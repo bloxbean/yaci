@@ -1,0 +1,51 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '7.1.2'
+}
+
+group 'com.bloxbean.cardano'
+version '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+compileJava {
+    sourceCompatibility = '11'
+    targetCompatibility = '11'
+}
+
+dependencies {
+    implementation('io.netty:netty-all:4.1.79.Final')
+    implementation('co.nstant.in:cbor:0.9')
+    implementation group: 'org.bouncycastle', name: 'bcprov-jdk15to18', version: '1.71'
+    implementation('org.slf4j:slf4j-api:1.7.30')
+    implementation('org.slf4j:slf4j-log4j12:1.7.30')
+
+    implementation('com.bloxbean.cardano:cardano-client-lib:0.3.0-beta2')
+    implementation('com.bloxbean.cardano:cardano-client-backend-blockfrost:0.3.0-beta2')
+
+    implementation group: 'com.google.guava', name: 'guava', version: '31.1-jre'
+
+    // import a BOM
+//    implementation platform('io.projectreactor:reactor-bom:2020.0.21')
+
+    // define dependencies without versions
+//    implementation 'io.projectreactor.netty:reactor-netty-core'
+//    implementation 'io.projectreactor.netty:reactor-netty-'
+
+    compileOnly 'org.projectlombok:lombok:1.18.20'
+    annotationProcessor 'org.projectlombok:lombok:1.18.20'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
+    testRuntimeOnly 'org.slf4j:slf4j-log4j12:1.7.30'
+
+    testCompileOnly 'org.projectlombok:lombok:1.18.20'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.20'
+}
+
+test {
+    useJUnitPlatform()
+}
+

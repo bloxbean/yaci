@@ -1,0 +1,39 @@
+package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
+
+import co.nstant.in.cbor.model.Array;
+import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.yaci.core.protocol.Message;
+import com.bloxbean.cardano.yaci.core.protocol.State;
+import com.bloxbean.cardano.yaci.core.protocol.blockfetch.serializers.*;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+
+public interface BlockfetchStateBase extends State {
+
+    default Message handleInbound(byte[] bytes) {
+        try {
+            DataItem di = CborSerializationUtil.deserialize(bytes);
+            Array array = (Array) di;
+            int id = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
+            switch (id) {
+                case 0:
+                    return RequestRangeSerializer.INSTANCE.deserialize(bytes);
+                case 1:
+                    return ClientDoneSerializer.INSTANCE.deserialize(bytes);
+                case 2:
+                    return StartBatchSerializer.INSTANCE.deserialize(bytes);
+                case 3:
+                    return NoBlocksSerializer.INSTANCE.deserialize(bytes);
+                case 4:
+                    return MsgBlockSerializer.INSTANCE.deserialize(bytes);
+                case 5:
+                    return BatchDoneSerializer.INSTANCE.deserialize(bytes);
+                default:
+                    throw new RuntimeException(String.format("Invalid msg id: %d", id));
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+}
