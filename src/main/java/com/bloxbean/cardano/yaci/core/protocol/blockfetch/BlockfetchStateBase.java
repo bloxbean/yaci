@@ -7,8 +7,12 @@ import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.State;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.serializers.*;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public interface BlockfetchStateBase extends State {
+    Logger log = LoggerFactory.getLogger(BlockfetchStateBase.class);
 
     default Message handleInbound(byte[] bytes) {
         try {
@@ -32,7 +36,9 @@ public interface BlockfetchStateBase extends State {
                     throw new RuntimeException(String.format("Invalid msg id: %d", id));
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Parsing error ", e);
+            log.error("Block data");
+            log.error(HexUtil.encodeHexString(bytes));
             return null;
         }
     }

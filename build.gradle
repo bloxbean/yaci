@@ -1,6 +1,8 @@
 plugins {
-    id 'java'
+    id 'java-library'
     id 'com.github.johnrengelman.shadow' version '7.1.2'
+    id 'maven-publish'
+    id 'signing'
 }
 
 group 'com.bloxbean.cardano'
@@ -13,6 +15,28 @@ repositories {
 compileJava {
     sourceCompatibility = '11'
     targetCompatibility = '11'
+
+    options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
+}
+
+tasks.withType(Javadoc) {
+    options.encoding = 'UTF-8'
+}
+
+task sourceJar(type: Jar) {
+    classifier "sources"
+    from sourceSets.main.allJava
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    classifier "javadoc"
+    from javadoc.destinationDir
+}
+
+artifacts {
+    archives jar
+    archives sourceJar
+    archives javadocJar
 }
 
 dependencies {
@@ -28,11 +52,8 @@ dependencies {
     implementation group: 'com.google.guava', name: 'guava', version: '31.1-jre'
 
     // import a BOM
-//    implementation platform('io.projectreactor:reactor-bom:2020.0.21')
-
-    // define dependencies without versions
-//    implementation 'io.projectreactor.netty:reactor-netty-core'
-//    implementation 'io.projectreactor.netty:reactor-netty-'
+    implementation platform('io.projectreactor:reactor-bom:2020.0.22')
+    api 'io.projectreactor:reactor-core'
 
     compileOnly 'org.projectlombok:lombok:1.18.20'
     annotationProcessor 'org.projectlombok:lombok:1.18.20'
@@ -48,4 +69,65 @@ dependencies {
 test {
     useJUnitPlatform()
 }
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            artifact(sourceJar) {
+                classifier = 'sources'
+            }
+            artifact(javadocJar) {
+                classifier = 'javadoc'
+            }
+            pom {
+                name = 'yaci-core'
+                description = 'A Cardano Mini Protocols implementation in Java'
+                url = 'https://github.com/bloxbean/yaci-core'
+                licenses {
+                    license {
+                        name = 'The MIT License'
+                        url = 'https://opensource.org/licenses/mit-license.php'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'satran004'
+                        name = 'Satya'
+                    }
+                }
+                scm {
+                    connection = 'scm:git:git://github.com/bloxbean/yaci-core.git'
+                    developerConnection = 'scm:git:ssh://git@github.com/bloxbean/yaci-core.git'
+                    url = 'https://github.com/bloxbean/yaci-core'
+                }
+            }
+        }
+    }
+
+    repositories {
+        String ossrhUsername = System.getenv('MAVEN_USERNAME')
+        String ossrhPassword = System.getenv('MAVEN_PASSWORD')
+
+        maven {
+            def releasesRepoUrl = "https://oss.sonatype.org/service/local/staging/deploy/maven2"
+            def snapshotsRepoUrl = "https://oss.sonatype.org/content/repositories/snapshots/"
+            url = version.endsWith('SNAPSHOT') ? snapshotsRepoUrl : releasesRepoUrl
+            credentials {
+                username ossrhUsername
+                password ossrhPassword
+            }
+        }
+    }
+}
+
+ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
+
+if (isReleaseVersion && !project.hasProperty("skipSigning")) {
+    signing {
+//        sign configurations.archives
+        sign publishing.publications
+    }
+}
+
 

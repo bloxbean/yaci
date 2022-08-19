@@ -1,11 +1,11 @@
-package com.bloxbean.cardano.yaci.core.examples;
+package com.bloxbean.cardano.yaci.core.helpers;
 
 import com.bloxbean.cardano.client.common.model.Networks;
-import com.bloxbean.cardano.yaci.core.network.Disposable;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import lombok.extern.slf4j.Slf4j;
@@ -23,17 +23,23 @@ public class BlockFetcher {
     }
 
     public void start(Point from, Point to) {
-        N2NClient n2CClient = new N2NClient(host, port);
+        HandshakeAgent handshakeAgent = new HandshakeAgent(versionTable);
         BlockfetchAgent blockfetchAgent = new BlockfetchAgent(from, to);
+        N2NClient n2CClient = new N2NClient(host, port,handshakeAgent, blockfetchAgent);
 
-        Disposable disposable = null;
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                blockfetchAgent.sendNextMessage();
+            }
+        });
+
         try {
-            disposable = n2CClient.start(new HandshakeAgent(versionTable), blockfetchAgent);
+            n2CClient.start();
         } catch (Exception e) {
            log.error("Error in main thread", e);
         }
 
-         blockfetchAgent.sendNextMessage();
 
         while (!blockfetchAgent.isDone()) {
             try {
@@ -44,7 +50,7 @@ public class BlockFetcher {
         }
 
         log.info("Dispose now !!!");
-        disposable.dispose();
+        n2CClient.shutdown();
     }
 
     public static void main(String[] args) {

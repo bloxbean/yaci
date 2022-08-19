@@ -20,20 +20,37 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * This is the main class to initialize single or multiple agents and setup channel handlers to send / process
+ * network bytes.
+ */
 @Slf4j
 public class N2NClient {
     private String host;
     private int port;
+    private SessionListener sessionListener;
+    private HandshakeAgent handshakeAgent;
+    private Agent[] agents;
+    private EventLoopGroup workerGroup;
+    private Session session;
 
-    public N2NClient(String host, int port) {
+    public N2NClient(String host, int port, HandshakeAgent handshakeAgent, Agent... agents) {
         this.host = host;
         this.port = port;
+        this.sessionListener = new SessionListenerAdapter();
+
+        this.handshakeAgent = handshakeAgent;
+        this.agents = agents;
+        this.workerGroup = new NioEventLoopGroup();
     }
 
-    public Disposable start(HandshakeAgent handshakeAgent, Agent... agents) {
+    public void start() {
+        if (session != null)
+            throw new RuntimeException("Session already available. Only one session is allowed per N2NClient. To start again, please call shutdown() first.");
+
         try {
             Bootstrap b = new Bootstrap();
-            EventLoopGroup workerGroup = new NioEventLoopGroup();
+            //EventLoopGroup workerGroup = new NioEventLoopGroup();
             b.group(workerGroup);
             b.channel(NioSocketChannel.class);
             b.option(ChannelOption.SO_KEEPALIVE, true);
@@ -46,6 +63,7 @@ public class N2NClient {
                 @Override
                 public void initChannel(SocketChannel ch)
                         throws Exception {
+                  //ch.pipeline().addLast("readTimeoutHandler", new ReadTimeoutHandler(30));
                     ch.pipeline().addLast(new MiniProtoRequestDataEncoder(),
                             new MiniProtoStreamingByteToMessageDecoder(agents),
                             new MiniProtoClientInboundHandler(handshakeAgent, agents));
@@ -55,12 +73,52 @@ public class N2NClient {
             SocketAddress socketAddress = null;
             socketAddress = new InetSocketAddress(host, port);
 
-            Session session = new Session(socketAddress, b, workerGroup, handshakeAgent, agents);
-            Disposable shutdownHook = session.start();
-            return shutdownHook;
+            session = new Session(socketAddress, b, handshakeAgent, agents);
+            session.setSessionListener(sessionListener);
+            session.start();
         } catch (Exception e) {
             log.error("Error", e);
-            throw new RuntimeException(e);
+        }
+    }
+
+    public void shutdown() {
+        log.info("Shutdown ----");
+
+        if (session != null) {
+            session.disableReconnection();
+            session.dispose();
+            session = null;
+        }
+
+        if (workerGroup != null) {
+            workerGroup.shutdownGracefully();
+        }
+    }
+
+    class SessionListenerAdapter implements SessionListener {
+        public SessionListenerAdapter() {
+
+        }
+
+        @Override
+        public void disconnected() {
+            log.error("Connection closed or error");
+            if (session != null) {
+                session.dispose();
+            }
+
+            //TODO some delay
+            //Try to start again
+            if (session.shouldReconnect()) {
+                log.warn("Trying to reconnect !!!");
+                session = null; //reset session before creating a new one.
+                start();
+            }
+        }
+
+        @Override
+        public void connected() {
+            log.info("Connected !!!");
         }
     }
 }

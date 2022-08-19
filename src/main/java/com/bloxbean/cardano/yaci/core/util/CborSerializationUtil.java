@@ -51,7 +51,6 @@ public class CborSerializationUtil {
      *
      * @param value
      * @return
-     * @throws CborException
      */
     public static byte[] serialize(DataItem value) {
         return serialize(new DataItem[]{value}, true); //By default Canonical = true
@@ -63,7 +62,6 @@ public class CborSerializationUtil {
      * @param value
      * @param canonical
      * @return
-     * @throws CborException
      */
     public static byte[] serialize(DataItem value, boolean canonical) {
         return serialize(new DataItem[]{value}, canonical);
@@ -85,7 +83,6 @@ public class CborSerializationUtil {
      * @param values
      * @param canonical
      * @return
-     * @throws CborException
      */
     public static byte[] serialize(DataItem[] values, boolean canonical) {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();

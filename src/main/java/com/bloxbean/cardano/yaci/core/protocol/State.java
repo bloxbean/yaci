@@ -8,8 +8,4 @@ public interface State {
         return null;
     }
 
-    default Message handleOutbound(Message message) { //TODO
-        return null;
-    }
-
 }

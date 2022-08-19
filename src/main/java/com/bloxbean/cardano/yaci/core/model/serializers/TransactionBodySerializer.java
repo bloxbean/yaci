@@ -109,6 +109,7 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
                     String name = HexUtil.encodeHexString(assetNameBS.getBytes(), true);
                     Amount amount = Amount.builder()
                             .unit(policyId + "." + name)
+                            .assetName(new String(assetNameBS.getBytes()))
                             .quantity(value).build();
 
                     mintAssets.add(amount);

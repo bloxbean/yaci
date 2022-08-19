@@ -6,12 +6,6 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.*;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshkeState;
 import lombok.extern.slf4j.Slf4j;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.Date;
-
 import static com.bloxbean.cardano.yaci.core.protocol.chainsync.ChainSyncState.Done;
 import static com.bloxbean.cardano.yaci.core.protocol.chainsync.ChainSyncState.Idle;
 
@@ -26,7 +20,6 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     private int agentNo;
     private int counter = 0;
 
-    private BufferedWriter br;
     private long startTime;
 
     public ChainsyncAgent(Point[] knownPoints) {
@@ -42,17 +35,6 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
         this.stopAt = stopSlotNo;
         this.agentNo = agentNo;
 
-        try {
-            br = new BufferedWriter(new FileWriter(new File("log-" + agentNo)));
-            startTime = System.currentTimeMillis();
-            br.write("\nStart slot : " + knownPoints[0].getSlot());
-            br.write("\nShould stop at: " + stopSlotNo);
-            br.write("\nStart Time : " + new Date());
-            br.flush();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-
         log.debug("Starting at slot > " + knownPoints[0].getSlot() +" --- To >> " + stopSlotNo +"  -- agent >> " + agentNo);
     }
 
@@ -65,8 +47,12 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     public Message buildNextMessage() {
         if (intersact == null) { //Find intersacts
             if (currentPoint == null) {
+                if (log.isDebugEnabled())
+                    log.info("FindIntersect for point: {}", knownPoints);
                 return new FindIntersect(knownPoints);
             } else {
+                if (log.isDebugEnabled())
+                    log.info("FindIntersect for point: {}", currentPoint);
                 return new FindIntersect(new Point[]{currentPoint});
             }
         } else if (intersact != null) {
@@ -79,17 +65,22 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     public Message deserializeResponse(byte[] bytes) {
         Message message = this.currenState.handleInbound(bytes);
         if (message instanceof IntersectFound) {
+            if (log.isDebugEnabled())
+                log.debug("IntersectFound - {}", message);
             intersact = ((IntersectFound) message).getPoint();
             tip = ((IntersectFound) message).getTip();
-            log.debug("IntersectFound - " + message);
             onIntersactFound((IntersectFound) message);
         } else if (message instanceof IntersectNotFound) {
-            log.debug("IntersectNotFound - " + message);
+            if (log.isDebugEnabled())
+                log.debug("IntersectNotFound - {}", message);
         } else if (message instanceof RollForward) {
+            if (log.isDebugEnabled())
+                log.debug("RollForward - {}", message);
             RollForward rollForward = (RollForward) message;
             onRollForward(rollForward);
         } else if (message instanceof Rollbackward) {
-            log.debug("RollBackward - " + message);
+            if (log.isDebugEnabled())
+                log.debug("RollBackward - ", message);
             Rollbackward rollBackward = (Rollbackward) message;
             onRollBackward(rollBackward);
         }
@@ -112,7 +103,17 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
         if (currentPoint != null) { //so not first time
             this.intersact = null;
         }
-        this.currentPoint = new Point(rollBackward.getPoint().getSlot(), rollBackward.getPoint().getHash());
+
+        if (log.isDebugEnabled()) {
+            log.debug("Current point : {}", currentPoint);
+            log.debug("Rollback to:  {}", rollBackward.getPoint());
+        }
+
+        if (rollBackward.getPoint().getHash() != null)
+            this.currentPoint = new Point(rollBackward.getPoint().getSlot(), rollBackward.getPoint().getHash());
+
+        if (log.isDebugEnabled())
+            log.debug("Current point after rollback: {}", this.currentPoint);
 
         getAgentListeners().stream().forEach(
                 chainSyncAgentListener -> {
@@ -122,28 +123,18 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     private void onRollForward(RollForward rollForward) {
-        this.currentPoint = new Point(rollForward.getBlockHeader().getHeaderBody().getSlot(), rollForward.getBlockHeader().getHeaderBody().getBlockBodyHash());
+        this.currentPoint = new Point(rollForward.getBlockHeader().getHeaderBody().getSlot(), rollForward.getBlockHeader().getHeaderBody().getBlockHash());
         if (counter++ % 100 == 0 || (tip.getPoint().getSlot() - currentPoint.getSlot()) < 10) {
-            log.debug("**********************************************************");
-            log.debug(String.valueOf(currentPoint));
-            log.debug("[Agent No: " + agentNo + "] : " + rollForward);
-            log.debug("**********************************************************");
+
+            if (log.isDebugEnabled()) {
+                log.debug("**********************************************************");
+                log.debug(String.valueOf(currentPoint));
+                log.debug("[Agent No: " + agentNo + "] : " + rollForward);
+                log.debug("**********************************************************");
+            }
 
             if (stopAt != 0 && rollForward.getBlockHeader().getHeaderBody().getSlot() >= stopAt) {
                 this.currenState = HandshkeState.Done;
-
-                //Stop here
-                try {
-                    br.write("\nStopping at slot no: " + rollForward.getBlockHeader().getHeaderBody().getSlot());
-                    br.write("\nStopping at blockno: " + rollForward.getBlockHeader().getHeaderBody().getBlockNumber());
-                    br.write("\nTime taken: " + (System.currentTimeMillis() - startTime)/1000 + " sec");
-                    br.write("\nCurrent Time : " + new Date());
-                    br.write("\nTotal block processed: " + counter);
-                    br.flush();
-                    br.close();
-                } catch (IOException e) {
-//                  throw new RuntimeException(e);
-                }
             }
         }
 

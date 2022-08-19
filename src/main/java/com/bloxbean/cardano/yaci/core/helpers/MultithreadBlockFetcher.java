@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.core.examples;
+package com.bloxbean.cardano.yaci.core.helpers;
 
 import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
@@ -25,8 +25,6 @@ public class MultithreadBlockFetcher {
     }
 
     public void start() throws Exception {
-        N2NClient n2CClient = new N2NClient(host, port);
-
         int noOfThreads = 6;
         GetPoints getPoints = new GetPoints();
         List<Point> points = getPoints.fetchPoints(noOfThreads);
@@ -38,7 +36,9 @@ public class MultithreadBlockFetcher {
             Runnable fetcher = () -> {
                 Agent[] agents = new Agent[]{new BlockfetchAgent(point, points.get(index))};
                 try {
-                    n2CClient.start(new HandshakeAgent(N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic())), agents);
+                    N2NClient n2CClient = new N2NClient(host, port,
+                            new HandshakeAgent(versionTable), agents);
+                    n2CClient.start();
                     while (true) {
                         agents[0].sendNextMessage();
                     }
@@ -52,21 +52,6 @@ public class MultithreadBlockFetcher {
             t1.start();
             threads.add(t1);
         }
-
-//        //Main fetcher
-//        Runnable fetcher = () -> {
-//            Agent[] agents = new Agent[]{new ChainsyncAgent(new Point[]{points.get(1)}, 0, noOfThreads)};
-//            try {
-//                n2CClient.start(new HandshakeAgent(N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic())), agents);
-//            } catch (Exception e) {
-//                e.printStackTrace();
-//                System.out.printf("Error in main thread", e);
-//            }
-//        };
-
-//        Thread t1 = new Thread(fetcher);
-//        t1.start();
-//        threads.add(t1);
 
         for (Thread t: threads)
             t.join();

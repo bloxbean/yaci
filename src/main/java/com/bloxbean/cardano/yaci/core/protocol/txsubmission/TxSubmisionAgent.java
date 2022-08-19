@@ -101,4 +101,8 @@ public class TxSubmisionAgent extends Agent {
         return this.currenState == TxSubmissionState.Done;
     }
 
+    @Override
+    public void reset() {
+        this.currenState = TxSubmissionState.Init;
+    }
 }

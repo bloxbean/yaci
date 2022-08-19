@@ -14,8 +14,9 @@ public class HeaderBody {
     private String prevHash;
     private String issuerVkey;
     private String vrfVkey;
-    private VrfCert nonceVrf;
-    private VrfCert leaderVrf;
+    private VrfCert nonceVrf; //removed in babbage
+    private VrfCert leaderVrf; //removed in babbage
+    private VrfCert vrfResult; //babbage
     private long blockBodySize;
     private String blockBodyHash;
     private ProtocolVersion protocolVersion;

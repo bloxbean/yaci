@@ -1,8 +1,7 @@
-package com.bloxbean.cardano.yaci.core.examples;
+package com.bloxbean.cardano.yaci.core.helpers;
 
 import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
-import com.bloxbean.cardano.yaci.core.network.Disposable;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.ChainSyncAgentListener;
@@ -25,7 +24,7 @@ public class TipFinder extends ChainSyncAgentListener{
     private int port;
     private final Point wellKnownPoint;
     private Agent agent;
-    private Disposable disposable;
+    private N2NClient n2NClient;
     BlockingQueue blockingQueue = new LinkedBlockingQueue();
 
     public TipFinder(String host, int port, Point wellKnownPoint) {
@@ -37,9 +36,6 @@ public class TipFinder extends ChainSyncAgentListener{
     }
 
     private void initAgent() {
-        N2NClient n2CClient = null;
-        n2CClient = new N2NClient(host, port);
-
         this.agent = new ChainsyncAgent(new Point[] {wellKnownPoint});
         agent.addListener(new ChainSyncAgentListener() {
             @Override
@@ -71,9 +67,9 @@ public class TipFinder extends ChainSyncAgentListener{
             }
         });
 
+        this.n2NClient = new N2NClient(host, port, handshakeAgent, agent);
         try {
-            disposable = n2CClient.start(handshakeAgent,
-                    agent);
+            n2NClient.start();
         } catch (Exception e) {
             log.error("Error in main thread", e);
         }
@@ -90,8 +86,8 @@ public class TipFinder extends ChainSyncAgentListener{
     }
 
     public void shutdown() {
-        if (disposable != null)
-            disposable.dispose();
+        if (n2NClient != null)
+            n2NClient.shutdown();
     }
 
     public static void main(String[] args) {

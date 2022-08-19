@@ -32,7 +32,11 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     public final void receiveResponse(Message message) {
+        State oldState = currenState;
         currenState = currenState.nextState(message);
+
+        //Notify
+        getAgentListeners().forEach(agentListener -> agentListener.onStateUpdate(oldState, currenState));
     }
 
     public final boolean hasAgency() {
@@ -72,7 +76,6 @@ public abstract class Agent<T extends AgentListener> {
             if (instant == null)
                 instant = Instant.now();
 
-            Segment.SegmentBuilder segmentBuilder = Segment.builder();
             int elapseTime = Duration.between(instant, Instant.now()).getNano() / 1000;
             instant = Instant.now();
             Segment segment = Segment.builder()

@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.MajorType;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.HeaderBody;
@@ -32,6 +33,49 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
     }
 
     public BlockHeader getBlockHeaderFromHeaderArray(Array headerArray) {
+        //Assumption: Last two header parameters are for protocol version
+        List<DataItem> headerBodyArr = ((Array) headerArray.getDataItems().get(0)).getDataItems();
+        DataItem protoVersionDI = headerBodyArr.get(headerBodyArr.size() - 1);
+
+        if (protoVersionDI.getMajorType() == MajorType.UNSIGNED_INTEGER) { //pre Babbage
+            return preBabbageHeader(headerArray);
+        } else {
+            return postBabbageHeader(headerArray);
+        }
+    }
+
+    private BlockHeader postBabbageHeader(Array headerArray) {
+        List<DataItem> headerBodyArr = ((Array) headerArray.getDataItems().get(0)).getDataItems();
+        String bodySignature = CborSerializationUtil.toHex(headerArray.getDataItems().get(1));
+
+        HeaderBody.HeaderBodyBuilder headerBodyBuilder = HeaderBody.builder();
+        headerBodyBuilder.blockNumber(CborSerializationUtil.toBigInteger(headerBodyArr.get(0)).longValue());
+        headerBodyBuilder.slot(CborSerializationUtil.toBigInteger(headerBodyArr.get(1)).longValue());
+        headerBodyBuilder.prevHash(CborSerializationUtil.toHex(headerBodyArr.get(2)));
+        headerBodyBuilder.issuerVkey(CborSerializationUtil.toHex(headerBodyArr.get(3)));
+        headerBodyBuilder.vrfVkey(CborSerializationUtil.toHex(headerBodyArr.get(4)));
+
+        Array vrtResultArr = (Array) headerBodyArr.get(5);
+        headerBodyBuilder.vrfResult(new VrfCert(CborSerializationUtil.toHex(vrtResultArr.getDataItems().get(0)), CborSerializationUtil.toHex(vrtResultArr.getDataItems().get(1))));
+
+        headerBodyBuilder.blockBodySize(CborSerializationUtil.toBigInteger(headerBodyArr.get(6)).longValue());
+        headerBodyBuilder.blockBodyHash(CborSerializationUtil.toHex(headerBodyArr.get(7)));
+
+//        List<DataItem> operationalCerts = ((Array) headerBodyArr.get(8)).getDataItems(); 4 items
+
+        List<DataItem> protocolVersionArr = ((Array) headerBodyArr.get(9)).getDataItems();
+        ProtocolVersion protocolVersion = new ProtocolVersion(CborSerializationUtil.toBigInteger(protocolVersionArr.get(0)).longValue(),
+                CborSerializationUtil.toBigInteger(protocolVersionArr.get(1)).longValue());
+        headerBodyBuilder.protocolVersion(protocolVersion);
+
+        //Derive blockHash
+        String blockHash = HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(CborSerializationUtil.serialize(headerArray)));
+        headerBodyBuilder.blockHash(blockHash);
+
+        return new BlockHeader(headerBodyBuilder.build(), bodySignature);
+    }
+
+    private BlockHeader preBabbageHeader(Array headerArray) {
         List<DataItem> headerBodyArr = ((Array) headerArray.getDataItems().get(0)).getDataItems();
         String bodySignature = CborSerializationUtil.toHex(headerArray.getDataItems().get(1));
 

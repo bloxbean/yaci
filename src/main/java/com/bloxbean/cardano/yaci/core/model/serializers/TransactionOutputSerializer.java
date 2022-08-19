@@ -113,6 +113,7 @@ public enum TransactionOutputSerializer implements Serializer<TransactionOutput>
         if(MajorType.UNSIGNED_INTEGER.equals(valueItem.getMajorType()) || MajorType.NEGATIVE_INTEGER.equals(valueItem.getMajorType())) {
             Amount amount = Amount.builder()
                     .unit(LOVELACE)
+                    .assetName(LOVELACE)
                     .quantity(((Number) valueItem).getValue())
                     .build();
             amounts.add(amount);
@@ -120,12 +121,14 @@ public enum TransactionOutputSerializer implements Serializer<TransactionOutput>
             if(valueItem.getTag().getValue() == 2) {
                 Amount amount = Amount.builder()
                         .unit(LOVELACE)
+                        .assetName(LOVELACE)
                         .quantity(new BigInteger(((ByteString) valueItem).getBytes()))
                         .build();
                 amounts.add(amount);
             } else if(valueItem.getTag().getValue() == 3) {
                 Amount amount = Amount.builder()
                         .unit(LOVELACE)
+                        .assetName(LOVELACE)
                         .quantity(new BigInteger(((ByteString) valueItem).getBytes()).multiply(BigInteger.valueOf(-1)))
                         .build();
                 amounts.add(amount);
@@ -136,6 +139,7 @@ public enum TransactionOutputSerializer implements Serializer<TransactionOutput>
             BigInteger coin = CborSerializationUtil.toBigInteger(valueDI);
             Amount lovelaceAmount = Amount.builder()
                     .unit(LOVELACE)
+                    .assetName(LOVELACE)
                     .quantity(coin).build();
             amounts.add(lovelaceAmount);
 

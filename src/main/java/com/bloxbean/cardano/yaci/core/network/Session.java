@@ -4,49 +4,59 @@ import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
-import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.SocketAddress;
-import java.time.Instant;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * This class tries to open the network connection. The session gets destroyed during disconnection event.
+ */
 @Slf4j
 class Session implements Disposable {
     private final SocketAddress socketAddress;
-    private final EventLoopGroup scheduler;
     private final Bootstrap clientBootstrap;
-
-    private final Instant instant;
-    private int reconnectDelayMs;
     private Channel activeChannel;
-    private final AtomicBoolean shouldReconnect;
+    private final AtomicBoolean shouldReconnect; //Not used currently
     private final Agent handshakeAgent;
     private final Agent[] agents;
 
+    private SessionListener sessionListener;
 
-    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, EventLoopGroup scheduler, Agent handshakeAgent, Agent[] agents) {
+    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, Agent handshakeAgent, Agent[] agents) {
         this.socketAddress = socketAddress;
-        this.scheduler = scheduler;
         this.clientBootstrap = clientBootstrap;
-        this.reconnectDelayMs = 1; //It was 1
         this.shouldReconnect = new AtomicBoolean(true);
 
         this.handshakeAgent = handshakeAgent;
         this.agents = agents;
+    }
 
-        this.instant = Instant.now();
+    public void setSessionListener(SessionListener sessionListener) {
+        if (this.sessionListener != null)
+            throw new RuntimeException("SessionListener is already there. Can't set another SessionListener");
+
+        this.sessionListener = sessionListener;
     }
 
     public Disposable start() throws InterruptedException {
+        handshakeAgent.reset();
         for (Agent agent: agents) {
-            agent.reset();
             agent.reset();
         }
 
         //Create a new connectFuture
-        ChannelFuture connectFuture = clientBootstrap.connect(socketAddress).sync();
+        ChannelFuture connectFuture = null;
+        while (connectFuture == null && shouldReconnect.get()) {
+            try {
+                connectFuture = clientBootstrap.connect(socketAddress).sync();
+            } catch (Exception e) {
+                log.error("Connection failed", e);
+                Thread.sleep(8000);
+                log.debug("Trying to reconnect !!!");
+            }
+        }
+
         activeChannel = connectFuture.channel();
 
         handshakeAgent.setChannel(activeChannel);
@@ -57,23 +67,21 @@ class Session implements Disposable {
         connectFuture.addListeners((ChannelFuture cf) -> {
             if (cf.isSuccess()) {
                 log.info("\nConnection established");
-                reconnectDelayMs = 1;
-
+                if (sessionListener != null)
+                    sessionListener.connected();
                 //Listen to the channel closing
                 var closeFuture = activeChannel.closeFuture();
                 closeFuture.addListeners((ChannelFuture closeFut) -> {
-                    if (shouldReconnect.get()) {
-                        log.info("Trying to reconnect ....");
-                        activeChannel.eventLoop().schedule(this::start, nextReconnectDelay(), TimeUnit.MILLISECONDS);
-                    } else {
-                        log.info("Session has been disposed won't reconnect");
-                    }
+                    log.error("Channel closed");
+                    if (sessionListener != null)
+                        sessionListener.disconnected();
                 });
 
             } else {
-                int delay = nextReconnectDelay();
-                log.info(String.format("Connection failed will re-attempt in %s ms", delay));
-                cf.channel().eventLoop().schedule(this::start, delay, TimeUnit.MILLISECONDS);
+                log.error("Connection failed");
+
+                if (sessionListener != null)
+                    sessionListener.disconnected();
             }
         });
 
@@ -88,8 +96,6 @@ class Session implements Disposable {
     public void dispose() {
         log.info("Disposing the session");
         try {
-            shouldReconnect.set(false);
-            scheduler.shutdownGracefully().sync();
             if (activeChannel != null) {
                 activeChannel.closeFuture().sync();
             }
@@ -98,16 +104,18 @@ class Session implements Disposable {
         }
     }
 
-    private int nextReconnectDelay() {
-        this.reconnectDelayMs = this.reconnectDelayMs * 2;
-        return Math.min(this.reconnectDelayMs, 5000);
+    public void disableReconnection() {
+        shouldReconnect.set(false);
+    }
+
+    public boolean shouldReconnect() {
+        return shouldReconnect.get();
     }
 
     public void handshake() {
         //Handshake First
         while (!handshakeAgent.isDone()) {
             if (handshakeAgent.hasAgency())
-//                sendNextMessage(handshakeAgent);
                 handshakeAgent.sendNextMessage();
             try {
                 Thread.sleep(100);
@@ -117,42 +125,4 @@ class Session implements Disposable {
         }
         log.info("Handshake successful");
     }
-
-//    public void runAgent() {
-//        while(true) {
-//            int count = 0;
-//            for (Agent agent : agents) {
-//                if (!agent.isDone()) {
-//                    count++;
-//                    if (!agent.isDone() && agent.hasAgency()) {
-//                        sendNextMessage(agent);
-//                    }
-//                }
-//            }
-//
-//            if (count == 0) {
-//                log.info("No live agent !!!");
-//                break;
-//            }
-//        }
-//        log.info("Outside agent.isDone ......");
-//
-//        dispose();
-//    }
-//
-//    private void sendNextMessage(Agent agent) {
-//        Message message = agent.buildNextMessage();
-//        if (message == null)
-//            return;
-//
-//        Segment segment = new Segment();
-//        int elapseTime = Duration.between(instant, Instant.now()).getNano() / 1000;
-//        instant = Instant.now();
-//        segment.setTimestamp(elapseTime);
-//        segment.setProtocol((short) agent.getProtocolId());
-//        segment.setPayload(message.serialize());
-//
-//        activeChannel.writeAndFlush(segment);
-//        agent.sendRequest(message);
-//    }
 }

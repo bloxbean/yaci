@@ -6,10 +6,14 @@ import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.State;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static com.bloxbean.cardano.yaci.core.protocol.txsubmission.serializers.TxSubmissionMessagesSerializers.*;
 
 public interface TxSubmissionStateBase extends State {
+    Logger log = LoggerFactory.getLogger(TxSubmissionStateBase.class);
 
     default Message handleInbound(byte[] bytes) {
         try {
@@ -33,7 +37,9 @@ public interface TxSubmissionStateBase extends State {
                     throw new RuntimeException(String.format("Invalid msg id: %d", id));
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Parsing error ", e);
+            log.error("TxSubmission data");
+            log.error(HexUtil.encodeHexString(bytes));
             return null;
         }
     }

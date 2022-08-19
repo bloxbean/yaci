@@ -17,6 +17,9 @@ import static com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchState
 
 @Slf4j
 public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
+    private Point orginalFrom;
+    private Point originalTo;
+
     private Point from;
     private Point to;
     private boolean shutDown;
@@ -25,6 +28,8 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
     private long errorBlks;
 
     public BlockfetchAgent(Point from, Point to) {
+        this.orginalFrom = from;
+        this.originalTo = to;
         this.from = from;
         this.to = to;
         this.currenState = Idle;
@@ -57,16 +62,22 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
     public Message deserializeResponse(byte[] bytes) {
         Message message = this.currenState.handleInbound(bytes);
         if (message instanceof StartBatch) {
-            log.info("Batch starting !!!");
+            if (log.isDebugEnabled())
+                log.debug("Batch starting !!!");
             onBachStart();
         } else if (message instanceof BatchDone) { //Blocks found
-            log.debug("BatchDone ------------------>> " + message);
+            if (log.isDebugEnabled())
+                log.debug("BatchDone >> {}", message);
             onBatchDone();
         } else if (message instanceof NoBlocks) {
-            log.debug("NoBlocks ******************>> " + message);
-            log.debug("NoBlocks : {} to {}", from, to);
+            if (log.isDebugEnabled()) {
+                log.debug("NoBlocks {}", message);
+                log.debug("NoBlocks : {} to {}", from, to);
+            }
             onNoBlocks();
         } else if (message instanceof MsgBlock) {
+            if (log.isDebugEnabled())
+                log.debug("Msg block");
             onReceiveBlocks((MsgBlock) message);
         }
 
@@ -86,19 +97,15 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
 
         Array array = (Array) CborSerializationUtil.deserialize(body);
         int version = ((UnsignedInteger)array.getDataItems().get(0)).getValue().intValue();
-//        log.info("Version >> " + version);
-
-//        Array headerArray = (Array) ((Array)array.getDataItems().get(1)).getDataItems().get(0);
-//        BlockHeader blockHeader = BlockHeaderSerializer.INSTANCE.getBlockHeaderFromHeaderArray(headerArray);
-
         try {
             Block block = BlockSerializer.INSTANCE.deserializeDI(array.getDataItems().get(1));
-//            log.info("Block >> " + JsonUtil.getPrettyJson(block));
-            log.info("Block >> " + version + ", " + block.getHeader().getHeaderBody().getBlockNumber() + ", " + block.getHeader().getHeaderBody().getSlot());
-            //redissionHelper.put(String.valueOf(block.getHeader().getHeaderBody().getBlockNumber()), block);
-            counter++;
+            if (log.isDebugEnabled())
+                log.info("Block >> {}, {}, {}", version, block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot());
 
+            //move from cursor
+            counter++;
             getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.blockFound(block));
+            this.from = new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash());
         } catch (Exception e) {
             errorBlks++;
             log.error("Error in parsing", e);
@@ -110,15 +117,17 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
 
     private void onBatchDone() {
         getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.batchDone());
-        log.info("BatchDone >>>>>>>>>>>>");
         from = null;
         to = null;
 
         long timeTaken = ((System.currentTimeMillis() - startTime) / 1000) / 60;
 
-        log.info("Total no of block processed: " + counter);
-        log.info("Total no of err blocks: " + errorBlks);
-        log.info("Agent finished in : " + timeTaken + " min");
+        if (log.isDebugEnabled()) {
+            log.debug("Batch done");
+            log.debug("Total no of block processed: " + counter);
+            log.debug("Total no of err blocks: " + errorBlks);
+            log.debug("Agent finished in : " + timeTaken + " min");
+        }
     }
 
     @Override

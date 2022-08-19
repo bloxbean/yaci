@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.core.examples;
+package com.bloxbean.cardano.yaci.core.helpers;
 
 import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
@@ -21,11 +21,11 @@ public class TxSubmissionClient {
     }
 
     public void start() {
-        N2NClient n2CClient = new N2NClient(host, port);
-
         TxSubmisionAgent txSubmisionAgent =  new TxSubmisionAgent();
+        N2NClient n2CClient = new N2NClient(host, port, new HandshakeAgent(N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic())), txSubmisionAgent);
+
         try {
-            n2CClient.start(new HandshakeAgent(N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic())), txSubmisionAgent);
+            n2CClient.start();
         } catch (Exception e) {
            log.error("Error in main thread", e);
         }

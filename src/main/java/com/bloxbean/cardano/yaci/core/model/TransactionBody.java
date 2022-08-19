@@ -24,7 +24,9 @@ public class TransactionBody {
     @Builder.Default
     @JsonIgnore
     private List<Certificate> certificates = new ArrayList<>();
-    private List<Amount> mint;
+
+    @Builder.Default
+    private List<Amount> mint = new ArrayList<>();
 //    private List<Witdrawal> witdrawals;
 //    private
 
