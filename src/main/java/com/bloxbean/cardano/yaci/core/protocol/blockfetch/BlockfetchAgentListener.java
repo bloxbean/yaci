@@ -12,6 +12,10 @@ public class BlockfetchAgentListener implements AgentListener {
 
     }
 
+    public void readyForNextBatch() {
+
+    }
+
     public void blockFound(Block block) {
 
     }

@@ -1,49 +1,66 @@
 package com.bloxbean.cardano.yaci.core.helpers;
 
 import com.bloxbean.cardano.client.common.model.Networks;
+import com.bloxbean.cardano.yaci.core.helpers.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmisionAgent;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.function.Consumer;
+
 @Slf4j
-public class TxSubmissionClient {
+public class TxSubmissionClient implements Fetcher {
     private String host;
     private int port;
     private VersionTable versionTable;
+    private HandshakeAgent handshakeAgent;
+    private TxSubmisionAgent txSubmisionAgent;
+    private N2NClient n2nClient;
 
     public TxSubmissionClient(String host, int port, VersionTable versionTable) {
         this.host = host;
         this.port = port;
         this.versionTable = versionTable;
+        init();
     }
 
-    public void start() {
-        TxSubmisionAgent txSubmisionAgent =  new TxSubmisionAgent();
-        N2NClient n2CClient = new N2NClient(host, port, new HandshakeAgent(N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic())), txSubmisionAgent);
+    private void init() {
+        handshakeAgent = new HandshakeAgent(versionTable);
+        txSubmisionAgent = new TxSubmisionAgent();
+        n2nClient = new N2NClient(host, port, handshakeAgent, txSubmisionAgent);
 
-        try {
-            n2CClient.start();
-        } catch (Exception e) {
-           log.error("Error in main thread", e);
-        }
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                txSubmisionAgent.sendNextMessage();
+            }
+        });
+    }
 
+    @Override
+    public void start(Consumer consumer) {
+        n2nClient.start();
         txSubmisionAgent.sendNextMessage();
-
-        try {
-            Thread.sleep(20000);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> txSubmisionAgent.shutdown()));
     }
+
+    @Override
+    public void shutdown() {
+        n2nClient.shutdown();
+    }
+
+    @Override
+    public boolean isRunning() {
+        return n2nClient.isRunning();
+    }
+
 
     public static void main(String[] args) {
         VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic());
         TxSubmissionClient blockFetcher = new TxSubmissionClient("192.168.0.228", 6000, versionTable);
-        blockFetcher.start();
+        blockFetcher.start((t) -> {});
     }
 }

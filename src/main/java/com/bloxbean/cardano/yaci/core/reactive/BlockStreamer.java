@@ -4,7 +4,6 @@ import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
-import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.State;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
@@ -13,6 +12,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.ChainsyncAgent;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import lombok.extern.slf4j.Slf4j;
@@ -37,10 +37,19 @@ public class BlockStreamer {
     public static Flux<Block> fromLatest(String host, int port, VersionTable versionTable, Point wellKnownPoint) {
         final AtomicBoolean tipFound = new AtomicBoolean(false);
 
-        Agent chainSyncAgent = new ChainsyncAgent(new Point[]{wellKnownPoint});
-        Agent blockFetch = new BlockfetchAgent(wellKnownPoint, wellKnownPoint);
+        ChainsyncAgent chainSyncAgent = new ChainsyncAgent(new Point[]{wellKnownPoint});
+        BlockfetchAgent blockFetch = new BlockfetchAgent();
+        HandshakeAgent handshakeAgent = new HandshakeAgent(versionTable);
 
-        N2NClient n2CClient = new N2NClient(host, port, new HandshakeAgent(versionTable),
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                //start
+                chainSyncAgent.sendNextMessage();
+            }
+        });
+
+        N2NClient n2CClient = new N2NClient(host, port, handshakeAgent,
                 chainSyncAgent, blockFetch);
 
         Flux<Block> stream = Flux.create(sink -> {
@@ -69,19 +78,19 @@ public class BlockStreamer {
         });
 
         stream = stream.doOnSubscribe(subscription -> {
-            log.debug("Subscription started");
-            n2CClient.start();
-
-            chainSyncAgent.sendNextMessage();
+            if (!n2CClient.isRunning()) {
+                log.debug("Subscription started");
+                n2CClient.start();
+            }
         });
 
         chainSyncAgent.addListener(new ChainSyncAgentListener() {
             @Override
             public void intersactFound(Tip tip, Point point) {
+                log.debug("Intersact found {}", point);
                 if (!tip.getPoint().equals(point) && !tipFound.get()) {
-                    ((ChainsyncAgent) chainSyncAgent).reset(tip.getPoint());
+                    chainSyncAgent.reset(tip.getPoint());
                     tipFound.set(true);
-                    chainSyncAgent.sendNextMessage();
                 }
             }
 
@@ -95,20 +104,18 @@ public class BlockStreamer {
                 long slot = blockHeader.getHeaderBody().getSlot();
                 String hash = blockHeader.getHeaderBody().getBlockHash();
 
-                ((BlockfetchAgent) blockFetch).reset(new Point(slot, hash), new Point(slot, hash));
+                blockFetch.resetPoints(new Point(slot, hash), new Point(slot, hash));
 
                 if (log.isDebugEnabled())
                     log.debug("Trying to fetch block for {}", new Point(slot, hash));
 
                 blockFetch.sendNextMessage();
-                chainSyncAgent.sendNextMessage();
             }
 
             @Override
             public void rollbackward(Tip tip, Point toPoint) {
                 if (log.isDebugEnabled())
                     log.debug("Rolling backward {}", toPoint);
-                chainSyncAgent.sendNextMessage();
             }
 
             @Override
@@ -120,4 +127,55 @@ public class BlockStreamer {
         return stream;
     }
 
+    public static Flux<Block> forRange(String host, int port, VersionTable versionTable, Point fromPoint, Point toPoint) {
+        BlockfetchAgent blockFetch = new BlockfetchAgent();
+        HandshakeAgent handshakeAgent = new HandshakeAgent(versionTable);
+
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                //start
+                blockFetch.sendNextMessage();
+            }
+        });
+
+        N2NClient n2CClient = new N2NClient(host, port, handshakeAgent,
+                blockFetch);
+
+        Flux<Block> stream = Flux.create(sink -> {
+            sink.onDispose(() -> {
+                n2CClient.shutdown();
+            });
+
+            blockFetch.addListener(
+                    new BlockfetchAgentListener() {
+                        @Override
+                        public void blockFound(Block block) {
+                            if (log.isTraceEnabled()) {
+                                log.trace("Block found {}", block);
+                            }
+                            sink.next(block);
+                            blockFetch.sendNextMessage();
+                        }
+
+                        @Override
+                        public void batchDone() {
+                            if (log.isTraceEnabled())
+                                log.trace("batchDone");
+//                            n2CClient.shutdown();
+                            sink.complete();
+                        }
+                    });
+
+        });
+
+        stream = stream.doOnSubscribe(subscription -> {
+            if (!n2CClient.isRunning()) {
+                log.debug("Subscription started");
+                n2CClient.start();
+            }
+        });
+
+        return stream;
+    }
 }

@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.helpers;
 
 import com.bloxbean.cardano.client.common.model.Networks;
+import com.bloxbean.cardano.yaci.core.helpers.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
@@ -17,31 +18,41 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.function.Consumer;
+
+/**
+ * Use this fetcher to fetch blocks from the current tip.
+ * The block can be received by passing a {@link Consumer} to the start method.
+ * The following listeners can be added to receive various events from the agents
+ * 1. {@link BlockfetchAgentListener} - To listen to events published by {@link BlockfetchAgent}
+ * 2. {@link ChainSyncAgentListener} - To listen to events published by {@link ChainsyncAgent}
+ */
 @Slf4j
-public class ChainSyncFetcherFromLatest {
+public class ChainSyncFetcherFromLatest implements Fetcher<Block> {
     private String host;
     private int port;
     private VersionTable versionTable;
     private Point wellKnownPoint;
-    private Point currentPoint;
     private boolean tipFound = false;
-
-    public ChainSyncFetcherFromLatest(String host, int port, VersionTable versionTable) {
-        this(host, port, versionTable, null);
-    }
+    private HandshakeAgent handshakeAgent;
+    private ChainsyncAgent chainSyncAgent;
+    private BlockfetchAgent blockFetch;
+    private N2NClient n2CClient;
 
     public ChainSyncFetcherFromLatest(String host, int port, VersionTable versionTable, Point wellKnownPoint) {
         this.host = host;
         this.port = port;
         this.versionTable = versionTable;
         this.wellKnownPoint = wellKnownPoint;
+
+        init();
     }
 
-    public void start() throws Exception {
-
-        HandshakeAgent handshakeAgent = new HandshakeAgent(versionTable);
-        ChainsyncAgent chainSyncAgent = new ChainsyncAgent(new Point[]{wellKnownPoint});
-        BlockfetchAgent blockFetch = new BlockfetchAgent(wellKnownPoint, wellKnownPoint);
+    private void init() {
+        handshakeAgent = new HandshakeAgent(versionTable);
+        chainSyncAgent = new ChainsyncAgent(new Point[]{wellKnownPoint});
+        blockFetch = new BlockfetchAgent();
+        blockFetch.resetPoints(wellKnownPoint, wellKnownPoint);
 
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
@@ -54,21 +65,15 @@ public class ChainSyncFetcherFromLatest {
         chainSyncAgent.addListener(new ChainSyncAgentListener() {
             @Override
             public void intersactFound(Tip tip, Point point) {
-              //  Point point = tip.getPoint();
-
-                log.info("Intersect found : Point : {},  Tip: {}", point, tip);
-                log.info("Tip Found: {}", tipFound);
+                if (log.isDebugEnabled()) {
+                    log.debug("Intersect found : Point : {},  Tip: {}", point, tip);
+                    log.debug("Tip Found: {}", tipFound);
+                }
 
                 if (!tip.getPoint().equals(point) && !tipFound) {
                     chainSyncAgent.reset(tip.getPoint());
                     tipFound = true;
                 }
-
-//                if ((tip.getPoint().getSlot() - point.getSlot()) > 60) { //60 slot difference, then reset
-//                    ((ChainsyncAgent) chainSyncAgent).reset(tip.getPoint());
-//                }
-
-                //chainSyncAgent.sendNextMessage();
             }
 
             @Override
@@ -81,10 +86,14 @@ public class ChainSyncFetcherFromLatest {
                 long slot = blockHeader.getHeaderBody().getSlot();
                 String hash = blockHeader.getHeaderBody().getBlockHash();
 
-                log.info("Rolled to slot: {}, block: {}", blockHeader.getHeaderBody().getSlot(), blockHeader.getHeaderBody().getBlockNumber());
+                if (log.isDebugEnabled()) {
+                    log.debug("Rolled to slot: {}, block: {}", blockHeader.getHeaderBody().getSlot(), blockHeader.getHeaderBody().getBlockNumber());
+                }
 
-                blockFetch.reset(new Point(slot, hash), new Point(slot, hash));
-                log.info("Trying to fetch block for {}", new Point(slot, hash));
+                blockFetch.resetPoints(new Point(slot, hash), new Point(slot, hash));
+
+                if (log.isDebugEnabled())
+                    log.debug("Trying to fetch block for {}", new Point(slot, hash));
                 blockFetch.sendNextMessage();
             }
 
@@ -97,24 +106,68 @@ public class ChainSyncFetcherFromLatest {
         blockFetch.addListener(new BlockfetchAgentListener() {
             @Override
             public void blockFound(Block block) {
-                log.info("Block Found >> " + block);
+                if (log.isDebugEnabled()) {
+                    log.debug("Block Found >> " + block);
+                }
             }
         });
 
-        N2NClient n2CClient = new N2NClient(host, port, handshakeAgent,
+        n2CClient = new N2NClient(host, port, handshakeAgent,
                 chainSyncAgent, blockFetch);
+    }
+
+    @Override
+    public void start(Consumer<Block> consumer) {
+        blockFetch.addListener(new BlockfetchAgentListener() {
+            @Override
+            public void blockFound(Block block) {
+                consumer.accept(block);
+            }
+        });
 
         n2CClient.start();
+    }
 
-        while (true) {
-            Thread.sleep(100);
-        }
+    public void addBlockFetchListener(BlockfetchAgentListener listener) {
+        if (this.isRunning())
+            throw new IllegalStateException("Listener can be added only before start() call");
+
+        if (listener != null)
+            blockFetch.addListener(listener);
+    }
+
+    public void addChainSyncListener(ChainSyncAgentListener listener) {
+        if (this.isRunning())
+            throw new IllegalStateException("Listener can be added only before start() call");
+
+        if (listener != null)
+            chainSyncAgent.addListener(listener);
+    }
+
+    @Override
+    public boolean isRunning() {
+        return n2CClient.isRunning();
+    }
+
+    @Override
+    public void shutdown() {
+        n2CClient.shutdown();
     }
 
     public static void main(String[] args) throws Exception {
         VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic());
         Point wellKnownPoint = new Point(17625824, "765359c702103513dcb8ff4fe86c1a1522c07535733f31ff23231ccd9a3e0247");
         ChainSyncFetcherFromLatest chainSyncFetcher = new ChainSyncFetcherFromLatest("192.168.0.228", 6000, versionTable, wellKnownPoint);
-        chainSyncFetcher.start();
+
+        chainSyncFetcher.addChainSyncListener(new ChainSyncAgentListener() {
+            @Override
+            public void rollforward(Tip tip, BlockHeader blockHeader) {
+                log.info("RollForward !!!");
+            }
+        });
+
+        chainSyncFetcher.start(block -> {
+            log.info(">>>> Block >>>> " + block.getHeader().getHeaderBody().getBlockNumber());
+        });
     }
 }

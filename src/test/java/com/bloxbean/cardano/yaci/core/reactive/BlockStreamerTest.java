@@ -1,6 +1,13 @@
 package com.bloxbean.cardano.yaci.core.reactive;
 
+import com.bloxbean.cardano.yaci.core.model.Amount;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import reactor.core.publisher.Flux;
+
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 @Slf4j
 class BlockStreamerTest {
@@ -48,9 +55,9 @@ class BlockStreamerTest {
 //        }
 //    }
 //
-//    @Test
+    @Test
 //    @Timeout(value = 10000, unit = TimeUnit.MILLISECONDS)
-//    void streamLatestFromTestnet() throws InterruptedException {
+    void streamLatestFromTestnet() throws InterruptedException {
 //        Flux<Amount> flux = BlockStreamer.fromLatest(true)
 //                .map(block -> {
 //                    System.out.println("\n-----------------------------------------------------------");
@@ -72,5 +79,5 @@ class BlockStreamerTest {
 //        while(true) {
 //            Thread.sleep(1000);
 //        }
-//    }
+    }
 }

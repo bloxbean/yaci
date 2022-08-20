@@ -72,7 +72,7 @@ class Session implements Disposable {
                 //Listen to the channel closing
                 var closeFuture = activeChannel.closeFuture();
                 closeFuture.addListeners((ChannelFuture closeFut) -> {
-                    log.error("Channel closed");
+                    log.error("Channel closed !!!");
                     if (sessionListener != null)
                         sessionListener.disconnected();
                 });
@@ -94,14 +94,14 @@ class Session implements Disposable {
      */
     @Override
     public void dispose() {
-        log.info("Disposing the session");
-        try {
+        log.info("Disposing the session !!!");
+      //  try {
             if (activeChannel != null) {
-                activeChannel.closeFuture().sync();
+                activeChannel.close();
             }
-        } catch (InterruptedException e) {
-            log.error("Interrupted while shutting down TcpClient");
-        }
+//        } catch (InterruptedException e) {
+//            log.error("Interrupted while shutting down TcpClient");
+//        }
     }
 
     public void disableReconnection() {

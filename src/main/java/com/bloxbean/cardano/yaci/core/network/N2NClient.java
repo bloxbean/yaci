@@ -81,8 +81,12 @@ public class N2NClient {
         }
     }
 
+    public boolean isRunning() {
+        return session != null;
+    }
+
     public void shutdown() {
-        log.info("Shutdown ----");
+        log.info("Shutdown connection !!!");
 
         if (session != null) {
             session.disableReconnection();
@@ -102,14 +106,14 @@ public class N2NClient {
 
         @Override
         public void disconnected() {
-            log.error("Connection closed or error");
+            log.info("Connection closed !!!");
             if (session != null) {
                 session.dispose();
             }
 
             //TODO some delay
             //Try to start again
-            if (session.shouldReconnect()) {
+            if (session != null && session.shouldReconnect()) {
                 log.warn("Trying to reconnect !!!");
                 session = null; //reset session before creating a new one.
                 start();

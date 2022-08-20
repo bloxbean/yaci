@@ -17,9 +17,6 @@ import static com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchState
 
 @Slf4j
 public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
-    private Point orginalFrom;
-    private Point originalTo;
-
     private Point from;
     private Point to;
     private boolean shutDown;
@@ -27,11 +24,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
     private long counter;
     private long errorBlks;
 
-    public BlockfetchAgent(Point from, Point to) {
-        this.orginalFrom = from;
-        this.originalTo = to;
-        this.from = from;
-        this.to = to;
+    public BlockfetchAgent() {
         this.currenState = Idle;
 
         this.startTime = System.currentTimeMillis();
@@ -49,7 +42,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
 
         switch ((BlockfetchState) currenState) {
             case Idle:
-                if (from != null) {
+                if (from != null && to != null) {
                     return new RequestRange(from, to);
                 } else
                     return null;
@@ -128,6 +121,8 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
             log.debug("Total no of err blocks: " + errorBlks);
             log.debug("Agent finished in : " + timeTaken + " min");
         }
+
+        getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.readyForNextBatch());
     }
 
     @Override
@@ -146,9 +141,8 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
         this.currenState = Idle;
     }
 
-    public void reset(Point from, Point to) {
+    public void resetPoints(Point from, Point to) {
         this.from = from;
         this.to = to;
-
     }
 }

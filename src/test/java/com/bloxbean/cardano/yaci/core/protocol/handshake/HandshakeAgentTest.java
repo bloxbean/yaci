@@ -15,32 +15,31 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 class HandshakeAgentTest extends BaseTest{
 
-    @Test
-    @Timeout(value = 10000, unit = TimeUnit.MILLISECONDS)
-    public void testHandshake() throws InterruptedException {
-        N2NClient n2CClient = null;
-        n2CClient = new N2NClient(node, nodePort);
-
-        HandshakeAgent handshakeAgent = new HandshakeAgent(N2NVersionTableConstant.v4AndAbove(Networks.testnet().getProtocolMagic()));
-        BlockfetchAgent blockfetchAgent = new BlockfetchAgent(knownPoint, knownPoint);
-
-        Disposable disposable = n2CClient.start(handshakeAgent, blockfetchAgent);
-
-        handshakeAgent.addListener(new HandshakeAgentListener() {
-            @Override
-            public void handshakeOk() {
-                log.info("HANDSHAKE Successful");
-            }
-
-            @Override
-            public void handshakeError(Reason reason) {
-                log.info("ERROR {}", reason);
-            }
-        });
-
-        Thread.sleep(500);
-        disposable.dispose();
-
-    }
+//    @Test
+//    @Timeout(value = 10000, unit = TimeUnit.MILLISECONDS)
+//    public void testHandshake() throws InterruptedException {
+//
+//        HandshakeAgent handshakeAgent = new HandshakeAgent(N2NVersionTableConstant.v4AndAbove(Networks.testnet().getProtocolMagic()));
+//        BlockfetchAgent blockfetchAgent = new BlockfetchAgent(knownPoint, knownPoint);
+//
+//        N2NClient n2CClient = new N2NClient(node, nodePort, handshakeAgent, blockfetchAgent);
+//        n2CClient.start();
+//
+//        handshakeAgent.addListener(new HandshakeAgentListener() {
+//            @Override
+//            public void handshakeOk() {
+//                log.info("HANDSHAKE Successful");
+//            }
+//
+//            @Override
+//            public void handshakeError(Reason reason) {
+//                log.info("ERROR {}", reason);
+//            }
+//        });
+//
+//        Thread.sleep(500);
+//        n2CClient.shutdown();
+//
+//    }
 
 }
