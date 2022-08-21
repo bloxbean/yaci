@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.helpers;
 import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.yaci.core.helpers.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.model.Block;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
 import com.bloxbean.cardano.yaci.core.protocol.State;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
@@ -93,9 +94,18 @@ public class BlockFetcher implements Fetcher<Block> {
     }
 
     public static void main(String[] args) {
+        //Byron
+//        Point from = new Point(21600, "9b01d07036df8705bc0454bb9c3c1c0df5e626f4753b74250898e3278cfb8eaa");
+//        Point to = new Point(21600, "92644f4c4e5c6fdcaad638038c923a9dbb57f5e11513f1b1ededef3ad81a3e2c");
+
+        Point from = new Point(21601, "84ba3d3e3dac8f574db187074e29605c2512ce65d5022f5e7d07e52620f498b0");
+        Point to = new Point(21602, "719e54f0a72386acc0c0953b54b812bc58876238353cef40b66ee630d1c521da");
+
+        //shelley
 //        Point from = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
-        Point from = new Point(43847831, "15b9eeee849dd6386d3770b0745e0450190f7560e5159b1b3ab13b14b2684a45");
-        Point to = new Point(43847844, "ff8d558a3d5a0e058beb3d94d26a567f75cd7d09ff5485aa0d0ebc38b61378d4");
+//        Point to = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
+//        Point from = new Point(43847831, "15b9eeee849dd6386d3770b0745e0450190f7560e5159b1b3ab13b14b2684a45");
+//        Point to = new Point(43847844, "ff8d558a3d5a0e058beb3d94d26a567f75cd7d09ff5485aa0d0ebc38b61378d4");
 //         Point to = new Point(43848472, "7e79488986d2961605259b5ed28b7c3179ca8fc85e34f9050adcb0d7e19f6871");
 //        Point from = new Point(68571139, "7e0b5c20b2d6b76238bd11dc6c58c5ad91d74d4a4b2fe3e80bcf30deda1d9d35");
 //        Point to = new Point(68752024, "d0adb6c30c548bff7fd21f94f29447e21587c08977a950a3c472b8ce0e56d084");
@@ -113,21 +123,31 @@ public class BlockFetcher implements Fetcher<Block> {
             }
 
             @Override
+            public void blockFound(Block block) {
+                log.info("BLOCK FOUND >> {}", block);
+            }
+
+            @Override
+            public void byronBlockFound(ByronBlock byronBlock) {
+                log.info("Byron BLOCK FOUND >>  {}", byronBlock.getHeader().getConsensusData().getSlotId());
+            }
+
+            @Override
             public void readyForNextBatch() {
                 if (counter == 1) {
                     blockFetcher.shutdown();
                     return;
                 }
                 counter++;
-                Point from = new Point(68752024, "d0adb6c30c548bff7fd21f94f29447e21587c08977a950a3c472b8ce0e56d084");
-                Point to = new Point(68752024, "d0adb6c30c548bff7fd21f94f29447e21587c08977a950a3c472b8ce0e56d084");
+                Point from1 = new Point(68752024, "d0adb6c30c548bff7fd21f94f29447e21587c08977a950a3c472b8ce0e56d084");
+                Point to1 = new Point(68752024, "d0adb6c30c548bff7fd21f94f29447e21587c08977a950a3c472b8ce0e56d084");
 
-                blockFetcher.fetch(from, to);
+                blockFetcher.fetch(from1, to1);
             }
         });
 
         blockFetcher.start(block -> {
-            log.info("Block ******* {} -- {}", block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot());
+            log.info("Block >>> {} -- {} {}", block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot() + "  ", block.getEra());
         });
 
         blockFetcher.fetch(from, to);

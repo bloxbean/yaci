@@ -2,10 +2,18 @@ package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
 
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
+import com.bloxbean.cardano.yaci.core.model.Era;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronHead;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockHeaderSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
+import com.bloxbean.cardano.yaci.core.model.serializers.ByronBlockSerializer;
+import com.bloxbean.cardano.yaci.core.model.serializers.ByronEbBlockSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.*;
@@ -89,16 +97,33 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
         byte[] body = message.getBytes();
 
         Array array = (Array) CborSerializationUtil.deserialize(body);
-        int version = ((UnsignedInteger)array.getDataItems().get(0)).getValue().intValue();
+        int eraValue = ((UnsignedInteger)array.getDataItems().get(0)).getValue().intValue();
         try {
-            Block block = BlockSerializer.INSTANCE.deserializeDI(array.getDataItems().get(1));
-            if (log.isDebugEnabled())
-                log.info("Block >> {}, {}, {}", version, block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot());
+            Era era = EraUtil.getEra(eraValue);
 
-            //move from cursor
-            counter++;
-            getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.blockFound(block));
-            this.from = new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash());
+            if (era == Era.Byron) {
+                ByronBlock block ;
+                if (eraValue == 0) {
+                    block = ByronEbBlockSerializer.INSTANCE.deserializeDI(array);
+                } else {
+                    block = ByronBlockSerializer.INSTANCE.deserializeDI(array);
+                }
+                //move from cursor
+                counter++;
+                getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.byronBlockFound(block));
+                this.from = new Point(block.getHeader().getConsensusData().getSlotId().getSlot(), null); //TODO calculate block hash
+
+               //TODO -- Pending // this.from = new Point(block.getHeader().getConsensusData().getSlotId().getSlot(), block.getHeader().get);
+            } else {
+                Block block = BlockSerializer.INSTANCE.deserializeDI(array);
+                if (log.isDebugEnabled())
+                    log.info("Block >> {}, {}, {}", eraValue, block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot());
+
+                //move from cursor
+                counter++;
+                getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.blockFound(block));
+                this.from = new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash());
+            }
         } catch (Exception e) {
             errorBlks++;
             log.error("Error in parsing", e);

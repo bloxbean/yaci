@@ -38,6 +38,24 @@ public class CborSerializationUtil {
         return value;
     }
 
+    /**
+     * Convert a CBOR DataItem to long
+     * @param valueItem
+     * @return
+     */
+    public static long toLong(DataItem valueItem) {
+        return toBigInteger(valueItem).longValue();
+    }
+
+    /**
+     * Convert a CBOR DataItem to int
+     * @param valueItem
+     * @return
+     */
+    public static int toInt(DataItem valueItem) {
+        return toBigInteger(valueItem).intValue();
+    }
+
     public static String toHex(DataItem di) {
         return HexUtil.encodeHexString(((ByteString)di).getBytes());
     }

@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
 
 import com.bloxbean.cardano.yaci.core.model.Block;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
 import com.bloxbean.cardano.yaci.core.protocol.AgentListener;
 
 public class BlockfetchAgentListener implements AgentListener {
@@ -21,6 +22,10 @@ public class BlockfetchAgentListener implements AgentListener {
     }
 
     public void noBlockFound() {
+
+    }
+
+    public void byronBlockFound(ByronBlock byronBlock) {
 
     }
 

@@ -12,6 +12,7 @@ import java.util.List;
 @EqualsAndHashCode
 @Builder
 public class Block {
+    private Era era;
     private BlockHeader header;
 
     @Builder.Default
