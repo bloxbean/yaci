@@ -24,7 +24,7 @@ jobs:
         run: |
           mkdir -p ~/.gradle/
           echo "${{secrets.SIGNING_KEY}}" > ~/.gradle/secring.gpg.b64
-          cat ~/.gradle/secring.gpg.b64 > ~/.gradle/secring.gpg
+          base64 -d ~/.gradle/secring.gpg.b64 > ~/.gradle/secring.gpg
 #      - id: install-secret-key
 #        name: Install gpg secret key
 #        run: |
