@@ -23,8 +23,8 @@ jobs:
       - name: Decode GPG Key
         run: |
           mkdir -p ~/.gradle/
-          echo "${{secrets.SIGNING_KEY}}" > ~/.gradle/secring.gpg.b64
-          base64 -d ~/.gradle/secring.gpg.b64 > ~/.gradle/secring.gpg
+          echo "${{secrets.SIGNING_KEY}}" > ~/.gradle/secring.gpg
+#          cat ~/.gradle/secring.gpg.b64 > ~/.gradle/secring.gpg
 #      - id: install-secret-key
 #        name: Install gpg secret key
 #        run: |
