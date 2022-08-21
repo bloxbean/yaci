@@ -25,18 +25,6 @@ jobs:
           mkdir -p ~/.gradle/
           echo "${{secrets.SIGNING_KEY}}" > ~/.gradle/secring.gpg.b64
           base64 -d ~/.gradle/secring.gpg.b64 > ~/.gradle/secring.gpg
-#      - id: install-secret-key
-#        name: Install gpg secret key
-#        run: |
-#          cat <(echo -e "${{ secrets.SIGNING_KEY }}") | gpg --batch --import
-#          gpg --list-secret-keys --keyid-format SHORT
-#      - name: Export gpg key to file
-#        run: |
-#          echo use-agent >> ~/.gnupg/gpg.conf
-#          echo pinentry-mode loopback >> ~/.gnupg/gpg.conf
-#          echo allow-loopback-pinentry >> ~/.gnupg/gpg-agent.conf
-#          echo RELOADAGENT | gpg-connect-agent
-#          echo ${{ secrets.SIGNING_PASSWORD }} | gpg  --export-secret-keys --batch --yes --passphrase-fd 0 --pinentry-mode loopback > ~/.gradle/secring.gpg
       - name: Publish package
         run: ./gradlew publish -Psigning.keyId=${{ secrets.SIGNING_KEY_ID }} -Psigning.password=${{ secrets.SIGNING_PASSWORD }} -Psigning.secretKeyRingFile=$(echo ~/.gradle/secring.gpg) --warn --stacktrace
         env:
