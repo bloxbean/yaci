@@ -31,40 +31,17 @@ public abstract class Agent<T extends AgentListener> {
         }
     }
 
+    public Message deserializeResponse(byte[] bytes) {
+        return this.currenState.handleInbound(bytes);
+    }
+
     public final void receiveResponse(Message message) {
         State oldState = currenState;
         currenState = currenState.nextState(message);
 
+        processResponse(message);
         //Notify
         getAgentListeners().forEach(agentListener -> agentListener.onStateUpdate(oldState, currenState));
-    }
-
-    public final boolean hasAgency() {
-        return currenState.hasAgency();
-    }
-
-    public final void addListener(T agentListener) {
-        agentListeners.add(agentListener);
-    }
-
-    protected List<T> getAgentListeners() {
-        return agentListeners;
-    }
-
-    public abstract int getProtocolId();
-
-    public abstract Message buildNextMessage();
-
-    public abstract Message deserializeResponse(byte[] bytes);
-
-    public abstract boolean isDone();
-
-    public void shutdown() {
-
-    }
-
-    public void reset() {
-
     }
 
     public final void sendNextMessage() {
@@ -88,4 +65,29 @@ public abstract class Agent<T extends AgentListener> {
             this.sendRequest(message);
         }
     }
+
+    public final boolean hasAgency() {
+        return currenState.hasAgency();
+    }
+
+    public final void addListener(T agentListener) {
+        agentListeners.add(agentListener);
+    }
+
+    protected List<T> getAgentListeners() {
+        return agentListeners;
+    }
+
+    public void reset() {
+
+    }
+
+    public void shutdown() {
+
+    }
+
+    public abstract int getProtocolId();
+    public abstract boolean isDone();
+    protected abstract Message buildNextMessage();
+    protected abstract void processResponse(Message message);
 }

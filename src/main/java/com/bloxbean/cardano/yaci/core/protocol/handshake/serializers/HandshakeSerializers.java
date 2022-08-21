@@ -107,9 +107,9 @@ public class HandshakeSerializers {
                 return null;
 
             long versionNumber = ((UnsignedInteger)dataItems.get(1)).getValue().longValue();
-            byte[] strBytes = ((ByteString)dataItems.get(1)).getBytes();
+            String str = ((UnicodeString)dataItems.get(2)).getString();
 
-            return new ReasonHandshakeDecodeError(versionNumber, new String(strBytes));
+            return new ReasonHandshakeDecodeError(versionNumber, str);
         }
 
         //TODO -- deserialize not used
@@ -128,9 +128,9 @@ public class HandshakeSerializers {
                 return null;
 
             long versionNumber = ((UnsignedInteger)dataItems.get(1)).getValue().longValue();
-            byte[] strBytes = ((ByteString)dataItems.get(1)).getBytes();
+            String str = ((UnicodeString)dataItems.get(2)).getString();
 
-            return new ReasonRefused(versionNumber, new String(strBytes));
+            return new ReasonRefused(versionNumber, str);
         }
 
         //TODO -- deserialize not used

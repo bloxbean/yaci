@@ -69,8 +69,8 @@ public class TxSubmisionAgent extends Agent {
     }
 
     @Override
-    public Message deserializeResponse(byte[] bytes) {
-        Message message = this.currenState.handleInbound(bytes);
+    public void processResponse(Message message) {
+        if (message == null) return;
         if (message instanceof RequestTxIds) {
             if (((RequestTxIds) message).isBlocking()) {
                 handleRequestTxIdsBlocking((RequestTxIds) message);
@@ -80,8 +80,6 @@ public class TxSubmisionAgent extends Agent {
         } else if (message instanceof RequestTxs) {
             handleRequestTxs((RequestTxs) message);
         }
-
-        return message;
     }
 
     private void handleRequestTxs(RequestTxs requestTxs) {

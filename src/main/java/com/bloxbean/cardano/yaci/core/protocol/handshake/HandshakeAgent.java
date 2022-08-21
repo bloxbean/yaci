@@ -6,7 +6,6 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.ProposedVersions;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
-import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import static com.bloxbean.cardano.yaci.core.protocol.handshake.HandshkeState.Propose;
@@ -36,9 +35,8 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     }
 
     @Override
-    public Message deserializeResponse(byte[] bytes) {
-        log.debug(HexUtil.encodeHexString(bytes));
-        Message message = this.currenState.handleInbound(bytes);
+    public void processResponse(Message message) {
+        if (message == null) return;
         if (message instanceof AcceptVersion) {
             log.info("Handshake successful. {}", message);
             handshakeOk();
@@ -46,8 +44,6 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
             log.error("Handshake failed. {}", message);
             handshakeError(message);
         }
-
-        return message;
     }
 
     private void handshakeOk() {

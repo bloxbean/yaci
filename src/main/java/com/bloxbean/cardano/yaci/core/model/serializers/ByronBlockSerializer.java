@@ -50,7 +50,7 @@ public enum ByronBlockSerializer implements Serializer<ByronMainBlock> {
         return block;
     }
 
-    private ByronBlockHead deserializeHeader(Array headerArr) {
+    public ByronBlockHead deserializeHeader(Array headerArr) {
         long protocolMagic = toLong(headerArr.getDataItems().get(0));
         String prevBlockId = toHex(headerArr.getDataItems().get(1));
 

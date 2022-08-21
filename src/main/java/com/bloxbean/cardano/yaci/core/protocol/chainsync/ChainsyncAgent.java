@@ -62,8 +62,8 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     @Override
-    public Message deserializeResponse(byte[] bytes) {
-        Message message = this.currenState.handleInbound(bytes);
+    public void processResponse(Message message) {
+        if (message == null) return;
         if (message instanceof IntersectFound) {
             if (log.isDebugEnabled())
                 log.debug("IntersectFound - {}", message);
@@ -84,8 +84,6 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
             Rollbackward rollBackward = (Rollbackward) message;
             onRollBackward(rollBackward);
         }
-
-        return message;
     }
 
     private void onIntersactFound(IntersectFound intersectFound) {
@@ -123,7 +121,9 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     private void onRollForward(RollForward rollForward) {
-        this.currentPoint = new Point(rollForward.getBlockHeader().getHeaderBody().getSlot(), rollForward.getBlockHeader().getHeaderBody().getBlockHash());
+        if (rollForward.getBlockHeader() != null) //For Byron era, this value is null. Will be fixed later
+            this.currentPoint = new Point(rollForward.getBlockHeader().getHeaderBody().getSlot(), rollForward.getBlockHeader().getHeaderBody().getBlockHash());
+
         if (counter++ % 100 == 0 || (tip.getPoint().getSlot() - currentPoint.getSlot()) < 10) {
 
             if (log.isDebugEnabled()) {
@@ -138,11 +138,20 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
             }
         }
 
-        getAgentListeners().stream().forEach(
-                chainSyncAgentListener -> {
-                    chainSyncAgentListener.rollforward(rollForward.getTip(), rollForward.getBlockHeader());
-                }
-        );
+        if(rollForward.getByronBlockHead() != null) { //For Byron
+            log.warn("Byron Block: " + rollForward.getByronBlockHead().getConsensusData().getSlotId());
+            getAgentListeners().stream().forEach(
+                    chainSyncAgentListener -> {
+                        chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronBlockHead());
+                    }
+            );
+        } else { //For Shelley and later eras
+            getAgentListeners().stream().forEach(
+                    chainSyncAgentListener -> {
+                        chainSyncAgentListener.rollforward(rollForward.getTip(), rollForward.getBlockHeader());
+                    }
+            );
+        }
     }
 
     @Override

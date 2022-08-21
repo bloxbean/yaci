@@ -7,9 +7,6 @@ import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronHead;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockHeaderSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.ByronBlockSerializer;
@@ -60,8 +57,8 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
     }
 
     @Override
-    public Message deserializeResponse(byte[] bytes) {
-        Message message = this.currenState.handleInbound(bytes);
+    public void processResponse(Message message) {
+        if (message == null) return;
         if (message instanceof StartBatch) {
             if (log.isDebugEnabled())
                 log.debug("Batch starting !!!");
@@ -81,8 +78,6 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
                 log.debug("Msg block");
             onReceiveBlocks((MsgBlock) message);
         }
-
-        return message;
     }
 
     private void onNoBlocks() {
@@ -155,7 +150,6 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
         return currenState == BlockfetchState.Done;
     }
 
-    @Override
     public void shutdown() {
         this.shutDown = true;
     }

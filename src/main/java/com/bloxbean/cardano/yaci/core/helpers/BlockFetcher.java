@@ -5,7 +5,6 @@ import com.bloxbean.cardano.yaci.core.helpers.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
-import com.bloxbean.cardano.yaci.core.protocol.State;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -41,13 +40,6 @@ public class BlockFetcher implements Fetcher<Block> {
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
-                blockfetchAgent.sendNextMessage();
-            }
-        });
-
-        blockfetchAgent.addListener(new BlockfetchAgentListener() {
-            @Override
-            public void onStateUpdate(State oldState, State newState) {
                 blockfetchAgent.sendNextMessage();
             }
         });
