@@ -6,7 +6,7 @@ plugins {
 }
 
 group 'com.bloxbean.cardano'
-version '1.0-SNAPSHOT'
+version 'v0.0.1-prev1'
 
 repositories {
     mavenCentral()
@@ -78,7 +78,7 @@ publishing {
             }
             pom {
                 name = 'yaci-core'
-                description = 'A Cardano Mini Protocols implementation in Java'
+                description = 'Yaci - A Cardano Mini Protocols implementation in Java'
                 url = 'https://github.com/bloxbean/yaci-core'
                 licenses {
                     license {
