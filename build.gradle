@@ -6,7 +6,7 @@ plugins {
 }
 
 group 'com.bloxbean.cardano'
-version 'v0.0.1-prev1'
+version 'v0.0.1-prev2'
 
 repositories {
     mavenCentral()
