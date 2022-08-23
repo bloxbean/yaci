@@ -38,10 +38,10 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     public void processResponse(Message message) {
         if (message == null) return;
         if (message instanceof AcceptVersion) {
-            log.info("Handshake successful. {}", message);
+            log.info("Handshake Ok!!! {}", message);
             handshakeOk();
         } else {
-            log.error("Handshake failed. {}", message);
+            log.error("Handshake failed!!! {}", message);
             handshakeError(message);
         }
     }

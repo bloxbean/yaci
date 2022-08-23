@@ -1,19 +1,16 @@
 package com.bloxbean.cardano.yaci.core.util;
 
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
-import com.bloxbean.cardano.client.transaction.spec.Transaction;
-import com.bloxbean.cardano.client.transaction.util.CborSerializationUtil;
 import com.bloxbean.cardano.client.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class TxUtil {
 
-    public static String calculateTxHash(byte[] cbor) {
+    public static String calculateTxHash(byte[] bytes) {
         try {
-            Transaction transaction = Transaction.deserialize(cbor);
             String txHash = HexUtil.encodeHexString(
-                    Blake2bUtil.blake2bHash256(CborSerializationUtil.serialize(transaction.getBody().serialize())));
+                    Blake2bUtil.blake2bHash256(bytes));
 
             return txHash;
         } catch (Exception e) {

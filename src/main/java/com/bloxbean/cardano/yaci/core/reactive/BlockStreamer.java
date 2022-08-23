@@ -123,8 +123,8 @@ public class BlockStreamer {
             }
 
             @Override
-            public void intersactNotFound(Point point) {
-                log.error("IntersactNotFound: {}", point);
+            public void intersactNotFound(Tip tip) {
+                log.error("IntersactNotFound: {}", tip);
             }
 
             @Override

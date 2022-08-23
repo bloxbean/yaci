@@ -26,7 +26,8 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
         this.currenState = Idle;
         this.knownPoints = knownPoints;
 
-        log.info("Starting at slot >> " + knownPoints[0].getSlot());
+        if (knownPoints != null && knownPoints.length > 0)
+            log.info("Trying to find the point " + knownPoints[0]);
     }
 
     public ChainsyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo) {
@@ -48,14 +49,16 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
         if (intersact == null) { //Find intersacts
             if (currentPoint == null) {
                 if (log.isDebugEnabled())
-                    log.info("FindIntersect for point: {}", knownPoints);
+                    log.debug("FindIntersect for point: {}", knownPoints);
                 return new FindIntersect(knownPoints);
             } else {
                 if (log.isDebugEnabled())
-                    log.info("FindIntersect for point: {}", currentPoint);
+                    log.debug("FindIntersect for point: {}", currentPoint);
                 return new FindIntersect(new Point[]{currentPoint});
             }
         } else if (intersact != null) {
+            if (log.isDebugEnabled())
+                log.debug("RequestNext : Current point: {}", currentPoint);
             return new RequestNext();
         } else
             return null;
@@ -73,6 +76,7 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
         } else if (message instanceof IntersectNotFound) {
             if (log.isDebugEnabled())
                 log.debug("IntersectNotFound - {}", message);
+            onIntersactNotFound((IntersectNotFound)message);
         } else if (message instanceof RollForward) {
             if (log.isDebugEnabled())
                 log.debug("RollForward - {}", message);
@@ -84,6 +88,15 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
             Rollbackward rollBackward = (Rollbackward) message;
             onRollBackward(rollBackward);
         }
+    }
+
+    private void onIntersactNotFound(IntersectNotFound intersectNotFound) {
+        log.error("Itersect not found. Tip: {}", intersectNotFound.getTip());
+        getAgentListeners().stream().forEach(
+                chainSyncAgentListener -> {
+                    chainSyncAgentListener.intersactNotFound(intersectNotFound.getTip());
+                }
+        );
     }
 
     private void onIntersactFound(IntersectFound intersectFound) {

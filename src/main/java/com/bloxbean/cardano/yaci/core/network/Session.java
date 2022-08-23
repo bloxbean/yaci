@@ -66,7 +66,7 @@ class Session implements Disposable {
 
         connectFuture.addListeners((ChannelFuture cf) -> {
             if (cf.isSuccess()) {
-                log.info("\nConnection established");
+                log.info("Connection established");
                 if (sessionListener != null)
                     sessionListener.connected();
                 //Listen to the channel closing
@@ -123,6 +123,8 @@ class Session implements Disposable {
                 throw new RuntimeException(e);
             }
         }
-        log.info("Handshake successful");
+
+        if (log.isDebugEnabled())
+            log.debug("Handshake successful");
     }
 }

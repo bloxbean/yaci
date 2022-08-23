@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class IntersectNotFound implements Message {
-    private Point point;
+    private Tip tip;
 
     @Override
     public byte[] serialize() {

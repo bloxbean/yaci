@@ -12,7 +12,7 @@ public class ChainSyncAgentListener implements AgentListener {
 
     }
 
-    public void intersactNotFound(Point point) {
+    public void intersactNotFound(Tip tip) {
 
     }
 

@@ -23,7 +23,7 @@ public enum IntersectNotFoundSerializer implements Serializer<IntersectNotFound>
             return null;
 
         IntersectNotFound intersectNotFound
-                = new IntersectNotFound(PointSerializer.INSTANCE.deserializeDI(array.getDataItems().get(1)));
+                = new IntersectNotFound(TipSerializer.INSTANCE.deserializeDI(array.getDataItems().get(1)));
         return intersectNotFound;
     }
 }

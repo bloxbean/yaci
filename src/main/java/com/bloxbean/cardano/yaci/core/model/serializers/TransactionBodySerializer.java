@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.core.util.TxUtil;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -24,6 +25,10 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         Map bodyMap = (Map) di;
 
         TransactionBody.TransactionBodyBuilder transactionBodyBuilder = TransactionBody.builder();
+
+        //derive
+        String txHash = TxUtil.calculateTxHash(CborSerializationUtil.serialize(di));
+        transactionBodyBuilder.txHash(txHash);
 
         Array inputArray =  (Array)bodyMap.get(new UnsignedInteger(0));
         Set<TransactionInput> inputs = new HashSet<>();

@@ -12,6 +12,13 @@ public class Point {
     private long slot;
     private String hash;
 
+    @Override
+    public String toString() {
+        return "[" +
+                "slot=" + slot +
+                ", hash='" + hash + '\'' +
+                ']';
+    }
 }
 
 

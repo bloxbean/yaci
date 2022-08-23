@@ -16,6 +16,9 @@ import java.util.Set;
 @EqualsAndHashCode
 @Builder(toBuilder = true)
 public class TransactionBody {
+    //Derived
+    private String txHash;
+
     private Set<TransactionInput> inputs;
     private List<TransactionOutput> outputs;
     private BigInteger fee;

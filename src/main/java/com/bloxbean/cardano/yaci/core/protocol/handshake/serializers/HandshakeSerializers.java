@@ -6,11 +6,13 @@ import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.*;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 public class HandshakeSerializers {
 
     public enum ProposedVersionSerializer implements Serializer<ProposedVersions> {
@@ -22,7 +24,8 @@ public class HandshakeSerializers {
             array.add(new UnsignedInteger(0));
             array.add(VersionTableSerializer.INSTANCE.serializeDI(proposedVersions.getVersionTable()));
 
-            System.out.println(HexUtil.encodeHexString(CborSerializationUtil.serialize(array)));
+            if (log.isDebugEnabled())
+                log.debug(HexUtil.encodeHexString(CborSerializationUtil.serialize(array)));
             return CborSerializationUtil.serialize(array);
         }
     }

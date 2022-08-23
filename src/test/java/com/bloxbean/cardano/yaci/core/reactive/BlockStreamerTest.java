@@ -40,8 +40,34 @@ class BlockStreamerTest {
     }
 
     @Test
-   // @Timeout(value = 80000, unit = TimeUnit.MILLISECONDS)
     void streamLatestFromMainnet() throws InterruptedException {
+        Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.MAINNET,
+                        Constants.WELL_KNOWN_MAINNET_POINT)
+                .map(block -> {
+                    System.out.println("\n-----------------------------------------------------------");
+                    System.out.println(String.format("Block : %d", block.getHeader().getHeaderBody().getBlockNumber()));
+                    return block.getTransactionBodies();
+                })
+                //.take(2)
+                .flatMap(transactionBodies ->
+                        Flux.fromStream(transactionBodies.stream().map(transactionBody -> transactionBody.getOutputs())))
+                .flatMap(transactionOutputs ->
+                        Flux.fromStream(transactionOutputs.stream().map(transactionOutput -> transactionOutput.getAmounts())))
+                .flatMap(amounts -> Flux.fromStream(amounts.stream()))
+                .map(Function.identity());
+
+        flux.subscribe(amount -> {
+            System.out.println(String.format("%30s : %d", amount.getAssetName(), amount.getQuantity()));
+        });
+
+        while(true) {
+            Thread.sleep(1000);
+        }
+    }
+
+    @Test
+   // @Timeout(value = 80000, unit = TimeUnit.MILLISECONDS)
+    void streamLatestFromPrePod_fromByron() throws InterruptedException {
         Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.PREPOD,
                         Constants.WELL_KNOWN_PREPOD_POINT)
                 .map(block -> {
