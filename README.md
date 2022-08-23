@@ -1,3 +1,5 @@
+[![Clean, Build](https://github.com/bloxbean/yaci-core/actions/workflows/build.yml/badge.svg)](https://github.com/bloxbean/yaci-core/actions/workflows/build.yml)
+
 # Yaci 
 A Cardano Mini Protocols implementation in Java
 
