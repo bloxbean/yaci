@@ -27,7 +27,7 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         TransactionBody.TransactionBodyBuilder transactionBodyBuilder = TransactionBody.builder();
 
         //derive
-        String txHash = TxUtil.calculateTxHash(CborSerializationUtil.serialize(di));
+        String txHash = TxUtil.calculateTxHash(CborSerializationUtil.serialize(di, false)); //disable canonical ordering
         transactionBodyBuilder.txHash(txHash);
 
         Array inputArray =  (Array)bodyMap.get(new UnsignedInteger(0));
