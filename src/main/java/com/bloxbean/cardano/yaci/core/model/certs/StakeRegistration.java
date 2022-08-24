@@ -1,8 +1,12 @@
 package com.bloxbean.cardano.yaci.core.model.certs;
 
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.ToString;
 
 @Getter
+@EqualsAndHashCode
+@ToString
 public class StakeRegistration implements Certificate {
     private final CertificateType type = CertificateType.STAKE_REGISTRATION;
 
@@ -11,17 +15,4 @@ public class StakeRegistration implements Certificate {
     public StakeRegistration(StakeCredential stakeCredential) {
         this.stakeCredential = stakeCredential;
     }
-
-
-//    @Override
-//    public Array serialize() throws CborSerializationException {
-//        if (stakeCredential == null)
-//            throw new CborSerializationException("StakeRegistration serialization failed. StakeCredential is NULL");
-//
-//        Array array = new Array();
-//        array.add(new UnsignedInteger(0));
-//
-//        array.add(stakeCredential.serialize());
-//        return array;
-//    }
 }

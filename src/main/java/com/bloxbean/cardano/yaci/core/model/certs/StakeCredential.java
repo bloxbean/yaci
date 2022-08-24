@@ -11,12 +11,14 @@ import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.ToString;
 
 import java.math.BigInteger;
 import java.util.List;
 
 @Getter
 @EqualsAndHashCode
+@ToString
 public class StakeCredential {
     private final StakeCredType type;
     private final String hash;
@@ -49,19 +51,6 @@ public class StakeCredential {
         StakeCredential stakeCredential = new StakeCredential(StakeCredType.SCRIPTHASH, scriptHash);
         return stakeCredential;
     }
-
-//    /**
-//     * @param script
-//     * @return StakeCredential
-//     * @throws CborRuntimeException
-//     */
-//    public static StakeCredential fromScript(Script script) {
-//        try {
-//            return new StakeCredential(com.bloxbean.cardano.client.transaction.spec.cert.StakeCredType.SCRIPTHASH, script.getScriptHash());
-//        } catch (CborSerializationException e) {
-//            throw new CborRuntimeException("Cbor serialization failed for the script", e);
-//        }
-//    }
 
     public static StakeCredential deserialize(Array stakeCredArray)  {
         List<DataItem> dataItemList = stakeCredArray.getDataItems();

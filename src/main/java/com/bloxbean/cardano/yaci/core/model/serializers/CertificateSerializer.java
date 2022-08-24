@@ -6,7 +6,6 @@ import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
 import com.bloxbean.cardano.yaci.core.model.certs.GenesisKeyDelegation;
-import com.bloxbean.cardano.yaci.core.model.certs.MoveInstataneous;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 
 import java.util.List;
@@ -48,12 +47,17 @@ public enum CertificateSerializer implements Serializer<Certificate> {
                 certificate = PoolRetirementSerializer.INSTANCE.deserializeDI(certArray);
                 break;
             case 5:
-                //Genesis key delegation
-                certificate = new GenesisKeyDelegation();
+                try {
+                    //Genesis key delegation
+                    certificate = GenesisKeyDelegationSerializer.INSTANCE.deserializeDI(certArray);
+                } catch (Exception e) {
+                    e.printStackTrace(); //TODO -- Keep this try catch temporary. Remove once the test is done.
+                    return new GenesisKeyDelegation(null, null, null);
+                }
                 break;
             case 6:
                 //Move instateneous rewards certs
-                certificate = new MoveInstataneous();
+                certificate = MoveInstantaneousRewardsSerializer.INSTANCE.deserializeDI(certArray);
                 break;
             default:
                 throw new CborRuntimeException("Certificate deserialization failed. Unknown type : " + type);
