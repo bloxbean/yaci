@@ -19,11 +19,14 @@ import java.util.List;
 @EqualsAndHashCode
 public class StakeCredential {
     private final StakeCredType type;
-    private final byte[] hash;
+    private final String hash;
 
-    private StakeCredential(StakeCredType type, byte[] hash) {
+    private StakeCredential(StakeCredType type, byte[] hashBytes) {
         this.type = type;
-        this.hash = hash;
+        if (hashBytes != null)
+            this.hash = HexUtil.encodeHexString(hashBytes);
+        else
+            this.hash = null;
     }
 
     public static StakeCredential fromKey(VerificationKey vkey) {
@@ -90,7 +93,7 @@ public class StakeCredential {
             throw new CborRuntimeException("Invalid stake credential type : " + type);
         }
 
-        array.add(new ByteString(hash));
+        array.add(new ByteString(HexUtil.decodeHexString(hash)));
         return array;
     }
 

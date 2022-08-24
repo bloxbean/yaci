@@ -6,10 +6,13 @@ import lombok.Getter;
 
 @Getter
 public class StakePoolId {
-    private final byte[] poolKeyHash;
+    private final String poolKeyHash;
 
-    public StakePoolId(byte[] poolKeyHash) {
-        this.poolKeyHash = poolKeyHash;
+    public StakePoolId(byte[] poolKeyHashBytes) {
+        if (poolKeyHashBytes != null)
+            this.poolKeyHash = HexUtil.encodeHexString(poolKeyHashBytes);
+        else
+            this.poolKeyHash = null;
     }
 
     public static StakePoolId fromHexPoolId(String poolId) {
