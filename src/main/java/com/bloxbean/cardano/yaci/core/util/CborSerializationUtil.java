@@ -4,9 +4,7 @@ import co.nstant.in.cbor.CborBuilder;
 import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborEncoder;
 import co.nstant.in.cbor.CborException;
-import co.nstant.in.cbor.model.ByteString;
-import co.nstant.in.cbor.model.DataItem;
-import co.nstant.in.cbor.model.MajorType;
+import co.nstant.in.cbor.model.*;
 import co.nstant.in.cbor.model.Number;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import lombok.NonNull;
@@ -62,6 +60,10 @@ public class CborSerializationUtil {
 
     public static byte[] toBytes(DataItem di) {
         return ((ByteString)di).getBytes();
+    }
+
+    public static String toUnicodeString(DataItem di) {
+        return ((UnicodeString)di).getString();
     }
 
     /**
