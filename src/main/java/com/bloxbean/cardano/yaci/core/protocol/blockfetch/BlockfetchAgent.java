@@ -72,6 +72,8 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
                 log.debug("NoBlocks {}", message);
                 log.debug("NoBlocks : {} to {}", from, to);
             }
+
+            log.warn("NoBlocks : {} to {}", from, to);
             onNoBlocks();
         } else if (message instanceof MsgBlock) {
             if (log.isDebugEnabled())
