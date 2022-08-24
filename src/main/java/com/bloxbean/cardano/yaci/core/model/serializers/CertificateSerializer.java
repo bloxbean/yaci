@@ -7,7 +7,6 @@ import com.bloxbean.cardano.client.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
 import com.bloxbean.cardano.yaci.core.model.certs.GenesisKeyDelegation;
 import com.bloxbean.cardano.yaci.core.model.certs.MoveInstataneous;
-import com.bloxbean.cardano.yaci.core.model.certs.PoolRetirement;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 
 import java.util.List;
@@ -46,7 +45,7 @@ public enum CertificateSerializer implements Serializer<Certificate> {
                 break;
             case 4:
                 //Pool retirement
-                certificate = new PoolRetirement();
+                certificate = PoolRetirementSerializer.INSTANCE.deserializeDI(certArray);
                 break;
             case 5:
                 //Genesis key delegation
