@@ -52,6 +52,8 @@ public enum BlockSerializer implements Serializer<Block> {
         List<Witnesses> witnessesSet = new ArrayList<>();
         Array witnessesListArr = (Array) blockArray.getDataItems().get(2);
         for (DataItem witnessesDI: witnessesListArr.getDataItems()) {
+            if (witnessesDI == SimpleValue.BREAK)
+                continue;
             Witnesses witnesses = WintessesSerializer.INSTANCE.deserializeDI(witnessesDI);
             witnessesSet.add(witnesses);
         }
@@ -61,6 +63,8 @@ public enum BlockSerializer implements Serializer<Block> {
         java.util.Map<Integer, AuxData> auxDataMap = new LinkedHashMap<>();
         Map auxDataMapDI = (Map) blockArray.getDataItems().get(3);
         for (DataItem txIdDI: auxDataMapDI.getKeys()) {
+            if (txIdDI == SimpleValue.BREAK)
+                continue;
             AuxData auxData = AuxDataSerializer.INSTANCE.deserializeDI(auxDataMapDI.get(txIdDI));
             auxDataMap.put(toInt(txIdDI), auxData);
         }
