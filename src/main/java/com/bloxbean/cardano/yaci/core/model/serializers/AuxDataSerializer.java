@@ -1,6 +1,8 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
+import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.MajorType;
 import co.nstant.in.cbor.model.Map;
 import com.bloxbean.cardano.client.exception.CborDeserializationException;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
@@ -19,8 +21,15 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
     @Override
     public AuxData deserializeDI(DataItem di) {
         try {
-            AuxiliaryData auxiliaryData = AuxiliaryData.deserialize((Map) di);
-            Metadata metadata = auxiliaryData.getMetadata();
+            Metadata metadata = null;
+            if (di.getMajorType() == MajorType.MAP) { //Shelley + Alonzo
+                AuxiliaryData auxiliaryData = AuxiliaryData.deserialize((Map) di);
+                metadata = auxiliaryData.getMetadata();
+            } else if (di.getMajorType() == MajorType.ARRAY) { //Shelley ma era. Handle it here as it's not handled in cardano-client-lib
+                DataItem metadataDI = ((Array)di).getDataItems().get(0);
+                AuxiliaryData auxiliaryData = AuxiliaryData.deserialize((Map)metadataDI);
+                metadata = auxiliaryData.getMetadata();
+            }
 
             String metadataCbor = null;
             String metadataJson = null;
