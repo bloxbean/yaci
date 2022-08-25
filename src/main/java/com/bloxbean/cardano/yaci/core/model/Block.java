@@ -2,8 +2,7 @@ package com.bloxbean.cardano.yaci.core.model;
 
 import lombok.*;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 @Getter
 @AllArgsConstructor
@@ -17,4 +16,8 @@ public class Block {
 
     @Builder.Default
     private List<TransactionBody> transactionBodies = new ArrayList<>();
+
+    private List<Witnesses> transactionWitness = new ArrayList<>();
+    private Map<Integer, AuxData> auxiliaryDataMap = new LinkedHashMap();
+    private List<Integer> invalidTransactions = new ArrayList<>();
 }

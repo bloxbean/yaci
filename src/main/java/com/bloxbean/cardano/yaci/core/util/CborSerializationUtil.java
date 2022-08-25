@@ -10,6 +10,7 @@ import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import lombok.NonNull;
 
 import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 
 public class CborSerializationUtil {
@@ -64,6 +65,21 @@ public class CborSerializationUtil {
 
     public static String toUnicodeString(DataItem di) {
         return ((UnicodeString)di).getString();
+    }
+
+    //convert [1,50] to "1/50"
+    public static String toRationalNumberStr(DataItem di) {
+        RationalNumber rdi = (RationalNumber) di;
+        return rdi.getNumerator() + "/" + rdi.getDenominator();
+    }
+
+    //convert [1, 50] to 0.02
+    public static BigDecimal toRationalNumber(DataItem di) {
+        RationalNumber rdi = (RationalNumber) di;
+        Number numerator = rdi.getNumerator();
+        Number denominator = rdi.getDenominator();
+
+        return new BigDecimal(numerator.getValue()).divide(new BigDecimal(denominator.getValue()));
     }
 
     /**

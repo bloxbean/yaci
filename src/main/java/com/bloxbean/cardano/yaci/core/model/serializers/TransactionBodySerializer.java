@@ -1,15 +1,13 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
-import com.bloxbean.cardano.yaci.core.model.Amount;
-import com.bloxbean.cardano.yaci.core.model.TransactionBody;
-import com.bloxbean.cardano.yaci.core.model.TransactionInput;
-import com.bloxbean.cardano.yaci.core.model.TransactionOutput;
+import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.TxUtil;
+import lombok.extern.slf4j.Slf4j;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -17,6 +15,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+@Slf4j
 public enum TransactionBodySerializer implements Serializer<TransactionBody> {
     INSTANCE;
 
@@ -76,25 +75,33 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         if (certificates != null)
             transactionBodyBuilder.certificates(certificates);
 
-//        //withdrawals
-//        Map withdrawalMap = (Map)bodyMap.get(new UnsignedInteger(5));
-//        if (withdrawalMap != null && withdrawalMap.getKeys() != null && withdrawalMap.getKeys().size() > 0) {
-//            Collection<DataItem> addrKeys = withdrawalMap.getKeys();
-//            for (DataItem addrKey: addrKeys) {
-//                Withdrawal withdrawal = Withdrawal.deserialize(withdrawalMap, addrKey);
-//                transactionBody.getWithdrawals().add(withdrawal);
-//            }
-//        }
-//
-//        ByteString metadataHashBS = (ByteString)bodyMap.get(new UnsignedInteger(7));
-//        if(metadataHashBS != null) {
-//            transactionBody.setAuxiliaryDataHash(metadataHashBS.getBytes());
-//        }
-//
-//        UnsignedInteger validityStartIntervalUI = (UnsignedInteger)bodyMap.get(new UnsignedInteger(8));
-//        if(validityStartIntervalUI != null) {
-//            transactionBody.setValidityStartInterval(validityStartIntervalUI.getValue().longValue());
-//        }
+        //withdrawals
+        Map withdrawalMap = (Map)bodyMap.get(new UnsignedInteger(5));
+        if (withdrawalMap != null && withdrawalMap.getKeys() != null && withdrawalMap.getKeys().size() > 0) {
+            java.util.Map<String, BigInteger> withdrawals = WithdrawalsSerializer.INSTANCE.deserializeDI(withdrawalMap);
+            if (withdrawals != null)
+                transactionBodyBuilder.withdrawals(withdrawals);
+        }
+
+        //Update
+        DataItem updateDI = bodyMap.get(new UnsignedInteger(6));
+        if (updateDI != null) {
+            Update update = UpdateSerializer.INSTANCE.deserializeDI(updateDI);
+            transactionBodyBuilder.update(update);
+        }
+
+        //Aux data hash
+        ByteString metadataHashBS = (ByteString)bodyMap.get(new UnsignedInteger(7));
+        if(metadataHashBS != null) {
+            String auxDataHash = HexUtil.encodeHexString(metadataHashBS.getBytes());
+            transactionBodyBuilder.auxiliaryDataHash(auxDataHash);
+        }
+
+        //Validity interval start
+        UnsignedInteger validityStartIntervalUI = (UnsignedInteger)bodyMap.get(new UnsignedInteger(8));
+        if(validityStartIntervalUI != null) {
+            transactionBodyBuilder.validityIntervalStart(validityStartIntervalUI.getValue().longValue());
+        }
 
         //Mint
         Map mintMap = (Map)bodyMap.get(new UnsignedInteger(9));
@@ -122,71 +129,71 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
             }
             transactionBodyBuilder.mint(mintAssets);
         }
-//
-//        //script_data_hash
-//        ByteString scriptDataHashBS = (ByteString)bodyMap.get(new UnsignedInteger(11));
-//        if (scriptDataHashBS != null) {
-//            transactionBody.setScriptDataHash(scriptDataHashBS.getBytes());
-//        }
-//
-//        //collateral
-//        Array collateralArray =  (Array)bodyMap.get(new UnsignedInteger(13));
-//        if (collateralArray != null) {
-//            List<TransactionInput> collateral = new ArrayList<>();
-//            for (DataItem inputItem : collateralArray.getDataItems()) {
-//                TransactionInput ti = TransactionInput.deserialize((Array) inputItem);
-//                collateral.add(ti);
-//            }
-//            transactionBody.setCollateral(collateral);
-//        }
-//
-//        //required_signers
-//        Array requiredSignerArray = (Array)bodyMap.get(new UnsignedInteger(14));
-//        if (requiredSignerArray != null) {
-//            List<byte[]> requiredSigners = new ArrayList<>();
-//            for (DataItem requiredSigDI: requiredSignerArray.getDataItems()) {
-//                ByteString requiredSigBS = (ByteString) requiredSigDI;
-//                requiredSigners.add(requiredSigBS.getBytes());
-//            }
-//            transactionBody.setRequiredSigners(requiredSigners);
-//        }
-//
-//        //network Id
-//        UnsignedInteger networkIdUI = (UnsignedInteger) bodyMap.get(new UnsignedInteger(15));
-//        if (networkIdUI != null) {
-//            int networkIdInt = networkIdUI.getValue().intValue();
-//            if (networkIdInt == 0) {
-//                transactionBody.setNetworkId(NetworkId.TESTNET);
-//            }else if (networkIdInt == 1) {
-//                transactionBody.setNetworkId(NetworkId.MAINNET);
-//            } else {
-//                throw new CborDeserializationException("Invalid networkId value : " + networkIdInt);
-//            }
-//        }
-//
-//        //collateral return
-//        DataItem collateralReturnDI = bodyMap.get(new UnsignedInteger(16));
-//        if (collateralReturnDI != null) {
-//            TransactionOutput collateralReturn = TransactionOutput.deserialize(collateralReturnDI);
-//            transactionBody.setCollateralReturn(collateralReturn);
-//        }
-//
-//        //total collateral
-//        UnsignedInteger totalCollateralUI = (UnsignedInteger) bodyMap.get(new UnsignedInteger(17));
-//        if (totalCollateralUI != null) {
-//            transactionBody.setTotalCollateral(totalCollateralUI.getValue());
-//        }
-//
-//        //reference inputs
-//        Array referenceInputsArray =  (Array)bodyMap.get(new UnsignedInteger(18));
-//        if (referenceInputsArray != null) {
-//            List<TransactionInput> referenceInputs = new ArrayList<>();
-//            for (DataItem inputItem : referenceInputsArray.getDataItems()) {
-//                TransactionInput ti = TransactionInput.deserialize((Array) inputItem);
-//                referenceInputs.add(ti);
-//            }
-//            transactionBody.setReferenceInputs(referenceInputs);
-//        }
+
+        //script_data_hash
+        ByteString scriptDataHashBS = (ByteString)bodyMap.get(new UnsignedInteger(11));
+        if (scriptDataHashBS != null) {
+            transactionBodyBuilder.scriptDataHash(HexUtil.encodeHexString(scriptDataHashBS.getBytes()));
+        }
+
+        //collateral inputs
+        Array collateralArray =  (Array)bodyMap.get(new UnsignedInteger(13));
+        if (collateralArray != null) {
+            Set<TransactionInput> collateral = new HashSet<>();
+            for (DataItem inputItem : collateralArray.getDataItems()) {
+                TransactionInput ti = TransactionInputSerializer.INSTANCE.deserializeDI(inputItem);
+                collateral.add(ti);
+            }
+            transactionBodyBuilder.collateralInputs(collateral);
+        }
+
+        //required_signers
+        Array requiredSignerArray = (Array)bodyMap.get(new UnsignedInteger(14));
+        if (requiredSignerArray != null) {
+            Set<String> requiredSigners = new HashSet<>();
+            for (DataItem requiredSigDI: requiredSignerArray.getDataItems()) {
+                ByteString requiredSigBS = (ByteString) requiredSigDI;
+                requiredSigners.add(HexUtil.encodeHexString(requiredSigBS.getBytes()));
+            }
+            transactionBodyBuilder.requiredSigners(requiredSigners);
+        }
+
+        //network Id
+        UnsignedInteger networkIdUI = (UnsignedInteger) bodyMap.get(new UnsignedInteger(15));
+        if (networkIdUI != null) {
+            int networkIdInt = networkIdUI.getValue().intValue();
+            if (networkIdInt == 0) {
+                transactionBodyBuilder.netowrkId(0);
+            }else if (networkIdInt == 1) {
+                transactionBodyBuilder.netowrkId(1);
+            } else {
+                log.error("Invalid networkId value : " + networkIdInt);
+            }
+        }
+
+        //collateral return
+        DataItem collateralReturnDI = bodyMap.get(new UnsignedInteger(16));
+        if (collateralReturnDI != null) {
+            TransactionOutput collateralReturn = TransactionOutputSerializer.INSTANCE.deserializeDI(collateralReturnDI);
+            transactionBodyBuilder.collateralReturn(collateralReturn);
+        }
+
+        //total collateral
+        UnsignedInteger totalCollateralUI = (UnsignedInteger) bodyMap.get(new UnsignedInteger(17));
+        if (totalCollateralUI != null) {
+            transactionBodyBuilder.totalCollateral(totalCollateralUI.getValue());
+        }
+
+        //reference inputs
+        Array referenceInputsArray =  (Array)bodyMap.get(new UnsignedInteger(18));
+        if (referenceInputsArray != null) {
+            Set<TransactionInput> referenceInputs = new HashSet<>();
+            for (DataItem inputItem : referenceInputsArray.getDataItems()) {
+                TransactionInput ti = TransactionInputSerializer.INSTANCE.deserializeDI(inputItem);
+                referenceInputs.add(ti);
+            }
+            transactionBodyBuilder.referenceInputs(referenceInputs);
+        }
 
         return transactionBodyBuilder.build();
 

@@ -60,7 +60,7 @@ public enum TransactionOutputSerializer implements Serializer<TransactionOutput>
                 datumHash = HexUtil.encodeHexString(((ByteString) datumOptionsList.get(1)).getBytes());
             } else if (new UnsignedInteger(1).equals(datumOptionsList.get(0))) { //datum
                 ByteString inlineDatumBS = (ByteString) datumOptionsList.get(1);
-                //inlineDatum = PlutusData.deserialize(inlineDatumBS.getBytes());
+                //inlineDatum = Datum.deserialize(inlineDatumBS.getBytes());
                 inlineDatum = HexUtil.encodeHexString(inlineDatumBS.getBytes());
             }
         }

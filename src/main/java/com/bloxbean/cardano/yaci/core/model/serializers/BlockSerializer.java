@@ -1,19 +1,16 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.model.Array;
-import co.nstant.in.cbor.model.DataItem;
-import co.nstant.in.cbor.model.Special;
-import co.nstant.in.cbor.model.UnsignedInteger;
+import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
-import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.model.BlockHeader;
-import com.bloxbean.cardano.yaci.core.model.Era;
-import com.bloxbean.cardano.yaci.core.model.TransactionBody;
+import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+
+import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toInt;
 
 public enum BlockSerializer implements Serializer<Block> {
     INSTANCE;
@@ -50,6 +47,24 @@ public enum BlockSerializer implements Serializer<Block> {
             txnBodies.add(txBody);
         }
         blockBuilder.transactionBodies(txnBodies);
+
+        //witnesses
+        List<Witnesses> witnessesSet = new ArrayList<>();
+        Array witnessesListArr = (Array) blockArray.getDataItems().get(2);
+        for (DataItem witnessesDI: witnessesListArr.getDataItems()) {
+            Witnesses witnesses = WintessesSerializer.INSTANCE.deserializeDI(witnessesDI);
+            witnessesSet.add(witnesses);
+        }
+        blockBuilder.transactionWitness(witnessesSet);
+
+        //auxiliary data
+        java.util.Map<Integer, AuxData> auxDataMap = new LinkedHashMap<>();
+        Map auxDataMapDI = (Map) blockArray.getDataItems().get(3);
+        for (DataItem txIdDI: auxDataMapDI.getKeys()) {
+            AuxData auxData = AuxDataSerializer.INSTANCE.deserializeDI(auxDataMapDI.get(txIdDI));
+            auxDataMap.put(toInt(txIdDI), auxData);
+        }
+        blockBuilder.auxiliaryDataMap(auxDataMap);
 
         return blockBuilder.build();
     }
