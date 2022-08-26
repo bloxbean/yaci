@@ -35,6 +35,8 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
         if (vkWitnessesArray != null) { //vkwitnesses
             List<DataItem> vkeyWitnessesDIList = ((Array) vkWitnessesArray).getDataItems();
             for (DataItem vkWitness : vkeyWitnessesDIList) {
+                if (vkWitness == SimpleValue.BREAK)
+                    continue;
                 VkeyWitness vkeyWitness = deserializeVkWitness((Array) vkWitness);
                 vkeyWitnessList.add(vkeyWitness);
             }
@@ -56,6 +58,8 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
         if (bootstrapWitnessArray != null) {
             List<DataItem> bootstrapWitnessDIList = ((Array) bootstrapWitnessArray).getDataItems();
             for (DataItem bootstrapWitnessDI : bootstrapWitnessDIList) {
+                if (bootstrapWitnessDI == SimpleValue.BREAK)
+                    continue;
                 BootstrapWitness bootstrapWitness = deserializeBootstrapWitness((Array) bootstrapWitnessDI);
                 if (bootstrapWitness != null)
                     bootstrapWitnesses.add(bootstrapWitness);
