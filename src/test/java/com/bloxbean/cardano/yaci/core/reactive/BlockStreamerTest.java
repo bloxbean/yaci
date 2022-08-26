@@ -28,7 +28,7 @@ class BlockStreamerTest {
         VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic());
         Point wellKnownPoint = new Point(17625824, "765359c702103513dcb8ff4fe86c1a1522c07535733f31ff23231ccd9a3e0247");
 
-        Flux<Block> flux = BlockStreamer.fromLatest("192.168.0.228", 6000, versionTable, wellKnownPoint);
+        Flux<Block> flux = BlockStreamer.fromLatest("192.168.0.228", 6000, versionTable, wellKnownPoint).stream();
 
         AtomicInteger counter = new AtomicInteger(0);
         Disposable disposable = flux.map(block -> block.getTransactionBodies())
@@ -43,6 +43,7 @@ class BlockStreamerTest {
     void streamLatestFromMainnet() throws InterruptedException {
         Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.MAINNET,
                         Constants.WELL_KNOWN_MAINNET_POINT)
+                .stream()
                 .map(block -> {
                     System.out.println("\n-----------------------------------------------------------");
                     System.out.println(String.format("Block : %d", block.getHeader().getHeaderBody().getBlockNumber()));
@@ -70,6 +71,7 @@ class BlockStreamerTest {
     void streamLatestFromPrePod_fromByron() throws InterruptedException {
         Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.PREPOD,
                         Constants.WELL_KNOWN_PREPOD_POINT)
+                .stream()
                 .map(block -> {
                     System.out.println("\n-----------------------------------------------------------");
                     System.out.println(String.format("Block : %d", block.getHeader().getHeaderBody().getBlockNumber()));
@@ -96,6 +98,7 @@ class BlockStreamerTest {
     @Timeout(value = 40000, unit = TimeUnit.MILLISECONDS)
     void streamFromPointFromMainnet() throws InterruptedException {
         Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.MAINNET, new Point(39916796, "e72579ff89dc9ed325b723a33624b596c08141c7bd573ecfff56a1f7229e4d09"))
+                .stream()
                 .map(block -> {
                     System.out.println("\n-----------------------------------------------------------");
                     System.out.println(String.format("Block : %d", block.getHeader().getHeaderBody().getBlockNumber()));
@@ -124,6 +127,7 @@ class BlockStreamerTest {
         Point to = new Point(43847844, "ff8d558a3d5a0e058beb3d94d26a567f75cd7d09ff5485aa0d0ebc38b61378d4");
 
         Flux<Amount> flux = BlockStreamer.forRange(NetworkType.MAINNET, from, to)
+                .stream()
                 .map(block -> {
                     System.out.println("\n-----------------------------------------------------------");
                     System.out.println(String.format("Block : %d", block.getHeader().getHeaderBody().getBlockNumber()));

@@ -24,8 +24,14 @@ import static com.bloxbean.cardano.yaci.core.common.Constants.*;
 
 @Slf4j
 public class BlockStreamer {
+    private N2NClient n2nClient;
+    private Flux<Block> blockFlux;
 
-    public static Flux<Block> fromLatest(NetworkType networkType) {
+    private BlockStreamer() {
+
+    }
+
+    public static BlockStreamer fromLatest(NetworkType networkType) {
         switch (networkType) {
             case MAINNET:
                 return fromLatest(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT,
@@ -39,7 +45,7 @@ public class BlockStreamer {
         }
     }
 
-    public static Flux<Block> fromPoint(NetworkType networkType, Point point) {
+    public static BlockStreamer fromPoint(NetworkType networkType, Point point) {
         switch (networkType) {
             case MAINNET:
                 return fromPoint(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT, networkType.getN2NVersionTable(), point);
@@ -52,15 +58,28 @@ public class BlockStreamer {
         }
     }
 
-    public static Flux<Block> fromLatest(String host, int port, VersionTable versionTable, Point wellKnownPoint) {
-        return getBlockFluxFromPoint(host, port, versionTable, wellKnownPoint, true);
+    public static BlockStreamer fromLatest(String host, int port, VersionTable versionTable, Point wellKnownPoint) {
+        BlockStreamer blockStreamer = new BlockStreamer();
+        blockStreamer.initBlockFluxFromPoint(host, port, versionTable, wellKnownPoint, true);
+        return blockStreamer;
     }
 
-    public static Flux<Block> fromPoint(String host, int port, VersionTable versionTable, Point point) {
-        return getBlockFluxFromPoint(host, port, versionTable, point, false);
+    public static BlockStreamer fromPoint(String host, int port, VersionTable versionTable, Point point) {
+        BlockStreamer blockStreamer = new BlockStreamer();
+        blockStreamer.initBlockFluxFromPoint(host, port, versionTable, point, false);
+        return blockStreamer;
     }
 
-    private static Flux<Block> getBlockFluxFromPoint(String host, int port, VersionTable versionTable, Point wellKnownPoint, boolean startFromTip) {
+    public void shutdown() {
+        if (n2nClient != null)
+            n2nClient.shutdown();
+    }
+
+    public Flux<Block> stream() {
+        return blockFlux;
+    }
+
+    private void initBlockFluxFromPoint(String host, int port, VersionTable versionTable, Point wellKnownPoint, boolean startFromTip) {
         final AtomicBoolean tipFound = new AtomicBoolean(false);
 
         ChainsyncAgent chainSyncAgent = new ChainsyncAgent(new Point[]{wellKnownPoint});
@@ -75,12 +94,12 @@ public class BlockStreamer {
             }
         });
 
-        N2NClient n2CClient = new N2NClient(host, port, handshakeAgent,
+        n2nClient = new N2NClient(host, port, handshakeAgent,
                 chainSyncAgent, blockFetch);
 
-        Flux<Block> stream = Flux.create(sink -> {
+        blockFlux = Flux.create(sink -> {
             sink.onDispose(() -> {
-                n2CClient.shutdown();
+
             });
 
             blockFetch.addListener(
@@ -103,10 +122,10 @@ public class BlockStreamer {
 
         });
 
-        stream = stream.doOnSubscribe(subscription -> {
-            if (!n2CClient.isRunning()) {
+        blockFlux = blockFlux.doOnSubscribe(subscription -> {
+            if (!n2nClient.isRunning()) {
                 log.debug("Subscription started");
-                n2CClient.start();
+                n2nClient.start();
             }
         });
 
@@ -120,6 +139,8 @@ public class BlockStreamer {
                         tipFound.set(true);
                     }
                 }
+                //Now move to the point
+                chainSyncAgent.sendNextMessage();
             }
 
             @Override
@@ -144,18 +165,18 @@ public class BlockStreamer {
             public void rollbackward(Tip tip, Point toPoint) {
                 if (log.isDebugEnabled())
                     log.debug("Rolling backward {}", toPoint);
+
+                //Rolled back. Find the next message
+                chainSyncAgent.sendNextMessage();
             }
 
             @Override
             public void onStateUpdate(State oldState, State newState) {
-                chainSyncAgent.sendNextMessage();
             }
         });
-
-        return stream;
     }
 
-    public static Flux<Block> forRange(NetworkType networkType, Point fromPoint, Point toPoint) {
+    public static BlockStreamer forRange(NetworkType networkType, Point fromPoint, Point toPoint) {
         switch (networkType) {
             case MAINNET:
                 return forRange(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT,
@@ -169,7 +190,13 @@ public class BlockStreamer {
         }
     }
 
-    public static Flux<Block> forRange(String host, int port, VersionTable versionTable, Point fromPoint, Point toPoint) {
+    public static BlockStreamer forRange(String host, int port, VersionTable versionTable, Point fromPoint, Point toPoint) {
+        BlockStreamer blockStreamer = new BlockStreamer();
+        blockStreamer.initBlockFluxForRange(host, port, versionTable, fromPoint, toPoint);
+        return blockStreamer;
+    }
+
+    private void initBlockFluxForRange(String host, int port, VersionTable versionTable, Point fromPoint, Point toPoint) {
         BlockfetchAgent blockFetch = new BlockfetchAgent();
         blockFetch.resetPoints(fromPoint, toPoint);
         HandshakeAgent handshakeAgent = new HandshakeAgent(versionTable);
@@ -186,7 +213,7 @@ public class BlockStreamer {
                 blockFetch);
 
         AtomicInteger subscriberCount = new AtomicInteger(0);
-        Flux<Block> stream = Flux.create(sink -> {
+        blockFlux = Flux.create(sink -> {
             sink.onDispose(() -> {
                 int count = subscriberCount.decrementAndGet();
                 if (count == 0)
@@ -207,21 +234,18 @@ public class BlockStreamer {
                         public void batchDone() {
                             if (log.isTraceEnabled())
                                 log.trace("batchDone");
-//                            n2CClient.shutdown();
                             sink.complete();
                         }
                     });
 
         });
 
-        stream = stream.doOnSubscribe(subscription -> {
+        blockFlux = blockFlux.doOnSubscribe(subscription -> {
             subscriberCount.incrementAndGet();
             if (!n2CClient.isRunning()) {
                 log.debug("Subscription started");
                 n2CClient.start();
             }
         });
-
-        return stream;
     }
 }
