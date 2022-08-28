@@ -1,7 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model;
 
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.*;
 
 import java.math.BigInteger;
@@ -26,7 +25,6 @@ public class TransactionBody {
     private long ttl;
 
     @Builder.Default
-    @JsonIgnore
     private List<Certificate> certificates = new ArrayList<>();
     private Map<String, BigInteger> withdrawals;
     private Update update;

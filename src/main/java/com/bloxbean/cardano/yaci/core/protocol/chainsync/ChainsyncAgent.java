@@ -84,7 +84,7 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
             onRollForward(rollForward);
         } else if (message instanceof Rollbackward) {
             if (log.isDebugEnabled())
-                log.debug("RollBackward - ", message);
+                log.debug("RollBackward - {}", message);
             Rollbackward rollBackward = (Rollbackward) message;
             onRollBackward(rollBackward);
         }
@@ -108,8 +108,14 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     private void onRollBackward(Rollbackward rollBackward) {
-        if (rollBackward.getPoint().equals(currentPoint)) //Rollback on same point. So don't rollback
+        if (rollBackward.getPoint().equals(currentPoint)) {//Rollback on same point. So don't rollback. But call listeners
+            getAgentListeners().stream().forEach(
+                    chainSyncAgentListener -> {
+                        chainSyncAgentListener.rollbackward(rollBackward.getTip(), rollBackward.getPoint());
+                    }
+            );
             return;
+        }
 
         if (currentPoint != null) { //so not first time
             this.intersact = null;
