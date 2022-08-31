@@ -91,7 +91,7 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
         List<DataItem> relayItems = ((Array) relayDI).getDataItems();
         int type = toInt(relayItems.get(0));
 
-        int port = 0;
+        Integer port = 0;
         String ipv4 = null;
         String ipv6 = null;
         String dns = null;
@@ -124,15 +124,12 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
             }
         } else if (type == 1) {
             DataItem itemDI = relayItems.get(1);
-            port = itemDI != SimpleValue.NULL ? toInt(itemDI) : null;
+            port = itemDI != SimpleValue.NULL? toInt(itemDI) : null;
 
             itemDI = relayItems.get(2);
             dns = itemDI != SimpleValue.NULL ? toUnicodeString(itemDI): null;
         } else if (type == 2) {
             DataItem itemDI = relayItems.get(1);
-            port = itemDI != SimpleValue.NULL ? toInt(itemDI) : null;
-
-            itemDI = relayItems.get(2);
             dns = itemDI != SimpleValue.NULL ? toUnicodeString(itemDI): null;
         }
 

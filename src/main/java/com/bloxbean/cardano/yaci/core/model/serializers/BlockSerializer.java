@@ -7,6 +7,7 @@ import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 
@@ -69,6 +70,23 @@ public enum BlockSerializer implements Serializer<Block> {
             auxDataMap.put(toInt(txIdDI), auxData);
         }
         blockBuilder.auxiliaryDataMap(auxDataMap);
+
+        if (blockArray.getDataItems().size() > 4) {
+            //Invalid transactions
+            java.util.List<Integer> invalidTransactions = null;
+            List<DataItem> invalidTxnDIList = ((Array) blockArray.getDataItems().get(4)).getDataItems();
+            if (invalidTxnDIList.size() > 0)
+                invalidTransactions = new ArrayList<>();
+            else
+                invalidTransactions = Collections.EMPTY_LIST;
+
+            for (DataItem txIndexDI : invalidTxnDIList) {
+                if (txIndexDI == SimpleValue.BREAK)
+                    continue;
+                invalidTransactions.add(toInt(txIndexDI));
+            }
+            blockBuilder.invalidTransactions(invalidTransactions);
+        }
 
         return blockBuilder.build();
     }

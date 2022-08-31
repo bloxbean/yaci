@@ -47,6 +47,8 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
         if (nativeScriptArray != null) { //nativeScriptArray
             List<DataItem> nativeScriptsDIList = ((Array) nativeScriptArray).getDataItems();
             for (DataItem nativeScriptDI : nativeScriptsDIList) {
+                if (nativeScriptDI == Special.BREAK)
+                    continue;
                 NativeScript nativeScript = deserializeNativeScript((Array) nativeScriptDI);
                 if (nativeScript != null)
                     nativeScripts.add(nativeScript);
@@ -73,6 +75,8 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
 
             try {
                 for (DataItem plutusV1ScriptDI : plutusV1ScriptDIList) {
+                    if (plutusV1ScriptDI == Special.BREAK)
+                        continue;
                     PlutusV1Script plutusV1Script = PlutusV1Script.deserialize((ByteString) plutusV1ScriptDI);
 
                     if (plutusV1Script != null) {
@@ -91,6 +95,8 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
             List<DataItem> plutusDataDIList = ((Array) plutusDataArray).getDataItems();
 
             for (DataItem plutusDataDI : plutusDataDIList) {
+                if (plutusDataDI == Special.BREAK)
+                    continue;
                 Datum datum = new Datum(HexUtil.encodeHexString(CborSerializationUtil.serialize(plutusDataDI, false)), ""); //TODO -- convert to json later'
                 datumList.add(datum);
 //                plutusDataList.add(PlutusData.deserialize(plutusDataDI));
@@ -102,6 +108,7 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
         if (redeemerArray != null) {
             List<DataItem> redeemerDIList = ((Array) redeemerArray).getDataItems();
             for (DataItem redeemerDI : redeemerDIList) {
+                if (redeemerDI == Special.BREAK) continue;
                 Redeemer redeemer = new Redeemer(HexUtil.encodeHexString(CborSerializationUtil.serialize(redeemerDI, false)));
                 redeemerList.add(redeemer);
                // redeemers.add(Redeemer.deserialize((Array) redeemerDI)); //TODO -- convert redeemer to json
@@ -114,6 +121,7 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
             List<DataItem> plutusV2ScriptDIList = ((Array) plutusV2ScriptArray).getDataItems();
             try {
                 for (DataItem plutusV2ScriptDI : plutusV2ScriptDIList) {
+                    if (plutusV2ScriptDI == Special.BREAK) continue;
                     PlutusV2Script plutusV2Script = PlutusV2Script.deserialize((ByteString) plutusV2ScriptDI);
 
                     if (plutusV2Script != null) {
@@ -161,7 +169,7 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
         return new VkeyWitness(key, signature);
     }
 
-    private NativeScript deserializeNativeScript(Array nativeScriptArray) {
+    public NativeScript deserializeNativeScript(Array nativeScriptArray) {
         List<DataItem> dataItemList = nativeScriptArray.getDataItems();
         if (dataItemList == null || dataItemList.size() == 0) {
             throw new CborRuntimeException("NativeScript deserialization failed. Invalid no of DataItem");
