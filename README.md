@@ -77,7 +77,7 @@ Connect to a Cardano node and stream blocks from Point1 to Point2.
   });
 ```
 
-## Using non-reactive apis (Callbacks)
+## Using Fetchers (Callbacks)
 
 If you want to receive all possible events, you can use out of box fetchers which provide data through callbacks/listeners.
 
