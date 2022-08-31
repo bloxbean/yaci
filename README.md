@@ -111,7 +111,7 @@ To receive blocks for a range
 
 ```
 
-### 2. ChainSyncFetchFromLatest
+### 2. ChainSyncFetcherFromLatest
 
 Stream blocks from latest block
 
