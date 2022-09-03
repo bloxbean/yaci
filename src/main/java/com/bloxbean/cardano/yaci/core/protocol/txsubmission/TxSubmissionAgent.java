@@ -11,12 +11,12 @@ import java.util.List;
 import java.util.Map;
 
 @Slf4j
-public class TxSubmisionAgent extends Agent {
+public class TxSubmissionAgent extends Agent {
     private final Map<String, byte[]> txs;
     private final List<String> reqTxIds;
     private final List<String> reqNonBlockingTxIds;
 
-    public TxSubmisionAgent() {
+    public TxSubmissionAgent() {
         this.currenState = TxSubmissionState.Init;
         txs = new HashMap<>();
         reqTxIds = new ArrayList<>();

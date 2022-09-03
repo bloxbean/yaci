@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.handshake.util;
 
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.N2CVersionData;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionData;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 
@@ -21,7 +22,7 @@ public class N2CVersionTableConstant {
     public final static long PROTOCOL_V12 = 32780;
 
     public static VersionTable v4AndAbove(long networkMagic) {
-        VersionData versionData = new VersionData(networkMagic, false);
+        N2CVersionData versionData = new N2CVersionData(networkMagic);
 
         Map<Long, VersionData> versionTableMap = new HashMap<>();
         versionTableMap.put(PROTOCOL_V4, versionData);
@@ -36,7 +37,7 @@ public class N2CVersionTableConstant {
     }
 
     public static VersionTable v6AndAbove(long networkMagic) {
-        VersionData versionData = new VersionData(networkMagic, false);
+        N2CVersionData versionData = new N2CVersionData(networkMagic);
 
         Map<Long, VersionData> versionTableMap = new HashMap<>();
         versionTableMap.put(PROTOCOL_V6, versionData);
@@ -49,13 +50,33 @@ public class N2CVersionTableConstant {
     }
 
     public static VersionTable v7AndAbove(long networkMagic) {
-        VersionData versionData = new VersionData(networkMagic, false);
+        N2CVersionData versionData = new N2CVersionData(networkMagic);
 
         Map<Long, VersionData> versionTableMap = new HashMap<>();
         versionTableMap.put(PROTOCOL_V7, versionData);
         versionTableMap.put(PROTOCOL_V8, versionData);
         versionTableMap.put(PROTOCOL_V9, versionData);
         versionTableMap.put(PROTOCOL_V10, versionData);
+
+        return new VersionTable(versionTableMap);
+    }
+
+    public static VersionTable v1AndAbove(long networkMagic) {
+        N2CVersionData versionData = new N2CVersionData(networkMagic);
+
+        Map<Long, VersionData> versionTableMap = new HashMap<>();
+        versionTableMap.put(PROTOCOL_V1, versionData);
+        versionTableMap.put(PROTOCOL_V2, versionData);
+        versionTableMap.put(PROTOCOL_V3, versionData);
+        versionTableMap.put(PROTOCOL_V4, versionData);
+        versionTableMap.put(PROTOCOL_V5, versionData);
+        versionTableMap.put(PROTOCOL_V6, versionData);
+        versionTableMap.put(PROTOCOL_V7, versionData);
+        versionTableMap.put(PROTOCOL_V8, versionData);
+        versionTableMap.put(PROTOCOL_V9, versionData);
+        versionTableMap.put(PROTOCOL_V10, versionData);
+        versionTableMap.put(PROTOCOL_V11, versionData);
+        versionTableMap.put(PROTOCOL_V12, versionData);
 
         return new VersionTable(versionTableMap);
     }

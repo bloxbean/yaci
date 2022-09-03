@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.handshake.util;
 
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.N2NVersionData;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionData;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 
@@ -16,7 +17,7 @@ public class N2NVersionTableConstant {
     public final static long PROTOCOL_V10 = 10;
 
     public static VersionTable v4AndAbove(long networkMagic) {
-        VersionData versionData = new VersionData(networkMagic, false);
+        N2NVersionData versionData = new N2NVersionData(networkMagic, false);
 
         Map<Long, VersionData> versionTableMap = new HashMap<>();
         versionTableMap.put(PROTOCOL_V4, versionData);
@@ -31,7 +32,7 @@ public class N2NVersionTableConstant {
     }
 
     public static VersionTable v6AndAbove(long networkMagic) {
-        VersionData versionData = new VersionData(networkMagic, false);
+        N2NVersionData versionData = new N2NVersionData(networkMagic, false);
 
         Map<Long, VersionData> versionTableMap = new HashMap<>();
         versionTableMap.put(PROTOCOL_V6, versionData);
@@ -44,7 +45,7 @@ public class N2NVersionTableConstant {
     }
 
     public static VersionTable v7AndAbove(long networkMagic) {
-        VersionData versionData = new VersionData(networkMagic, false);
+        N2NVersionData versionData = new N2NVersionData(networkMagic, false);
 
         Map<Long, VersionData> versionTableMap = new HashMap<>();
         versionTableMap.put(PROTOCOL_V7, versionData);

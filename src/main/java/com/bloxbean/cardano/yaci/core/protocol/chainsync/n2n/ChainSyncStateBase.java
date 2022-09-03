@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.core.protocol.chainsync;
+package com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n;
 
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.UnsignedInteger;

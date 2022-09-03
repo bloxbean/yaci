@@ -7,7 +7,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
-import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmisionAgent;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionAgent;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.function.Consumer;
@@ -18,7 +18,7 @@ public class TxSubmissionClient implements Fetcher {
     private int port;
     private VersionTable versionTable;
     private HandshakeAgent handshakeAgent;
-    private TxSubmisionAgent txSubmisionAgent;
+    private TxSubmissionAgent txSubmissionAgent;
     private N2NClient n2nClient;
 
     public TxSubmissionClient(String host, int port, VersionTable versionTable) {
@@ -30,13 +30,13 @@ public class TxSubmissionClient implements Fetcher {
 
     private void init() {
         handshakeAgent = new HandshakeAgent(versionTable);
-        txSubmisionAgent = new TxSubmisionAgent();
-        n2nClient = new N2NClient(host, port, handshakeAgent, txSubmisionAgent);
+        txSubmissionAgent = new TxSubmissionAgent();
+        n2nClient = new N2NClient(host, port, handshakeAgent, txSubmissionAgent);
 
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
-                txSubmisionAgent.sendNextMessage();
+                txSubmissionAgent.sendNextMessage();
             }
         });
     }
@@ -44,7 +44,7 @@ public class TxSubmissionClient implements Fetcher {
     @Override
     public void start(Consumer consumer) {
         n2nClient.start();
-        txSubmisionAgent.sendNextMessage();
+        txSubmissionAgent.sendNextMessage();
     }
 
     @Override

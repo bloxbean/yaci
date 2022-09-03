@@ -4,7 +4,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 
 public enum NetworkType {
-    MAINNET(764824073), LEGACY_TESTNET(1097911063), PREPOD(1);//, PREV_TESTNET(2);
+    MAINNET(764824073), LEGACY_TESTNET(1097911063), PREPOD(1), PREV_TESTNET(2);
 
     long protocolMagic;
     NetworkType(long protocolMagic) {

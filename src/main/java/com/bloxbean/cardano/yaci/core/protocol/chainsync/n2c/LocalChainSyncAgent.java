@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.core.protocol.chainsync;
+package com.bloxbean.cardano.yaci.core.protocol.chainsync.n2c;
 
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
@@ -6,11 +6,11 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.*;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshkeState;
 import lombok.extern.slf4j.Slf4j;
 
-import static com.bloxbean.cardano.yaci.core.protocol.chainsync.ChainSyncState.Done;
-import static com.bloxbean.cardano.yaci.core.protocol.chainsync.ChainSyncState.Idle;
+import static com.bloxbean.cardano.yaci.core.protocol.chainsync.n2c.LocalChainSyncState.Done;
+import static com.bloxbean.cardano.yaci.core.protocol.chainsync.n2c.LocalChainSyncState.Idle;
 
 @Slf4j
-public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
+public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     private Point intersact;
     private Tip tip;
     private Point[] knownPoints;
@@ -20,9 +20,7 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     private int agentNo;
     private int counter = 0;
 
-    private long startTime;
-
-    public ChainsyncAgent(Point[] knownPoints) {
+    public LocalChainSyncAgent(Point[] knownPoints) {
         this.currenState = Idle;
         this.knownPoints = knownPoints;
 
@@ -30,7 +28,7 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
             log.info("Trying to find the point " + knownPoints[0]);
     }
 
-    public ChainsyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo) {
+    public LocalChainSyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo) {
         this.currenState = Idle;
         this.knownPoints = knownPoints;
         this.stopAt = stopSlotNo;
@@ -41,7 +39,7 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
 
     @Override
     public int getProtocolId() {
-        return 2;
+        return 5;
     }
 
     @Override
@@ -77,10 +75,12 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
             if (log.isDebugEnabled())
                 log.debug("IntersectNotFound - {}", message);
             onIntersactNotFound((IntersectNotFound)message);
-        } else if (message instanceof RollForward) {
-            if (log.isDebugEnabled())
-                log.debug("RollForward - {}", message);
-            RollForward rollForward = (RollForward) message;
+        } else if (message instanceof LocalRollForward) {
+            if (log.isDebugEnabled()) {
+                log.debug("LocalRollForward !!!");
+                log.trace("LocalRollForward - {}", message);
+            }
+            LocalRollForward rollForward = (LocalRollForward) message;
             onRollForward(rollForward);
         } else if (message instanceof Rollbackward) {
             if (log.isDebugEnabled())
@@ -139,9 +139,12 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
         );
     }
 
-    private void onRollForward(RollForward rollForward) {
-        if (rollForward.getBlockHeader() != null) //For Byron era, this value is null. Will be fixed later
-            this.currentPoint = new Point(rollForward.getBlockHeader().getHeaderBody().getSlot(), rollForward.getBlockHeader().getHeaderBody().getBlockHash());
+    private void onRollForward(LocalRollForward rollForward) {
+        if (rollForward.getBlock() != null) //For Byron era, this value is null. Will be fixed later
+            this.currentPoint = new Point(rollForward.getBlock().getHeader().getHeaderBody().getSlot(), rollForward.getBlock().getHeader().getHeaderBody().getBlockHash());
+        else if (rollForward.getByronBlock() != null) {
+            //TODO - handle currentPoint value for ByronBlock
+        }
 
         if (counter++ % 100 == 0 || (tip.getPoint().getSlot() - currentPoint.getSlot()) < 10) {
 
@@ -152,22 +155,21 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
                 log.debug("**********************************************************");
             }
 
-            if (stopAt != 0 && rollForward.getBlockHeader().getHeaderBody().getSlot() >= stopAt) {
+            if (stopAt != 0 && rollForward.getBlock().getHeader().getHeaderBody().getSlot() >= stopAt) {
                 this.currenState = HandshkeState.Done;
             }
         }
-
-        if(rollForward.getByronBlockHead() != null) { //For Byron
-            log.warn("Byron Block: " + rollForward.getByronBlockHead().getConsensusData().getSlotId());
+        if(rollForward.getByronBlock() != null) { //For Byron
+            log.warn("Byron Block: " + rollForward.getByronBlock().getHeader().getConsensusData().getSlotId());
             getAgentListeners().stream().forEach(
                     chainSyncAgentListener -> {
-                        chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronBlockHead());
+                        chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronBlock().getHeader());
                     }
             );
-        } else { //For Shelley and later eras
+        } else { //For Shelley and later eras**/
             getAgentListeners().stream().forEach(
                     chainSyncAgentListener -> {
-                        chainSyncAgentListener.rollforward(rollForward.getTip(), rollForward.getBlockHeader());
+                        chainSyncAgentListener.rollforward(rollForward.getTip(), rollForward.getBlock());
                     }
             );
         }

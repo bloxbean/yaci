@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.core.common;
 
-import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 
 public class Constants {
@@ -8,8 +7,10 @@ public class Constants {
     public final static Point WELL_KNOWN_TESTNET_POINT = new Point(13694363, "b596f9739b647ab5af901c8fc6f75791e262b0aeba81994a1d622543459734f2");
     public final static Point WELL_KNOWN_PREPOD_POINT = new Point(4325, "f3d7cd6f93cb4c59b61b28ac974f4a4dccfc44a4c83c1998aad17bb6b7b03446");
 
-    public final static long MAINNET_PROTOCOL_MAGIC = Networks.mainnet().getProtocolMagic();
-    public final static long TESTNET_PROTOCOL_MAGIC = Networks.testnet().getProtocolMagic();
+    public final static long MAINNET_PROTOCOL_MAGIC = NetworkType.MAINNET.getProtocolMagic();
+    public final static long LEGACY_TESTNET_PROTOCOL_MAGIC = NetworkType.LEGACY_TESTNET.getProtocolMagic();
+    public final static long PREPOD_PROTOCOL_MAGIC = NetworkType.PREPOD.getProtocolMagic();
+    public final static long PREVIEW_PROTOCOL_MAGIC = NetworkType.PREV_TESTNET.getProtocolMagic();
 
     public final static String TESTNET_IOHK_RELAY_ADDR = "relays-new.cardano-testnet.iohkdev.io";
     public final static int TESTNET_IOHK_RELAY_PORT = 3001;

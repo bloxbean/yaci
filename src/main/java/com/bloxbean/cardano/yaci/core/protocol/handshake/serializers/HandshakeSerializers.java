@@ -39,10 +39,15 @@ public class HandshakeSerializers {
             Map<Long, VersionData> versionDataMap = versionTable.getVersionDataMap();
             versionDataMap.entrySet()
                     .forEach(entry -> {
-                        Array versionDataArray = new Array();
-                        versionDataArray.add(new UnsignedInteger(entry.getValue().getNetworkMagic()));
-                        versionDataArray.add(entry.getValue().isInitiatorAndResponderDiffusionMode()? SimpleValue.TRUE: SimpleValue.FALSE);
-                        cborMap.put(new UnsignedInteger(entry.getKey()), versionDataArray);
+                        if (entry.getValue() instanceof N2NVersionData) {
+                            N2NVersionData versionData = (N2NVersionData) entry.getValue();
+                            Array versionDataArray = new Array();
+                            versionDataArray.add(new UnsignedInteger(versionData.getNetworkMagic()));
+                            versionDataArray.add(versionData.isInitiatorAndResponderDiffusionMode() ? SimpleValue.TRUE : SimpleValue.FALSE);
+                            cborMap.put(new UnsignedInteger(entry.getKey()), versionDataArray);
+                        } else if (entry.getValue() instanceof N2CVersionData) {
+                            cborMap.put(new UnsignedInteger(entry.getKey()), new UnsignedInteger(entry.getValue().getNetworkMagic()));
+                        }
                     });
 
             return cborMap;
@@ -56,19 +61,27 @@ public class HandshakeSerializers {
         public AcceptVersion deserializeDI(DataItem di) {
             Array array = (Array) di;
             List<DataItem> dataItems = array.getDataItems();
-            int label = ((UnsignedInteger)dataItems.get(0)).getValue().intValue();
+            int label = ((UnsignedInteger) dataItems.get(0)).getValue().intValue();
 
             if (label != 1)
                 throw new CborRuntimeException("Invalid label : " + di);
 
-            long versionNumber = ((UnsignedInteger)dataItems.get(1)).getValue().intValue();
+            long versionNumber = ((UnsignedInteger) dataItems.get(1)).getValue().intValue();
 
-            Array versionDataArr = (Array) dataItems.get(2);
-            long networkMagic = ((UnsignedInteger)versionDataArr.getDataItems().get(0)).getValue().intValue();
-            DataItem initiatorAndResponderDiffusionModeDI = versionDataArr.getDataItems().get(1);
-            boolean iardm = initiatorAndResponderDiffusionModeDI == SimpleValue.TRUE? true : false;
+            DataItem versionDataDI = dataItems.get(2);
+            if (versionDataDI.getMajorType() == MajorType.ARRAY) { //N2N
+                Array versionDataArr = (Array) dataItems.get(2);
+                long networkMagic = ((UnsignedInteger) versionDataArr.getDataItems().get(0)).getValue().intValue();
+                DataItem initiatorAndResponderDiffusionModeDI = versionDataArr.getDataItems().get(1);
+                boolean iardm = initiatorAndResponderDiffusionModeDI == SimpleValue.TRUE ? true : false;
 
-            return new AcceptVersion(versionNumber, new VersionData(networkMagic, iardm));
+                return new AcceptVersion(versionNumber, new N2NVersionData(networkMagic, iardm));
+            } else if (versionDataDI.getMajorType() == MajorType.UNSIGNED_INTEGER) { //N2C
+                UnsignedInteger networkMagic = (UnsignedInteger) dataItems.get(2); //versiondata == networkmagic
+
+                return new AcceptVersion(versionNumber, new N2CVersionData(networkMagic.getValue().longValue()));
+            } else
+                throw new CborRuntimeException("Parsing error. Invalid dataitem type : " + versionDataDI);
         }
     }
 
@@ -79,7 +92,7 @@ public class HandshakeSerializers {
         public ReasonVersionMismatch deserializeDI(DataItem di) {
             Array array = (Array) di;
             List<DataItem> dataItems = array.getDataItems();
-            int label = ((UnsignedInteger)dataItems.get(0)).getValue().intValue();
+            int label = ((UnsignedInteger) dataItems.get(0)).getValue().intValue();
 
             if (label != 0)
                 return null;
@@ -87,8 +100,8 @@ public class HandshakeSerializers {
             Array versionNoArr = (Array) dataItems.get(1);
             List<Long> versionNumbers = new ArrayList<>();
 
-            for (DataItem vnoDI: versionNoArr.getDataItems()) {
-                versionNumbers.add(((UnsignedInteger)vnoDI).getValue().longValue());
+            for (DataItem vnoDI : versionNoArr.getDataItems()) {
+                versionNumbers.add(((UnsignedInteger) vnoDI).getValue().longValue());
             }
 
             return new ReasonVersionMismatch(versionNumbers);
@@ -104,13 +117,13 @@ public class HandshakeSerializers {
         public ReasonHandshakeDecodeError deserializeDI(DataItem di) {
             Array array = (Array) di;
             List<DataItem> dataItems = array.getDataItems();
-            int label = ((UnsignedInteger)dataItems.get(0)).getValue().intValue();
+            int label = ((UnsignedInteger) dataItems.get(0)).getValue().intValue();
 
             if (label != 1)
                 return null;
 
-            long versionNumber = ((UnsignedInteger)dataItems.get(1)).getValue().longValue();
-            String str = ((UnicodeString)dataItems.get(2)).getString();
+            long versionNumber = ((UnsignedInteger) dataItems.get(1)).getValue().longValue();
+            String str = ((UnicodeString) dataItems.get(2)).getString();
 
             return new ReasonHandshakeDecodeError(versionNumber, str);
         }
@@ -125,13 +138,13 @@ public class HandshakeSerializers {
         public ReasonRefused deserializeDI(DataItem di) {
             Array array = (Array) di;
             List<DataItem> dataItems = array.getDataItems();
-            int label = ((UnsignedInteger)dataItems.get(0)).getValue().intValue();
+            int label = ((UnsignedInteger) dataItems.get(0)).getValue().intValue();
 
             if (label != 2)
                 return null;
 
-            long versionNumber = ((UnsignedInteger)dataItems.get(1)).getValue().longValue();
-            String str = ((UnicodeString)dataItems.get(2)).getString();
+            long versionNumber = ((UnsignedInteger) dataItems.get(1)).getValue().longValue();
+            String str = ((UnicodeString) dataItems.get(2)).getString();
 
             return new ReasonRefused(versionNumber, str);
         }
