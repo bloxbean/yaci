@@ -30,17 +30,17 @@ Gradle
 | `n2n Chain-Sync`         | Done        | 
 | `n2n TxSubmission`       | In Progress | 
 | `n2n Keep-Alive`         | Not started | 
-| `n2c Handshake`          | Not started | 
-| `n2c Chain-Sync`         | Not started | 
+| `n2c Handshake`          | Done        | 
+| `n2c Chain-Sync`         | Done        | 
 | `n2c Local TxSubmission` | Done        | 
 | `n2c Local State Query`  | Not started |
 
 
-| Other tasks              | Status                                                        |
-|--------------------------|---------------------------------------------------------------|
-| `Block Parsing`          | Tx Inputs, Tx Outputs, MultiAssets, Mint, Certificate         |
-| `Eras`                   | Done (Shelley, Alonzo, Babbage),   Not Done(Byron Era) |   
-|                          |                                                               |
+| Other tasks              | Status                                                   |
+|--------------------------|----------------------------------------------------------|
+| `Block Parsing`          | Tx Inputs, Tx Outputs, MultiAssets, Mint, Certificate    |
+| `Eras`                   | Done (Shelley, Alonzo, Babbage),   Not Done(Byron Era)   |   
+|                          |                                                          |
  
 
 # How to Use 
