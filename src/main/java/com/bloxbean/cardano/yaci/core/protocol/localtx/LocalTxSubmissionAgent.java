@@ -6,20 +6,21 @@ import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgAcceptTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgDone;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgRejectTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgSubmitTx;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
+import com.bloxbean.cardano.yaci.core.protocol.localtx.model.TxSubmissionRequest;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.PriorityQueue;
 import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 @Slf4j
-public class LocalTxSubmissionAgent extends Agent {
+public class LocalTxSubmissionAgent extends Agent<LocalTxSubmissionListener> {
     private boolean shutDown;
-    private Queue<Txn> txnQueue;
+    private Queue<TxSubmissionRequest> txnQueue;
+    private Queue<TxSubmissionRequest> pendingQueue;
 
     public LocalTxSubmissionAgent() {
-        txnQueue = new PriorityQueue<>();
+        txnQueue = new ConcurrentLinkedQueue<>();
+        pendingQueue = new ConcurrentLinkedQueue<>();
         this.currenState = LocalTxSubmissionState.Idle;
     }
 
@@ -34,7 +35,7 @@ public class LocalTxSubmissionAgent extends Agent {
     }
 
     @Override
-    protected Message buildNextMessage() {
+    protected synchronized Message buildNextMessage() {
         if (shutDown)
             return new MsgDone();
 
@@ -43,8 +44,9 @@ public class LocalTxSubmissionAgent extends Agent {
                 if (txnQueue.peek() != null) {
                     if (log.isDebugEnabled())
                         log.debug("Found txn in txn queue : {}", txnQueue.peek());
-                    Txn txn = txnQueue.poll();
-                    return new MsgSubmitTx(txn.txnBytes);
+                    TxSubmissionRequest txSubmissionRequest = txnQueue.poll();
+                    pendingQueue.add(txSubmissionRequest);
+                    return new MsgSubmitTx(txSubmissionRequest.getTxBodyType(), txSubmissionRequest.getTxnBytes());
                 } else if (shutDown) {
                     if (log.isDebugEnabled())
                         log.debug("MsgDone");
@@ -60,36 +62,56 @@ public class LocalTxSubmissionAgent extends Agent {
     }
 
     @Override
-    protected void processResponse(Message message) {
+    protected synchronized void processResponse(Message message) {
         if (message == null) {
             if (log.isDebugEnabled())
                 log.debug("Message is null");
         }
 
+        TxSubmissionRequest txSubmissionRequest = null;
+        if (!pendingQueue.isEmpty())
+            txSubmissionRequest = pendingQueue.poll();
+
         if (message instanceof MsgAcceptTx) {
             if (log.isDebugEnabled())
                 log.debug("MsgAccept : {}", message);
+            onTxAccepted(txSubmissionRequest, (MsgAcceptTx) message);
         } else if (message instanceof MsgRejectTx) {
             if (log.isDebugEnabled())
                 log.debug("MsgRject : {}", message);
+            onTxRejected(txSubmissionRequest, (MsgRejectTx) message);
         } else {
             if (log.isDebugEnabled())
                 log.debug("Unknown messaget type : {}", message);
         }
     }
 
-    public void submitTx(Txn txn) {
-        txnQueue.add(txn);
+    private void onTxRejected(TxSubmissionRequest txSubmissionRequest, MsgRejectTx message) {
+        getAgentListeners().stream().forEach(
+                listener -> listener.txRejected(txSubmissionRequest, message)
+        );
+    }
+
+    private void onTxAccepted(TxSubmissionRequest txSubmissionRequest, MsgAcceptTx message) {
+        getAgentListeners().stream().forEach(
+                listener -> listener.txAccepted(txSubmissionRequest, message)
+        );
+    }
+
+    public void submitTx(TxSubmissionRequest txnRequest) {
+        txnQueue.add(txnRequest);
+    }
+
+    @Override
+    public synchronized void reset() {
+        this.currenState = LocalTxSubmissionState.Idle;
+        this.txnQueue.clear();
+        this.pendingQueue.clear();
     }
 
     public void shutdown() {
         this.shutDown = true;
     }
 
-    @AllArgsConstructor
-    @Getter
-    public static class  Txn {
-        private String txnHash;
-        private byte[] txnBytes;
-    }
+
 }

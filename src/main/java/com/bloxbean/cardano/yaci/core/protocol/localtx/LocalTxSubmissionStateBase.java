@@ -5,7 +5,7 @@ import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.State;
-import com.bloxbean.cardano.yaci.core.protocol.txsubmission.serializers.TxSubmissionMessagesSerializers;
+import com.bloxbean.cardano.yaci.core.protocol.localtx.serializers.LocalTxSubmissionSerializers;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import org.slf4j.Logger;
@@ -22,13 +22,13 @@ public interface LocalTxSubmissionStateBase extends State {
             int id = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
             switch (id) {
                 case 0:
-                    return TxSubmissionMessagesSerializers.InitSerializer.INSTANCE.deserialize(bytes);
+                    return LocalTxSubmissionSerializers.MsgSubmitTxSerializer.INSTANCE.deserialize(bytes);
                 case 1:
-                    return TxSubmissionMessagesSerializers.RequestTxIdsSerializer.INSTANCE.deserialize(bytes);
+                    return LocalTxSubmissionSerializers.MsgAcceptTxSerializer.INSTANCE.deserialize(bytes);
                 case 2:
-                    return TxSubmissionMessagesSerializers.ReplyTxIdsSerializer.INSTANCE.deserialize(bytes);
+                    return LocalTxSubmissionSerializers.MsgRejectTxSerializer.INSTANCE.deserialize(bytes);
                 case 3:
-                    return TxSubmissionMessagesSerializers.RequestTxsSerializer.INSTANCE.deserialize(bytes);
+                    return LocalTxSubmissionSerializers.MsgDoneSerializer.INSTANCE.deserialize(bytes);
                 default:
                     throw new RuntimeException(String.format("Invalid msg id: %d", id));
             }

@@ -20,6 +20,8 @@ public class N2CVersionTableConstant {
     public final static long PROTOCOL_V10 = 32778;
     public final static long PROTOCOL_V11 = 32779;
     public final static long PROTOCOL_V12 = 32780;
+    public final static long PROTOCOL_V13 = 32781;
+    public final static long PROTOCOL_V14 = 32782;
 
     public static VersionTable v4AndAbove(long networkMagic) {
         N2CVersionData versionData = new N2CVersionData(networkMagic);
@@ -32,6 +34,10 @@ public class N2CVersionTableConstant {
         versionTableMap.put(PROTOCOL_V8, versionData);
         versionTableMap.put(PROTOCOL_V9, versionData);
         versionTableMap.put(PROTOCOL_V10, versionData);
+        versionTableMap.put(PROTOCOL_V11, versionData);
+        versionTableMap.put(PROTOCOL_V12, versionData);
+        versionTableMap.put(PROTOCOL_V13, versionData);
+        versionTableMap.put(PROTOCOL_V14, versionData);
 
         return new VersionTable(versionTableMap);
     }
@@ -45,6 +51,10 @@ public class N2CVersionTableConstant {
         versionTableMap.put(PROTOCOL_V8, versionData);
         versionTableMap.put(PROTOCOL_V9, versionData);
         versionTableMap.put(PROTOCOL_V10, versionData);
+        versionTableMap.put(PROTOCOL_V11, versionData);
+        versionTableMap.put(PROTOCOL_V12, versionData);
+        versionTableMap.put(PROTOCOL_V13, versionData);
+        versionTableMap.put(PROTOCOL_V14, versionData);
 
         return new VersionTable(versionTableMap);
     }
@@ -57,6 +67,24 @@ public class N2CVersionTableConstant {
         versionTableMap.put(PROTOCOL_V8, versionData);
         versionTableMap.put(PROTOCOL_V9, versionData);
         versionTableMap.put(PROTOCOL_V10, versionData);
+        versionTableMap.put(PROTOCOL_V11, versionData);
+        versionTableMap.put(PROTOCOL_V12, versionData);
+        versionTableMap.put(PROTOCOL_V13, versionData);
+        versionTableMap.put(PROTOCOL_V14, versionData);
+
+        return new VersionTable(versionTableMap);
+    }
+
+    public static VersionTable v9AndAbove(long networkMagic) {
+        N2CVersionData versionData = new N2CVersionData(networkMagic);
+
+        Map<Long, VersionData> versionTableMap = new HashMap<>();
+        versionTableMap.put(PROTOCOL_V9, versionData);
+        versionTableMap.put(PROTOCOL_V10, versionData);
+        versionTableMap.put(PROTOCOL_V11, versionData);
+        versionTableMap.put(PROTOCOL_V12, versionData);
+        versionTableMap.put(PROTOCOL_V13, versionData);
+        versionTableMap.put(PROTOCOL_V14, versionData);
 
         return new VersionTable(versionTableMap);
     }
@@ -77,6 +105,8 @@ public class N2CVersionTableConstant {
         versionTableMap.put(PROTOCOL_V10, versionData);
         versionTableMap.put(PROTOCOL_V11, versionData);
         versionTableMap.put(PROTOCOL_V12, versionData);
+        versionTableMap.put(PROTOCOL_V13, versionData);
+        versionTableMap.put(PROTOCOL_V14, versionData);
 
         return new VersionTable(versionTableMap);
     }

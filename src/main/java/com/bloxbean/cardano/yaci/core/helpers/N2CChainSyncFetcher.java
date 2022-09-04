@@ -1,22 +1,20 @@
 package com.bloxbean.cardano.yaci.core.helpers;
 
-import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.helpers.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronHead;
 import com.bloxbean.cardano.yaci.core.network.N2CClient;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
-import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
-import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainsyncAgent;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2c.LocalChainSyncAgent;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2c.LocalChainSyncAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainsyncAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.function.Consumer;
@@ -169,22 +167,4 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
         n2CClient.shutdown();
     }
 
-    public static void main(String[] args) throws Exception {
-        VersionTable versionTable = N2CVersionTableConstant.v4AndAbove(1);
-//        Point wellKnownPoint = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
-        Point point = new Point(84242, "45899e8002b27df291e09188bfe3aeb5397ac03546a7d0ead93aa2500860f1af");
-        N2CChainSyncFetcher chainSyncFetcher = new N2CChainSyncFetcher("/Users/satya/work/cardano-node/prepod/db/node.socket", versionTable, Constants.WELL_KNOWN_PREPOD_POINT, false);
-
-//        chainSyncFetcher.addChainSyncListener(new LocalChainSyncAgentListener() {
-//            @Override
-//            public void rollforward(Tip tip, Block block) {
-//                log.info(block.getHeader().getHeaderBody().getBlockNumber() + " " + block.getHeader().getHeaderBody().getSlot());
-//                log.info("RollForward !!!");
-//            }
-//        });
-
-        chainSyncFetcher.start(block -> {
-            log.info(">>>> Block >>>> " + block.getHeader().getHeaderBody().getBlockNumber());
-        });
-    }
 }
