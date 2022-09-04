@@ -17,8 +17,8 @@ import java.util.function.Consumer;
 
 /**
  * Use this helper to submit transactions to a local Cardano node through Node-to-client mini-protocol.
- * The transaction result can be received through <br/>
- * - a Consumer function passed to {@link #start(Consumer)} <br/>
+ * The transaction result can be received through <br>
+ * - a Consumer function passed to {@link #start(Consumer)} <br>
  * - or, by adding a {@link LocalTxSubmissionListener} using {@link #addTxSubmissionListener(LocalTxSubmissionListener)}
  */
 @Slf4j
