@@ -33,7 +33,8 @@ Gradle
 | `n2c Handshake`          | Done        | 
 | `n2c Chain-Sync`         | Done        | 
 | `n2c Local TxSubmission` | Done        | 
-| `n2c Local State Query`  | Not started |
+| `n2c Local State Query`  | In Progress |
+| `n2c Local Tx Monitor`   | Not Started |
 
 
 | Other tasks              | Status                                                   |

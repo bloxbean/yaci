@@ -1,9 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.model.Array;
-import co.nstant.in.cbor.model.DataItem;
-import co.nstant.in.cbor.model.Map;
-import co.nstant.in.cbor.model.UnsignedInteger;
+import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.util.Tuple;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.core.model.Update;
@@ -23,7 +20,7 @@ import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
 public enum UpdateSerializer implements Serializer<Update> {
     INSTANCE;
 
-//    update = [ proposed_protocol_parameter_updates
+    //    update = [ proposed_protocol_parameter_updates
 //         , epoch
 //         ]
     @Override
@@ -33,13 +30,13 @@ public enum UpdateSerializer implements Serializer<Update> {
 
         long epoch = toInt(dataItemList.get(1));
 
-        Map protoParamUpdateMap = (Map)dataItemList.get(0);
+        Map protoParamUpdateMap = (Map) dataItemList.get(0);
 
         java.util.Map<String, ProtocolParamUpdate> deProtocolParamUpdateMap = new HashMap<>();
         Collection<DataItem> genesisHashDIKeys = protoParamUpdateMap.getKeys();
 
         if (genesisHashDIKeys != null && genesisHashDIKeys.size() > 0) {
-            for (DataItem gensisHashDI: genesisHashDIKeys) {
+            for (DataItem gensisHashDI : genesisHashDIKeys) {
                 Map genesisProtocolParamsMap = (Map) protoParamUpdateMap.get(gensisHashDI);
 
                 ProtocolParamUpdate protocolParamUpdate = getProtocolParams(genesisProtocolParamsMap);
@@ -54,49 +51,49 @@ public enum UpdateSerializer implements Serializer<Update> {
 
     public ProtocolParamUpdate getProtocolParams(Map genesisProtocolParamsMap) {
         DataItem itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(0));
-        Integer minFeeA = itemDI != null? toInt(itemDI) : null;
+        Integer minFeeA = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(1));
-        Integer minFeeB = itemDI != null? toInt(itemDI) : null;
+        Integer minFeeB = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(2));
-        Integer maxBlockSize = itemDI != null? toInt(itemDI) : null;
+        Integer maxBlockSize = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(3));
-        Integer maxTxSize = itemDI != null? toInt(itemDI) : null;
+        Integer maxTxSize = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(4));
-        Integer maxBlockHeaderSize = itemDI != null? toInt(itemDI) : null;
+        Integer maxBlockHeaderSize = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(5));
-        BigInteger keyDeposit = itemDI != null? toBigInteger(itemDI): null;
+        BigInteger keyDeposit = itemDI != null ? toBigInteger(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(6));
-        BigInteger poolDeposit = itemDI != null? toBigInteger(itemDI): null;
+        BigInteger poolDeposit = itemDI != null ? toBigInteger(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(7));
-        Integer maxEpoch = itemDI != null? toInt(itemDI): null;
+        Integer maxEpoch = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(8));
-        Integer nOpt = itemDI != null? toInt(itemDI): null;
+        Integer nOpt = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(9));
-        BigDecimal poolPledgeInfluence = itemDI != null? toRationalNumber(itemDI): null;
+        BigDecimal poolPledgeInfluence = itemDI != null ? toRationalNumber(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(10));
-        BigDecimal expansionRate = itemDI != null? toRationalNumber(itemDI): null;
+        BigDecimal expansionRate = itemDI != null ? toRationalNumber(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(11));
-        BigDecimal treasuryGrowthRate = itemDI != null? toRationalNumber(itemDI): null;
+        BigDecimal treasuryGrowthRate = itemDI != null ? toRationalNumber(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(12));
-        BigDecimal decentralizationParam = itemDI != null? toRationalNumber(itemDI): null;
+        BigDecimal decentralizationParam = itemDI != null ? toRationalNumber(itemDI) : null;
 
         String extraEntropy = null;
 //                $nonce /= [ 0 // 1, bytes .size 32 ]
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(13)); //Removed
         if (itemDI != null) {
-            List<DataItem> extraEntropyDIList =((Array) itemDI).getDataItems();
+            List<DataItem> extraEntropyDIList = ((Array) itemDI).getDataItems();
             int extraEntropy_1 = toInt(extraEntropyDIList.get(0));
             String extraEntropy_2 = "";
             if (extraEntropyDIList.size() == 2) {
@@ -109,27 +106,27 @@ public enum UpdateSerializer implements Serializer<Update> {
         Integer protocolMinorVersion = null;
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(14));
         if (itemDI != null) {
-            List<DataItem> protocolVersionDIList =((Array) itemDI).getDataItems();
+            List<DataItem> protocolVersionDIList = ((Array) itemDI).getDataItems();
             protocolMajorVersion = toInt(protocolVersionDIList.get(0));
             protocolMinorVersion = toInt(protocolVersionDIList.get(1));
         }
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(15)); //Removed
-        BigInteger minUtxo = itemDI != null? toBigInteger(itemDI): null;
+        BigInteger minUtxo = itemDI != null ? toBigInteger(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(16));
-        BigInteger minPoolCost = itemDI != null? toBigInteger(itemDI): null;
+        BigInteger minPoolCost = itemDI != null ? toBigInteger(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(17));
-        BigInteger adaPerUtxoBytes = itemDI != null? toBigInteger(itemDI): null;
+        BigInteger adaPerUtxoBytes = itemDI != null ? toBigInteger(itemDI) : null;
 
         //CostModels
         java.util.Map<Integer, String> costModelMap = null;
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(18));
         if (itemDI != null) {
             costModelMap = new LinkedHashMap<>();
-            Map itemDIMap = (Map)itemDI;
-            for (DataItem key: itemDIMap.getKeys()) {
+            Map itemDIMap = (Map) itemDI;
+            for (DataItem key : itemDIMap.getKeys()) {
                 Integer version = toInt(key);
                 String costModel = HexUtil.encodeHexString(CborSerializationUtil.serialize(itemDIMap.get(key)));
                 costModelMap.put(version, costModel);
@@ -137,12 +134,12 @@ public enum UpdateSerializer implements Serializer<Update> {
         }
 
         //exUnits prices
-        BigInteger priceMem = null;
-        BigInteger priceSteps = null;
+        BigDecimal priceMem = null;
+        BigDecimal priceSteps = null;
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(19));
         if (itemDI != null) {
-            List<DataItem> exUnitPriceList =((Array) itemDI).getDataItems();
-            Tuple<BigInteger, BigInteger> tuple = getExUnits(exUnitPriceList);
+            List<DataItem> exUnitPriceList = ((Array) itemDI).getDataItems();
+            Tuple<BigDecimal, BigDecimal> tuple = getExUnitPrices(exUnitPriceList);
             priceMem = tuple._1;
             priceSteps = tuple._2;
         }
@@ -152,7 +149,7 @@ public enum UpdateSerializer implements Serializer<Update> {
         BigInteger maxTxExSteps = null;
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(20));
         if (itemDI != null) {
-            List<DataItem> exUnits =((Array) itemDI).getDataItems();
+            List<DataItem> exUnits = ((Array) itemDI).getDataItems();
             Tuple<BigInteger, BigInteger> tuple = getExUnits(exUnits);
             maxTxExMem = tuple._1;
             maxTxExSteps = tuple._2;
@@ -163,20 +160,20 @@ public enum UpdateSerializer implements Serializer<Update> {
         BigInteger maxBlockExSteps = null;
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(21));
         if (itemDI != null) {
-            List<DataItem> exUnits =((Array) itemDI).getDataItems();
+            List<DataItem> exUnits = ((Array) itemDI).getDataItems();
             Tuple<BigInteger, BigInteger> tuple = getExUnits(exUnits);
             maxBlockExMem = tuple._1;
             maxBlockExSteps = tuple._2;
         }
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(22));
-        Long maxValueSize = itemDI != null? toLong(itemDI): null;
+        Long maxValueSize = itemDI != null ? toLong(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(23));
-        Integer collateralPercent = itemDI != null? toInt(itemDI): null;
+        Integer collateralPercent = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(24));
-        Integer maxCollateralPercent = itemDI != null? toInt(itemDI): null;
+        Integer maxCollateralPercent = itemDI != null ? toInt(itemDI) : null;
 
         ProtocolParamUpdate protocolParamUpdate = ProtocolParamUpdate.builder()
                 .minFeeA(minFeeA)
@@ -220,5 +217,15 @@ public enum UpdateSerializer implements Serializer<Update> {
             steps = toBigInteger(exunits.get(1));
 
         return new Tuple<>(mem, steps);
+    }
+
+    private Tuple<BigDecimal, BigDecimal> getExUnitPrices(List<DataItem> exunits) {
+        RationalNumber memPriceRN = (RationalNumber) exunits.get(0);
+        RationalNumber stepPriceRN = (RationalNumber) exunits.get(1);
+
+        BigDecimal memPrice = toRationalNumber(memPriceRN);
+        BigDecimal stepPrice = toRationalNumber(stepPriceRN);
+
+        return new Tuple<>(memPrice, stepPrice);
     }
 }

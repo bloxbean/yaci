@@ -39,8 +39,8 @@ public class ProtocolParamUpdate {
     private Map<Integer, String> costModels; //18
 
     //ex_unit_prices
-    private BigInteger priceMem; //19
-    private BigInteger priceStep; //19
+    private BigDecimal priceMem; //19
+    private BigDecimal priceStep; //19
 
     //max tx ex units
     private BigInteger maxTxExMem; //20
