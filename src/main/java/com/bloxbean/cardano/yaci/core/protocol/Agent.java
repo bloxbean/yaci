@@ -70,8 +70,12 @@ public abstract class Agent<T extends AgentListener> {
         return currenState.hasAgency();
     }
 
-    public final void addListener(T agentListener) {
+    public final synchronized void addListener(T agentListener) {
         agentListeners.add(agentListener);
+    }
+
+    public final synchronized void removeListener(T agentListener) {
+        agentListeners.remove(agentListener);
     }
 
     protected List<T> getAgentListeners() {
