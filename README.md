@@ -23,18 +23,18 @@ Gradle
 
 ## Status
 
-| mini protocol            | initiator   |
-|--------------------------|-------------|
-| `n2n Handshake`          | Done        | 
-| `n2n Block-Fetch`        | Done        |     
-| `n2n Chain-Sync`         | Done        | 
-| `n2n TxSubmission`       | In Progress | 
-| `n2n Keep-Alive`         | Not started | 
-| `n2c Handshake`          | Done        | 
-| `n2c Chain-Sync`         | Done        | 
-| `n2c Local TxSubmission` | Done        | 
-| `n2c Local State Query`  | In Progress |
-| `n2c Local Tx Monitor`   | Not Started |
+| mini protocol            | initiator      |
+|--------------------------|----------------|
+| `n2n Handshake`          | Done           | 
+| `n2n Block-Fetch`        | Done           |     
+| `n2n Chain-Sync`         | Done           | 
+| `n2n TxSubmission`       | In Progress    | 
+| `n2n Keep-Alive`         | Not started    | 
+| `n2c Handshake`          | Done           | 
+| `n2c Chain-Sync`         | Done           | 
+| `n2c Local TxSubmission` | Done           | 
+| `n2c Local State Query`  | Partially Done |
+| `n2c Local Tx Monitor`   | Not Started    |
 
 
 | Other tasks              | Status                                                   |
@@ -121,7 +121,7 @@ Stream blocks from latest block
         VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Constants.MAINNET_PROTOCOL_MAGIC); 
         Point wellKnownPoint = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
         
-        ChainSyncFetcherFromLatest chainSyncFetcher = new ChainSyncFetcherFromLatest("<cardano_host>", <cardano_node_socket_port>, versionTable, wellKnownPoint);
+        ChainSyncFetcherFromLatest chainSyncFetcher = new ChainSyncFetcherFromLatest("<cardano_host>", <cardano_node_socket_port>,  wellKnownPoint, versionTable);
 
         chainSyncFetcher.addChainSyncListener(new ChainSyncAgentListener() {
             @Override
@@ -136,13 +136,13 @@ Stream blocks from latest block
         });
 ```
 
-### 3. TipFinder (Mainnet) 
+### 3. TipFinder 
 
 Find the tip
 
 ```java
         Point point = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
-        TipFinder tipFinder = new TipFinder("<cardano_host>", <cardano_socket_port>, point);
+        TipFinder tipFinder = new TipFinder("<cardano_host>", <cardano_socket_port>, point, Constants.MAINNET_PROTOCOL_MAGIC);
         tipFinder.start(tip -> {
             System.out.println("Tip found >>> " + tip);
         });
