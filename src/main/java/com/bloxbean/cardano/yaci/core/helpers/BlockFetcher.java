@@ -3,7 +3,6 @@ package com.bloxbean.cardano.yaci.core.helpers;
 import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.yaci.core.helpers.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
@@ -16,6 +15,36 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.function.Consumer;
 
+/**
+ * Use this fetcher to fetch blocks from Point-1 to Point-2 from a remote Cardano node using Node-to-node protocol.
+ * There are two ways to receive blocks fetched by this fetcher
+ * <p>
+ * 1. through a consumer function passed to {@link #start(Consumer)},
+ * <br>
+ * 2. by attaching a {@link BlockfetchAgentListener} through {@link #addBlockFetchListener(BlockfetchAgentListener)}
+ * </p>
+ * <br>
+ * <b>Note:</b> This fetcher can only return Shelley / Post-Shelley era blocks for now
+ * <p></p>
+ * <p>
+ * Example: Fetch block from point-1 to point-2 and receive blocks in a {@link Consumer} function
+ * </p>
+ *
+ * <pre>
+ * {@code
+ * BlockFetcher blockFetcher = new BlockFetcher(node, nodePort, Constants.MAINNET_PROTOCOL_MAGIC);
+ * blockFetcher.start(block -> {
+ *    //process block
+ * });
+ *
+ * Point from = new Point(70895877, "094de3242c9cc6504851c9ca1f109c379840364bb6a1a941353c87cf1f22cf06");
+ * Point to = new Point(70896002, "1f58983e784ff3eabd9bdb97808402086baffbf51742a120d3635df867c16ad9");
+ * blockFetcher.fetch(from, to);
+ *
+ * blockFetcher.shutdown();
+ *  }
+ * </pre>
+ */
 @Slf4j
 public class BlockFetcher implements Fetcher<Block> {
     private String host;
@@ -25,6 +54,22 @@ public class BlockFetcher implements Fetcher<Block> {
     private BlockfetchAgent blockfetchAgent;
     private N2NClient n2CClient;
 
+    /**
+     * Constructor to create BlockFetcher instance
+     * @param host Cardano node host
+     * @param port Cardano node port
+     * @param protocolMagic Protocol Magic
+     */
+    public BlockFetcher(String host, int port, long protocolMagic) {
+        this(host, port, N2NVersionTableConstant.v4AndAbove(protocolMagic));
+    }
+
+    /**
+     * Constructor to create BlockFetcher instance
+     * @param host Cardano node host
+     * @param port Cardano node port
+     * @param versionTable VersionTable for N2N protocol
+     */
     public BlockFetcher(String host, int port, VersionTable versionTable) {
         this.host = host;
         this.port = port;
@@ -45,6 +90,11 @@ public class BlockFetcher implements Fetcher<Block> {
         });
     }
 
+    /**
+     * Invoke this method to establish the connection with remote Cardano node.
+     * This method should be called only once.
+     * @param receiver Consumer function to receive {@link Block}
+     */
     public void start(Consumer<Block> receiver) {
         blockfetchAgent.addListener(new BlockfetchAgentListener() {
             @Override
@@ -53,9 +103,16 @@ public class BlockFetcher implements Fetcher<Block> {
             }
         });
 
-        n2CClient.start();
+        if (!n2CClient.isRunning())
+            n2CClient.start();
     }
 
+    /**
+     * Invoke this method to fetch blocks
+     * This method should be called after {@link #start(Consumer)}
+     * @param from Start point
+     * @param to End point
+     */
     public void fetch(Point from, Point to) {
         if (!n2CClient.isRunning())
             throw new IllegalStateException("fetch() should be called after start()");
@@ -67,6 +124,10 @@ public class BlockFetcher implements Fetcher<Block> {
             log.warn("Agent status is Done. Can't reschedule new points.");
     }
 
+    /**
+     * Add a {@link BlockfetchAgentListener} to listen different block fetch events from {@link BlockfetchAgent}
+     * @param listener
+     */
     public void addBlockFetchListener(BlockfetchAgentListener listener) {
         if (this.isRunning())
             throw new IllegalStateException("Listener can be added only before start() call");
@@ -75,71 +136,30 @@ public class BlockFetcher implements Fetcher<Block> {
             blockfetchAgent.addListener(listener);
     }
 
+    /**
+     * Check if the agent connection is still alive
+     * @return true if alive, false if not
+     */
     @Override
     public boolean isRunning() {
         return n2CClient.isRunning();
     }
 
+    /**
+     * Invoke this method to close the socket connection to node
+     */
     @Override
     public void shutdown() {
         n2CClient.shutdown();
     }
 
     public static void main(String[] args) {
-        //Byron
-//        Point from = new Point(21600, "9b01d07036df8705bc0454bb9c3c1c0df5e626f4753b74250898e3278cfb8eaa");
-//        Point to = new Point(21600, "92644f4c4e5c6fdcaad638038c923a9dbb57f5e11513f1b1ededef3ad81a3e2c");
-
-//        Point from = new Point(21601, "84ba3d3e3dac8f574db187074e29605c2512ce65d5022f5e7d07e52620f498b0");
-//        Point to = new Point(21602, "719e54f0a72386acc0c0953b54b812bc58876238353cef40b66ee630d1c521da");
-
         //shelley
         Point from = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
         Point to = new Point(70223766, "21155bb822637508a91e9952e712040c0ea45107fb91898bfe8c9a95389b0d90");
-//        Point from = new Point(43847831, "15b9eeee849dd6386d3770b0745e0450190f7560e5159b1b3ab13b14b2684a45");
-//        Point to = new Point(43847844, "ff8d558a3d5a0e058beb3d94d26a567f75cd7d09ff5485aa0d0ebc38b61378d4");
-//         Point to = new Point(43848472, "7e79488986d2961605259b5ed28b7c3179ca8fc85e34f9050adcb0d7e19f6871");
-//        Point from = new Point(68571139, "7e0b5c20b2d6b76238bd11dc6c58c5ad91d74d4a4b2fe3e80bcf30deda1d9d35");
-//        Point to = new Point(68752024, "d0adb6c30c548bff7fd21f94f29447e21587c08977a950a3c472b8ce0e56d084");
-//        Point from = new Point(68925707, "ddf38fece4cc7a4d132a186a347a15306bc409559d23826a912c654d0d0f3745");
-//        Point to = new Point(68925707, "ddf38fece4cc7a4d132a186a347a15306bc409559d23826a912c654d0d0f3745");
 
         VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic());
         BlockFetcher blockFetcher = new BlockFetcher("192.168.0.228", 6000, versionTable);
-
-        blockFetcher.addBlockFetchListener(new BlockfetchAgentListener() {
-            int counter = 0;
-            @Override
-            public void batchDone() {
-                log.info("Batch Done ------>");
-            }
-
-            @Override
-            public void blockFound(Block block) {
-//                log.info("BLOCK FOUND >> {}", block);
-                System.out.println(block.getEra());
-                System.out.println(block.getHeader().getHeaderBody().getBlockNumber());
-                System.out.println(block.getAuxiliaryDataMap());
-            }
-
-            @Override
-            public void byronBlockFound(ByronBlock byronBlock) {
-                log.info("Byron BLOCK FOUND >>  {}", byronBlock.getHeader().getConsensusData().getSlotId());
-            }
-
-            @Override
-            public void readyForNextBatch() {
-                if (counter == 1) {
-                    blockFetcher.shutdown();
-                    return;
-                }
-                counter++;
-                Point from1 = new Point(68752024, "d0adb6c30c548bff7fd21f94f29447e21587c08977a950a3c472b8ce0e56d084");
-                Point to1 = new Point(68752024, "d0adb6c30c548bff7fd21f94f29447e21587c08977a950a3c472b8ce0e56d084");
-
-                blockFetcher.fetch(from1, to1);
-            }
-        });
 
         blockFetcher.start(block -> {
             log.info("Block >>> {} -- {} {}", block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot() + "  ", block.getEra());

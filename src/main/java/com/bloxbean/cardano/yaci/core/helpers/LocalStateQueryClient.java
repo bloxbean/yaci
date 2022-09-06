@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.helpers;
 
+import com.bloxbean.cardano.yaci.core.helpers.api.ReactiveFetcher;
 import com.bloxbean.cardano.yaci.core.network.N2CClient;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
@@ -26,6 +27,19 @@ import java.util.function.Consumer;
 
 /**
  * Use this to query local ledger state using Node-to-client local-state-query mini-protocol
+ *
+ * <p>
+ * Example: Query system start time
+ * </p>
+ * <pre>
+ * {@code
+ * LocalStateQueryClient queryClient = new LocalStateQueryClient(nodeSocketFile, Constants.PREVIEW_PROTOCOL_MAGIC);
+ * queryClient.start();
+ *
+ * Mono<SystemStartResult> queryResultMono = queryClient.executeQuery(new SystemStartQuery());
+ * SystemStartResult result = queryResultMono.block();
+ * }
+ * </pre>
  */
 @Slf4j
 public class LocalStateQueryClient extends ReactiveFetcher<QueryResult> {
@@ -37,10 +51,20 @@ public class LocalStateQueryClient extends ReactiveFetcher<QueryResult> {
 
     private Map<Object, MonoSink> monoSinkMap = new ConcurrentHashMap<>();
 
+    /**
+     * Construct a LocalStateQueryClient
+     * @param nodeSocketFile Cardano node socket file
+     * @param protocolMagic Protocol Magic
+     */
     public LocalStateQueryClient(String nodeSocketFile, long protocolMagic) {
         this(nodeSocketFile, N2CVersionTableConstant.v1AndAbove(protocolMagic));
     }
 
+    /**
+     * Constuct a LocalStateQueryClient
+     * @param nodeSocketFile Cardano node socket file
+     * @param versionTable VersionTable for Node-to-Client protocol
+     */
     public LocalStateQueryClient(String nodeSocketFile, VersionTable versionTable) {
         this.nodeSocketFile = nodeSocketFile;
         this.versionTable = versionTable;
@@ -58,6 +82,14 @@ public class LocalStateQueryClient extends ReactiveFetcher<QueryResult> {
                 localStateQueryAgent.sendNextMessage();
             }
         });
+    }
+
+    /**
+     * Establish the connection with the local Cardano node
+     * This method should be called first
+     */
+    public void start() {
+        start(null);
     }
 
     @Override
@@ -123,6 +155,12 @@ public class LocalStateQueryClient extends ReactiveFetcher<QueryResult> {
         });
     }
 
+    /**
+     * Execute a query
+     * @param query Pass a query object
+     * @return Mono with instance of {@link QueryResult}
+     * @param <T>
+     */
     public <T extends QueryResult> Mono<T> executeQuery(Query query) {
         return Mono.create(monoSink -> {
             localStateQueryAgent.query(query);
@@ -131,16 +169,27 @@ public class LocalStateQueryClient extends ReactiveFetcher<QueryResult> {
         });
     }
 
+    /**
+     * Invoke this method to shutdown the connection
+     */
     @Override
     public void shutdown() {
         n2cClient.shutdown();
     }
 
+    /**
+     * Check if the connection is alive
+     * @return
+     */
     @Override
     public boolean isRunning() {
         return n2cClient.isRunning();
     }
 
+    /**
+     * Add a {@link LocalStateQueryListener} to listen query events published by {@link LocalStateQueryAgent}
+     * @param listener
+     */
     public void addLocalStateQueryListener(LocalStateQueryListener listener) {
         if (this.isRunning())
             throw new IllegalStateException("Listener can be added only before start() call");

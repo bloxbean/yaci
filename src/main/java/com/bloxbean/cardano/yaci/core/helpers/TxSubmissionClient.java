@@ -12,6 +12,11 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.function.Consumer;
 
+/**
+ * This helper is still under development.
+ * Use {@link LocalTxSubmissionClient} to submitTx to a local Cardano node.
+ * Tx submission with Node to Node protocol
+ */
 @Slf4j
 public class TxSubmissionClient implements Fetcher {
     private String host;

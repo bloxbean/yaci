@@ -42,11 +42,40 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
     private BlockfetchAgent blockFetchAgent;
     private N2NClient n2CClient;
 
-    public N2NChainSyncFetcher(String host, int port, VersionTable versionTable, Point wellKnownPoint) {
-        this(host, port, versionTable, wellKnownPoint, true);
+    /**
+     * Construct {@link N2NChainSyncFetcher} to sync the blockchain
+     *
+     * @param host           Cardano node host
+     * @param port           Cardano node port
+     * @param wellKnownPoint a well known point
+     * @param protocolMagic  protocol magic
+     */
+    public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, long protocolMagic) {
+        this(host, port, wellKnownPoint, N2NVersionTableConstant.v4AndAbove(protocolMagic), true);
     }
 
-    public N2NChainSyncFetcher(String host, int port, VersionTable versionTable, Point wellKnownPoint, boolean syncFromLatest) {
+    /**
+     * Construct {@link N2NChainSyncFetcher} to sync the blockchain
+     *
+     * @param host           Cardano host
+     * @param port           Cardano node port
+     * @param wellKnownPoint a well known point
+     * @param versionTable   N2N version table
+     */
+    public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable) {
+        this(host, port, wellKnownPoint, versionTable, true);
+    }
+
+    /**
+     * Construct {@link N2NChainSyncFetcher} to sync the blockchain
+     *
+     * @param host           Cardano node host
+     * @param port           Cardano node port
+     * @param wellKnownPoint a well known point
+     * @param versionTable   N2N version table
+     * @param syncFromLatest true if sync from latest block, false if sync from the well known point
+     */
+    public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable, boolean syncFromLatest) {
         this.host = host;
         this.port = port;
         this.versionTable = versionTable;
@@ -144,6 +173,11 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
                 chainSyncAgent, blockFetchAgent);
     }
 
+    /**
+     * Invoke this method or {@link #start()} method to start the sync process
+     *
+     * @param consumer
+     */
     @Override
     public void start(Consumer<Block> consumer) {
         blockFetchAgent.addListener(new BlockfetchAgentListener() {
@@ -156,6 +190,11 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
         n2CClient.start();
     }
 
+    /**
+     * Add a {@link BlockfetchAgentListener} to listen to {@link BlockfetchAgent} events
+     *
+     * @param listener
+     */
     public void addBlockFetchListener(BlockfetchAgentListener listener) {
         if (this.isRunning())
             throw new IllegalStateException("Listener can be added only before start() call");
@@ -164,6 +203,11 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
             blockFetchAgent.addListener(listener);
     }
 
+    /**
+     * Add a {@link ChainSyncAgentListener} to listen to {@link ChainsyncAgent} events
+     *
+     * @param listener
+     */
     public void addChainSyncListener(ChainSyncAgentListener listener) {
         if (this.isRunning())
             throw new IllegalStateException("Listener can be added only before start() call");
@@ -172,21 +216,26 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
             chainSyncAgent.addListener(listener);
     }
 
+    /**
+     * Check if the connection is alive
+     *
+     * @return
+     */
     @Override
     public boolean isRunning() {
         return n2CClient.isRunning();
     }
 
+    /**
+     * Shutdown connection
+     */
     @Override
     public void shutdown() {
         n2CClient.shutdown();
     }
 
     public static void main(String[] args) throws Exception {
-        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(1);
-//        Point wellKnownPoint = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
-//        N2NChainSyncFetcher chainSyncFetcher = new N2NChainSyncFetcher("192.168.0.228", 6000, versionTable, wellKnownPoint);
-        N2NChainSyncFetcher chainSyncFetcher = new N2NChainSyncFetcher("localhost", 30000, versionTable, Constants.WELL_KNOWN_PREPOD_POINT, false);
+        N2NChainSyncFetcher chainSyncFetcher = new N2NChainSyncFetcher("localhost", 30000, Constants.WELL_KNOWN_PREPOD_POINT, Constants.PREPOD_PROTOCOL_MAGIC);
 
         chainSyncFetcher.addChainSyncListener(new ChainSyncAgentListener() {
             @Override

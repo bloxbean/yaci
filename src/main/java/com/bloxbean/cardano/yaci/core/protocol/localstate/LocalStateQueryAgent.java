@@ -12,6 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
+import static com.bloxbean.cardano.yaci.core.protocol.localstate.LocalStateQueryState.Idle;
+
 @Slf4j
 public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
     private Point point;
@@ -26,7 +28,7 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     public LocalStateQueryAgent(Point point) {
         this.point = point;
-        this.currenState = LocalStateQueryState.Idle;
+        this.currenState = Idle;
 
         acquiredCommands = new ConcurrentLinkedQueue<>();
         pendingQueryCommands = new ConcurrentLinkedQueue<>();
@@ -45,15 +47,14 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     @Override
     protected Message buildNextMessage() {
-        if (shutDown) {
-            if (log.isDebugEnabled())
-                log.debug("Shutdown flag set. MsgDone()");
-            return new MsgDone();
-        }
-
-        switch ((LocalStateQueryState)currenState) {
+        switch ((LocalStateQueryState) currenState) {
             case Idle:
-                return new MsgAcquire(point);
+                if (shutDown) {
+                    if (log.isDebugEnabled())
+                        log.debug("Shutdown flag set. MsgDone()");
+                    return new MsgDone();
+                } else
+                    return new MsgAcquire(point);
             case Acquired:
                 Message peekMsg = acquiredCommands.peek();
                 if (peekMsg != null) {
@@ -61,11 +62,10 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
                         log.debug("Found command in acquired commands queue : {}", peekMsg);
 
                     if (peekMsg instanceof MsgQuery)
-                        pendingQueryCommands.add(((MsgQuery)peekMsg).getQuery());
+                        pendingQueryCommands.add(((MsgQuery) peekMsg).getQuery());
 
                     return acquiredCommands.poll();
-                }
-                else {
+                } else {
                     if (log.isDebugEnabled())
                         log.debug("No query found in acquired commands queue.");
                     return null;
@@ -139,44 +139,47 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     public MsgQuery query(Query query) {
         MsgQuery msgQuery = new MsgQuery(query);
-        acquiredCommands.add(msgQuery);
+        this.currenState.verifyMessageType(msgQuery);
 
+        acquiredCommands.add(msgQuery);
         return msgQuery;
     }
 
     public MsgReAcquire reAcquire(Point point) {
-        this.point = point;
         MsgReAcquire msgReAcquire = new MsgReAcquire(point);
-        acquiredCommands.add(msgReAcquire);
+        this.currenState.verifyMessageType(msgReAcquire);
 
+        this.point = point;
+        acquiredCommands.add(msgReAcquire);
         return msgReAcquire;
     }
 
     public MsgAcquire acquire(Point point) {
-        this.point = point;
         MsgAcquire msgAcquire = new MsgAcquire(point);
-        acquiredCommands.add(msgAcquire);
+        this.currenState.verifyMessageType(msgAcquire);
 
+        this.point = point;
         return msgAcquire;
     }
 
     public MsgRelease release() {
         MsgRelease msgRelease = new MsgRelease();
-        acquiredCommands.add(msgRelease);
+        this.currenState.verifyMessageType(msgRelease);
 
+        acquiredCommands.add(msgRelease);
         return msgRelease;
     }
 
     @Override
     public void reset() {
-        this.currenState = LocalStateQueryState.Idle;
+        this.currenState = Idle;
         acquiredCommands.clear();
         pendingQueryCommands.clear();
     }
 
     public void reset(Point point) {
         this.point = point;
-        this.currenState = LocalStateQueryState.Idle;
+        this.currenState = Idle;
         acquiredCommands.clear();
         pendingQueryCommands.clear();
     }

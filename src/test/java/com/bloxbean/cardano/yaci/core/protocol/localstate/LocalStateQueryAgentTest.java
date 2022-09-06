@@ -18,6 +18,7 @@ import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.ChainPointQuer
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.SystemStartQuery;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.SystemStartResult;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
@@ -280,6 +281,122 @@ class LocalStateQueryAgentTest extends BaseTest {
 
         n2CClient.start();
         countDownLatch.await(20, TimeUnit.SECONDS);
+        n2CClient.shutdown();
+    }
+
+    @Test
+    void acquireReleaseAcquireTest() throws InterruptedException {
+
+        Mono<Tip> tipMono = findTip();
+        Tip tip = tipMono.block(Duration.ofSeconds(10));
+
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(2));
+        LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
+
+        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
+
+        CountDownLatch countDownLatch = new CountDownLatch(2);
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                log.info("HANDSHAKE Successful");
+                localStateQueryAgent.sendNextMessage();
+            }
+
+            @Override
+            public void handshakeError(Reason reason) {
+                log.info("ERROR {}", reason);
+            }
+        });
+
+        localStateQueryAgent.addListener(new LocalStateQueryListener() {
+            @Override
+            public void resultReceived(Query query, QueryResult result) {
+                System.out.println("### Query  ### " + query);
+                System.out.println("### Result ### " + result);
+                countDownLatch.countDown();
+            }
+        });
+
+        n2CClient.start();
+        Thread.sleep(500);
+        localStateQueryAgent.query(new ChainPointQuery());
+        localStateQueryAgent.sendNextMessage();
+
+        Thread.sleep(50);
+
+        localStateQueryAgent.release();
+        localStateQueryAgent.sendNextMessage();
+
+        System.out.println("RELEASE DONE >>>>>>>>>>>>>>>");
+        Thread.sleep(50);
+
+        localStateQueryAgent.acquire(tip.getPoint());
+        localStateQueryAgent.sendNextMessage();
+
+        System.out.println("ACQUIRE DONE >>>>>>>>>>>>>>>");
+        Thread.sleep(50);
+
+        System.out.println("QUERYING AGAIN >>>>>>>>>>>>>");
+        localStateQueryAgent.query(new ChainPointQuery());
+        localStateQueryAgent.sendNextMessage();
+
+        countDownLatch.await(20, TimeUnit.SECONDS);
+        n2CClient.shutdown();
+    }
+
+    @Test
+    void invalid_invokeReleaseTwiceTest() throws InterruptedException {
+
+        Mono<Tip> tipMono = findTip();
+        Tip tip = tipMono.block(Duration.ofSeconds(10));
+
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(2));
+        LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
+
+        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
+
+        CountDownLatch countDownLatch = new CountDownLatch(2);
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                log.info("HANDSHAKE Successful");
+                localStateQueryAgent.sendNextMessage();
+            }
+
+            @Override
+            public void handshakeError(Reason reason) {
+                log.info("ERROR {}", reason);
+            }
+        });
+
+        localStateQueryAgent.addListener(new LocalStateQueryListener() {
+            @Override
+            public void resultReceived(Query query, QueryResult result) {
+                System.out.println("### Query  ### " + query);
+                System.out.println("### Result ### " + result);
+                countDownLatch.countDown();
+            }
+        });
+
+        n2CClient.start();
+        Thread.sleep(500);
+        localStateQueryAgent.query(new ChainPointQuery());
+        localStateQueryAgent.sendNextMessage();
+
+        Thread.sleep(50);
+
+        localStateQueryAgent.release();
+        localStateQueryAgent.sendNextMessage();
+
+        System.out.println("RELEASE DONE >>>>>>>>>>>>>>>");
+        Thread.sleep(50);
+
+        Assertions.assertThrows(IllegalStateException.class, () -> {
+            localStateQueryAgent.release();
+            localStateQueryAgent.sendNextMessage();
+        });
+
         n2CClient.shutdown();
     }
 

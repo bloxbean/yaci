@@ -21,7 +21,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.bloxbean.cardano.yaci.core.common.Constants.*;
+import static com.bloxbean.cardano.yaci.core.common.Constants.PREVIEW_IOHK_RELAY_PORT;
 
+/**
+ * The reactive implementation is experimental and needs more testing.
+ * <br>
+ * This class provides reactive stream apis to stream blocks from a Cardano node.
+ * Using this class, you can stream blocks
+ * <p>
+ * 1. from tip of the chain <br>
+ * 2. from a given point <br>
+ * 3. for a range from Point-1 to Point-2 <br>
+ */
 @Slf4j
 public class BlockStreamer {
     private N2NClient n2nClient;
@@ -31,55 +42,99 @@ public class BlockStreamer {
 
     }
 
+    /**
+     * Get {@link BlockStreamer} to stream from the latest block
+     *
+     * @param networkType Network type (Mainnet, Legacy Testnet, Prepod, Preview)
+     * @return a new BlockStreamer instance
+     */
     public static BlockStreamer fromLatest(NetworkType networkType) {
         switch (networkType) {
             case MAINNET:
-                return fromLatest(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT,
-                        networkType.getN2NVersionTable(), WELL_KNOWN_MAINNET_POINT);
+                return fromLatest(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT, WELL_KNOWN_MAINNET_POINT, networkType.getN2NVersionTable());
             case LEGACY_TESTNET:
-                return fromLatest(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, networkType.getN2NVersionTable(), WELL_KNOWN_TESTNET_POINT);
+                return fromLatest(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, WELL_KNOWN_TESTNET_POINT, networkType.getN2NVersionTable());
             case PREPOD:
-                return fromLatest(PREPOD_IOHK_RELAY_ADDR, PREPOD_IOHK_RELAY_PORT, networkType.getN2NVersionTable(), WELL_KNOWN_PREPOD_POINT);
+                return fromLatest(PREPOD_IOHK_RELAY_ADDR, PREPOD_IOHK_RELAY_PORT, WELL_KNOWN_PREPOD_POINT, networkType.getN2NVersionTable());
+            case PREV_TESTNET:
+                return fromLatest(PREVIEW_IOHK_RELAY_ADDR, PREVIEW_IOHK_RELAY_PORT, WELL_KNOWN_PREVIEW_POINT, networkType.getN2NVersionTable());
             default:
                 return null;
         }
     }
 
+    /**
+     * Get {@link BlockStreamer} to stream from a known point
+     *
+     * @param networkType Network type (Mainnet, Legacy Testnet, Prepod, Preview)
+     * @param point
+     * @return a new BlockStreamer instance
+     */
     public static BlockStreamer fromPoint(NetworkType networkType, Point point) {
         switch (networkType) {
             case MAINNET:
-                return fromPoint(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT, networkType.getN2NVersionTable(), point);
+                return fromPoint(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
             case LEGACY_TESTNET:
-                return fromPoint(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, networkType.getN2NVersionTable(), point);
+                return fromPoint(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
             case PREPOD:
-                return fromPoint(PREPOD_IOHK_RELAY_ADDR, PREPOD_IOHK_RELAY_PORT, networkType.getN2NVersionTable(), point);
+                return fromPoint(PREPOD_IOHK_RELAY_ADDR, PREPOD_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
+            case PREV_TESTNET:
+                return fromPoint(PREVIEW_IOHK_RELAY_ADDR, PREVIEW_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
             default:
                 return null;
         }
     }
 
-    public static BlockStreamer fromLatest(String host, int port, VersionTable versionTable, Point wellKnownPoint) {
+    /**
+     * Get {@link BlockStreamer} to stream from latest block
+     *
+     * @param host           Cardano host
+     * @param port           Cardano port
+     * @param wellKnownPoint a well known point
+     * @param versionTable   N2N version table
+     * @return a new BlockStreamer instance
+     */
+    public static BlockStreamer fromLatest(String host, int port, Point wellKnownPoint, VersionTable versionTable) {
         BlockStreamer blockStreamer = new BlockStreamer();
-        blockStreamer.initBlockFluxFromPoint(host, port, versionTable, wellKnownPoint, true);
+        blockStreamer.initBlockFluxFromPoint(host, port, wellKnownPoint, versionTable, true);
         return blockStreamer;
     }
 
-    public static BlockStreamer fromPoint(String host, int port, VersionTable versionTable, Point point) {
+
+    /**
+     * Get {@link BlockStreamer} to stream from a known point
+     *
+     * @param host         Cardano host
+     * @param port         Cardano port
+     * @param point        a known point
+     * @param versionTable N2N version table
+     * @return a new BlockStreamer instance
+     */
+    public static BlockStreamer fromPoint(String host, int port, Point point, VersionTable versionTable) {
         BlockStreamer blockStreamer = new BlockStreamer();
-        blockStreamer.initBlockFluxFromPoint(host, port, versionTable, point, false);
+        blockStreamer.initBlockFluxFromPoint(host, port, point, versionTable, false);
         return blockStreamer;
     }
 
+    /**
+     * Shutdown streamer.
+     * This method should be called to close the connection. The stream can't be reused after this method call.
+     */
     public void shutdown() {
         if (n2nClient != null)
             n2nClient.shutdown();
     }
 
+    /**
+     * Get a reactive {@link Flux} which can be used to receive incoming {@link Block}
+     *
+     * @return a {@link Flux} for {@link Block}
+     */
     public Flux<Block> stream() {
         return blockFlux;
     }
 
-    private void initBlockFluxFromPoint(String host, int port, VersionTable versionTable, Point wellKnownPoint, boolean startFromTip) {
+    private void initBlockFluxFromPoint(String host, int port, Point wellKnownPoint, VersionTable versionTable, boolean startFromTip) {
         final AtomicBoolean tipFound = new AtomicBoolean(false);
 
         ChainsyncAgent chainSyncAgent = new ChainsyncAgent(new Point[]{wellKnownPoint});
@@ -176,27 +231,46 @@ public class BlockStreamer {
         });
     }
 
+    /**
+     * Get {@link BlockStreamer} to stream from Point 1 to Point 2
+     *
+     * @param networkType networkType Network type (Mainnet, Legacy Testnet, Prepod, Preview)
+     * @param fromPoint   start point
+     * @param toPoint     end point
+     * @return new BlockStreamer instance
+     */
     public static BlockStreamer forRange(NetworkType networkType, Point fromPoint, Point toPoint) {
         switch (networkType) {
             case MAINNET:
-                return forRange(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT,
-                        networkType.getN2NVersionTable(), fromPoint, toPoint);
+                return forRange(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
             case LEGACY_TESTNET:
-                return forRange(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, networkType.getN2NVersionTable(), fromPoint, toPoint);
+                return forRange(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
             case PREPOD:
-                return forRange(PREPOD_IOHK_RELAY_ADDR, PREPOD_IOHK_RELAY_PORT, networkType.getN2NVersionTable(), fromPoint, toPoint);
+                return forRange(PREPOD_IOHK_RELAY_ADDR, PREPOD_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
+            case PREV_TESTNET:
+                return forRange(PREVIEW_IOHK_RELAY_ADDR, PREVIEW_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
             default:
                 return null;
         }
     }
 
-    public static BlockStreamer forRange(String host, int port, VersionTable versionTable, Point fromPoint, Point toPoint) {
+    /**
+     * Get {@link BlockStreamer} to stream from Point 1 to Point 2
+     *
+     * @param host Cardano node host
+     * @param port Cardano node port
+     * @param fromPoint Start point
+     * @param toPoint End point
+     * @param versionTable N2N version table
+     * @return
+     */
+    public static BlockStreamer forRange(String host, int port, Point fromPoint, Point toPoint, VersionTable versionTable) {
         BlockStreamer blockStreamer = new BlockStreamer();
-        blockStreamer.initBlockFluxForRange(host, port, versionTable, fromPoint, toPoint);
+        blockStreamer.initBlockFluxForRange(host, port, fromPoint, toPoint, versionTable);
         return blockStreamer;
     }
 
-    private void initBlockFluxForRange(String host, int port, VersionTable versionTable, Point fromPoint, Point toPoint) {
+    private void initBlockFluxForRange(String host, int port, Point fromPoint, Point toPoint, VersionTable versionTable) {
         BlockfetchAgent blockFetch = new BlockfetchAgent();
         blockFetch.resetPoints(fromPoint, toPoint);
         HandshakeAgent handshakeAgent = new HandshakeAgent(versionTable);

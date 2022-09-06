@@ -15,6 +15,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainsyncAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.function.Consumer;
@@ -22,7 +23,7 @@ import java.util.function.Consumer;
 /**
  * Use this fetcher to fetch blocks from the current tip or from a wellknown point. The fetcher connects to a local
  * Cardano node through node socket file using node-to-client mini-protocol.
- * The block can be received by passing a {@link Consumer} to the start method.
+ * Incoming blocks can be received by passing a {@link Consumer} function to the start method.
  * The following listeners can be added to receive various events from the agents
  * 1. {@link BlockfetchAgentListener} - To listen to events published by {@link BlockfetchAgent}
  * 2. {@link ChainSyncAgentListener} - To listen to events published by {@link ChainsyncAgent}
@@ -39,14 +40,25 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
     private N2CClient n2CClient;
 
     /**
+     * Use this constructor to sync block from the tip
+     *
+     * @param nodeSocketFile path to local Cardano node's socket file
+     * @param wellKnownPoint
+     * @param protocolMagic
+     */
+    public N2CChainSyncFetcher(String nodeSocketFile, Point wellKnownPoint, long protocolMagic) {
+        this(nodeSocketFile, wellKnownPoint, N2CVersionTableConstant.v1AndAbove(protocolMagic));
+    }
+
+    /**
      * Use this constructor to sync block from the tip.
      *
      * @param nodeSocketFile
      * @param versionTable
      * @param wellKnownPoint
      */
-    public N2CChainSyncFetcher(String nodeSocketFile, VersionTable versionTable, Point wellKnownPoint) {
-        this(nodeSocketFile, versionTable, wellKnownPoint, true);
+    public N2CChainSyncFetcher(String nodeSocketFile, Point wellKnownPoint, VersionTable versionTable) {
+        this(nodeSocketFile, wellKnownPoint, versionTable, true);
     }
 
     /**
@@ -57,7 +69,7 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
      * @param wellKnownPoint
      * @param syncFromLatest true if sync from tip, false if sync from wellKnownPoint
      */
-    public N2CChainSyncFetcher(String nodeSocketFile, VersionTable versionTable, Point wellKnownPoint, boolean syncFromLatest) {
+    public N2CChainSyncFetcher(String nodeSocketFile, Point wellKnownPoint, VersionTable versionTable, boolean syncFromLatest) {
         this.nodeSocketFile = nodeSocketFile;
         this.versionTable = versionTable;
         this.wellKnownPoint = wellKnownPoint;
@@ -137,6 +149,10 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
                 chainSyncAgent);
     }
 
+    /**
+     * Invoke this method or {@link #start()} method to start the sync process
+     * @param consumer
+     */
     @Override
     public void start(Consumer<Block> consumer) {
         chainSyncAgent.addListener(new LocalChainSyncAgentListener() {
@@ -149,6 +165,10 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
         n2CClient.start();
     }
 
+    /**
+     * Add a {@link LocalChainSyncAgentListener} to listen {@link LocalChainSyncAgent} events
+     * @param listener
+     */
     public void addChainSyncListener(LocalChainSyncAgentListener listener) {
         if (this.isRunning())
             throw new IllegalStateException("Listener can be added only before start() call");
@@ -157,11 +177,18 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
             chainSyncAgent.addListener(listener);
     }
 
+    /**
+     * Check if the connection is alive
+     * @return
+     */
     @Override
     public boolean isRunning() {
         return n2CClient.isRunning();
     }
 
+    /**
+     * Shutdown connection
+     */
     @Override
     public void shutdown() {
         n2CClient.shutdown();

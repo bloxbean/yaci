@@ -35,7 +35,7 @@ public abstract class Agent<T extends AgentListener> {
         return this.currenState.handleInbound(bytes);
     }
 
-    public final void receiveResponse(Message message) {
+    public synchronized final void receiveResponse(Message message) {
         State oldState = currenState;
         currenState = currenState.nextState(message);
 

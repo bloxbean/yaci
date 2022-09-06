@@ -28,13 +28,12 @@ class BlockStreamerTest {
         VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic());
         Point wellKnownPoint = new Point(17625824, "765359c702103513dcb8ff4fe86c1a1522c07535733f31ff23231ccd9a3e0247");
 
-        Flux<Block> flux = BlockStreamer.fromLatest("192.168.0.228", 6000, versionTable, wellKnownPoint).stream();
+        Flux<Block> flux = BlockStreamer.fromLatest("192.168.0.228", 6000, wellKnownPoint, versionTable).stream();
 
         AtomicInteger counter = new AtomicInteger(0);
-        Disposable disposable = flux.map(block -> block.getTransactionBodies())
-                .subscribe(vrfCert -> log.info("&&&&&&&&&&&&&&&&&&&&&& " + vrfCert));
+        Disposable disposable = flux.subscribe(block -> log.info(">>>>>>>>" + block.getHeader().getHeaderBody().getBlockNumber()));
 
-        while(counter.get() < 100) {
+        while (counter.get() < 100) {
             Thread.sleep(1000);
         }
     }
@@ -61,13 +60,13 @@ class BlockStreamerTest {
             System.out.println(String.format("%30s : %d", amount.getAssetName(), amount.getQuantity()));
         });
 
-        while(true) {
+        while (true) {
             Thread.sleep(1000);
         }
     }
 
     @Test
-   // @Timeout(value = 80000, unit = TimeUnit.MILLISECONDS)
+        // @Timeout(value = 80000, unit = TimeUnit.MILLISECONDS)
     void streamLatestFromPrePod_fromByron() throws InterruptedException {
         Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.PREPOD,
                         Constants.WELL_KNOWN_PREPOD_POINT)
@@ -89,7 +88,7 @@ class BlockStreamerTest {
             System.out.println(String.format("%30s : %d", amount.getAssetName(), amount.getQuantity()));
         });
 
-        while(true) {
+        while (true) {
             Thread.sleep(1000);
         }
     }
@@ -116,7 +115,7 @@ class BlockStreamerTest {
             System.out.println(String.format("%30s : %d", amount.getAssetName(), amount.getQuantity()));
         });
 
-        while(true) {
+        while (true) {
             Thread.sleep(1000);
         }
     }
@@ -148,7 +147,7 @@ class BlockStreamerTest {
             System.out.println("I also got the amount>> " + amount);
         });
 
-        while(true) {
+        while (true) {
             Thread.sleep(1000);
         }
     }
