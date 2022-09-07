@@ -3,14 +3,17 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 import co.nstant.in.cbor.model.Number;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.address.util.AddressUtil;
+import com.bloxbean.cardano.client.util.AssetUtil;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.Amount;
 import com.bloxbean.cardano.yaci.core.model.TransactionOutput;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import com.bloxbean.cardano.yaci.core.util.StringUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -156,11 +159,14 @@ public enum TransactionOutputSerializer implements Serializer<TransactionOutput>
                         DataItem assetValueDI = assetsMap.get(assetKey);
                         BigInteger value = CborSerializationUtil.toBigInteger(assetValueDI);
 
-                        String name = HexUtil.encodeHexString(assetNameBS.getBytes(), true);
+                        String hexName = HexUtil.encodeHexString(assetNameBS.getBytes(), false);
+                        String assetName = StringUtil.isUtf8(assetNameBS.getBytes())?
+                                new String(assetNameBS.getBytes(), StandardCharsets.UTF_8): AssetUtil.calculateFingerPrint(policyId, hexName);
+
                         Amount amount = Amount.builder()
-                                .unit(policyId + "." + name)
+                                .unit(policyId + "." + hexName)
                                 .policyId(policyId)
-                                .assetName(new String(assetNameBS.getBytes()))
+                                .assetName(assetName)
                                 .quantity(value).build();
 
                         amounts.add(amount);
