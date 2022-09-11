@@ -183,7 +183,8 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
         blockFetchAgent.addListener(new BlockfetchAgentListener() {
             @Override
             public void blockFound(Block block) {
-                consumer.accept(block);
+                if (consumer != null)
+                    consumer.accept(block);
             }
         });
 
