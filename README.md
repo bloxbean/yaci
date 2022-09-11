@@ -46,11 +46,11 @@ Gradle
 
 [Documentation](docs/README.md)
 
-# Quick Guide 
+## Quick Guide 
 
-## Using Reactive api
+### Using Reactive api
 
-### 1. Stream Blocks using reactive api (Project Reactor)
+#### 1. Stream Blocks using reactive api (Project Reactor)
 
 Connect to a public relay and stream blocks from last block.
 
@@ -62,7 +62,7 @@ Flux<Block> blocksFlux = BlockStreamer.fromLatest(NetworkType.MAINNET)
 blocksFlux.subscribe(block -> System.out.println(block.getHeader().getHeaderBody().getBlockNumber()));
 ```
 
-### 2. Stream Blocks from Point-1 to Point-2 
+#### 2. Stream Blocks from Point-1 to Point-2 
 
 Connect to a Cardano node and stream blocks from Point1 to Point2.
 
@@ -81,11 +81,11 @@ Connect to a Cardano node and stream blocks from Point1 to Point2.
   });
 ```
 
-## Using Fetchers (Callbacks)
+### Using Fetchers (Callbacks)
 
 If you want to receive all possible events, you can use out of box fetchers which provide data through callbacks/listeners.
 
-### 1. BlockFetcher
+#### 1. BlockFetcher
 To receive blocks for a range
 
 ```java
@@ -115,7 +115,7 @@ To receive blocks for a range
 
 ```
 
-### 2. ChainSyncFetcherFromLatest
+#### 2. ChainSyncFetcherFromLatest
 
 Stream blocks from latest block
 
@@ -138,7 +138,7 @@ Stream blocks from latest block
         });
 ```
 
-### 3. TipFinder 
+#### 3. TipFinder 
 
 Find the tip
 
