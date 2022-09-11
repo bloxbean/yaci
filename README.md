@@ -18,7 +18,7 @@ Maven
 Gradle
 
 ```xml
- implementation('com.bloxbean.cardano:yaci-core:0.0.2')
+ implementation('com.bloxbean.cardano:yaci-core:0.0.4')
 ```
 
 [Documentation](docs/README.md)
