@@ -42,9 +42,11 @@ Gradle
 | `Block Parsing`          | Tx Inputs, Tx Outputs, MultiAssets, Mint, Certificate    |
 | `Eras`                   | Done (Shelley, Alonzo, Babbage),   Not Done(Byron Era)   |   
 |                          |                                                          |
- 
 
-# How to Use 
+
+[Documentation](docs/README.md)
+
+# Quick Guide 
 
 ## Using Reactive api
 
