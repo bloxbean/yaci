@@ -21,6 +21,8 @@ Gradle
  implementation('com.bloxbean.cardano:yaci-core:0.0.2')
 ```
 
+[Documentation](docs/README.md)
+
 ## Status
 
 | mini protocol            | initiator      |
@@ -43,8 +45,6 @@ Gradle
 | `Eras`                   | Done (Shelley, Alonzo, Babbage),   Not Done(Byron Era)   |   
 |                          |                                                          |
 
-
-[Documentation](docs/README.md)
 
 ## Quick Guide 
 
