@@ -1,4 +1,4 @@
-# First App using Fetcher Api
+## First App using Fetcher Api
 
 ### A simple program to follow the chain by connecting to a remote Cardano node
 

@@ -28,4 +28,6 @@ The below sections go through some simple use cases using different available ap
 
 ### 2. [Getting Started With Fetcher api](fetchers/FetchersGettingStarted.md)
 
+### 3. [Getting Started With Reactive api](reactive/ReactiveGettingStarted.md)
+
 
