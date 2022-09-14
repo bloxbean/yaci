@@ -18,8 +18,10 @@ Maven
 Gradle
 
 ```xml
- implementation('com.bloxbean.cardano:yaci-core:0.0.2')
+ implementation('com.bloxbean.cardano:yaci-core:0.0.4')
 ```
+
+[Documentation](docs/README.md)
 
 ## Status
 
@@ -43,8 +45,6 @@ Gradle
 | `Eras`                   | Done (Shelley, Alonzo, Babbage),   Not Done(Byron Era)   |   
 |                          |                                                          |
 
-
-[Documentation](docs/README.md)
 
 ## Quick Guide 
 
