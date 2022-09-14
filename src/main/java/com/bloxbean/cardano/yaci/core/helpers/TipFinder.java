@@ -121,7 +121,8 @@ public class TipFinder extends ReactiveFetcher<Tip> {
         chainSyncAgent.addListener(new ChainSyncAgentListener() {
             @Override
             public void intersactFound(Tip tip, Point point) {
-                consumer.accept(tip);
+                if (consumer != null)
+                    consumer.accept(tip);
             }
         });
 

@@ -158,7 +158,8 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
         chainSyncAgent.addListener(new LocalChainSyncAgentListener() {
             @Override
             public void rollforward(Tip tip, Block block) {
-                consumer.accept(block);
+                if (consumer != null)
+                    consumer.accept(block);
             }
         });
 

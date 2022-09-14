@@ -99,7 +99,8 @@ public class BlockFetcher implements Fetcher<Block> {
         blockfetchAgent.addListener(new BlockfetchAgentListener() {
             @Override
             public void blockFound(Block block) {
-                receiver.accept(block);
+                if (receiver != null)
+                    receiver.accept(block);
             }
         });
 

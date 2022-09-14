@@ -88,6 +88,7 @@ public class LocalTxSubmissionClient implements Fetcher<TxResult> {
         txSubmissionAgent.addListener(new LocalTxSubmissionListener() {
             @Override
             public void txAccepted(TxSubmissionRequest txSubmissionRequest, MsgAcceptTx msgAcceptTx) {
+                if (consumer == null) return;
                 TxResult txResult = TxResult.builder()
                         .txHash(txSubmissionRequest.getTxHash())
                         .accepted(true)
@@ -97,6 +98,7 @@ public class LocalTxSubmissionClient implements Fetcher<TxResult> {
 
             @Override
             public void txRejected(TxSubmissionRequest txSubmissionRequest, MsgRejectTx msgRejectTx) {
+                if (consumer == null) return;
                 TxResult txResult = TxResult.builder()
                         .txHash(txSubmissionRequest.getTxHash())
                         .accepted(false)
