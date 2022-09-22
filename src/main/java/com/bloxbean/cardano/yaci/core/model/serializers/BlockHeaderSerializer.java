@@ -1,9 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.model.Array;
-import co.nstant.in.cbor.model.ByteString;
-import co.nstant.in.cbor.model.DataItem;
-import co.nstant.in.cbor.model.MajorType;
+import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.HeaderBody;
@@ -51,7 +48,10 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
         HeaderBody.HeaderBodyBuilder headerBodyBuilder = HeaderBody.builder();
         headerBodyBuilder.blockNumber(CborSerializationUtil.toBigInteger(headerBodyArr.get(0)).longValue());
         headerBodyBuilder.slot(CborSerializationUtil.toBigInteger(headerBodyArr.get(1)).longValue());
-        headerBodyBuilder.prevHash(CborSerializationUtil.toHex(headerBodyArr.get(2)));
+
+        if (headerBodyArr.get(2) != SimpleValue.NULL) //Required for block = 0
+            headerBodyBuilder.prevHash(CborSerializationUtil.toHex(headerBodyArr.get(2)));
+
         headerBodyBuilder.issuerVkey(CborSerializationUtil.toHex(headerBodyArr.get(3)));
         headerBodyBuilder.vrfVkey(CborSerializationUtil.toHex(headerBodyArr.get(4)));
 
