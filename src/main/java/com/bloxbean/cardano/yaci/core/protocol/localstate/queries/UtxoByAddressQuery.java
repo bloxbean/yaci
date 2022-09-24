@@ -40,8 +40,6 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
 
         array.add(addArr);
 
-        System.out.println(HexUtil.encodeHexString(CborSerializationUtil.serialize(wrapWithOuterArray(array))));
-
         return wrapWithOuterArray(array);
     }
 
@@ -93,11 +91,7 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
             utxoList.add(utxo);
         }
 
-//        utxoMap.getKeys();
-//        UtxoSerializer.INSTANCE.deserializeDI(utxoDI);
-        return new
-
-                UtxoByAddressQueryResult(utxoList);
+        return new UtxoByAddressQueryResult(utxoList);
     }
 
 }
