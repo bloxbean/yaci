@@ -51,6 +51,8 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
         Set<String> poolOwners = new HashSet<>();
         List<DataItem> poolOwnersDataItems = ((Array) dataItemList.get(7)).getDataItems();
         for (DataItem poolOwnerDI : poolOwnersDataItems) {
+            if (poolOwnerDI == SimpleValue.BREAK)
+                continue;
             poolOwners.add(toHex(poolOwnerDI));
         }
 
@@ -58,6 +60,8 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
         List<DataItem> relaysDataItems = ((Array) dataItemList.get(8)).getDataItems();
         List<Relay> relays = new ArrayList<>();
         for (DataItem relayDI : relaysDataItems) {
+            if (relayDI == SimpleValue.BREAK)
+                continue;
             relays.add(deserializeRelay(relayDI));
         }
 
