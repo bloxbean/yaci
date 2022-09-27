@@ -11,6 +11,11 @@ public enum MsgResultSerializer implements Serializer<MsgResult> {
     INSTANCE;
 
     @Override
+    public MsgResult deserializeDI(DataItem di) {
+        return deserializeDI(new DataItem[]{di});
+    }
+
+    @Override
     public MsgResult deserializeDI(DataItem[] di) {
         List<DataItem> dataItemList = checkMsgType(di[0], 4);
 
