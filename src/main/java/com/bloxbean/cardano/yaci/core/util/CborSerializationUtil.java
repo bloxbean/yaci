@@ -109,7 +109,7 @@ public class CborSerializationUtil {
      * @param values
      * @return
      */
-    public static byte[] serialize(DataItem[] values) throws CborException {
+    public static byte[] serialize(DataItem[] values) {
         return serialize(values, true); //By default Canonical = true
     }
 
@@ -162,7 +162,7 @@ public class CborSerializationUtil {
      * @param bytes
      * @return DataItem
      */
-    public static DataItem[] deserializeList(@NonNull byte[] bytes) {
+    public static DataItem[] deserialize(@NonNull byte[] bytes) {
         try {
             return CborDecoder.decode(bytes).toArray(new DataItem[0]);
         } catch (CborException e) {

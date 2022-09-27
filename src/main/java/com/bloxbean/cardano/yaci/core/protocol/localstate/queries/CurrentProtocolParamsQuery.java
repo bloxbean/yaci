@@ -163,8 +163,8 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
         if (paramsDIList.size() > 22) { //It seems node is returning 22 elements in first DI and 1 in second DI
             itemDI = paramsDIList.get(22);
             maxCollateralInputs = itemDI != null ? toInt(itemDI) : null;
-
-            if (maxCollateralInputs == null && di.length == 2) { //Check the second di in the array if available
+        } else {
+            if (di.length == 2) { //Check the second di in the array if available
                 itemDI = di[1];
                 maxCollateralInputs = itemDI != null ? toInt(itemDI) : null;
             }

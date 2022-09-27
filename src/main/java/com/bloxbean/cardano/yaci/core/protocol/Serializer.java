@@ -14,16 +14,37 @@ public interface Serializer<T> {
     }
 
     default T deserialize(byte[] bytes) {
-        DataItem di = CborSerializationUtil.deserializeOne(bytes);
-        return deserializeDI(di);
+        DataItem[] dataItems = CborSerializationUtil.deserialize(bytes);
+        if (dataItems.length == 0)
+            return null;
+
+        if (dataItems.length == 1) {
+            return deserializeDI(CborSerializationUtil.deserializeOne(bytes));
+        } else {
+            return deserializeDI(CborSerializationUtil.deserialize(bytes));
+        }
     }
 
     default DataItem serializeDI(T object) {
         return null;
     }
 
+    /**
+     * Implement this method when only one top-level DataItem is expected after parsing
+     * @param di
+     * @return
+     */
     default T deserializeDI(DataItem di) {
-        return null;
+        throw new UnsupportedOperationException("This deserialization method is not implemented for this messge");
+    }
+
+    /**
+     * Implement this method when multiple top-level DataItems are expected after parsing
+     * @param dis
+     * @return
+     */
+    default T deserializeDI(DataItem[] dis) {
+        throw new UnsupportedOperationException("This deserialization method is not implemented for this message. Something is wrong");
     }
 
     /**

@@ -11,11 +11,11 @@ public enum MsgResultSerializer implements Serializer<MsgResult> {
     INSTANCE;
 
     @Override
-    public MsgResult deserializeDI(DataItem di) {
-        List<DataItem> dataItemList = checkMsgType(di, 4);
+    public MsgResult deserializeDI(DataItem[] di) {
+        List<DataItem> dataItemList = checkMsgType(di[0], 4);
 
 //        QueryResult result = QueryResultDeserializer.deserialize(dataItemList.get(1));
-        return new MsgResult(CborSerializationUtil.serialize(di));
+        return new MsgResult(CborSerializationUtil.serialize(di, false));
     }
 
     //TODO -- serialize() is not required now as it's used in server
