@@ -17,7 +17,7 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
 
     @Override
     public BlockHeader deserialize(byte[] bytes) {
-        DataItem di = CborSerializationUtil.deserialize(bytes);
+        DataItem di = CborSerializationUtil.deserializeOne(bytes);
 
         return deserializeDI(di);
     }
@@ -25,7 +25,7 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
     @Override
     public BlockHeader deserializeDI(DataItem di) {
         byte[] headerBytes = ((ByteString)di).getBytes();
-        Array headerArray = (Array)CborSerializationUtil.deserialize(headerBytes);
+        Array headerArray = (Array)CborSerializationUtil.deserializeOne(headerBytes);
         return getBlockHeaderFromHeaderArray(headerArray);
     }
 

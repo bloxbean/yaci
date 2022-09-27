@@ -14,7 +14,7 @@ public interface Serializer<T> {
     }
 
     default T deserialize(byte[] bytes) {
-        DataItem di = CborSerializationUtil.deserialize(bytes);
+        DataItem di = CborSerializationUtil.deserializeOne(bytes);
         return deserializeDI(di);
     }
 

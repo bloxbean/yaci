@@ -103,7 +103,7 @@ public enum ByronBlockSerializer implements Serializer<ByronMainBlock> {
 
                 //0th item is 0
                 //txin = [0, #6.24(bytes .cbor ([txid, u32]))] / [u8 .ne 0, encoded-cbor]
-                Array txInDI_1 = (Array)CborSerializationUtil.deserialize(((ByteString)txInArr.getDataItems().get(1)).getBytes());
+                Array txInDI_1 = (Array)CborSerializationUtil.deserializeOne(((ByteString)txInArr.getDataItems().get(1)).getBytes());
                 String txInHash = toHex(txInDI_1.getDataItems().get(0));
                 int txIndex = toInt(txInDI_1.getDataItems().get(1));
 

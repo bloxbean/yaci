@@ -145,11 +145,11 @@ public class CborSerializationUtil {
     }
 
     /**
-     * Deserialize bytes to DataItem
+     * Deserialize bytes to a DataItem. If multiple DataItem found at top level, return the first DataItem
      * @param bytes
      * @return DataItem
      */
-    public static DataItem deserialize(@NonNull byte[] bytes) {
+    public static DataItem deserializeOne(@NonNull byte[] bytes) {
         try {
             return CborDecoder.decode(bytes).get(0);
         } catch (CborException e) {

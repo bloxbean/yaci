@@ -20,7 +20,7 @@ public enum NoBlocksSerializer implements Serializer<NoBlocks> {
 
     @Override
     public NoBlocks deserialize(byte[] bytes) {
-        DataItem di = CborSerializationUtil.deserialize(bytes);
+        DataItem di = CborSerializationUtil.deserializeOne(bytes);
 
         if (di instanceof Array) {
             int key = ((UnsignedInteger)((Array) di).getDataItems().get(0)).getValue().intValue();

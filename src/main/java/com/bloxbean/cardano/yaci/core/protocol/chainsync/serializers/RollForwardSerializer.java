@@ -20,7 +20,7 @@ public enum RollForwardSerializer implements Serializer<RollForward> {
     INSTANCE;
 
     public RollForward deserialize(byte[] bytes) {
-        Array headerContentArr = (Array)CborSerializationUtil.deserialize(bytes);
+        Array headerContentArr = (Array)CborSerializationUtil.deserializeOne(bytes);
         List<DataItem> headerContentDI = headerContentArr.getDataItems();
         int rollForwardType = toInt(headerContentDI.get(0));
 
@@ -37,7 +37,7 @@ public enum RollForwardSerializer implements Serializer<RollForward> {
             int byronPrefix_2 = toInt(byronPrefixArr.getDataItems().get(1));
 
             byte[] headerBytes =((ByteString)(byronPrefixAndHeaderDI.getDataItems().get(1))).getBytes();
-            DataItem headerDI = CborSerializationUtil.deserialize(headerBytes);
+            DataItem headerDI = CborSerializationUtil.deserializeOne(headerBytes);
             byronBlockHead = ByronBlockSerializer.INSTANCE.deserializeHeader((Array) headerDI);
         } else { //Shelley and later versions
             blockHeader =

@@ -17,7 +17,7 @@ public interface LocalChainSyncStateBase extends State {
 
     default Message handleInbound(byte[] bytes) {
         try {
-            Array array = (Array) CborSerializationUtil.deserialize(bytes);
+            Array array = (Array) CborSerializationUtil.deserializeOne(bytes);
             int id = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
             switch (id) {
                 case 1:

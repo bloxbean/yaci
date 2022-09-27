@@ -176,7 +176,7 @@ public class TxSubmissionMessagesSerializers {
 
         @Override
         public MsgDone deserialize(byte[] bytes) {
-            DataItem di = CborSerializationUtil.deserialize(bytes);
+            DataItem di = CborSerializationUtil.deserializeOne(bytes);
 
             int key = ((UnsignedInteger)((Array) di).getDataItems().get(0)).getValue().intValue();
             if (key == 4)

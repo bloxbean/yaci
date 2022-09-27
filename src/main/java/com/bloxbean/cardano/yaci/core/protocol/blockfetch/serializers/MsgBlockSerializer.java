@@ -12,7 +12,7 @@ public enum MsgBlockSerializer implements Serializer<MsgBlock> {
 
     @Override
     public MsgBlock deserialize(byte[] bytes) {
-        Array array = (Array)CborSerializationUtil.deserialize(bytes);
+        Array array = (Array)CborSerializationUtil.deserializeOne(bytes);
 
         int key = ((UnsignedInteger)array.getDataItems().get(0)).getValue().intValue();
         if (key != 4)

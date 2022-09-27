@@ -24,12 +24,12 @@ public enum LocalRollForwardSerializer implements Serializer<LocalRollForward> {
     INSTANCE;
 
     public LocalRollForward deserialize(byte[] bytes) {
-        Array contentArr = (Array)CborSerializationUtil.deserialize(bytes);
+        Array contentArr = (Array)CborSerializationUtil.deserializeOne(bytes);
         List<DataItem> contentDI = contentArr.getDataItems();
         int rollForwardType = toInt(contentDI.get(0));
 
         ByteString blockContent = (ByteString) contentDI.get(1);
-        Array blockArray = (Array) CborSerializationUtil.deserialize(blockContent.getBytes());
+        Array blockArray = (Array) CborSerializationUtil.deserializeOne(blockContent.getBytes());
 
         int eraValue = ((UnsignedInteger)blockArray.getDataItems().get(0)).getValue().intValue();
         Era era = EraUtil.getEra(eraValue);

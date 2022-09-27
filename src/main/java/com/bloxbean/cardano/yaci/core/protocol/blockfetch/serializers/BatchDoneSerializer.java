@@ -20,7 +20,7 @@ public enum BatchDoneSerializer implements Serializer<BatchDone> {
 
     @Override
     public BatchDone deserialize(byte[] bytes) {
-        DataItem di = CborSerializationUtil.deserialize(bytes);
+        DataItem di = CborSerializationUtil.deserializeOne(bytes);
 
         if (di instanceof Array) {
             int key = ((UnsignedInteger)((Array) di).getDataItems().get(0)).getValue().intValue();

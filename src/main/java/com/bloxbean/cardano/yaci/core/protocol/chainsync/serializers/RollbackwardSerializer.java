@@ -12,7 +12,7 @@ public enum RollbackwardSerializer implements Serializer<Rollbackward> {
 
     @Override
     public Rollbackward deserialize(byte[] bytes) {
-        Array array = (Array) CborSerializationUtil.deserialize(bytes);
+        Array array = (Array) CborSerializationUtil.deserializeOne(bytes);
 
         Point point = PointSerializer.INSTANCE.deserializeDI(array.getDataItems().get(1));
         Tip tip = TipSerializer.INSTANCE.deserializeDI(array.getDataItems().get(2));

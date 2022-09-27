@@ -18,7 +18,7 @@ public enum BlockSerializer implements Serializer<Block> {
 
     @Override
     public Block deserialize(byte[] bytes) {
-        DataItem dataItem = CborSerializationUtil.deserialize(bytes);
+        DataItem dataItem = CborSerializationUtil.deserializeOne(bytes);
         return deserializeDI(dataItem);
     }
 

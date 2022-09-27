@@ -93,7 +93,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
     private void onReceiveBlocks(MsgBlock message) {
         byte[] body = message.getBytes();
 
-        Array array = (Array) CborSerializationUtil.deserialize(body);
+        Array array = (Array) CborSerializationUtil.deserializeOne(body);
         int eraValue = ((UnsignedInteger)array.getDataItems().get(0)).getValue().intValue();
         try {
             Era era = EraUtil.getEra(eraValue);

@@ -17,7 +17,7 @@ public interface LocalTxSubmissionStateBase extends State {
     @Override
     default Message handleInbound(byte[] bytes) {
         try {
-            DataItem di = CborSerializationUtil.deserialize(bytes);
+            DataItem di = CborSerializationUtil.deserializeOne(bytes);
             Array array = (Array) di;
             int id = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
             switch (id) {

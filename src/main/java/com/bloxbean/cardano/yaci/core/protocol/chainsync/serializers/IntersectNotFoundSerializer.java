@@ -16,7 +16,7 @@ public enum IntersectNotFoundSerializer implements Serializer<IntersectNotFound>
     }
 
     public IntersectNotFound deserialize(byte[] bytes) {
-        DataItem di = CborSerializationUtil.deserialize(bytes);
+        DataItem di = CborSerializationUtil.deserializeOne(bytes);
         Array array = (Array) di;
         int key = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
         if (key != 6)
