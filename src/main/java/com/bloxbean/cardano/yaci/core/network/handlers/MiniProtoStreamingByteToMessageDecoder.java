@@ -57,8 +57,8 @@ public class MiniProtoStreamingByteToMessageDecoder
             bytes = BytesUtil.merge(bytes, payload);
             try {
                 while (true && bytes.length != 0) {
-                    DataItem di = CborDecoder.decode(bytes).get(0);
-                    byte[] segmentBytes = CborSerializationUtil.serialize(di);
+                    List<DataItem> diList = CborDecoder.decode(bytes);
+                    byte[] segmentBytes = bytes.clone();//CborSerializationUtil.serialize(diList.toArray(new DataItem[0]), false);
 
                     Segment segment = Segment.builder()
                             .timestamp(timestamp)

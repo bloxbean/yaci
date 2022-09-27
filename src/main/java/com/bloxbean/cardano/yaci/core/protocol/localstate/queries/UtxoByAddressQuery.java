@@ -44,8 +44,8 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
     }
 
     @Override
-    public UtxoByAddressQueryResult deserializeResult(DataItem di) {
-        List<DataItem> utxoDIList = extractResultArray(di);
+    public UtxoByAddressQueryResult deserializeResult(DataItem[] di) {
+        List<DataItem> utxoDIList = extractResultArray(di[0]);
         Map utxoMap = (Map) utxoDIList.get(0); //As only one address is passed, we are sure only one value in the list
 
         List<Utxo> utxoList = new ArrayList<>();

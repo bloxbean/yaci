@@ -20,8 +20,8 @@ public class ChainPointQuery implements Query<ChainPointQueryResult> {
     }
 
     @Override
-    public ChainPointQueryResult deserializeResult(DataItem di) {
-        List<DataItem> dataItemList = ((Array)di).getDataItems();
+    public ChainPointQueryResult deserializeResult(DataItem[] di) {
+        List<DataItem> dataItemList = ((Array)di[0]).getDataItems();
 
         int type = ((UnsignedInteger)dataItemList.get(0)).getValue().intValue(); //4
 

@@ -36,12 +36,12 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
     }
 
     @Override
-    public CurrentProtocolParamQueryResult deserializeResult(DataItem di) {
-        List<DataItem> dataItemList = ((Array) di).getDataItems();
+    public CurrentProtocolParamQueryResult deserializeResult(DataItem[] di) {
+        List<DataItem> dataItemList = ((Array) di[0]).getDataItems();
 
         int type = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue(); //4
 
-        List<DataItem> paramsDIList = ((Array) extractResultArray(di).get(0)).getDataItems();
+        List<DataItem> paramsDIList = ((Array) extractResultArray(di[0]).get(0)).getDataItems();
 
         DataItem itemDI = paramsDIList.get(0);
         Integer minFeeA = itemDI != null ? toInt(itemDI) : null;
@@ -158,9 +158,17 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
 
         itemDI = paramsDIList.get(21);
         Integer collateralPercent = itemDI != null? toInt(itemDI): null;
-//
-//        itemDI = paramsDIList.get(22);
-//        Integer maxCollateralPercent = itemDI != null? toInt(itemDI): null;
+
+        Integer maxCollateralInputs = null;
+        if (paramsDIList.size() > 22) { //It seems node is returning 22 elements in first DI and 1 in second DI
+            itemDI = paramsDIList.get(22);
+            maxCollateralInputs = itemDI != null ? toInt(itemDI) : null;
+
+            if (maxCollateralInputs == null && di.length == 2) { //Check the second di in the array if available
+                itemDI = di[1];
+                maxCollateralInputs = itemDI != null ? toInt(itemDI) : null;
+            }
+        }
 
         ProtocolParamUpdate protocolParams = ProtocolParamUpdate.builder()
                 .minFeeA(minFeeA)
@@ -188,7 +196,7 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
                 .maxBlockExSteps(maxBlockExSteps)
                 .maxValSize(maxValueSize)
                 .collateralPercent(collateralPercent)
-//                .maxCollateralInputs(maxCollateralPercent)
+                .maxCollateralInputs(maxCollateralInputs)
                 .build();
 
         return new CurrentProtocolParamQueryResult(protocolParams);

@@ -156,5 +156,18 @@ public class CborSerializationUtil {
             throw new CborRuntimeException("Cbor de-serialization error", e);
         }
     }
+
+    /**
+     * Deserialize bytes to list of DataItem.
+     * @param bytes
+     * @return DataItem
+     */
+    public static DataItem[] deserializeList(@NonNull byte[] bytes) {
+        try {
+            return CborDecoder.decode(bytes).toArray(new DataItem[0]);
+        } catch (CborException e) {
+            throw new CborRuntimeException("Cbor de-serialization error", e);
+        }
+    }
 }
 

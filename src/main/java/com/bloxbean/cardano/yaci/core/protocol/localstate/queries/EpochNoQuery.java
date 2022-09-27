@@ -26,8 +26,8 @@ public class EpochNoQuery implements EraQuery<EpochNoQueryResult> {
     }
 
     @Override
-    public EpochNoQueryResult deserializeResult(DataItem di) {
-        List<DataItem> dataItemList = extractResultArray(di);
+    public EpochNoQueryResult deserializeResult(DataItem[] di) {
+        List<DataItem> dataItemList = extractResultArray(di[0]);
         long epochNo = ((UnsignedInteger) dataItemList.get(0)).getValue().longValue();
         return new EpochNoQueryResult(epochNo);
     }
