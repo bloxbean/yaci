@@ -9,14 +9,14 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
-@Disabled
+@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 class BlockFetcherTest extends BaseTest {
 
     @Test
@@ -29,6 +29,10 @@ class BlockFetcherTest extends BaseTest {
             log.info("Block >>> {} -- {} {}", block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot() + "  ", block.getEra());
             countDownLatch.countDown();
         });
+
+        //Byron blocks
+//        Point from = new Point(0, "f0f7892b5c333cffc4b3c4344de48af4cc63f55e44936196f365a9ef2244134f");
+//        Point to = new Point(5, "365201e928da50760fce4bdad09a7338ba43a43aff1c0e8d3ec458388c932ec8");
 
         Point from = new Point(33914577, "d9c6a8314457e3f8a8204c1d8c26854e377df101326e529a5d1a7cd27dd101e1");
         Point to = new Point(33914577, "d9c6a8314457e3f8a8204c1d8c26854e377df101326e529a5d1a7cd27dd101e1");

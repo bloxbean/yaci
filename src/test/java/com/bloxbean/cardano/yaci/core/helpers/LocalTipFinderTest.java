@@ -4,14 +4,16 @@ import com.bloxbean.cardano.yaci.core.BaseTest;
 import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
-import org.junit.jupiter.api.Disabled;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import reactor.core.publisher.Mono;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-@Disabled
+@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
+@Slf4j
 class LocalTipFinderTest extends BaseTest {
 
     @Test

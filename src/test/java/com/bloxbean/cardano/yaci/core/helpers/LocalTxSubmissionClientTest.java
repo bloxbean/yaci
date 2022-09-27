@@ -6,14 +6,14 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableCon
 import com.bloxbean.cardano.yaci.core.protocol.localtx.model.TxSubmissionRequest;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
-@Disabled
+@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 class LocalTxSubmissionClientTest {
 
     String nodeSocketFile = "/Users/satya/work/cardano-node/preview/db/node.socket";

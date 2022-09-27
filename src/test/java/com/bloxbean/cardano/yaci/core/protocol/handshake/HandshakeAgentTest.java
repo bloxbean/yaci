@@ -12,11 +12,11 @@ import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgRejectTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.model.TxSubmissionRequest;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 @Slf4j
-@Disabled
+@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 class HandshakeAgentTest extends BaseTest {
 
 //    @Test
