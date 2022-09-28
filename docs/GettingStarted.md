@@ -30,4 +30,6 @@ The below sections go through some simple use cases using different available ap
 
 ### 3. [Getting Started With Reactive api](reactive/ReactiveGettingStarted.md)
 
+### 4. [Getting Started With Local State Queries](local-state-queries.md)
+
 

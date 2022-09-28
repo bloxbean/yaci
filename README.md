@@ -11,17 +11,17 @@ Maven
 <dependency>
     <groupId>com.bloxbean.cardano</groupId>
     <artifactId>yaci-core</artifactId>
-    <version>0.0.5</version>
+    <version>0.0.7</version>
 </dependency>
 ```
 
 Gradle
 
 ```xml
- implementation('com.bloxbean.cardano:yaci-core:0.0.5')
+ implementation('com.bloxbean.cardano:yaci-core:0.0.7')
 ```
 
-[Documentation](docs/README.md)
+## [Documentation](docs/README.md)
 
 ## Status
 
@@ -89,7 +89,8 @@ If you want to receive all possible events, you can use out of box fetchers whic
 To receive blocks for a range
 
 ```java
-        Point from = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
+        //Last Byron Block
+        Point from = new Point(4492799, "f8084c61b6a238acec985b59310b6ecec49c0ab8352249afd7268da5cff2a457");
         Point to = new Point(70223766, "21155bb822637508a91e9952e712040c0ea45107fb91898bfe8c9a95389b0d90");
 
         VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Constants.MAINNET_PROTOCOL_MAGIC); 

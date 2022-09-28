@@ -12,6 +12,7 @@ The followings are the main components in Yaci Core.
 1. [Agents](agents.md)
 2. [Fetchers](fetchers.md)
 3. [Reactive Apis](reactive.md)
+4. [LocalState Queries](local-state-queries.md)
 
 
 [Getting Started Guide](GettingStarted.md)
