@@ -72,7 +72,8 @@ class Session implements Disposable {
                 //Listen to the channel closing
                 var closeFuture = activeChannel.closeFuture();
                 closeFuture.addListeners((ChannelFuture closeFut) -> {
-                    log.error("Channel closed !!!");
+                    if (log.isDebugEnabled())
+                        log.warn("Channel closed !!!");
                     if (sessionListener != null)
                         sessionListener.disconnected();
                 });
