@@ -4,28 +4,28 @@ import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
 import com.bloxbean.cardano.yaci.core.protocol.AgentListener;
 
-public class BlockfetchAgentListener implements AgentListener {
-    public void batchStarted() {
+public interface BlockfetchAgentListener extends AgentListener {
+    default void batchStarted() {
 
     }
 
-    public void batchDone() {
+    default void batchDone() {
 
     }
 
-    public void readyForNextBatch() {
+    default void readyForNextBatch() {
 
     }
 
-    public void blockFound(Block block) {
+    default void blockFound(Block block) {
 
     }
 
-    public void noBlockFound() {
+    default void noBlockFound() {
 
     }
 
-    public void byronBlockFound(ByronBlock byronBlock) {
+    default void byronBlockFound(ByronBlock byronBlock) {
 
     }
 

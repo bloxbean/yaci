@@ -56,6 +56,18 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
 
     /**
      * Construct {@link N2NChainSyncFetcher} to sync the blockchain
+     * @param host  Cardano node host
+     * @param port  Cardano node port
+     * @param wellKnownPoint point
+     * @param protocolMagic protocol magic
+     * @param syncFromLatest true if sync from latest block, false if sync from the well known point
+     */
+    public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, long protocolMagic, boolean syncFromLatest) {
+        this(host, port, wellKnownPoint, N2NVersionTableConstant.v4AndAbove(protocolMagic), syncFromLatest);
+    }
+
+    /**
+     * Construct {@link N2NChainSyncFetcher} to sync the blockchain
      *
      * @param host           Cardano host
      * @param port           Cardano node port
