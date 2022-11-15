@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
+import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.client.util.JsonUtil;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.model.Epoch;
@@ -59,7 +60,14 @@ public enum ByronBlockSerializer implements Serializer<ByronMainBlock> {
         ByronBlockCons consensusData = deserializeConsensusData(headerArr.getDataItems().get(3));
         String extraData = HexUtil.encodeHexString(CborSerializationUtil.serialize(headerArr.getDataItems().get(4)));
 
-        return new ByronBlockHead(protocolMagic, prevBlockId, bodyProof, consensusData, extraData);
+        //Calculate block hash
+        Array blockHashArray = new Array();
+        // hash expects to have a prefix for the type of block
+        blockHashArray.add(new UnsignedInteger(1)); //For main block 1
+        blockHashArray.add(headerArr);
+        String blockHash = HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(CborSerializationUtil.serialize(blockHashArray)));
+
+        return new ByronBlockHead(protocolMagic, prevBlockId, bodyProof, consensusData, extraData, blockHash);
     }
 
     private ByronBlockCons deserializeConsensusData(DataItem dataItem) {

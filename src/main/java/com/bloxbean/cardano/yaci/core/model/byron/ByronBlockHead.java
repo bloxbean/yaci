@@ -14,4 +14,7 @@ public class ByronBlockHead implements ByronHead {
     private String bodyProof;
     private ByronBlockCons consensusData;
     private String extraData;
+
+    //Derived Value
+    private String blockHash;
 }
