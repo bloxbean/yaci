@@ -14,7 +14,7 @@ public enum PointSerializer implements Serializer<Point> {
     @Override
     public DataItem serializeDI(Point point) {
         Array array = new Array();
-        if (point.getSlot() != 0 && point.getHash() != null) {
+        if (point != Point.ORIGIN) {
             array.add(new UnsignedInteger(point.getSlot()));
             array.add(new ByteString(HexUtil.decodeHexString(point.getHash())));
         }
