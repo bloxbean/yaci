@@ -140,8 +140,11 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     private void onRollForward(RollForward rollForward) {
-        if (rollForward.getBlockHeader() != null) //For Byron era, this value is null. Will be fixed later
+        if (rollForward.getByronBlockHead() != null) {
+            this.currentPoint = new Point(rollForward.getByronBlockHead().getConsensusData().getSlotId().getSlot(), rollForward.getByronBlockHead().getBlockHash());
+        } else if (rollForward.getBlockHeader() != null) { //shelley and later
             this.currentPoint = new Point(rollForward.getBlockHeader().getHeaderBody().getSlot(), rollForward.getBlockHeader().getHeaderBody().getBlockHash());
+        }
 
         if (counter++ % 100 == 0 || (tip.getPoint().getSlot() - currentPoint.getSlot()) < 10) {
 
