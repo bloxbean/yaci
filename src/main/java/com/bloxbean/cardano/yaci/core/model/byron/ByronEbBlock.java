@@ -8,6 +8,6 @@ import lombok.*;
 @ToString
 @EqualsAndHashCode
 @Builder
-public class ByronEbBlock implements ByronBlock {
+public class ByronEbBlock {
     private ByronEbHead header;
 }

@@ -1,7 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.chainsync.messages;
 
 import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.Message;

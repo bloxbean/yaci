@@ -8,7 +8,7 @@ import lombok.*;
 @ToString
 @EqualsAndHashCode
 @Builder
-public class ByronEbHead implements ByronHead<ByronEbBlockCons> {
+public class ByronEbHead {
     private long protocolMagic;
     private String prevBlock;
     private String bodyProof;

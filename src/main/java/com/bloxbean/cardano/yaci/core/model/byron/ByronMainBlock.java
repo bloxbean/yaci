@@ -8,7 +8,7 @@ import lombok.*;
 @ToString
 @EqualsAndHashCode
 @Builder
-public class ByronMainBlock implements ByronBlock {
+public class ByronMainBlock {
     private ByronBlockHead header;
     private ByronBlockBody body;
 }
