@@ -1,7 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.localstate;
 
 import com.bloxbean.cardano.yaci.core.BaseTest;
-import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.helpers.LocalTipFinder;
 import com.bloxbean.cardano.yaci.core.network.N2CClient;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -38,7 +37,7 @@ class LocalStateQueryAgentTest extends BaseTest {
     void acquiredInvalidPoint_shouldReturn_MsgFailure() throws InterruptedException {
         Point acquirePoint = new Point(2348544, "75ec1008c5e8a49516c9c823bbb0363e858705ff3ae48f61794115385d0ffce8");
 
-        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(2));
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(acquirePoint);
 
         N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
@@ -80,10 +79,9 @@ class LocalStateQueryAgentTest extends BaseTest {
 
     @Test
     void acquiredValidPoint_shouldReturn_Acquired() throws InterruptedException {
-        Point acquirePoint = new Point(2348544, "85ec1008c5e8a49516c9c823bbb0363e858705ff3ae48f61794115385d0ffce9");
 
-        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(2));
-        LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(acquirePoint);
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
+        LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(knownPoint);
 
         N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
 
@@ -128,7 +126,7 @@ class LocalStateQueryAgentTest extends BaseTest {
         Mono<Tip> tipMono = findTip();
         Tip tip = tipMono.block(Duration.ofSeconds(10));
 
-        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(2));
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
 
         N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
@@ -182,7 +180,7 @@ class LocalStateQueryAgentTest extends BaseTest {
         Mono<Tip> tipMono = findTip();
         Tip tip = tipMono.block(Duration.ofSeconds(10));
 
-        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(2));
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
 
         N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
@@ -236,7 +234,7 @@ class LocalStateQueryAgentTest extends BaseTest {
         Mono<Tip> tipMono = findTip();
         Tip tip = tipMono.block(Duration.ofSeconds(10));
 
-        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(2));
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
 
         N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
@@ -290,7 +288,7 @@ class LocalStateQueryAgentTest extends BaseTest {
         Mono<Tip> tipMono = findTip();
         Tip tip = tipMono.block(Duration.ofSeconds(10));
 
-        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(2));
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
 
         N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
@@ -351,7 +349,7 @@ class LocalStateQueryAgentTest extends BaseTest {
         Mono<Tip> tipMono = findTip();
         Tip tip = tipMono.block(Duration.ofSeconds(10));
 
-        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(2));
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
 
         N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
@@ -403,7 +401,7 @@ class LocalStateQueryAgentTest extends BaseTest {
     @Test
     public Mono<Tip> findTip() {
         return Mono.create(tipMonoSink -> {
-            LocalTipFinder tipFinder = new LocalTipFinder(nodeSocketFile, new Point(), Constants.PREVIEW_PROTOCOL_MAGIC);
+            LocalTipFinder tipFinder = new LocalTipFinder(nodeSocketFile, Point.ORIGIN, protocolMagic);
             tipFinder.start(tip -> {
                 tipMonoSink.success(tip);
                 tipFinder.shutdown();

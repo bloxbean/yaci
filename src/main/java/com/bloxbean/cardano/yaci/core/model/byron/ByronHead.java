@@ -1,9 +1,10 @@
 package com.bloxbean.cardano.yaci.core.model.byron;
 
-public interface ByronHead {
+public interface ByronHead<T> {
     long getProtocolMagic();
     String getPrevBlock();
     String getBodyProof();
-    ByronBlockCons getConsensusData();
+    T getConsensusData();
     String getExtraData();
+    String getBlockHash();
 }

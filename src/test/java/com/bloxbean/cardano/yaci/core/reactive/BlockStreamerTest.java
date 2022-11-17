@@ -15,9 +15,13 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
 @EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
@@ -28,14 +32,21 @@ class BlockStreamerTest {
         VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic());
         Point wellKnownPoint = new Point(17625824, "765359c702103513dcb8ff4fe86c1a1522c07535733f31ff23231ccd9a3e0247");
 
-        Flux<Block> flux = BlockStreamer.fromLatest("192.168.0.228", 6000, wellKnownPoint, versionTable).stream();
+        Flux<Block> flux = BlockStreamer.fromLatest(Constants.MAINNET_IOHK_RELAY_ADDR, Constants.MAINNET_IOHK_RELAY_PORT, wellKnownPoint, versionTable).stream();
 
-        AtomicInteger counter = new AtomicInteger(0);
-        Disposable disposable = flux.subscribe(block -> log.info(">>>>>>>>" + block.getHeader().getHeaderBody().getBlockNumber()));
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+        List<Block> blocks = new ArrayList<>();
+        Disposable disposable = flux.subscribe(block -> {
+            log.info(">>>>>>>>" + block.getHeader().getHeaderBody().getBlockNumber());
+            blocks.add(block);
+            countDownLatch.countDown();
+        });
 
-        while (counter.get() < 100) {
-            Thread.sleep(1000);
-        }
+        countDownLatch.await(60, TimeUnit.SECONDS);
+        disposable.dispose();
+
+        assertThat(blocks).hasSize(1);
+        assertThat(blocks.get(0).getHeader().getHeaderBody().getBlockNumber()).isGreaterThan(8025579);
     }
 
     @Test

@@ -2,7 +2,8 @@ package com.bloxbean.cardano.yaci.core.helpers;
 
 import com.bloxbean.cardano.yaci.core.helpers.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronHead;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.network.N2CClient;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
@@ -48,6 +49,18 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
      */
     public N2CChainSyncFetcher(String nodeSocketFile, Point wellKnownPoint, long protocolMagic) {
         this(nodeSocketFile, wellKnownPoint, N2CVersionTableConstant.v1AndAbove(protocolMagic));
+    }
+
+    /**
+     * Use this constructor to sync block from the wellknown point
+     *
+     * @param nodeSocketFile path to local Cardano node's socket file
+     * @param wellKnownPoint
+     * @param protocolMagic
+     * @param syncFromLatest
+     */
+    public N2CChainSyncFetcher(String nodeSocketFile, Point wellKnownPoint, long protocolMagic, boolean syncFromLatest) {
+        this(nodeSocketFile, wellKnownPoint, N2CVersionTableConstant.v1AndAbove(protocolMagic), syncFromLatest);
     }
 
     /**
@@ -133,9 +146,16 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
             }
 
             @Override
-            public void rollforwardByronEra(Tip tip, ByronHead byronHead) {
+            public void rollforwardByronEra(Tip tip, ByronMainBlock byronMainBlock) {
                 if (log.isDebugEnabled())
-                    log.debug("ByronEraBlock : {}", byronHead.getConsensusData().getSlotId());
+                    log.debug("ByronEraBlock : {}", byronMainBlock.getHeader().getConsensusData());
+                chainSyncAgent.sendNextMessage();
+            }
+
+            @Override
+            public void rollforwardByronEra(Tip tip, ByronEbBlock byronEbBlock) {
+                if (log.isDebugEnabled())
+                    log.debug("ByronEbBlock : {}", byronEbBlock.getHeader().getConsensusData());
                 chainSyncAgent.sendNextMessage();
             }
 

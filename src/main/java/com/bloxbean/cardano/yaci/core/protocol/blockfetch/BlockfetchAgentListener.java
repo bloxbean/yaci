@@ -1,7 +1,8 @@
 package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
 
 import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.AgentListener;
 
 public interface BlockfetchAgentListener extends AgentListener {
@@ -25,7 +26,11 @@ public interface BlockfetchAgentListener extends AgentListener {
 
     }
 
-    default void byronBlockFound(ByronBlock byronBlock) {
+    default void byronBlockFound(ByronMainBlock byronBlock) {
+
+    }
+
+    default void byronEbBlockFound(ByronEbBlock byronEbBlock) {
 
     }
 

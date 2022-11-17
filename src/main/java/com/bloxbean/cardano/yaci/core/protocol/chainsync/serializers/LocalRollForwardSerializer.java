@@ -7,7 +7,8 @@ import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Era;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.ByronBlockSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.ByronEbBlockSerializer;
@@ -35,19 +36,20 @@ public enum LocalRollForwardSerializer implements Serializer<LocalRollForward> {
         Era era = EraUtil.getEra(eraValue);
 
         Block block = null;
-        ByronBlock byronBlock = null;
+        ByronEbBlock byronEbBlock = null;
+        ByronMainBlock byronMainBlock = null;
         if (era == Era.Byron) {
             if (eraValue == 0) {
-                byronBlock = ByronEbBlockSerializer.INSTANCE.deserializeDI(blockArray);
+                byronEbBlock = ByronEbBlockSerializer.INSTANCE.deserializeDI(blockArray);
             } else {
-                byronBlock = ByronBlockSerializer.INSTANCE.deserializeDI(blockArray);
+                byronMainBlock = ByronBlockSerializer.INSTANCE.deserializeDI(blockArray);
             }
         } else {
             block = BlockSerializer.INSTANCE.deserializeDI(blockArray);
         }
 
         Tip tip = TipSerializer.INSTANCE.deserializeDI(contentDI.get(2));
-        return new LocalRollForward(byronBlock, block, tip);
+        return new LocalRollForward(byronEbBlock, byronMainBlock, block, tip);
     }
 
 }

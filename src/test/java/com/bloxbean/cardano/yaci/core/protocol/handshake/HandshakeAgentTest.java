@@ -15,6 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
 @Slf4j
 @EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 class HandshakeAgentTest extends BaseTest {
@@ -49,8 +52,7 @@ class HandshakeAgentTest extends BaseTest {
     @Test
     public void testHandshake() throws InterruptedException {
 
-        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(2));
-        String nodeSocketFile = "/Users/satya/work/cardano-node/preview/db/node.socket";
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
 
         LocalTxSubmissionAgent localTxSubmissionAgent = new LocalTxSubmissionAgent();
         localTxSubmissionAgent.addListener(new LocalTxSubmissionListener() {
@@ -70,6 +72,7 @@ class HandshakeAgentTest extends BaseTest {
         N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localTxSubmissionAgent);
         n2CClient.start();
 
+        CountDownLatch countDownLatch = new CountDownLatch(1);
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
@@ -78,6 +81,7 @@ class HandshakeAgentTest extends BaseTest {
                 TxSubmissionRequest txnRequest = new TxSubmissionRequest(TxBodyType.BABBAGE, txBytes);
                 localTxSubmissionAgent.submitTx(txnRequest);
                 localTxSubmissionAgent.sendNextMessage();
+                countDownLatch.countDown();
             }
 
             @Override
@@ -86,7 +90,7 @@ class HandshakeAgentTest extends BaseTest {
             }
         });
 
-        Thread.sleep(10000);
+        countDownLatch.await(10, TimeUnit.SECONDS);
     }
 
 }

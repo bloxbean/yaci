@@ -26,7 +26,7 @@ class LocalStateQueryClientTest extends BaseTest {
 
     @BeforeEach
     void setup() {
-        queryClient = new LocalStateQueryClient(nodeSocketFile, Constants.PREVIEW_PROTOCOL_MAGIC);
+        queryClient = new LocalStateQueryClient(nodeSocketFile, Constants.PREPOD_PROTOCOL_MAGIC);
         queryClient.start();
     }
 
@@ -94,7 +94,7 @@ class LocalStateQueryClientTest extends BaseTest {
         EpochNoQueryResult epochNoQueryResult = queryResultMono.block(Duration.ofSeconds(20));
 
         log.info("Epoch >> " + epochNoQueryResult.getEpochNo());
-        assertThat(epochNoQueryResult.getEpochNo()).isGreaterThanOrEqualTo(49);
+        assertThat(epochNoQueryResult.getEpochNo()).isGreaterThanOrEqualTo(32);
     }
 
     @Test

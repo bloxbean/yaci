@@ -4,8 +4,7 @@ import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.helpers.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronHead;
+import com.bloxbean.cardano.yaci.core.model.byron.*;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
@@ -144,20 +143,21 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
                 long slot = blockHeader.getHeaderBody().getSlot();
                 String hash = blockHeader.getHeaderBody().getBlockHash();
 
-                if (log.isDebugEnabled()) {
-                    log.debug("Rolled to slot: {}, block: {}", blockHeader.getHeaderBody().getSlot(), blockHeader.getHeaderBody().getBlockNumber());
-                }
-
-                blockFetchAgent.resetPoints(new Point(slot, hash), new Point(slot, hash));
-
-                if (log.isDebugEnabled())
-                    log.debug("Trying to fetch block for {}", new Point(slot, hash));
-                blockFetchAgent.sendNextMessage();
+                resetBlockFetchAgentAndFetchBlock(slot, hash);
             }
 
             @Override
-            public void rollforwardByronEra(Tip tip, ByronHead byronHead) {
-                chainSyncAgent.sendNextMessage(); //TODO -- For now. Remove after Byron block parsing
+            public void rollforwardByronEra(Tip tip, ByronBlockHead byronHead) {
+                long slot = byronHead.getConsensusData().getSlotId().getSlot();
+                String hash = byronHead.getBlockHash();
+                resetBlockFetchAgentAndFetchBlock(slot, hash);
+            }
+
+            @Override
+            public void rollforwardByronEra(Tip tip, ByronEbHead byronEbHead) {
+                long epoch = byronEbHead.getConsensusData().getEpoch();
+                String hash = byronEbHead.getBlockHash();
+                resetBlockFetchAgentAndFetchBlock(0, hash);
             }
 
             @Override
@@ -176,13 +176,30 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
             }
 
             @Override
-            public void byronBlockFound(ByronBlock byronBlock) {
+            public void byronBlockFound(ByronMainBlock byronBlock) {
+                chainSyncAgent.sendNextMessage();
+            }
+
+            @Override
+            public void byronEbBlockFound(ByronEbBlock byronEbBlock) {
                 chainSyncAgent.sendNextMessage();
             }
         });
 
         n2CClient = new N2NClient(host, port, handshakeAgent,
                 chainSyncAgent, blockFetchAgent);
+    }
+
+    private void resetBlockFetchAgentAndFetchBlock(long slot, String hash) {
+        if (log.isDebugEnabled()) {
+            log.debug("Rolled to slot: {}, block: {}", slot, hash);
+        }
+
+        blockFetchAgent.resetPoints(new Point(slot, hash), new Point(slot, hash));
+
+        if (log.isDebugEnabled())
+            log.debug("Trying to fetch block for {}", new Point(slot, hash));
+        blockFetchAgent.sendNextMessage();
     }
 
     /**

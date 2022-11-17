@@ -1,7 +1,8 @@
 package com.bloxbean.cardano.yaci.core.protocol.chainsync.n2c;
 
 import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronHead;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.AgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
@@ -24,7 +25,11 @@ public interface LocalChainSyncAgentListener extends AgentListener {
 
     }
 
-    default void rollforwardByronEra(Tip tip, ByronHead byronHead) {
+    default void rollforwardByronEra(Tip tip, ByronMainBlock byronMainBlock) {
+
+    }
+
+    default void rollforwardByronEra(Tip tip, ByronEbBlock byronEbBlock) {
 
     }
 }

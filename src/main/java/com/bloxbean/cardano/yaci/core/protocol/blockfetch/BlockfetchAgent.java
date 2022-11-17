@@ -6,7 +6,8 @@ import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.Era;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronBlock;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockHeaderSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.ByronBlockSerializer;
@@ -99,18 +100,21 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
             Era era = EraUtil.getEra(eraValue);
 
             if (era == Era.Byron) {
-                ByronBlock block ;
-                if (eraValue == 0) {
-                    block = ByronEbBlockSerializer.INSTANCE.deserializeDI(array);
-                } else {
-                    block = ByronBlockSerializer.INSTANCE.deserializeDI(array);
-                }
-                //move from cursor
-                counter++;
-                getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.byronBlockFound(block));
-                this.from = new Point(block.getHeader().getConsensusData().getSlotId().getSlot(), null); //TODO calculate block hash
+                if (eraValue == 0) { //Epoch boundry block
+                    ByronEbBlock block = ByronEbBlockSerializer.INSTANCE.deserializeDI(array);
 
-               //TODO -- Pending // this.from = new Point(block.getHeader().getConsensusData().getSlotId().getSlot(), block.getHeader().get);
+                    //move from cursor
+                    counter++;
+                    getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.byronEbBlockFound(block));
+                    this.from = new Point(0, block.getHeader().getBlockHash()); //TODO -- slot == 0??
+                } else if (eraValue == 1) {
+                    ByronMainBlock block = ByronBlockSerializer.INSTANCE.deserializeDI(array);
+
+                    //move from cursor
+                    counter++;
+                    getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.byronBlockFound(block));
+                    this.from = new Point(block.getHeader().getConsensusData().getSlotId().getSlot(), block.getHeader().getBlockHash());
+                }
             } else {
                 Block block = BlockSerializer.INSTANCE.deserializeDI(array);
                 if (log.isDebugEnabled())

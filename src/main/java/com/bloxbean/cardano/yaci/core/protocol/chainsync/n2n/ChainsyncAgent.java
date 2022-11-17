@@ -140,10 +140,12 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     private void onRollForward(RollForward rollForward) {
-        if (rollForward.getByronBlockHead() != null) {
-            this.currentPoint = new Point(rollForward.getByronBlockHead().getConsensusData().getSlotId().getSlot(), rollForward.getByronBlockHead().getBlockHash());
-        } else if (rollForward.getBlockHeader() != null) { //shelley and later
+        if (rollForward.getBlockHeader() != null) { //shelley and later
             this.currentPoint = new Point(rollForward.getBlockHeader().getHeaderBody().getSlot(), rollForward.getBlockHeader().getHeaderBody().getBlockHash());
+        } else if (rollForward.getByronBlockHead() != null) { //Byron Block
+            this.currentPoint = new Point(rollForward.getByronBlockHead().getConsensusData().getSlotId().getSlot(), rollForward.getByronBlockHead().getBlockHash());
+        } else if (rollForward.getByronEbHead() != null) { //Byron Epoch block. TODO -- SlotId = 0??
+            this.currentPoint = new Point(0, rollForward.getByronEbHead().getBlockHash());
         }
 
         if (counter++ % 100 == 0 || (tip.getPoint().getSlot() - currentPoint.getSlot()) < 10) {
@@ -160,20 +162,29 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
             }
         }
 
-        if(rollForward.getByronBlockHead() != null) { //For Byron
-            log.warn("Byron Block: " + rollForward.getByronBlockHead().getConsensusData().getSlotId());
-            getAgentListeners().stream().forEach(
-                    chainSyncAgentListener -> {
-                        chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronBlockHead());
-                    }
-            );
-        } else { //For Shelley and later eras
+       if (rollForward.getBlockHeader() != null) { //For Shelley and later eras
             getAgentListeners().stream().forEach(
                     chainSyncAgentListener -> {
                         chainSyncAgentListener.rollforward(rollForward.getTip(), rollForward.getBlockHeader());
                     }
             );
-        }
+        } else if(rollForward.getByronBlockHead() != null) { //For Byron main block
+            if (log.isTraceEnabled())
+                log.trace("Byron Block: " + rollForward.getByronBlockHead().getConsensusData().getSlotId());
+            getAgentListeners().stream().forEach(
+                    chainSyncAgentListener -> {
+                        chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronBlockHead());
+                    }
+            );
+        } else if (rollForward.getByronEbHead() != null) { //For Byron Eb block
+           if (log.isTraceEnabled())
+               log.trace("Byron Eb Block: " + rollForward.getByronEbHead().getConsensusData());
+           getAgentListeners().stream().forEach(
+                   chainSyncAgentListener -> {
+                       chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronEbHead());
+                   }
+           );
+       }
     }
 
     @Override

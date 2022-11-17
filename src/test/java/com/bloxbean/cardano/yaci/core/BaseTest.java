@@ -1,11 +1,13 @@
 package com.bloxbean.cardano.yaci.core;
 
+import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 
 public class BaseTest {
-    protected String node = "192.168.0.228";
-    protected int nodePort = 6000;
-    protected Point knownPoint = new Point(18014387, "9914c8da22a833a777d8fc1f735d2dbba70b99f15d765b6c6ee45fe322d92d93");
+    protected String node = Constants.PREPOD_IOHK_RELAY_ADDR;
+    protected int nodePort = Constants.PREPOD_IOHK_RELAY_PORT;
+    protected long protocolMagic = Constants.PREPOD_PROTOCOL_MAGIC;
+    protected Point knownPoint = new Point(13003663, "b896e43a25de269cfc47be7afbcbf00cad41a5011725c2732393f1b4508cf41d");
 
-    protected String nodeSocketFile = "/Users/satya/work/cardano-node/preview/db/node.socket";
+    protected String nodeSocketFile = "/Users/satya/work/cardano-node/prepod/db/node.socket";
 }

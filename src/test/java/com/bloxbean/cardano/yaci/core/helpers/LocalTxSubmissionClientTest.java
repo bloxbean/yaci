@@ -1,6 +1,6 @@
 package com.bloxbean.cardano.yaci.core.helpers;
 
-import com.bloxbean.cardano.yaci.core.common.Constants;
+import com.bloxbean.cardano.yaci.core.BaseTest;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.model.TxSubmissionRequest;
@@ -14,13 +14,10 @@ import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
-class LocalTxSubmissionClientTest {
-
-    String nodeSocketFile = "/Users/satya/work/cardano-node/preview/db/node.socket";
-
+class LocalTxSubmissionClientTest extends BaseTest {
     @Test
     void submitTx() throws InterruptedException {
-        LocalTxSubmissionClient localTxSubmissionClient = new LocalTxSubmissionClient(nodeSocketFile, N2CVersionTableConstant.v9AndAbove(Constants.PREVIEW_PROTOCOL_MAGIC));
+        LocalTxSubmissionClient localTxSubmissionClient = new LocalTxSubmissionClient(nodeSocketFile, N2CVersionTableConstant.v9AndAbove(protocolMagic));
 
         CountDownLatch countDownLatch = new CountDownLatch(1);
         localTxSubmissionClient.start(txResult -> {
