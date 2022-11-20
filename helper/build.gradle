@@ -1,5 +1,5 @@
 plugins {
-    id 'java-library'
+    id 'java'
     id 'maven-publish'
     id 'signing'
 }
@@ -38,7 +38,20 @@ artifacts {
 
 dependencies {
     implementation project(':yaci-core')
-    implementation project(':yaci-helper')
+
+    compileOnly 'org.projectlombok:lombok:1.18.20'
+    annotationProcessor 'org.projectlombok:lombok:1.18.20'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
+    testImplementation 'org.hamcrest:hamcrest-library:2.2'
+    testImplementation 'org.mockito:mockito-inline:3.7.7'
+    testImplementation 'org.mockito:mockito-junit-jupiter:3.7.7'
+    testImplementation 'org.assertj:assertj-core:3.21.0'
+    testRuntimeOnly 'org.slf4j:slf4j-log4j12:1.7.36'
+
+    testCompileOnly 'org.projectlombok:lombok:1.18.20'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.20'
 }
 
 test {
@@ -56,9 +69,9 @@ publishing {
                 classifier = 'javadoc'
             }
             pom {
-                name = 'yaci'
-                description = 'Yaci - A Cardano Mini Protocols implementation in Java'
-                url = 'https://github.com/bloxbean/yaci-core'
+                name = 'yaci-helper'
+                description = 'Yaci - A Cardano Mini Protocols Helpers in Java'
+                url = 'https://github.com/bloxbean/yaci-helper'
                 licenses {
                     license {
                         name = 'The MIT License'
@@ -72,9 +85,9 @@ publishing {
                     }
                 }
                 scm {
-                    connection = 'scm:git:git://github.com/bloxbean/yaci-core.git'
-                    developerConnection = 'scm:git:ssh://git@github.com/bloxbean/yaci-core.git'
-                    url = 'https://github.com/bloxbean/yaci-core'
+                    connection = 'scm:git:git://github.com/bloxbean/yaci-helper.git'
+                    developerConnection = 'scm:git:ssh://git@github.com/bloxbean/yaci-helper.git'
+                    url = 'https://github.com/bloxbean/yaci-helper'
                 }
             }
         }
@@ -104,5 +117,6 @@ if (isReleaseVersion && !project.hasProperty("skipSigning")) {
         sign publishing.publications
     }
 }
+
 
 
