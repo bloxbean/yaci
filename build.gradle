@@ -37,8 +37,8 @@ artifacts {
 }
 
 dependencies {
-    implementation project(':yaci-core')
-    implementation project(':yaci-helper')
+    api project(':yaci-core')
+    api project(':yaci-helper')
 }
 
 test {
