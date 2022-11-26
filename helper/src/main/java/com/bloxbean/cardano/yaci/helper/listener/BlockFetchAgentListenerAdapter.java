@@ -8,7 +8,9 @@ import com.bloxbean.cardano.yaci.helper.model.Transaction;
 import com.bloxbean.cardano.yaci.helper.model.Utxo;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
     private BlockChainDataListener blockChainDataListener;
@@ -22,7 +24,6 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
         List<Transaction> transactionEvents = new ArrayList<>();
         int i = 0;
         for (TransactionBody txBody: block.getTransactionBodies()) {
-            List<Utxo> utxos = getUtxosFromOutput(txBody);
             Witnesses witnesses = block.getTransactionWitness().get(i);
             AuxData auxData = block.getAuxiliaryDataMap().get(i);
 
@@ -32,12 +33,21 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
                     invalidTxn = true;
             }
 
+            List<Utxo> utxos;
+            if (!invalidTxn)
+                utxos = getUtxosFromOutput(txBody);
+            else
+                utxos = Collections.emptyList();
+
+            Optional<Utxo> collateralReturnUtxo = getCollateralReturnUtxo(txBody);
+
             Transaction transactionEvent = Transaction.builder()
                     .blockNumber(block.getHeader().getHeaderBody().getBlockNumber())
                     .slot(block.getHeader().getHeaderBody().getSlot())
                     .txHash(txBody.getTxHash())
                     .body(txBody)
                     .utxos(utxos)
+                    .collateralReturnUtxo(collateralReturnUtxo)
                     .witnesses(witnesses)
                     .auxData(auxData)
                     .invalid(invalidTxn)
@@ -69,12 +79,16 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
             utxos.add(utxo);
         }
 
+        return utxos;
+    }
+
+    private Optional<Utxo> getCollateralReturnUtxo(TransactionBody txBody) {
         //Check if collateral return output is there
         if (txBody.getCollateralReturn() != null) {
             TransactionOutput txOutput = txBody.getCollateralReturn();
             Utxo utxo = Utxo.builder()
                     .txHash(txBody.getTxHash())
-                    .index(utxos.size())
+                    .index(0)
                     .address(txOutput.getAddress())
                     .amounts(txOutput.getAmounts())
                     .datumHash(txOutput.getDatumHash())
@@ -82,10 +96,10 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
                     .scriptRef(txOutput.getScriptRef())
                     .build();
 
-            utxos.add(utxo);
+            return Optional.of(utxo);
+        } else {
+            return Optional.empty();
         }
-
-        return utxos;
     }
 
     @Override
