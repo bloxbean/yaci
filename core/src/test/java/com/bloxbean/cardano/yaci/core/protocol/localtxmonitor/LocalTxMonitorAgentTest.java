@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableCon
 import com.bloxbean.cardano.yaci.core.protocol.localtxmonitor.messages.*;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -19,7 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
-//@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
+@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 public class LocalTxMonitorAgentTest extends BaseTest {
 
     @Test

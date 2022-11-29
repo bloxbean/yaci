@@ -45,7 +45,7 @@ public class BlockStreamer {
     /**
      * Get {@link BlockStreamer} to stream from the latest block
      *
-     * @param networkType Network type (Mainnet, Legacy Testnet, Prepod, Preview)
+     * @param networkType Network type (Mainnet, Legacy Testnet, Preprod, Preview)
      * @return a new BlockStreamer instance
      */
     public static BlockStreamer fromLatest(NetworkType networkType) {
@@ -54,9 +54,9 @@ public class BlockStreamer {
                 return fromLatest(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT, WELL_KNOWN_MAINNET_POINT, networkType.getN2NVersionTable());
             case LEGACY_TESTNET:
                 return fromLatest(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, WELL_KNOWN_TESTNET_POINT, networkType.getN2NVersionTable());
-            case PREPOD:
-                return fromLatest(PREPOD_IOHK_RELAY_ADDR, PREPOD_IOHK_RELAY_PORT, WELL_KNOWN_PREPOD_POINT, networkType.getN2NVersionTable());
-            case PREV_TESTNET:
+            case PREPROD:
+                return fromLatest(PREPROD_IOHK_RELAY_ADDR, PREPROD_IOHK_RELAY_PORT, WELL_KNOWN_PREPROD_POINT, networkType.getN2NVersionTable());
+            case PREVIEW:
                 return fromLatest(PREVIEW_IOHK_RELAY_ADDR, PREVIEW_IOHK_RELAY_PORT, WELL_KNOWN_PREVIEW_POINT, networkType.getN2NVersionTable());
             default:
                 return null;
@@ -66,7 +66,7 @@ public class BlockStreamer {
     /**
      * Get {@link BlockStreamer} to stream from a known point
      *
-     * @param networkType Network type (Mainnet, Legacy Testnet, Prepod, Preview)
+     * @param networkType Network type (Mainnet, Legacy Testnet, Preprod, Preview)
      * @param point
      * @return a new BlockStreamer instance
      */
@@ -76,9 +76,9 @@ public class BlockStreamer {
                 return fromPoint(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
             case LEGACY_TESTNET:
                 return fromPoint(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
-            case PREPOD:
-                return fromPoint(PREPOD_IOHK_RELAY_ADDR, PREPOD_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
-            case PREV_TESTNET:
+            case PREPROD:
+                return fromPoint(PREPROD_IOHK_RELAY_ADDR, PREPROD_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
+            case PREVIEW:
                 return fromPoint(PREVIEW_IOHK_RELAY_ADDR, PREVIEW_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
             default:
                 return null;
@@ -234,7 +234,7 @@ public class BlockStreamer {
     /**
      * Get {@link BlockStreamer} to stream from Point 1 to Point 2
      *
-     * @param networkType networkType Network type (Mainnet, Legacy Testnet, Prepod, Preview)
+     * @param networkType networkType Network type (Mainnet, Legacy Testnet, Preprod, Preview)
      * @param fromPoint   start point
      * @param toPoint     end point
      * @return new BlockStreamer instance
@@ -245,9 +245,9 @@ public class BlockStreamer {
                 return forRange(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
             case LEGACY_TESTNET:
                 return forRange(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
-            case PREPOD:
-                return forRange(PREPOD_IOHK_RELAY_ADDR, PREPOD_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
-            case PREV_TESTNET:
+            case PREPROD:
+                return forRange(PREPROD_IOHK_RELAY_ADDR, PREPROD_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
+            case PREVIEW:
                 return forRange(PREVIEW_IOHK_RELAY_ADDR, PREVIEW_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
             default:
                 return null;

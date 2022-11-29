@@ -24,7 +24,7 @@ public class N2CChainSyncTest {
 
     @Test
     void testChainSync_fromOrigin_byronBlocks() throws InterruptedException {
-        N2CChainSyncFetcher chainSyncFetcher = new N2CChainSyncFetcher("/Users/satya/work/cardano-node/prepod/db/node.socket", Point.ORIGIN, Constants.PREPOD_PROTOCOL_MAGIC, false);
+        N2CChainSyncFetcher chainSyncFetcher = new N2CChainSyncFetcher("/Users/satya/work/cardano-node/prepod/db/node.socket", Point.ORIGIN, Constants.PREPROD_PROTOCOL_MAGIC, false);
 
         List<ByronEbBlock> genesisBlock = new ArrayList<>();
         List<ByronMainBlock> byronBlocks = new ArrayList<>();
@@ -59,7 +59,7 @@ public class N2CChainSyncTest {
 
     @Test
     void testChainSync_fromRecent() throws InterruptedException {
-        N2CChainSyncFetcher chainSyncFetcher = new N2CChainSyncFetcher("/Users/satya/work/cardano-node/prepod/db/node.socket", Point.ORIGIN, Constants.PREPOD_PROTOCOL_MAGIC, true);
+        N2CChainSyncFetcher chainSyncFetcher = new N2CChainSyncFetcher("/Users/satya/work/cardano-node/prepod/db/node.socket", Point.ORIGIN, Constants.PREPROD_PROTOCOL_MAGIC, true);
 
         List<Block> blocks = new ArrayList<>();
         CountDownLatch countDownLatch = new CountDownLatch(1);

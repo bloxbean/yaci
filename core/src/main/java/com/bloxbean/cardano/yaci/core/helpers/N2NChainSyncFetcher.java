@@ -265,7 +265,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
     }
 
     public static void main(String[] args) throws Exception {
-        N2NChainSyncFetcher chainSyncFetcher = new N2NChainSyncFetcher("localhost", 30000, Constants.WELL_KNOWN_PREPOD_POINT, Constants.PREPOD_PROTOCOL_MAGIC);
+        N2NChainSyncFetcher chainSyncFetcher = new N2NChainSyncFetcher("localhost", 30000, Constants.WELL_KNOWN_PREPROD_POINT, Constants.PREPROD_PROTOCOL_MAGIC);
 
         chainSyncFetcher.addChainSyncListener(new ChainSyncAgentListener() {
             @Override

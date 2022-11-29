@@ -26,7 +26,7 @@ class LocalStateQueryClientTest extends BaseTest {
 
     @BeforeEach
     void setup() {
-        queryClient = new LocalStateQueryClient(nodeSocketFile, Constants.PREPOD_PROTOCOL_MAGIC);
+        queryClient = new LocalStateQueryClient(nodeSocketFile, Constants.PREPROD_PROTOCOL_MAGIC);
         queryClient.start();
     }
 

@@ -12,8 +12,8 @@ class GenesisBlockFinderTest {
 
     @Test
     void getGenesisAndFirstBlock() {
-        GenesisBlockFinder genesisBlockFinder = new GenesisBlockFinder(Constants.PREPOD_IOHK_RELAY_ADDR,
-                Constants.PREPOD_IOHK_RELAY_PORT, Constants.PREPOD_PROTOCOL_MAGIC);
+        GenesisBlockFinder genesisBlockFinder = new GenesisBlockFinder(Constants.PREPROD_IOHK_RELAY_ADDR,
+                Constants.PREPROD_IOHK_RELAY_PORT, Constants.PREPROD_PROTOCOL_MAGIC);
         Optional<StartPoint> optional = genesisBlockFinder.getGenesisAndFirstBlock();
 
         assertThat(optional.isPresent()).isTrue();

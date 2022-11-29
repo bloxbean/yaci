@@ -26,8 +26,8 @@ NetworkType enum has 4 network types.
 
 1. MAINNET
 2. LEGACY_TESTNET
-3. PREPOD
-4. PREV_TESTNET
+3. PREPROD
+4. PREVIEW
 
 Application just needs to specify the network type to connect to the public relay of the network.
 To connect to a custom node or a private network, app needs to provide informations like host, port, a well known point 

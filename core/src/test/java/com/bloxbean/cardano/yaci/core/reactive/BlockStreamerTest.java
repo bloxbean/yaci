@@ -78,9 +78,9 @@ class BlockStreamerTest {
 
     @Test
         // @Timeout(value = 80000, unit = TimeUnit.MILLISECONDS)
-    void streamLatestFromPrePod_fromByron() throws InterruptedException {
-        Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.PREPOD,
-                        Constants.WELL_KNOWN_PREPOD_POINT)
+    void streamLatestFromPreprod_fromByron() throws InterruptedException {
+        Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.PREPROD,
+                        Constants.WELL_KNOWN_PREPROD_POINT)
                 .stream()
                 .map(block -> {
                     System.out.println("\n-----------------------------------------------------------");

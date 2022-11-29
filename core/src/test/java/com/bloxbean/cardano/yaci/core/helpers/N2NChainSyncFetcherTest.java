@@ -22,7 +22,7 @@ public class N2NChainSyncFetcherTest {
 
     @Test
     void testChainSync_fromOrigin_byronBlocks() throws InterruptedException {
-        N2NChainSyncFetcher chainSyncFetcher = new N2NChainSyncFetcher(Constants.PREPOD_IOHK_RELAY_ADDR, Constants.PREPOD_IOHK_RELAY_PORT,
+        N2NChainSyncFetcher chainSyncFetcher = new N2NChainSyncFetcher(Constants.PREPROD_IOHK_RELAY_ADDR, Constants.PREPROD_IOHK_RELAY_PORT,
                 Point.ORIGIN, 1, false);
 
         List<ByronEbBlock> genesisBlock = new ArrayList<>();
@@ -62,7 +62,7 @@ public class N2NChainSyncFetcherTest {
 
 //    @Test
     void testChainSync_fromRecent() throws InterruptedException {
-        N2NChainSyncFetcher chainSyncFetcher = new N2NChainSyncFetcher(Constants.PREPOD_IOHK_RELAY_ADDR, Constants.PREPOD_IOHK_RELAY_PORT,
+        N2NChainSyncFetcher chainSyncFetcher = new N2NChainSyncFetcher(Constants.PREPROD_IOHK_RELAY_ADDR, Constants.PREPROD_IOHK_RELAY_PORT,
                 Point.ORIGIN, 1);
 
         List<Block> blocks = new ArrayList<>();
