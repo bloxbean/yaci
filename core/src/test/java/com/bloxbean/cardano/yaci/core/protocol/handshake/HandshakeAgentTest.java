@@ -2,7 +2,7 @@ package com.bloxbean.cardano.yaci.core.protocol.handshake;
 
 import com.bloxbean.cardano.yaci.core.BaseTest;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
-import com.bloxbean.cardano.yaci.core.network.N2CClient;
+import com.bloxbean.cardano.yaci.core.network.UnixSocketNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.LocalTxSubmissionAgent;
@@ -69,7 +69,7 @@ class HandshakeAgentTest extends BaseTest {
             }
         });
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localTxSubmissionAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localTxSubmissionAgent);
         n2CClient.start();
 
         CountDownLatch countDownLatch = new CountDownLatch(1);

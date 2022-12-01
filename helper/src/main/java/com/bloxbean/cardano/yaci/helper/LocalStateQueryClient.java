@@ -19,7 +19,7 @@ import reactor.core.publisher.Mono;
  * Use this to query local ledger state using Node-to-client local-state-query mini-protocol
  *
  *<p>
- *Create a {@link LocalQueryProvider} to get an instance of this class.
+ *Create a {@link LocalClientProvider} to get an instance of this class.
  *</p>
  *
  * <p>
@@ -27,9 +27,9 @@ import reactor.core.publisher.Mono;
  * </p>
  * <pre>
  * {@code
- *  LocalQueryProvider localQueryProvider = new LocalQueryProvider(nodeSocketFile, protocolMagic);
- *  LocalStateQueryClient localStateQueryClient = localQueryProvider.getLocalStateQueryClient();
- *  localQueryProvider.start();
+ *  LocalClientProvider localClientProvider = new LocalClientProvider(nodeSocketFile, protocolMagic);
+ *  LocalStateQueryClient localStateQueryClient = localClientProvider.getLocalStateQueryClient();
+ *  localClientProvider.start();
  *
  *  Mono<SystemStartResult> queryResultMono = localStateQueryClient.executeQuery(new SystemStartQuery());
  *  SystemStartResult result = queryResultMono.block();

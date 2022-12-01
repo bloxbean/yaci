@@ -3,7 +3,7 @@ package com.bloxbean.cardano.yaci.helper.reactive;
 import com.bloxbean.cardano.yaci.core.common.NetworkType;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
-import com.bloxbean.cardano.yaci.core.network.N2NClient;
+import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.State;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
@@ -34,7 +34,7 @@ import static com.bloxbean.cardano.yaci.core.common.Constants.*;
  */
 @Slf4j
 public class BlockStreamer {
-    private N2NClient n2nClient;
+    private TCPNodeClient n2nClient;
     private Flux<Block> blockFlux;
 
     private BlockStreamer() {
@@ -148,7 +148,7 @@ public class BlockStreamer {
             }
         });
 
-        n2nClient = new N2NClient(host, port, handshakeAgent,
+        n2nClient = new TCPNodeClient(host, port, handshakeAgent,
                 chainSyncAgent, blockFetch);
 
         blockFlux = Flux.create(sink -> {
@@ -282,7 +282,7 @@ public class BlockStreamer {
             }
         });
 
-        N2NClient n2CClient = new N2NClient(host, port, handshakeAgent,
+        TCPNodeClient n2CClient = new TCPNodeClient(host, port, handshakeAgent,
                 blockFetch);
 
         AtomicInteger subscriberCount = new AtomicInteger(0);

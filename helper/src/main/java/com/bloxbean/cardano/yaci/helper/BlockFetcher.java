@@ -1,7 +1,7 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.network.N2NClient;
+import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -51,7 +51,7 @@ public class BlockFetcher implements Fetcher<Block> {
     private VersionTable versionTable;
     private HandshakeAgent handshakeAgent;
     private BlockfetchAgent blockfetchAgent;
-    private N2NClient n2CClient;
+    private TCPNodeClient n2nClient;
 
     /**
      * Constructor to create BlockFetcher instance
@@ -79,7 +79,7 @@ public class BlockFetcher implements Fetcher<Block> {
     private void init() {
         handshakeAgent = new HandshakeAgent(versionTable);
         blockfetchAgent = new BlockfetchAgent();
-        n2CClient = new N2NClient(host, port, handshakeAgent, blockfetchAgent);
+        n2nClient = new TCPNodeClient(host, port, handshakeAgent, blockfetchAgent);
 
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
@@ -103,8 +103,8 @@ public class BlockFetcher implements Fetcher<Block> {
             }
         });
 
-        if (!n2CClient.isRunning())
-            n2CClient.start();
+        if (!n2nClient.isRunning())
+            n2nClient.start();
     }
 
     /**
@@ -114,7 +114,7 @@ public class BlockFetcher implements Fetcher<Block> {
      * @param to End point
      */
     public void fetch(Point from, Point to) {
-        if (!n2CClient.isRunning())
+        if (!n2nClient.isRunning())
             throw new IllegalStateException("fetch() should be called after start()");
 
         blockfetchAgent.resetPoints(from, to);
@@ -142,7 +142,7 @@ public class BlockFetcher implements Fetcher<Block> {
      */
     @Override
     public boolean isRunning() {
-        return n2CClient.isRunning();
+        return n2nClient.isRunning();
     }
 
     /**
@@ -150,7 +150,7 @@ public class BlockFetcher implements Fetcher<Block> {
      */
     @Override
     public void shutdown() {
-        n2CClient.shutdown();
+        n2nClient.shutdown();
     }
 
 //    public static void main(String[] args) {

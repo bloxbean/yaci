@@ -18,10 +18,10 @@ import java.net.SocketAddress;
  * This is the main class to initialize single or multiple agents for Node-to-client mini-protocol and setup channel handlers to send / process
  * network bytes.
  */
-public class N2CClient extends NodeClient {
+public class UnixSocketNodeClient extends NodeClient {
     private String nodeSocketFile;
 
-    public N2CClient(String nodeSocketFile, HandshakeAgent handshakeAgent, Agent... agents) {
+    public UnixSocketNodeClient(String nodeSocketFile, HandshakeAgent handshakeAgent, Agent... agents) {
         super(handshakeAgent, agents);
         this.nodeSocketFile = nodeSocketFile;
     }

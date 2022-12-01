@@ -1,95 +1,47 @@
 package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.yaci.core.network.N2CClient;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.LocalTxSubmissionAgent;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.LocalTxSubmissionListener;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgAcceptTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgRejectTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.model.TxSubmissionRequest;
-import com.bloxbean.cardano.yaci.helper.api.ReactiveFetcher;
+import com.bloxbean.cardano.yaci.helper.api.QueryClient;
 import com.bloxbean.cardano.yaci.helper.model.TxResult;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
-import java.util.function.Consumer;
-
 /**
- * Use this helper to submit transactions to a local Cardano node through Node-to-client mini-protocol.
+ * Use this helper to submit transactions to a Cardano node through Node-to-client mini-protocol.
  * The transaction result can be received through <br>
- * - a Consumer function passed to {@link #start(Consumer)} <br>
- * - or, by adding a {@link LocalTxSubmissionListener} using {@link #addTxSubmissionListener(LocalTxSubmissionListener)}
+ * - a reactive way using Mono <br>
+ * - or, in a {@link LocalTxSubmissionListener}
  *
  * <p>Example:</p>
  * <pre>
  * {@code
- * LocalTxSubmissionClient localTxSubmissionClient = new LocalTxSubmissionClient(nodeSocketFile, Constants.MAINNET_PROTOCOL_MAGIC);
- *
- * localTxSubmissionClient.start(txResult -> {
- *      log.info(" RESULT >> " + txResult);
- * });
+ *  LocalClientProvider LocalClientProvider = new LocalClientProvider(nodeSocketFile, protocolMagic);
+ *  LocalTxSubmissionClient localTxSubmissionClient = LocalClientProvider.getTxSubmissionClient();
+ *  localClientProvider.start();
  *
  * byte[] txBytes = ...;
  * TxSubmissionRequest txnRequest = new TxSubmissionRequest(TxBodyType.BABBAGE, txBytes);
- * localTxSubmissionClient.submitTx(txnRequest);
- * }
- * </pre>
+ * Mono<TxResult> txResultMono = localTxSubmissionClient.submitTx(txnRequest);
+ * txResultMono.subscribe(txResult -> {
+ *      String txId = txResult.getTxHash();
+ * });
+ * }</pre>
  */
 @Slf4j
-public class LocalTxSubmissionClient extends ReactiveFetcher<TxResult> {
-    private String nodeSocketFile;
-    private VersionTable versionTable;
-    private HandshakeAgent handshakeAgent;
-    private LocalTxSubmissionAgent txSubmissionAgent;
-    private N2CClient n2cClient;
+public class LocalTxSubmissionClient extends QueryClient {
+    private LocalTxSubmissionAgent localTxSubmissionAgent;
 
-    /**
-     * Construct a LocalTxSubmissionClient
-     *
-     * @param nodeSocketFile Cardano node socket file
-     * @param protocolMagic  Network protocol magic
-     */
-    public LocalTxSubmissionClient(String nodeSocketFile, long protocolMagic) {
-        this(nodeSocketFile, N2CVersionTableConstant.v1AndAbove(protocolMagic));
-    }
-
-    /**
-     * Construct a LocalTxSubmissionClient
-     *
-     * @param nodeSocketFile Cardano node socket file
-     * @param versionTable   VersionTable for Node to Client protocol
-     */
-    public LocalTxSubmissionClient(String nodeSocketFile, VersionTable versionTable) {
-        this.nodeSocketFile = nodeSocketFile;
-        this.versionTable = versionTable;
+    public LocalTxSubmissionClient(LocalTxSubmissionAgent localTxSubmissionAgent) {
+        this.localTxSubmissionAgent = localTxSubmissionAgent;
         init();
     }
 
     private void init() {
-        handshakeAgent = new HandshakeAgent(versionTable);
-        txSubmissionAgent = new LocalTxSubmissionAgent();
-        n2cClient = new N2CClient(nodeSocketFile, handshakeAgent, txSubmissionAgent);
-
-        handshakeAgent.addListener(new HandshakeAgentListener() {
-            @Override
-            public void handshakeOk() {
-                txSubmissionAgent.sendNextMessage();
-            }
-        });
-    }
-
-    /**
-     * Establish the connection with the node. This method should be called first.
-     * The transaction result can be received through the {@link Consumer} function passed to this method.
-     *
-     * @param consumer
-     */
-    @Override
-    public void start(Consumer<TxResult> consumer) {
-        txSubmissionAgent.addListener(new LocalTxSubmissionListener() {
+        localTxSubmissionAgent.addListener(new LocalTxSubmissionListener() {
             @Override
             public void txAccepted(TxSubmissionRequest txSubmissionRequest, MsgAcceptTx msgAcceptTx) {
                 TxResult txResult = TxResult.builder()
@@ -98,8 +50,6 @@ public class LocalTxSubmissionClient extends ReactiveFetcher<TxResult> {
                         .build();
 
                 applyMonoSuccess(txSubmissionRequest, txResult);
-                if (consumer != null)
-                    consumer.accept(txResult);
             }
 
             @Override
@@ -111,13 +61,8 @@ public class LocalTxSubmissionClient extends ReactiveFetcher<TxResult> {
                         .build();
 
                 applyMonoSuccess(txSubmissionRequest, txResult);
-                if (consumer != null)
-                    consumer.accept(txResult);
             }
         });
-
-        n2cClient.start();
-        txSubmissionAgent.sendNextMessage();
     }
 
     /**
@@ -126,8 +71,8 @@ public class LocalTxSubmissionClient extends ReactiveFetcher<TxResult> {
      * @param txSubmissionRequest
      */
     public void submitTxCallback(TxSubmissionRequest txSubmissionRequest) {
-        txSubmissionAgent.submitTx(txSubmissionRequest);
-        txSubmissionAgent.sendNextMessage();
+        localTxSubmissionAgent.submitTx(txSubmissionRequest);
+        localTxSubmissionAgent.sendNextMessage();
     }
 
     /**
@@ -137,41 +82,9 @@ public class LocalTxSubmissionClient extends ReactiveFetcher<TxResult> {
      */
     public Mono<TxResult> submitTx(TxSubmissionRequest txSubmissionRequest) {
         return Mono.create(monoSink -> {
-            txSubmissionAgent.submitTx(txSubmissionRequest);
+            localTxSubmissionAgent.submitTx(txSubmissionRequest);
             storeMonoSinkReference(txSubmissionRequest, monoSink);
-            txSubmissionAgent.sendNextMessage();
+            localTxSubmissionAgent.sendNextMessage();
         });
     }
-
-    /**
-     * Shutdown the connection
-     */
-    @Override
-    public void shutdown() {
-        n2cClient.shutdown();
-    }
-
-    /**
-     * Check if the connection is alive
-     *
-     * @return true if alive, otherwise false
-     */
-    @Override
-    public boolean isRunning() {
-        return n2cClient.isRunning();
-    }
-
-    /**
-     * Add a {@link LocalTxSubmissionListener} to listen {@link LocalTxSubmissionAgent} events
-     *
-     * @param listener
-     */
-    public void addTxSubmissionListener(LocalTxSubmissionListener listener) {
-        if (this.isRunning())
-            throw new IllegalStateException("Listener can be added only before start() call");
-
-        if (listener != null)
-            txSubmissionAgent.addListener(listener);
-    }
-
 }

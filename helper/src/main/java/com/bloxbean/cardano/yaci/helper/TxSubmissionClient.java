@@ -1,6 +1,6 @@
 package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.yaci.core.network.N2NClient;
+import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
@@ -22,7 +22,7 @@ public class TxSubmissionClient implements Fetcher {
     private VersionTable versionTable;
     private HandshakeAgent handshakeAgent;
     private TxSubmissionAgent txSubmissionAgent;
-    private N2NClient n2nClient;
+    private TCPNodeClient n2nClient;
 
     public TxSubmissionClient(String host, int port, VersionTable versionTable) {
         this.host = host;
@@ -34,7 +34,7 @@ public class TxSubmissionClient implements Fetcher {
     private void init() {
         handshakeAgent = new HandshakeAgent(versionTable);
         txSubmissionAgent = new TxSubmissionAgent();
-        n2nClient = new N2NClient(host, port, handshakeAgent, txSubmissionAgent);
+        n2nClient = new TCPNodeClient(host, port, handshakeAgent, txSubmissionAgent);
 
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override

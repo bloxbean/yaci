@@ -1,6 +1,6 @@
 package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.yaci.core.network.N2CClient;
+import com.bloxbean.cardano.yaci.core.network.UnixSocketNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
@@ -40,7 +40,7 @@ class LocalStateQueryAgentIT extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(acquirePoint);
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
 
         CountDownLatch countDownLatch = new CountDownLatch(1);
         handshakeAgent.addListener(new HandshakeAgentListener() {
@@ -83,7 +83,7 @@ class LocalStateQueryAgentIT extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(knownPoint);
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
 
         CountDownLatch countDownLatch = new CountDownLatch(1);
         handshakeAgent.addListener(new HandshakeAgentListener() {
@@ -129,7 +129,7 @@ class LocalStateQueryAgentIT extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
 
         CountDownLatch countDownLatch = new CountDownLatch(2);
         handshakeAgent.addListener(new HandshakeAgentListener() {
@@ -183,7 +183,7 @@ class LocalStateQueryAgentIT extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
 
         CountDownLatch countDownLatch = new CountDownLatch(2);
         handshakeAgent.addListener(new HandshakeAgentListener() {
@@ -237,7 +237,7 @@ class LocalStateQueryAgentIT extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
 
         CountDownLatch countDownLatch = new CountDownLatch(2);
         handshakeAgent.addListener(new HandshakeAgentListener() {
@@ -291,7 +291,7 @@ class LocalStateQueryAgentIT extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
 
         CountDownLatch countDownLatch = new CountDownLatch(2);
         handshakeAgent.addListener(new HandshakeAgentListener() {
@@ -352,7 +352,7 @@ class LocalStateQueryAgentIT extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent(tip.getPoint());
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localStateQueryAgent);
 
         CountDownLatch countDownLatch = new CountDownLatch(2);
         handshakeAgent.addListener(new HandshakeAgentListener() {

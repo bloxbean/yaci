@@ -15,14 +15,14 @@ import java.util.List;
 /**
  * Helper to query mempool of a local Cardano node using local tx monitor node-to-client mini protocol.
  * <p>
- * Create a {@link LocalQueryProvider} to get an instance of this class.
+ * Create a {@link LocalClientProvider} to get an instance of this class.
  * </p>
  * Example:
  *
  * <pre>{@code
- *     LocalQueryProvider localQueryProvider = new LocalQueryProvider(nodeSocketFile, protocolMagic);
- *     LocalTxMonitorClient localTxMonitorClient = localQueryProvider.getTxMonitorClient();
- *     localQueryProvider.start();
+ *     LocalClientProvider localClientProvider = new LocalClientProvider(nodeSocketFile, protocolMagic);
+ *     LocalTxMonitorClient localTxMonitorClient = localClientProvider.getTxMonitorClient();
+ *     localClientProvider.start();
  * }</pre>
  */
 @Slf4j

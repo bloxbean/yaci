@@ -1,7 +1,7 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.common.Constants;
-import com.bloxbean.cardano.yaci.core.network.N2NClient;
+import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
@@ -57,7 +57,7 @@ public class TipFinder extends ReactiveFetcher<Tip> {
 
     private HandshakeAgent handshakeAgent;
     private ChainsyncAgent chainSyncAgent;
-    private N2NClient n2NClient;
+    private TCPNodeClient n2NClient;
     private VersionTable versionTable;
     private String tipRequest = "TIP_REQUEST";
 
@@ -108,7 +108,7 @@ public class TipFinder extends ReactiveFetcher<Tip> {
             }
         });
 
-        this.n2NClient = new N2NClient(host, port, handshakeAgent, chainSyncAgent);
+        this.n2NClient = new TCPNodeClient(host, port, handshakeAgent, chainSyncAgent);
     }
 
     /**

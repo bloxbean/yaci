@@ -3,7 +3,9 @@ package com.bloxbean.cardano.yaci.helper;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
-import com.bloxbean.cardano.yaci.core.network.N2CClient;
+import com.bloxbean.cardano.yaci.core.network.NodeClient;
+import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
+import com.bloxbean.cardano.yaci.core.network.UnixSocketNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -40,7 +42,10 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
     private boolean tipFound = false;
     private HandshakeAgent handshakeAgent;
     private LocalChainSyncAgent chainSyncAgent;
-    private N2CClient n2CClient;
+    private NodeClient n2CClient;
+
+    private String host;
+    private int port;
 
     /**
      * Use this constructor to sync block from the tip
@@ -88,6 +93,66 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
         this.nodeSocketFile = nodeSocketFile;
         this.versionTable = versionTable;
         this.wellKnownPoint = wellKnownPoint;
+        this.syncFromLatest = syncFromLatest;
+
+        init();
+    }
+
+    /**
+     * Use this constructor to sync blocks from the tip using host and port (node to client protocol)
+     * To expose n2c protocol through TCP, a relay tool like socat can be used.
+     *
+     * @param host address to Cardano node node-to-client via tcp
+     * @param port port to Cardano node node-to-client via tcp
+     * @param wellKnownPoint
+     * @param protocolMagic
+     */
+    public N2CChainSyncFetcher(String host, int port, Point wellKnownPoint, long protocolMagic) {
+        this(host, port, wellKnownPoint, protocolMagic, true);
+    }
+
+    /**
+     * Use this constructor to sync blocks from the tip or well known point using host and port (node to client protocol)
+     * To expose n2c protocol through TCP, a relay tool like socat can be used.
+     *
+     * @param host address to Cardano node node-to-client via tcp
+     * @param port port to Cardano node node-to-client via tcp
+     * @param wellKnownPoint
+     * @param protocolMagic
+     * @param syncFromLatest true if sync from tip, false if sync from wellKnownPoint
+     */
+    public N2CChainSyncFetcher(String host, int port, Point wellKnownPoint, long protocolMagic, boolean syncFromLatest) {
+        this(host, port, wellKnownPoint, N2CVersionTableConstant.v1AndAbove(protocolMagic), syncFromLatest);
+    }
+
+    /**
+     * Use this constructor to sync blocks from the tip using host and port (node to client protocol)
+     * To expose n2c protocol through TCP, a relay tool like socat can be used.
+     *
+     * @param host address to Cardano node node-to-client via tcp
+     * @param port port to Cardano node node-to-client via tcp
+     * @param wellKnownPoint
+     * @param versionTable
+     */
+    public N2CChainSyncFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable) {
+        this(host, port, wellKnownPoint, versionTable, true);
+    }
+
+    /**
+     * Use this constructor to sync blocks from the tip or well known point using host and port (node to client protocol)
+     * To expose n2c protocol through TCP, a relay tool like socat can be used.
+     *
+     * @param host address to Cardano node node-to-client via tcp
+     * @param port port to Cardano node node-to-client via tcp
+     * @param wellKnownPoint
+     * @param versionTable
+     * @param syncFromLatest true if sync from tip, false if sync from wellKnownPoint
+     */
+    public N2CChainSyncFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable, boolean syncFromLatest) {
+        this.host = host;
+        this.port = port;
+        this.wellKnownPoint = wellKnownPoint;
+        this.versionTable = versionTable;
         this.syncFromLatest = syncFromLatest;
 
         init();
@@ -167,8 +232,11 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
             }
         });
 
-        n2CClient = new N2CClient(nodeSocketFile, handshakeAgent,
-                chainSyncAgent);
+        if (nodeSocketFile != null && !nodeSocketFile.isEmpty()) {
+            n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent,
+                    chainSyncAgent);
+        } else if (host != null && !host.isEmpty())
+            n2CClient = new TCPNodeClient(host, port, handshakeAgent, chainSyncAgent);
     }
 
     /**

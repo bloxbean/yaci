@@ -20,12 +20,12 @@ import static org.junit.jupiter.api.Assertions.*;
 @Slf4j
 class LocalStateQueryClientIT extends BaseTest {
 
-    private LocalQueryProvider localQueryProvider;
+    private LocalClientProvider localQueryProvider;
     private LocalStateQueryClient localStateQueryClient;
 
     @BeforeEach
     public void setup() {
-        this.localQueryProvider = new LocalQueryProvider(nodeSocketFile, protocolMagic);
+        this.localQueryProvider = new LocalClientProvider("192.168.0.228", 31001, protocolMagic);
         this.localStateQueryClient = localQueryProvider.getLocalStateQueryClient();
         localQueryProvider.start();
     }

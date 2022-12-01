@@ -22,12 +22,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Slf4j
 @EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 class LocalTxMonitorClientIT extends BaseTest {
-    private LocalQueryProvider localQueryProvider;
+    private LocalClientProvider localQueryProvider;
     private LocalTxMonitorClient localTxMonitorClient;
 
     @BeforeEach
     public void setup() {
-        this.localQueryProvider = new LocalQueryProvider(nodeSocketFile, protocolMagic);
+        this.localQueryProvider = new LocalClientProvider(nodeSocketFile, protocolMagic);
         this.localTxMonitorClient = localQueryProvider.getTxMonitorClient();
         localQueryProvider.start();
     }
@@ -120,7 +120,7 @@ class LocalTxMonitorClientIT extends BaseTest {
     @Test
     void testAddTxMonitorListener() {
         AtomicInteger count = new AtomicInteger(0);
-        LocalQueryProvider localQueryProvider = new LocalQueryProvider(nodeSocketFile, protocolMagic);
+        LocalClientProvider localQueryProvider = new LocalClientProvider(nodeSocketFile, protocolMagic);
         localQueryProvider.addLocalTxMonitorListener(new LocalTxMonitorListener() {
             @Override
             public void acquiredAt(MsgAwaitAcquire request, MsgAcquired msgAcquired) {

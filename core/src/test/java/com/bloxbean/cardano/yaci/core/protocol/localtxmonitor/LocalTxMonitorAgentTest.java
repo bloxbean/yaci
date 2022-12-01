@@ -1,7 +1,7 @@
 package com.bloxbean.cardano.yaci.core.protocol.localtxmonitor;
 
 import com.bloxbean.cardano.yaci.core.BaseTest;
-import com.bloxbean.cardano.yaci.core.network.N2CClient;
+import com.bloxbean.cardano.yaci.core.network.UnixSocketNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
@@ -29,7 +29,7 @@ public class LocalTxMonitorAgentTest extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalTxMonitorAgent localTxMonitorAgent = new LocalTxMonitorAgent();
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localTxMonitorAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localTxMonitorAgent);
 
         CountDownLatch countDownLatch = new CountDownLatch(1);
         handshakeAgent.addListener(new HandshakeAgentListener() {
@@ -72,7 +72,7 @@ public class LocalTxMonitorAgentTest extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalTxMonitorAgent localTxMonitorAgent = new LocalTxMonitorAgent();
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localTxMonitorAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localTxMonitorAgent);
 
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
@@ -123,7 +123,7 @@ public class LocalTxMonitorAgentTest extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalTxMonitorAgent localTxMonitorAgent = new LocalTxMonitorAgent();
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localTxMonitorAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localTxMonitorAgent);
 
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
@@ -170,7 +170,7 @@ public class LocalTxMonitorAgentTest extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalTxMonitorAgent localTxMonitorAgent = new LocalTxMonitorAgent();
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localTxMonitorAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localTxMonitorAgent);
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
@@ -216,7 +216,7 @@ public class LocalTxMonitorAgentTest extends BaseTest {
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalTxMonitorAgent localTxMonitorAgent = new LocalTxMonitorAgent();
 
-        N2CClient n2CClient = new N2CClient(nodeSocketFile, handshakeAgent, localTxMonitorAgent);
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(nodeSocketFile, handshakeAgent, localTxMonitorAgent);
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {

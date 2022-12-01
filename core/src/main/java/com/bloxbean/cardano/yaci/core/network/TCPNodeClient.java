@@ -17,11 +17,11 @@ import java.net.SocketAddress;
  * network bytes.
  */
 @Slf4j
-public class N2NClient extends NodeClient {
+public class TCPNodeClient extends NodeClient {
     private String host;
     private int port;
 
-    public N2NClient(String host, int port, HandshakeAgent handshakeAgent, Agent... agents) {
+    public TCPNodeClient(String host, int port, HandshakeAgent handshakeAgent, Agent... agents) {
         super(handshakeAgent, agents);
         this.host = host;
         this.port = port;

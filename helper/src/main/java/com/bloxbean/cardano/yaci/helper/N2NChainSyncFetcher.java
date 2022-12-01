@@ -7,7 +7,7 @@ import com.bloxbean.cardano.yaci.core.model.byron.ByronBlockHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
-import com.bloxbean.cardano.yaci.core.network.N2NClient;
+import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -42,7 +42,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
     private HandshakeAgent handshakeAgent;
     private ChainsyncAgent chainSyncAgent;
     private BlockfetchAgent blockFetchAgent;
-    private N2NClient n2CClient;
+    private TCPNodeClient n2CClient;
 
     /**
      * Construct {@link N2NChainSyncFetcher} to sync the blockchain
@@ -189,7 +189,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
             }
         });
 
-        n2CClient = new N2NClient(host, port, handshakeAgent,
+        n2CClient = new TCPNodeClient(host, port, handshakeAgent,
                 chainSyncAgent, blockFetchAgent);
     }
 
