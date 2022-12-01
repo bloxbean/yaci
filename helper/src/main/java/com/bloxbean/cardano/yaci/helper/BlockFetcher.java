@@ -1,7 +1,5 @@
-package com.bloxbean.cardano.yaci.core.helpers;
+package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.client.common.model.Networks;
-import com.bloxbean.cardano.yaci.core.helpers.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
@@ -11,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
+import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.function.Consumer;
@@ -154,18 +153,18 @@ public class BlockFetcher implements Fetcher<Block> {
         n2CClient.shutdown();
     }
 
-    public static void main(String[] args) {
-        //shelley
-        Point from = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
-        Point to = new Point(70223766, "21155bb822637508a91e9952e712040c0ea45107fb91898bfe8c9a95389b0d90");
-
-        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic());
-        BlockFetcher blockFetcher = new BlockFetcher("192.168.0.228", 6000, versionTable);
-
-        blockFetcher.start(block -> {
-            log.info("Block >>> {} -- {} {}", block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot() + "  ", block.getEra());
-        });
-
-        blockFetcher.fetch(from, to);
-    }
+//    public static void main(String[] args) {
+//        //shelley
+//        Point from = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
+//        Point to = new Point(70223766, "21155bb822637508a91e9952e712040c0ea45107fb91898bfe8c9a95389b0d90");
+//
+//        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic());
+//        BlockFetcher blockFetcher = new BlockFetcher("192.168.0.228", 6000, versionTable);
+//
+//        blockFetcher.start(block -> {
+//            log.info("Block >>> {} -- {} {}", block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot() + "  ", block.getEra());
+//        });
+//
+//        blockFetcher.fetch(from, to);
+//    }
 }

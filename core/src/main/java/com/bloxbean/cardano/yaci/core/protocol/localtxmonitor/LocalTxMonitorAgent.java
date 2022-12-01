@@ -36,14 +36,14 @@ public class LocalTxMonitorAgent extends Agent<LocalTxMonitorListener> {
 
     @Override
     protected Message buildNextMessage() {
+        if (shutDown && currenState == Idle) {
+            if (log.isDebugEnabled())
+                log.debug("Shutdown flag set. MsgDone()");
+            return new MsgDone();
+        }
+
         switch ((LocalTxMonitorState) currenState) {
             case Idle:
-                if (shutDown) {
-                    if (log.isDebugEnabled())
-                        log.debug("Shutdown flag set. MsgDone()");
-                    return new MsgDone();
-                } else
-                    return new MsgAwaitAcquire();
             case Acquired:
                 Message peekMsg = acquiredCommands.peek();
                 if (peekMsg != null) {
@@ -77,9 +77,9 @@ public class LocalTxMonitorAgent extends Agent<LocalTxMonitorListener> {
         if (message instanceof MsgAcquired) {
             if (log.isDebugEnabled())
                 log.debug("MsgAcquired: {}", message);
-            onMessageAcquired((MsgAcquired)message);
+            onMessageAcquired((MsgAwaitAcquire) query, (MsgAcquired) message);
         } else if (message instanceof MsgReplyHasTx) {
-            onMessageReplyHashTx((MsgHasTx) query, (MsgReplyHasTx)message);
+            onMessageReplyHashTx((MsgHasTx) query, (MsgReplyHasTx) message);
         } else if (message instanceof MsgReplyNextTx) {
             onMessageReplyNextTx((MsgNextTx) query, (MsgReplyNextTx) message);
         } else if (message instanceof MsgReplyGetSizes) {
@@ -88,12 +88,12 @@ public class LocalTxMonitorAgent extends Agent<LocalTxMonitorListener> {
 
     }
 
-    private void onMessageAcquired(MsgAcquired msgAcquired) {
+    private void onMessageAcquired(MsgAwaitAcquire msgAwaitAcquire, MsgAcquired msgAcquired) {
         if (log.isDebugEnabled())
             log.debug("onMessageAcquired : {} ", msgAcquired);
 
         getAgentListeners().stream().forEach(
-                listener -> listener.acquiredAt(msgAcquired.getSlotNo())
+                listener -> listener.acquiredAt(msgAwaitAcquire, msgAcquired)
         );
     }
 

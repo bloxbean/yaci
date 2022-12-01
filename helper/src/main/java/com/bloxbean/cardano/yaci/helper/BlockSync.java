@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.yaci.core.helpers.N2NChainSyncFetcher;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.listener.BlockFetchAgentListenerAdapter;
@@ -51,12 +50,6 @@ public class BlockSync {
             n2NChainSyncFetcher.shutdown();
 
         initializeAgentAndStart(wellKnownPoint, blockChainDataListener, true);
-//
-////        TipFinder tipFinder = new TipFinder(host, port, wellKnownPoint, protocolMagic);
-////        Mono<Tip> tipMono = tipFinder.find();
-//
-////        Tip tip = tipMono.block();
-//        startSync(tip.getPoint(), blockChainDataListener);
     }
 
     public void stop() {

@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.core.reactive;
+package com.bloxbean.cardano.yaci.helper.reactive;
 
 import com.bloxbean.cardano.yaci.core.common.NetworkType;
 import com.bloxbean.cardano.yaci.core.model.Block;
@@ -7,10 +7,10 @@ import com.bloxbean.cardano.yaci.core.network.N2NClient;
 import com.bloxbean.cardano.yaci.core.protocol.State;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
-import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
-import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainsyncAgent;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainsyncAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.bloxbean.cardano.yaci.core.common.Constants.*;
-import static com.bloxbean.cardano.yaci.core.common.Constants.PREVIEW_IOHK_RELAY_PORT;
 
 /**
  * The reactive implementation is experimental and needs more testing.

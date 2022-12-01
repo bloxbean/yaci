@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.yaci.core.helpers.BlockFetcher;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.listener.BlockFetchAgentListenerAdapter;
@@ -35,9 +34,6 @@ public class BlockRangeSync {
     public void fetch(Point from, Point to) {
         if (blockFetcher == null)
             throw new IllegalStateException("Please call start before fetch");
-
-//        if (from == Point.ORIGIN)
-//            from =
 
         blockFetcher.fetch(from, to);
     }

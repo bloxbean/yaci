@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.core.helpers.model;
+package com.bloxbean.cardano.yaci.helper.model;
 
 import lombok.*;
 

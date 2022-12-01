@@ -36,6 +36,7 @@ public class LocalTxMonitorAgentTest extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
+                localTxMonitorAgent.awaitAcquire();
                 localTxMonitorAgent.sendNextMessage();
             }
 
@@ -49,9 +50,9 @@ public class LocalTxMonitorAgentTest extends BaseTest {
         AtomicLong atomicSlot = new AtomicLong(0);
         localTxMonitorAgent.addListener(new LocalTxMonitorListener() {
             @Override
-            public void acquiredAt(long slot) {
-                log.info("Slot >> " + slot);
-                atomicSlot.set(slot);
+            public void acquiredAt(MsgAwaitAcquire request, MsgAcquired reply) {
+                log.info("Slot >> " + reply.getSlotNo());
+                atomicSlot.set(reply.getSlotNo());
                 countDownLatch.countDown();
                 success.set(true);
             }
@@ -77,6 +78,7 @@ public class LocalTxMonitorAgentTest extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
+                localTxMonitorAgent.awaitAcquire();
                 localTxMonitorAgent.sendNextMessage();
             }
 
@@ -86,17 +88,22 @@ public class LocalTxMonitorAgentTest extends BaseTest {
             }
         });
 
-        CountDownLatch countDownLatch = new CountDownLatch(2);
+        CountDownLatch countDownLatch = new CountDownLatch(3);
         AtomicInteger counter = new AtomicInteger(0);
         localTxMonitorAgent.addListener(new LocalTxMonitorListener() {
             @Override
-            public void acquiredAt(long slot) {
+            public void acquiredAt(MsgAwaitAcquire request, MsgAcquired reply) {
                 countDownLatch.countDown();
                 counter.incrementAndGet();
-                log.info("Slot >> " + slot);
+                log.info("Slot > >> " + reply.getSlotNo());
                 localTxMonitorAgent.release();
                 localTxMonitorAgent.sendNextMessage();
 
+                try { //sleep to avoid timing issue
+                    Thread.sleep(300);
+                } catch (InterruptedException e) {
+
+                }
                 localTxMonitorAgent.awaitAcquire(); //TODO --
                 localTxMonitorAgent.sendNextMessage();
             }
@@ -107,7 +114,7 @@ public class LocalTxMonitorAgentTest extends BaseTest {
         countDownLatch.await(20, TimeUnit.SECONDS);
         n2CClient.shutdown();
 
-        assertThat(counter.get()).isEqualTo(2);
+        assertThat(counter.get()).isEqualTo(3);
     }
 
     @Test
@@ -122,6 +129,7 @@ public class LocalTxMonitorAgentTest extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
+                localTxMonitorAgent.awaitAcquire();
                 localTxMonitorAgent.sendNextMessage();
             }
 
@@ -135,8 +143,8 @@ public class LocalTxMonitorAgentTest extends BaseTest {
         CountDownLatch onNextCallbackCDL = new CountDownLatch(1);
         localTxMonitorAgent.addListener(new LocalTxMonitorListener() {
             @Override
-            public void acquiredAt(long slot) {
-                log.info("Slot >> " + slot);
+            public void acquiredAt(MsgAwaitAcquire request, MsgAcquired reply) {
+                log.info("Slot >> " + reply.getSlotNo());
                 localTxMonitorAgent.nextTx();
                 localTxMonitorAgent.sendNextMessage();
             }
@@ -167,6 +175,7 @@ public class LocalTxMonitorAgentTest extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
+                localTxMonitorAgent.awaitAcquire();
                 localTxMonitorAgent.sendNextMessage();
             }
 
@@ -180,8 +189,8 @@ public class LocalTxMonitorAgentTest extends BaseTest {
         CountDownLatch countDownLatch = new CountDownLatch(1);
         localTxMonitorAgent.addListener(new LocalTxMonitorListener() {
             @Override
-            public void acquiredAt(long slot) {
-                log.info("Slot >> " + slot);
+            public void acquiredAt(MsgAwaitAcquire request, MsgAcquired reply) {
+                log.info("Slot >> " + reply.getSlotNo());
                 localTxMonitorAgent.hasTx("4f539156bfbefc070a3b61cad3d1cedab3050e2b2a62f0ffe16a43eb0edc1ce8");
                 localTxMonitorAgent.sendNextMessage();
             }
@@ -212,6 +221,7 @@ public class LocalTxMonitorAgentTest extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
+                localTxMonitorAgent.awaitAcquire();
                 localTxMonitorAgent.sendNextMessage();
             }
 
@@ -227,8 +237,8 @@ public class LocalTxMonitorAgentTest extends BaseTest {
         CountDownLatch countDownLatch = new CountDownLatch(1);
         localTxMonitorAgent.addListener(new LocalTxMonitorListener() {
             @Override
-            public void acquiredAt(long slot) {
-                log.info("Slot >> " + slot);
+            public void acquiredAt(MsgAwaitAcquire request, MsgAcquired reply) {
+                log.info("Slot >> " + reply.getSlotNo());
                 localTxMonitorAgent.getSizeAndCapacity();
 //                localTxMonitorAgent.nextTx();
                 localTxMonitorAgent.sendNextMessage();

@@ -1,6 +1,5 @@
-package com.bloxbean.cardano.yaci.core.helpers;
+package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.yaci.core.BaseTest;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
 import lombok.extern.slf4j.Slf4j;
@@ -15,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 @Slf4j
-class LocalTipFinderTest extends BaseTest {
+class LocalTipFinderIT extends BaseTest {
 
     @Test
     void findTip() {

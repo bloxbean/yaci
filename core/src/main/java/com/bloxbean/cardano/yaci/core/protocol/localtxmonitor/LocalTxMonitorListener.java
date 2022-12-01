@@ -4,7 +4,7 @@ import com.bloxbean.cardano.yaci.core.protocol.AgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.localtxmonitor.messages.*;
 
 public interface LocalTxMonitorListener extends AgentListener {
-    default void acquiredAt(long slot) {
+    default void acquiredAt(MsgAwaitAcquire request, MsgAcquired msgAcquired) {
 
     }
 

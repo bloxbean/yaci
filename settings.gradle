@@ -2,11 +2,5 @@ rootProject.name = 'yaci'
 include 'core'
 include 'helper'
 
-project(':core').projectDir = file('core')
-project(":core").name = "yaci-core"
-
-project(':helper').projectDir = file('helper')
-project(":helper").name = "yaci-helper"
-
 
 

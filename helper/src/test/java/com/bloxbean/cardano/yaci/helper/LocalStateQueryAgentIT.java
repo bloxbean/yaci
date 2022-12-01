@@ -1,7 +1,5 @@
-package com.bloxbean.cardano.yaci.core.protocol.localstate;
+package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.yaci.core.BaseTest;
-import com.bloxbean.cardano.yaci.core.helpers.LocalTipFinder;
 import com.bloxbean.cardano.yaci.core.network.N2CClient;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
@@ -9,6 +7,8 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.LocalStateQueryAgent;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.LocalStateQueryListener;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Query;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.QueryResult;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.messages.MsgFailure;
@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
 @EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
-class LocalStateQueryAgentTest extends BaseTest {
+class LocalStateQueryAgentIT extends BaseTest {
 
     @Test
     void acquiredInvalidPoint_shouldReturn_MsgFailure() throws InterruptedException {
@@ -398,7 +398,6 @@ class LocalStateQueryAgentTest extends BaseTest {
         n2CClient.shutdown();
     }
 
-    @Test
     public Mono<Tip> findTip() {
         return Mono.create(tipMonoSink -> {
             LocalTipFinder tipFinder = new LocalTipFinder(nodeSocketFile, Point.ORIGIN, protocolMagic);

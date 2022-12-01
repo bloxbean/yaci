@@ -1,13 +1,11 @@
-package com.bloxbean.cardano.yaci.core.helpers;
+package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.client.common.model.Networks;
-import com.bloxbean.cardano.yaci.core.helpers.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.network.N2NClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionAgent;
+import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.function.Consumer;
@@ -62,10 +60,4 @@ public class TxSubmissionClient implements Fetcher {
         return n2nClient.isRunning();
     }
 
-
-    public static void main(String[] args) {
-        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic());
-        TxSubmissionClient blockFetcher = new TxSubmissionClient("192.168.0.228", 6000, versionTable);
-        blockFetcher.start((t) -> {});
-    }
 }

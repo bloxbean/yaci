@@ -1,8 +1,6 @@
-package com.bloxbean.cardano.yaci.core.helpers;
+package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.client.address.Address;
-import com.bloxbean.cardano.yaci.core.BaseTest;
-import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.*;
@@ -20,24 +18,26 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 @Slf4j
-class LocalStateQueryClientTest extends BaseTest {
+class LocalStateQueryClientIT extends BaseTest {
 
-    LocalStateQueryClient queryClient;
+    private LocalQueryProvider localQueryProvider;
+    private LocalStateQueryClient localStateQueryClient;
 
     @BeforeEach
-    void setup() {
-        queryClient = new LocalStateQueryClient(nodeSocketFile, Constants.PREPROD_PROTOCOL_MAGIC);
-        queryClient.start();
+    public void setup() {
+        this.localQueryProvider = new LocalQueryProvider(nodeSocketFile, protocolMagic);
+        this.localStateQueryClient = localQueryProvider.getLocalStateQueryClient();
+        localQueryProvider.start();
     }
 
     @AfterEach
-    void tearDown() {
-        queryClient.shutdown();
+    public void tearDown() {
+        this.localQueryProvider.shutdown();
     }
 
     @Test
     void startTimeQuery() {
-        Mono<SystemStartResult> queryResultMono = queryClient.executeQuery(new SystemStartQuery());
+        Mono<SystemStartResult> queryResultMono = localStateQueryClient.executeQuery(new SystemStartQuery());
         SystemStartResult systemStartResult = queryResultMono.block(Duration.ofSeconds(20));
 
         log.info("SystemStartQuery >> " + systemStartResult);
@@ -47,7 +47,7 @@ class LocalStateQueryClientTest extends BaseTest {
 
     @Test
     void blockHeighQuery() {
-        Mono<BlockHeightQueryResult> blockHeightQueryMono = queryClient.executeQuery(new BlockHeightQuery());
+        Mono<BlockHeightQueryResult> blockHeightQueryMono = localStateQueryClient.executeQuery(new BlockHeightQuery());
         BlockHeightQueryResult blockHeightQueryResult = blockHeightQueryMono.block(Duration.ofSeconds(20));
 
         log.info("BlockHeight >> " + blockHeightQueryResult);
@@ -56,14 +56,14 @@ class LocalStateQueryClientTest extends BaseTest {
 
     @Test
     void chainPoint() {
-        Mono<ChainPointQueryResult> chainPointQueryMono = queryClient.executeQuery(new ChainPointQuery());
+        Mono<ChainPointQueryResult> chainPointQueryMono = localStateQueryClient.executeQuery(new ChainPointQuery());
         ChainPointQueryResult chainPointQueryResult = chainPointQueryMono.block(Duration.ofSeconds(8));
         log.info("ChainPoint >> " + chainPointQueryResult);
 
-        Mono<Point> reAcquireMono = queryClient.reAcquire();
+        Mono<Point> reAcquireMono = localStateQueryClient.reAcquire();
         reAcquireMono.block();
 
-        Mono<BlockHeightQueryResult> blockHeightQueryMono = queryClient.executeQuery(new BlockHeightQuery());
+        Mono<BlockHeightQueryResult> blockHeightQueryMono = localStateQueryClient.executeQuery(new BlockHeightQuery());
         BlockHeightQueryResult blockHeightQueryResult = blockHeightQueryMono.block(Duration.ofSeconds(20));
 
         log.info("BlockHeight >> " + blockHeightQueryResult);
@@ -72,7 +72,7 @@ class LocalStateQueryClientTest extends BaseTest {
 //        queryClient.release().block();
 //        queryClient.acquire(chainPointQueryResult.getChainPoint()).block();
 
-        blockHeightQueryMono = queryClient.executeQuery(new BlockHeightQuery());
+        blockHeightQueryMono = localStateQueryClient.executeQuery(new BlockHeightQuery());
         blockHeightQueryResult = blockHeightQueryMono.block(Duration.ofSeconds(20));
 
         log.info("BlockHeight >> " + blockHeightQueryResult);
@@ -80,7 +80,7 @@ class LocalStateQueryClientTest extends BaseTest {
 
     @Test
     void protocolParameters() {
-        Mono<CurrentProtocolParamQueryResult> mono = queryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Alonzo));
+        Mono<CurrentProtocolParamQueryResult> mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Alonzo));
         CurrentProtocolParamQueryResult protocolParams = mono.block(Duration.ofSeconds(8));
         log.info("Protocol Params >> " + protocolParams);
 
@@ -90,7 +90,7 @@ class LocalStateQueryClientTest extends BaseTest {
 
     @Test
     void epochNoQuery() {
-        Mono<EpochNoQueryResult> queryResultMono = queryClient.executeQuery(new EpochNoQuery(Era.Alonzo));
+        Mono<EpochNoQueryResult> queryResultMono = localStateQueryClient.executeQuery(new EpochNoQuery(Era.Alonzo));
         EpochNoQueryResult epochNoQueryResult = queryResultMono.block(Duration.ofSeconds(20));
 
         log.info("Epoch >> " + epochNoQueryResult.getEpochNo());
@@ -99,7 +99,7 @@ class LocalStateQueryClientTest extends BaseTest {
 
     @Test
     void utxoByAddress() {
-        Mono<UtxoByAddressQueryResult> queryResultMono = queryClient.executeQuery(new UtxoByAddressQuery(Era.Alonzo, new Address("addr_test1vpfwv0ezc5g8a4mkku8hhy3y3vp92t7s3ul8g778g5yegsgalc6gc")));
+        Mono<UtxoByAddressQueryResult> queryResultMono = localStateQueryClient.executeQuery(new UtxoByAddressQuery(Era.Alonzo, new Address("addr_test1vpfwv0ezc5g8a4mkku8hhy3y3vp92t7s3ul8g778g5yegsgalc6gc")));
         UtxoByAddressQueryResult utxoByAddressQueryResult = queryResultMono.block(Duration.ofSeconds(20));
 
         log.info("Utxos >> " + utxoByAddressQueryResult.getUtxoList());

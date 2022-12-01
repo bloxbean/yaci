@@ -1,6 +1,5 @@
-package com.bloxbean.cardano.yaci.core.helpers;
+package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.yaci.core.BaseTest;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
@@ -9,6 +8,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
-//@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
-class BlockFetcherTest extends BaseTest {
+@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
+class BlockFetcherIT extends BaseTest {
 
     @Test
     public void fetchBlock() throws InterruptedException {

@@ -1,6 +1,5 @@
-package com.bloxbean.cardano.yaci.core.helpers;
+package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.yaci.core.helpers.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
@@ -17,6 +16,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
+import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.function.Consumer;
@@ -24,10 +24,12 @@ import java.util.function.Consumer;
 /**
  * Use this fetcher to fetch blocks from the current tip or from a wellknown point. The fetcher connects to a local
  * Cardano node through node socket file using node-to-client mini-protocol.
- * Incoming blocks can be received by passing a {@link Consumer} function to the start method.
- * The following listeners can be added to receive various events from the agents
+ * <p>Incoming blocks can be received by passing a {@link Consumer} function to the start method.</p>
+ * <p>The following listeners can be added to receive various events from the agents</p>
+ * <pre>
  * 1. {@link BlockfetchAgentListener} - To listen to events published by {@link BlockfetchAgent}
  * 2. {@link ChainSyncAgentListener} - To listen to events published by {@link ChainsyncAgent}
+ * </pre>
  */
 @Slf4j
 public class N2CChainSyncFetcher implements Fetcher<Block> {
