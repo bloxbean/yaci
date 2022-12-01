@@ -10,9 +10,10 @@ import com.bloxbean.cardano.yaci.core.protocol.localtx.LocalTxSubmissionListener
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgAcceptTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgRejectTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.model.TxSubmissionRequest;
-import com.bloxbean.cardano.yaci.helper.api.Fetcher;
+import com.bloxbean.cardano.yaci.helper.api.ReactiveFetcher;
 import com.bloxbean.cardano.yaci.helper.model.TxResult;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Mono;
 
 import java.util.function.Consumer;
 
@@ -38,7 +39,7 @@ import java.util.function.Consumer;
  * </pre>
  */
 @Slf4j
-public class LocalTxSubmissionClient implements Fetcher<TxResult> {
+public class LocalTxSubmissionClient extends ReactiveFetcher<TxResult> {
     private String nodeSocketFile;
     private VersionTable versionTable;
     private HandshakeAgent handshakeAgent;
@@ -47,8 +48,9 @@ public class LocalTxSubmissionClient implements Fetcher<TxResult> {
 
     /**
      * Construct a LocalTxSubmissionClient
+     *
      * @param nodeSocketFile Cardano node socket file
-     * @param protocolMagic Network protocol magic
+     * @param protocolMagic  Network protocol magic
      */
     public LocalTxSubmissionClient(String nodeSocketFile, long protocolMagic) {
         this(nodeSocketFile, N2CVersionTableConstant.v1AndAbove(protocolMagic));
@@ -56,8 +58,9 @@ public class LocalTxSubmissionClient implements Fetcher<TxResult> {
 
     /**
      * Construct a LocalTxSubmissionClient
+     *
      * @param nodeSocketFile Cardano node socket file
-     * @param versionTable VersionTable for Node to Client protocol
+     * @param versionTable   VersionTable for Node to Client protocol
      */
     public LocalTxSubmissionClient(String nodeSocketFile, VersionTable versionTable) {
         this.nodeSocketFile = nodeSocketFile;
@@ -81,6 +84,7 @@ public class LocalTxSubmissionClient implements Fetcher<TxResult> {
     /**
      * Establish the connection with the node. This method should be called first.
      * The transaction result can be received through the {@link Consumer} function passed to this method.
+     *
      * @param consumer
      */
     @Override
@@ -88,23 +92,27 @@ public class LocalTxSubmissionClient implements Fetcher<TxResult> {
         txSubmissionAgent.addListener(new LocalTxSubmissionListener() {
             @Override
             public void txAccepted(TxSubmissionRequest txSubmissionRequest, MsgAcceptTx msgAcceptTx) {
-                if (consumer == null) return;
                 TxResult txResult = TxResult.builder()
                         .txHash(txSubmissionRequest.getTxHash())
                         .accepted(true)
                         .build();
-                consumer.accept(txResult);
+
+                applyMonoSuccess(txSubmissionRequest, txResult);
+                if (consumer != null)
+                    consumer.accept(txResult);
             }
 
             @Override
             public void txRejected(TxSubmissionRequest txSubmissionRequest, MsgRejectTx msgRejectTx) {
-                if (consumer == null) return;
                 TxResult txResult = TxResult.builder()
                         .txHash(txSubmissionRequest.getTxHash())
                         .accepted(false)
                         .errorCbor(msgRejectTx.getReasonCbor())
                         .build();
-                consumer.accept(txResult);
+
+                applyMonoSuccess(txSubmissionRequest, txResult);
+                if (consumer != null)
+                    consumer.accept(txResult);
             }
         });
 
@@ -113,12 +121,26 @@ public class LocalTxSubmissionClient implements Fetcher<TxResult> {
     }
 
     /**
-     * Submit transaction to the Cardano network
+     * Submit transaction to the Cardano network and get the result through registered {@link LocalTxSubmissionListener}
+     *
      * @param txSubmissionRequest
      */
-    public void submitTx(TxSubmissionRequest txSubmissionRequest) {
+    public void submitTxCallback(TxSubmissionRequest txSubmissionRequest) {
         txSubmissionAgent.submitTx(txSubmissionRequest);
         txSubmissionAgent.sendNextMessage();
+    }
+
+    /**
+     * Submit transaction to the local Cardano network
+     * @param txSubmissionRequest
+     * @return Mono with TxResult
+     */
+    public Mono<TxResult> submitTx(TxSubmissionRequest txSubmissionRequest) {
+        return Mono.create(monoSink -> {
+            txSubmissionAgent.submitTx(txSubmissionRequest);
+            storeMonoSinkReference(txSubmissionRequest, monoSink);
+            txSubmissionAgent.sendNextMessage();
+        });
     }
 
     /**
@@ -131,6 +153,7 @@ public class LocalTxSubmissionClient implements Fetcher<TxResult> {
 
     /**
      * Check if the connection is alive
+     *
      * @return true if alive, otherwise false
      */
     @Override
@@ -140,6 +163,7 @@ public class LocalTxSubmissionClient implements Fetcher<TxResult> {
 
     /**
      * Add a {@link LocalTxSubmissionListener} to listen {@link LocalTxSubmissionAgent} events
+     *
      * @param listener
      */
     public void addTxSubmissionListener(LocalTxSubmissionListener listener) {
