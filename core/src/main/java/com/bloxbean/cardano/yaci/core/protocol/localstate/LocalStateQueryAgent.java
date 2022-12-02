@@ -6,6 +6,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Query;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.QueryResult;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.messages.*;
+import com.bloxbean.cardano.yaci.core.protocol.localtxmonitor.LocalTxMonitorState;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -23,16 +24,10 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
     private Queue<Query> pendingQueryCommands;
 
     public LocalStateQueryAgent() {
-        this(null);
-    }
-
-    public LocalStateQueryAgent(Point point) {
-        this.point = point;
         this.currenState = Idle;
 
         acquiredCommands = new ConcurrentLinkedQueue<>();
         pendingQueryCommands = new ConcurrentLinkedQueue<>();
-
     }
 
     @Override
@@ -47,14 +42,14 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     @Override
     protected Message buildNextMessage() {
+        if (shutDown && currenState == LocalTxMonitorState.Idle) {
+            if (log.isDebugEnabled())
+                log.debug("Shutdown flag set. MsgDone()");
+            return new MsgDone();
+        }
+
         switch ((LocalStateQueryState) currenState) {
             case Idle:
-                if (shutDown) {
-                    if (log.isDebugEnabled())
-                        log.debug("Shutdown flag set. MsgDone()");
-                    return new MsgDone();
-                } else
-                    return new MsgAcquire(point);
             case Acquired:
                 Message peekMsg = acquiredCommands.peek();
                 if (peekMsg != null) {
@@ -154,11 +149,16 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
         return msgReAcquire;
     }
 
+    public MsgAcquire acquire() {
+        return acquire(null);
+    }
+
     public MsgAcquire acquire(Point point) {
         MsgAcquire msgAcquire = new MsgAcquire(point);
         this.currenState.verifyMessageType(msgAcquire);
 
         this.point = point;
+        acquiredCommands.add(msgAcquire);
         return msgAcquire;
     }
 
@@ -172,14 +172,6 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     @Override
     public void reset() {
-        this.currenState = Idle;
-        acquiredCommands.clear();
-        pendingQueryCommands.clear();
-    }
-
-    public void reset(Point point) {
-        this.point = point;
-        this.currenState = Idle;
         acquiredCommands.clear();
         pendingQueryCommands.clear();
     }

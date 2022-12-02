@@ -90,6 +90,10 @@ public abstract class Agent<T extends AgentListener> {
 
     }
 
+    public State getCurrentState() {
+        return currenState;
+    }
+
     public abstract int getProtocolId();
     public abstract boolean isDone();
     protected abstract Message buildNextMessage();

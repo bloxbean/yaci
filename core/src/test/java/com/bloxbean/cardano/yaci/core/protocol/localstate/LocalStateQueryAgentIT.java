@@ -1,14 +1,12 @@
-package com.bloxbean.cardano.yaci.helper;
+package com.bloxbean.cardano.yaci.core.protocol.localstate;
 
+import com.bloxbean.cardano.yaci.core.BaseTest;
 import com.bloxbean.cardano.yaci.core.network.UnixSocketNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
-import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
-import com.bloxbean.cardano.yaci.core.protocol.localstate.LocalStateQueryAgent;
-import com.bloxbean.cardano.yaci.core.protocol.localstate.LocalStateQueryListener;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Query;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.QueryResult;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.messages.MsgFailure;
@@ -20,9 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-import reactor.core.publisher.Mono;
 
-import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -47,7 +43,7 @@ class LocalStateQueryAgentIT extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
-                localStateQueryAgent.acquire(acquirePoint);
+                localStateQueryAgent.acquire(new Point(1233, "82cd3c389e0c6c0de588db51ba6a5860bae9808a5080119033aee401c75c97d0")); //Tip
                 localStateQueryAgent.sendNextMessage();
             }
 
@@ -80,8 +76,6 @@ class LocalStateQueryAgentIT extends BaseTest {
 
     @Test
     void acquiredValidPoint_shouldReturn_Acquired() throws InterruptedException {
-        Mono<Tip> tipMono = findTip();
-        Tip tip = tipMono.block(Duration.ofSeconds(10));
 
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent();
@@ -93,7 +87,7 @@ class LocalStateQueryAgentIT extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
-                localStateQueryAgent.acquire(tip.getPoint());
+                localStateQueryAgent.acquire(); //Tip
                 localStateQueryAgent.sendNextMessage();
             }
 
@@ -126,10 +120,6 @@ class LocalStateQueryAgentIT extends BaseTest {
 
     @Test
     void systemStartQuery_shouldReturn_startDateTime() throws InterruptedException {
-
-        Mono<Tip> tipMono = findTip();
-        Tip tip = tipMono.block(Duration.ofSeconds(10));
-
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent();
 
@@ -140,7 +130,7 @@ class LocalStateQueryAgentIT extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
-                localStateQueryAgent.acquire(tip.getPoint());
+                localStateQueryAgent.acquire(); //tip
                 localStateQueryAgent.sendNextMessage();
             }
 
@@ -181,10 +171,6 @@ class LocalStateQueryAgentIT extends BaseTest {
 
     @Test
     void blockHeightQuery_shouldReturn_BlockHeight() throws InterruptedException {
-
-        Mono<Tip> tipMono = findTip();
-        Tip tip = tipMono.block(Duration.ofSeconds(10));
-
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent();
 
@@ -195,7 +181,7 @@ class LocalStateQueryAgentIT extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
-                localStateQueryAgent.acquire(tip.getPoint());
+                localStateQueryAgent.acquire();
                 localStateQueryAgent.sendNextMessage();
             }
 
@@ -236,10 +222,6 @@ class LocalStateQueryAgentIT extends BaseTest {
 
     @Test
     void chainPointQuery_shouldReturn_blockHash() throws InterruptedException {
-
-        Mono<Tip> tipMono = findTip();
-        Tip tip = tipMono.block(Duration.ofSeconds(10));
-
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent();
 
@@ -250,7 +232,7 @@ class LocalStateQueryAgentIT extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
-                localStateQueryAgent.acquire(tip.getPoint());
+                localStateQueryAgent.acquire();
                 localStateQueryAgent.sendNextMessage();
             }
 
@@ -291,10 +273,6 @@ class LocalStateQueryAgentIT extends BaseTest {
 
     @Test
     void acquireReleaseAcquireTest() throws InterruptedException {
-
-        Mono<Tip> tipMono = findTip();
-        Tip tip = tipMono.block(Duration.ofSeconds(10));
-
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent();
 
@@ -305,7 +283,7 @@ class LocalStateQueryAgentIT extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
-                localStateQueryAgent.acquire(tip.getPoint());
+                localStateQueryAgent.acquire();
                 localStateQueryAgent.sendNextMessage();
             }
 
@@ -337,7 +315,7 @@ class LocalStateQueryAgentIT extends BaseTest {
         System.out.println("RELEASE DONE >>>>>>>>>>>>>>>");
         Thread.sleep(50);
 
-        localStateQueryAgent.acquire(tip.getPoint());
+        localStateQueryAgent.acquire();
         localStateQueryAgent.sendNextMessage();
 
         System.out.println("ACQUIRE DONE >>>>>>>>>>>>>>>");
@@ -353,10 +331,6 @@ class LocalStateQueryAgentIT extends BaseTest {
 
     @Test
     void invalid_invokeReleaseTwiceTest() throws InterruptedException {
-
-        Mono<Tip> tipMono = findTip();
-        Tip tip = tipMono.block(Duration.ofSeconds(10));
-
         HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent();
 
@@ -367,7 +341,7 @@ class LocalStateQueryAgentIT extends BaseTest {
             @Override
             public void handshakeOk() {
                 log.info("HANDSHAKE Successful");
-                localStateQueryAgent.acquire(tip.getPoint());
+                localStateQueryAgent.acquire();
                 localStateQueryAgent.sendNextMessage();
             }
 
@@ -405,15 +379,5 @@ class LocalStateQueryAgentIT extends BaseTest {
         });
 
         n2CClient.shutdown();
-    }
-
-    public Mono<Tip> findTip() {
-        return Mono.create(tipMonoSink -> {
-            LocalTipFinder tipFinder = new LocalTipFinder(nodeSocketFile, Point.ORIGIN, protocolMagic);
-            tipFinder.start(tip -> {
-                tipMonoSink.success(tip);
-                tipFinder.shutdown();
-            });
-        });
     }
 }

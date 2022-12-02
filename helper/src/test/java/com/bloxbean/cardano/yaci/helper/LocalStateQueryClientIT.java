@@ -12,6 +12,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
@@ -25,7 +26,7 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @BeforeEach
     public void setup() {
-        this.localQueryProvider = new LocalClientProvider("192.168.0.228", 31001, protocolMagic);
+        this.localQueryProvider = new LocalClientProvider(nodeSocketFile, protocolMagic);
         this.localStateQueryClient = localQueryProvider.getLocalStateQueryClient();
         localQueryProvider.start();
     }
@@ -36,7 +37,7 @@ class LocalStateQueryClientIT extends BaseTest {
     }
 
     @Test
-    void startTimeQuery() {
+    void startTimeQuery() throws InterruptedException {
         Mono<SystemStartResult> queryResultMono = localStateQueryClient.executeQuery(new SystemStartQuery());
         SystemStartResult systemStartResult = queryResultMono.block(Duration.ofSeconds(20));
 
@@ -55,12 +56,23 @@ class LocalStateQueryClientIT extends BaseTest {
     }
 
     @Test
+    void blockHeighQuery_whenManualAcquire() {
+        localStateQueryClient.acquire().block(Duration.ofSeconds(15));
+        Mono<BlockHeightQueryResult> blockHeightQueryMono = localStateQueryClient.executeQuery(new BlockHeightQuery());
+        BlockHeightQueryResult blockHeightQueryResult = blockHeightQueryMono.block(Duration.ofSeconds(20));
+        localStateQueryClient.release().block(Duration.ofSeconds(15));
+
+        log.info("BlockHeight >> " + blockHeightQueryResult);
+        assertTrue(blockHeightQueryResult.getBlockHeight() > 19000);
+    }
+
+    @Test
     void chainPoint() {
         Mono<ChainPointQueryResult> chainPointQueryMono = localStateQueryClient.executeQuery(new ChainPointQuery());
         ChainPointQueryResult chainPointQueryResult = chainPointQueryMono.block(Duration.ofSeconds(8));
         log.info("ChainPoint >> " + chainPointQueryResult);
 
-        Mono<Point> reAcquireMono = localStateQueryClient.reAcquire();
+        Mono<Optional<Point>> reAcquireMono = localStateQueryClient.reAcquire();
         reAcquireMono.block();
 
         Mono<BlockHeightQueryResult> blockHeightQueryMono = localStateQueryClient.executeQuery(new BlockHeightQuery());
@@ -106,4 +118,30 @@ class LocalStateQueryClientIT extends BaseTest {
         assertThat(utxoByAddressQueryResult.getUtxoList()).hasSizeGreaterThan(0);
     }
 
+    @Test
+    void acquireReacquireAndQuery() {
+        localStateQueryClient.acquire().block(Duration.ofSeconds(15));
+        Mono<CurrentProtocolParamQueryResult> mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Alonzo));
+        CurrentProtocolParamQueryResult protocolParams = mono.block(Duration.ofSeconds(8));
+        log.info("Protocol Params >> " + protocolParams);
+
+        assertThat(protocolParams.getProtocolParams().getCollateralPercent()).isEqualTo(150);
+        assertThat(protocolParams.getProtocolParams().getMaxCollateralInputs()).isEqualTo(3);
+
+        //Re-Acquire
+        localStateQueryClient.reAcquire().block(Duration.ofSeconds(15));
+
+        Mono<EpochNoQueryResult> queryResultMono = localStateQueryClient.executeQuery(new EpochNoQuery(Era.Alonzo));
+        EpochNoQueryResult epochNoQueryResult = queryResultMono.block(Duration.ofSeconds(20));
+
+        log.info("Epoch >> " + epochNoQueryResult.getEpochNo());
+        assertThat(epochNoQueryResult.getEpochNo()).isGreaterThanOrEqualTo(32);
+
+        //release
+        localStateQueryClient.release().block();
+
+        //Automatically acquire if in Idle state
+        queryResultMono = localStateQueryClient.executeQuery(new EpochNoQuery(Era.Alonzo));
+        epochNoQueryResult = queryResultMono.block(Duration.ofSeconds(20));
+    }
 }

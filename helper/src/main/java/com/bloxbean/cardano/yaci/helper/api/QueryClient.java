@@ -18,4 +18,24 @@ public class QueryClient {
         if (monoSink != null)
             monoSink.success(result);
     }
+
+    protected boolean hasMonoSink(Object key) {
+        return monoSinkMap.containsKey(key);
+    }
+
+    protected void applyMonoError(Object key, Object result) {
+        MonoSink monoSink = monoSinkMap.get(key);
+        if (monoSink != null)
+            monoSink.error(new RuntimeException(String.valueOf(result)));
+    }
+
+    /**
+     * Apply failure for all available mono
+     * @param result
+     */
+    protected void applyError(Object result) {
+        monoSinkMap.entrySet()
+                .stream().forEach(objectMonoSinkEntry ->
+                        objectMonoSinkEntry.getValue().error(new RuntimeException(String.valueOf(result))));
+    }
 }
