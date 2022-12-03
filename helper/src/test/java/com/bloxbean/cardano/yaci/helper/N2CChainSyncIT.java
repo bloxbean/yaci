@@ -48,7 +48,7 @@ public class N2CChainSyncIT {
         chainSyncFetcher.shutdown();
 
         assertThat(byronBlocks).hasSizeGreaterThanOrEqualTo(3);
-        assertThat(byronBlocks.get(0).getClass()).isEqualTo(ByronEbBlock.class);
+        assertThat(byronBlocks.get(0).getClass()).isEqualTo(ByronMainBlock.class);
         assertThat(genesisBlock.get(0).getHeader().getConsensusData().getEpoch()).isEqualTo(0);
         assertThat(genesisBlock.get(0).getHeader().getBlockHash()).isEqualTo("9ad7ff320c9cf74e0f5ee78d22a85ce42bb0a487d0506bf60cfb5a91ea4497d2");
         assertThat(byronBlocks.get(0).getHeader().getConsensusData().getSlotId().getSlot()).isEqualTo(2);
