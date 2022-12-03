@@ -10,12 +10,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+import reactor.test.StepVerifier;
 
 import java.time.Duration;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 @Slf4j
@@ -39,83 +40,100 @@ class LocalStateQueryClientIT extends BaseTest {
     @Test
     void startTimeQuery() throws InterruptedException {
         Mono<SystemStartResult> queryResultMono = localStateQueryClient.executeQuery(new SystemStartQuery());
-        SystemStartResult systemStartResult = queryResultMono.block(Duration.ofSeconds(20));
+        Mono<SystemStartResult> mono = queryResultMono.log();
 
-        log.info("SystemStartQuery >> " + systemStartResult);
-        assertNotNull(systemStartResult);
-        assertEquals(systemStartResult.getYear(), 2022);
+        StepVerifier
+                .create(mono)
+                .expectNextMatches(startTime -> startTime != null && startTime.getYear() == 2022)
+                .expectComplete()
+                .verify();
     }
 
     @Test
     void blockHeighQuery() {
         Mono<BlockHeightQueryResult> blockHeightQueryMono = localStateQueryClient.executeQuery(new BlockHeightQuery());
-        BlockHeightQueryResult blockHeightQueryResult = blockHeightQueryMono.block(Duration.ofSeconds(20));
+        Mono<BlockHeightQueryResult> mono = blockHeightQueryMono.log();
 
-        log.info("BlockHeight >> " + blockHeightQueryResult);
-        assertTrue(blockHeightQueryResult.getBlockHeight() > 19000);
+        StepVerifier
+                .create(mono)
+                .expectNextMatches(blockHeightQueryResult -> blockHeightQueryResult.getBlockHeight() > 19000)
+                .expectComplete()
+                .verify();
     }
 
     @Test
     void blockHeighQuery_whenManualAcquire() {
         localStateQueryClient.acquire().block(Duration.ofSeconds(15));
         Mono<BlockHeightQueryResult> blockHeightQueryMono = localStateQueryClient.executeQuery(new BlockHeightQuery());
-        BlockHeightQueryResult blockHeightQueryResult = blockHeightQueryMono.block(Duration.ofSeconds(20));
-        localStateQueryClient.release().block(Duration.ofSeconds(15));
+        Mono<BlockHeightQueryResult> mono = blockHeightQueryMono.log();
 
-        log.info("BlockHeight >> " + blockHeightQueryResult);
-        assertTrue(blockHeightQueryResult.getBlockHeight() > 19000);
+        StepVerifier
+                .create(mono)
+                .expectNextMatches(blockHeightQueryResult -> blockHeightQueryResult.getBlockHeight() > 19000)
+                .expectComplete()
+                .verify();
     }
 
     @Test
-    void chainPoint() {
+    void chainPointQuery() {
         Mono<ChainPointQueryResult> chainPointQueryMono = localStateQueryClient.executeQuery(new ChainPointQuery());
-        ChainPointQueryResult chainPointQueryResult = chainPointQueryMono.block(Duration.ofSeconds(8));
-        log.info("ChainPoint >> " + chainPointQueryResult);
+        Mono<ChainPointQueryResult> mono = chainPointQueryMono.log();
 
+        StepVerifier
+                .create(mono)
+                .expectNextMatches(chainPointQueryResult -> chainPointQueryResult.getChainPoint().getSlot() > 1000)
+                .expectComplete()
+                .verify();
+
+        //Reacquire
         Mono<Optional<Point>> reAcquireMono = localStateQueryClient.reAcquire();
         reAcquireMono.block();
 
         Mono<BlockHeightQueryResult> blockHeightQueryMono = localStateQueryClient.executeQuery(new BlockHeightQuery());
-        BlockHeightQueryResult blockHeightQueryResult = blockHeightQueryMono.block(Duration.ofSeconds(20));
+        blockHeightQueryMono = blockHeightQueryMono.log();
 
-        log.info("BlockHeight >> " + blockHeightQueryResult);
-
-        //TODO -- test
-//        queryClient.release().block();
-//        queryClient.acquire(chainPointQueryResult.getChainPoint()).block();
-
-        blockHeightQueryMono = localStateQueryClient.executeQuery(new BlockHeightQuery());
-        blockHeightQueryResult = blockHeightQueryMono.block(Duration.ofSeconds(20));
-
-        log.info("BlockHeight >> " + blockHeightQueryResult);
+        StepVerifier
+                .create(blockHeightQueryMono)
+                .expectNextMatches(blockHeightQueryResult -> blockHeightQueryResult.getBlockHeight() > 1000)
+                .expectComplete()
+                .verify();
     }
 
     @Test
     void protocolParameters() {
         Mono<CurrentProtocolParamQueryResult> mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Alonzo));
-        CurrentProtocolParamQueryResult protocolParams = mono.block(Duration.ofSeconds(8));
-        log.info("Protocol Params >> " + protocolParams);
+        mono = mono.log();
 
-        assertThat(protocolParams.getProtocolParams().getCollateralPercent()).isEqualTo(150);
-        assertThat(protocolParams.getProtocolParams().getMaxCollateralInputs()).isEqualTo(3);
+        StepVerifier
+                .create(mono)
+                .expectNextMatches(protoParams -> protoParams.getProtocolParams().getCollateralPercent() == 150
+                        && protoParams.getProtocolParams().getMaxCollateralInputs().equals(3))
+                .expectComplete()
+                .verify();
     }
 
     @Test
     void epochNoQuery() {
-        Mono<EpochNoQueryResult> queryResultMono = localStateQueryClient.executeQuery(new EpochNoQuery(Era.Alonzo));
-        EpochNoQueryResult epochNoQueryResult = queryResultMono.block(Duration.ofSeconds(20));
+        Mono<EpochNoQueryResult> mono = localStateQueryClient.executeQuery(new EpochNoQuery(Era.Alonzo));
+        mono = mono.log();
 
-        log.info("Epoch >> " + epochNoQueryResult.getEpochNo());
-        assertThat(epochNoQueryResult.getEpochNo()).isGreaterThanOrEqualTo(32);
+        StepVerifier
+                .create(mono)
+                .expectNextMatches(epochNoQueryResult -> epochNoQueryResult.getEpochNo() > 32)
+                .expectComplete()
+                .verify();
     }
 
     @Test
     void utxoByAddress() {
-        Mono<UtxoByAddressQueryResult> queryResultMono = localStateQueryClient.executeQuery(new UtxoByAddressQuery(Era.Alonzo, new Address("addr_test1vpfwv0ezc5g8a4mkku8hhy3y3vp92t7s3ul8g778g5yegsgalc6gc")));
-        UtxoByAddressQueryResult utxoByAddressQueryResult = queryResultMono.block(Duration.ofSeconds(20));
+        Mono<UtxoByAddressQueryResult> mono = localStateQueryClient.executeQuery(new UtxoByAddressQuery(Era.Alonzo, new Address("addr_test1vpfwv0ezc5g8a4mkku8hhy3y3vp92t7s3ul8g778g5yegsgalc6gc")));
+        mono = mono.log();
 
-        log.info("Utxos >> " + utxoByAddressQueryResult.getUtxoList());
-        assertThat(utxoByAddressQueryResult.getUtxoList()).hasSizeGreaterThan(0);
+        StepVerifier
+                .create(mono)
+                .expectNextMatches(utxoByAddressQueryResult -> utxoByAddressQueryResult.getUtxoList().size() > 0)
+                .expectComplete()
+                .verify();
     }
 
     @Test
@@ -143,5 +161,28 @@ class LocalStateQueryClientIT extends BaseTest {
         //Automatically acquire if in Idle state
         queryResultMono = localStateQueryClient.executeQuery(new EpochNoQuery(Era.Alonzo));
         epochNoQueryResult = queryResultMono.block(Duration.ofSeconds(20));
+    }
+
+    @Test
+    void nestedCalls() throws InterruptedException {
+        Mono<CurrentProtocolParamQueryResult> mono= localQueryProvider.getTxMonitorClient()
+                .acquireAndGetMempoolSizeAndCapacity()
+                .filter(mempoolStatus -> mempoolStatus.getNumberOfTxs() == 0)
+                .flatMap(mempoolStatus -> localStateQueryClient.acquire())
+                .publishOn(Schedulers.boundedElastic())
+                .map(point -> {
+                    CurrentProtocolParamQueryResult currentProtocolParamQueryResult =
+                            (CurrentProtocolParamQueryResult) localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Alonzo)).block(Duration.ofSeconds(10));
+                    System.out.println(currentProtocolParamQueryResult);
+                    return currentProtocolParamQueryResult;
+                });
+
+        mono = mono.log();
+
+        StepVerifier
+                .create(mono)
+                .expectNextMatches(protoParams -> protoParams.getProtocolParams().getMaxBlockSize() > 20000)
+                .expectComplete()
+                .verify();
     }
 }

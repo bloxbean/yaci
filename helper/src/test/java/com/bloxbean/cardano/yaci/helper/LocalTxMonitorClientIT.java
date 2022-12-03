@@ -15,6 +15,8 @@ import reactor.test.StepVerifier;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,74 +43,78 @@ class LocalTxMonitorClientIT extends BaseTest {
     void whenAcquire_returnSlotNo() {
         localTxMonitorClient.acquire();
         Mono<Long> mono = localTxMonitorClient.acquire();
-
-        long slot = mono.block(Duration.ofSeconds(10));
-        System.out.println("Slot : " + slot);
-        assertThat(slot).isGreaterThan(1000);
+        StepVerifier
+                .create(mono)
+                .expectNextMatches(slot -> slot > 1000)
+                .expectComplete()
+                .verify();
     }
 
     @Test
     void whenGetMempoolSize_returnSizeAndCapacity() {
         localTxMonitorClient.acquire().block(Duration.ofSeconds(10));
         Mono<MempoolStatus> mono = localTxMonitorClient.getMempoolSizeAndCapacity();
-        MempoolStatus mempoolStatus = mono.block(Duration.ofSeconds(10));
-        System.out.println("Size & Capacity : " + mempoolStatus);
-        assertThat(mempoolStatus.getCapacityInBytes()).isGreaterThan(10); //some random value other than zero
-        assertThat(mempoolStatus.getNumberOfTxs()).isGreaterThanOrEqualTo(0);
-        assertThat(mempoolStatus.getSizeInBytes()).isGreaterThanOrEqualTo(0);
+
+        StepVerifier.create(mono)
+                .expectNextMatches(mpStatus -> mpStatus.getCapacityInBytes() > 1000
+                        && mpStatus.getNumberOfTxs() >= 0
+                        && mpStatus.getSizeInBytes() >= 0
+                )
+                .expectComplete()
+                .verify();
     }
 
     @Test
     void whenAcquireAndGetMempoolSizeAndCapacity_returnSizeAndCapacity() {
         Mono<MempoolStatus> mono = localTxMonitorClient.acquireAndGetMempoolSizeAndCapacity();
-        MempoolStatus mempoolStatus = mono.block(Duration.ofSeconds(10));
-        System.out.println("Size & Capacity : " + mempoolStatus);
-        assertThat(mempoolStatus.getCapacityInBytes()).isGreaterThan(10); //some random value other than zero
-        assertThat(mempoolStatus.getNumberOfTxs()).isGreaterThanOrEqualTo(0);
-        assertThat(mempoolStatus.getSizeInBytes()).isGreaterThanOrEqualTo(0);
+
+        StepVerifier.create(mono)
+                .expectNextMatches(mpStatus -> mpStatus.getCapacityInBytes() > 1000
+                        && mpStatus.getNumberOfTxs() >= 0
+                        && mpStatus.getSizeInBytes() >= 0
+                )
+                .expectComplete()
+                .verify();
     }
 
     @Test
     void whenGetCurrentMempoolTransactions_returnsListOfTxn() {
         localTxMonitorClient.acquire().block();
-        Mono<List<byte[]>> mono = localTxMonitorClient.getCurrentMempoolTransactions();
-        List<byte[]> txns = mono.block();
-
-        assertThat(txns).hasSize(0);
-//        System.out.println(txns.size());
-//        for(byte[] bytes: txns) {
-//            System.out.println(TransactionUtil.getTxHash(bytes));
-//        }
+        Mono<List<byte[]>> mono = localTxMonitorClient.getCurrentMempoolTransactionsAsMono();
+//        List<byte[]> txns = mono.block();
+//
+        StepVerifier.create(mono)
+                .expectNextMatches(txs -> txs.size() >= 0)
+                .expectComplete()
+                .verify();
     }
 
     @Test
     void whenGetCurrentMempoolTransactionsAsFlux_returnFlux() {
         localTxMonitorClient.acquire().block();
-        Flux<byte[]> flux = localTxMonitorClient.getCurrentMempoolTransactionsAsFlux();
+        Flux<byte[]> flux = localTxMonitorClient.getCurrentMempoolTransactionsAs();
 //        flux.subscribe(bytes -> System.out.println(TransactionUtil.getTxHash(bytes)));
 
         StepVerifier.create(flux)
                 .expectComplete()
-                .verify();;
+                .verify();
+        ;
     }
 
     @Test
-    //TODO -- Mock test
+        //TODO -- Mock test
     void whenAcquireAndGetMempoolTransactions_returnFluxOfTransactions() {
         Flux<byte[]> flux = localTxMonitorClient.acquireAndGetMempoolTransactions();
-//        flux.subscribe(bytes -> {
-//            System.out.println(TransactionUtil.getTxHash(bytes));
-//        });
-//
+
         StepVerifier.create(flux)
                 .expectComplete()
                 .verify();
     }
 
     @Test
-    //TODO-- Mock test
+        //TODO-- Mock test
     void whenStreamMempoolTransactions_returnNewTransactions() throws InterruptedException {
-       Flux<byte[]> flux = localTxMonitorClient.streamMempoolTransactions();
+        Flux<byte[]> flux = localTxMonitorClient.streamMempoolTransactions();
 //       flux.subscribe(bytes -> {
 //           System.out.println("Tx# " + TransactionUtil.getTxHash(bytes));
 //       });
@@ -118,18 +124,21 @@ class LocalTxMonitorClientIT extends BaseTest {
     }
 
     @Test
-    void testAddTxMonitorListener() {
+    void testAddTxMonitorListener() throws InterruptedException {
         AtomicInteger count = new AtomicInteger(0);
+        CountDownLatch countDownLatch = new CountDownLatch(1);
         LocalClientProvider localQueryProvider = new LocalClientProvider(nodeSocketFile, protocolMagic);
         localQueryProvider.addLocalTxMonitorListener(new LocalTxMonitorListener() {
             @Override
             public void acquiredAt(MsgAwaitAcquire request, MsgAcquired msgAcquired) {
                 System.out.println("ACQUIRED");
                 count.incrementAndGet();
+                countDownLatch.countDown();
             }
         });
         localQueryProvider.start();
-        localQueryProvider.getTxMonitorClient().acquire().block();
+        localQueryProvider.getTxMonitorClient().acquire().subscribe();
+        countDownLatch.await(10, TimeUnit.SECONDS);
         assertThat(count.get()).isEqualTo(1);
     }
 }
