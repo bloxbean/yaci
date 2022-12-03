@@ -15,6 +15,11 @@ import java.util.List;
 /**
  * Helper to query mempool of a local Cardano node using local tx monitor node-to-client mini protocol.
  * <p>
+ * This class is not thread-safe. As local-tx-monitor is a stateful protocol with explicit state acquisition driven by the client,
+ * an instance of this class should not be used from multiple threads simultaneously.
+ *</p>
+ *
+ * <p>
  * Create a {@link LocalClientProvider} to get an instance of this class.
  * </p>
  * Example:
@@ -105,7 +110,7 @@ public class LocalTxMonitorClient extends QueryClient {
      */
     public Mono<MempoolStatus> acquireAndGetMempoolSizeAndCapacity() {
         return Mono.create(monoSink -> {
-            acquire().subscribe(aLong -> {
+            acquire().doOnNext(aLong -> {
                 if (log.isDebugEnabled())
                     log.debug("Try to acquire for LocalTxMonitor");
 
@@ -113,7 +118,7 @@ public class LocalTxMonitorClient extends QueryClient {
                 storeMonoSinkReference(sizeRequest, monoSink);
                 localTxMonitorAgent.sendNextMessage();
 
-            });
+            }).subscribe();
         });
     }
 
@@ -122,8 +127,8 @@ public class LocalTxMonitorClient extends QueryClient {
      * <p>This method should be called after {@link #acquire()}</p>
      * @return Mono for List of transactions
      */
-    public Mono<List<byte[]>> getCurrentMempoolTransactions() {
-        return getCurrentMempoolTransactionsAsFlux().collectList();
+    public Mono<List<byte[]>> getCurrentMempoolTransactionsAsMono() {
+        return getCurrentMempoolTransactionsAs().collectList();
     }
 
     /**
@@ -131,7 +136,7 @@ public class LocalTxMonitorClient extends QueryClient {
      * <p>This method should be called after {@link #acquire()}</p>
      * @return Flux for transactions (bytes)
      */
-    public Flux<byte[]> getCurrentMempoolTransactionsAsFlux() {
+    public Flux<byte[]> getCurrentMempoolTransactionsAs() {
         return Flux.create(fluxSink -> {
             _getMempoolTransactions(fluxSink, false);
         });
@@ -148,6 +153,16 @@ public class LocalTxMonitorClient extends QueryClient {
                 _getMempoolTransactions(fluxSink, false);
             });
         });
+    }
+
+    /**
+     * First acquire a mempool snapshot and then query mempool for transactions
+     * This method automatically handles the acquire call before the query.
+     *
+     * @return Mono for List of transactions
+     */
+    public Mono<List<byte[]>> acquireAndGetMempoolTransactionsAsMono() {
+        return acquireAndGetMempoolTransactions().collectList();
     }
 
 
