@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
+import co.nstant.in.cbor.model.Map;
 import com.bloxbean.cardano.client.util.AssetUtil;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
@@ -13,10 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 @Slf4j
 public enum TransactionBodySerializer implements Serializer<TransactionBody> {
@@ -33,7 +31,7 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         transactionBodyBuilder.txHash(txHash);
 
         Array inputArray =  (Array)bodyMap.get(new UnsignedInteger(0));
-        Set<TransactionInput> inputs = new HashSet<>();
+        Set<TransactionInput> inputs = new LinkedHashSet<>();
         for(DataItem inputItem: inputArray.getDataItems()) {
             if (inputItem == Special.BREAK)
                 continue;
@@ -194,7 +192,7 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         //reference inputs
         Array referenceInputsArray =  (Array)bodyMap.get(new UnsignedInteger(18));
         if (referenceInputsArray != null) {
-            Set<TransactionInput> referenceInputs = new HashSet<>();
+            Set<TransactionInput> referenceInputs = new LinkedHashSet<>();
             for (DataItem inputItem : referenceInputsArray.getDataItems()) {
                 TransactionInput ti = TransactionInputSerializer.INSTANCE.deserializeDI(inputItem);
                 referenceInputs.add(ti);
