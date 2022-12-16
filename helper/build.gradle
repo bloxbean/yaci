@@ -2,7 +2,7 @@ dependencies {
     api project(':core')
     api 'io.projectreactor:reactor-core:3.4.22'
 
-    testCompileClasspath('com.bloxbean.cardano:cardano-client-lib:0.3.0')
+    testCompileClasspath('com.bloxbean.cardano:cardano-client-core:0.4.0')
     testImplementation('io.projectreactor:reactor-test:3.4.22')
 
 }
