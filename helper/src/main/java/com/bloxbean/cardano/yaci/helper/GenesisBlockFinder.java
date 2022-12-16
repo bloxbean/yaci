@@ -36,7 +36,12 @@ public class GenesisBlockFinder {
 
             @Override
             public void onBlock(Block block) {
-                System.out.println(block);
+                if (block.getHeader().getHeaderBody().getBlockNumber() == 0)
+                    startPoint.setGenesisBlock(new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash()));
+                else if (block.getHeader().getHeaderBody().getBlockNumber() == 1)
+                    startPoint.setFirstBlock(new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash()));
+
+                    countDownLatch.countDown();
             }
         });
 
