@@ -11,14 +11,14 @@ Maven
 <dependency>
     <groupId>com.bloxbean.cardano</groupId>
     <artifactId>yaci-core</artifactId>
-    <version>0.0.8</version>
+    <version>0.1.2</version>
 </dependency>
 ```
 
 Gradle
 
 ```xml
- implementation('com.bloxbean.cardano:yaci-core:0.0.8')
+ implementation('com.bloxbean.cardano:yaci-core:0.1.2')
 ```
 
 ## [Documentation](docs/README.md)
@@ -36,7 +36,7 @@ Gradle
 | `n2c Chain-Sync`         | Done           | 
 | `n2c Local TxSubmission` | Done           | 
 | `n2c Local State Query`  | Partially Done |
-| `n2c Local Tx Monitor`   | Not Started    |
+| `n2c Local Tx Monitor`   | Done   |
 
 
 | Other tasks              | Status                                                   |
