@@ -26,6 +26,10 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
     @NonNull
     private Era era;
 
+    public CurrentProtocolParamsQuery() {
+        era = Era.Alonzo;
+    }
+
     @Override
     public DataItem serialize() {
         //[0 [0 [Era query]]]

@@ -13,6 +13,10 @@ public class TxSubmissionRequest {
     private byte[] txnBytes;
     private String txHash;
 
+    public TxSubmissionRequest(byte[] txnBytes) {
+       this(TxBodyType.BABBAGE, txnBytes);
+    }
+
     public TxSubmissionRequest(TxBodyType txBodyType, byte[] txnBytes) {
         if (txnBytes == null)
             throw new RuntimeException("TxBytes can't be null");
