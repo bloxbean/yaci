@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
+import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
 
@@ -50,6 +51,7 @@ public class BlockFetcher implements Fetcher<Block> {
     private int port;
     private VersionTable versionTable;
     private HandshakeAgent handshakeAgent;
+    private KeepAliveAgent keepAliveAgent;
     private BlockfetchAgent blockfetchAgent;
     private TCPNodeClient n2nClient;
 
@@ -78,13 +80,14 @@ public class BlockFetcher implements Fetcher<Block> {
 
     private void init() {
         handshakeAgent = new HandshakeAgent(versionTable);
+        keepAliveAgent = new KeepAliveAgent();
         blockfetchAgent = new BlockfetchAgent();
-        n2nClient = new TCPNodeClient(host, port, handshakeAgent, blockfetchAgent);
+        n2nClient = new TCPNodeClient(host, port, handshakeAgent, keepAliveAgent, blockfetchAgent);
 
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
-                blockfetchAgent.sendNextMessage();
+                keepAliveAgent.sendKeepAlive(1234);
             }
         });
     }

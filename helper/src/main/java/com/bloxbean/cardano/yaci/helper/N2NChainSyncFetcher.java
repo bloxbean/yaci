@@ -18,6 +18,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
+import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
 
@@ -40,6 +41,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
     private boolean syncFromLatest;
     private boolean tipFound = false;
     private HandshakeAgent handshakeAgent;
+    private KeepAliveAgent keepAliveAgent;
     private ChainsyncAgent chainSyncAgent;
     private BlockfetchAgent blockFetchAgent;
     private TCPNodeClient n2CClient;
@@ -101,6 +103,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
 
     private void init() {
         handshakeAgent = new HandshakeAgent(versionTable);
+        keepAliveAgent = new KeepAliveAgent();
         chainSyncAgent = new ChainsyncAgent(new Point[]{wellKnownPoint});
         blockFetchAgent = new BlockfetchAgent();
         blockFetchAgent.resetPoints(wellKnownPoint, wellKnownPoint);
@@ -108,6 +111,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
+                keepAliveAgent.sendKeepAlive(1234);
                 //start
                 chainSyncAgent.sendNextMessage();
             }
@@ -189,7 +193,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
             }
         });
 
-        n2CClient = new TCPNodeClient(host, port, handshakeAgent,
+        n2CClient = new TCPNodeClient(host, port, handshakeAgent, keepAliveAgent,
                 chainSyncAgent, blockFetchAgent);
     }
 
