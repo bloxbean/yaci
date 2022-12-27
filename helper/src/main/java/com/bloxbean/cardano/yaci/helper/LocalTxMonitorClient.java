@@ -17,7 +17,7 @@ import java.util.List;
  * <p>
  * This class is not thread-safe. As local-tx-monitor is a stateful protocol with explicit state acquisition driven by the client,
  * an instance of this class should not be used from multiple threads simultaneously.
- *</p>
+ * </p>
  *
  * <p>
  * Create a {@link LocalClientProvider} to get an instance of this class.
@@ -70,6 +70,11 @@ public class LocalTxMonitorClient extends QueryClient {
                         .build();
                 applyMonoSuccess(request, mempoolStatus);
             }
+
+            @Override
+            public void onDisconnect() {
+                applyError("Connection Error !!!");
+            }
         });
     }
 
@@ -77,6 +82,7 @@ public class LocalTxMonitorClient extends QueryClient {
      * Acquire a mempool snapshot
      * The local-tx-monitor is a stateful protocol with explicit state acquisition driven by the client. That is, clients
      * must first acquire a mempool snapshot for running queries over it.
+     *
      * @return Mono for slot number
      */
     public Mono<Long> acquire() {
@@ -93,6 +99,7 @@ public class LocalTxMonitorClient extends QueryClient {
     /**
      * Get size and capacity of the mempool for the currently acquired snapshot.
      * <p>This method should be called after {@link #acquire()}</p>
+     *
      * @return Mono for {@link MempoolStatus}
      */
     public Mono<MempoolStatus> getMempoolSizeAndCapacity() {
@@ -106,37 +113,45 @@ public class LocalTxMonitorClient extends QueryClient {
     /**
      * First acquire a mempool snapshot and then query mempool size and capacity.
      * This method automatically handles the acquire call before query.
+     *
      * @return Mono for {@link MempoolStatus}
      */
     public Mono<MempoolStatus> acquireAndGetMempoolSizeAndCapacity() {
         return Mono.create(monoSink -> {
             acquire().doOnNext(aLong -> {
-                if (log.isDebugEnabled())
-                    log.debug("Try to acquire for LocalTxMonitor");
+                        if (log.isDebugEnabled())
+                            log.debug("Try to acquire for LocalTxMonitor");
 
-                MsgGetSizes sizeRequest = localTxMonitorAgent.getSizeAndCapacity();
-                storeMonoSinkReference(sizeRequest, monoSink);
-                localTxMonitorAgent.sendNextMessage();
+                        MsgGetSizes sizeRequest = localTxMonitorAgent.getSizeAndCapacity();
+                        storeMonoSinkReference(sizeRequest, monoSink);
+                        localTxMonitorAgent.sendNextMessage();
 
-            }).subscribe();
+                    }).doOnError(throwable -> {
+                        if (log.isDebugEnabled())
+                            log.error("Error >> ", throwable);
+                        monoSink.error(throwable);
+                    })
+                    .subscribe();
         });
     }
 
     /**
      * Get transactions in the current snapshot of mempool as Mono
      * <p>This method should be called after {@link #acquire()}</p>
+     *
      * @return Mono for List of transactions
      */
     public Mono<List<byte[]>> getCurrentMempoolTransactionsAsMono() {
-        return getCurrentMempoolTransactionsAs().collectList();
+        return getCurrentMempoolTransactions().collectList();
     }
 
     /**
      * Get transactions in the current snapshot of mempool
      * <p>This method should be called after {@link #acquire()}</p>
+     *
      * @return Flux for transactions (bytes)
      */
-    public Flux<byte[]> getCurrentMempoolTransactionsAs() {
+    public Flux<byte[]> getCurrentMempoolTransactions() {
         return Flux.create(fluxSink -> {
             _getMempoolTransactions(fluxSink, false);
         });
@@ -145,13 +160,17 @@ public class LocalTxMonitorClient extends QueryClient {
     /**
      * First acquire a mempool snapshot and then query mempool for transactions
      * This method automatically handles the acquire call before the query.
+     *
      * @return Flux for transactions
      */
     public Flux<byte[]> acquireAndGetMempoolTransactions() {
         return Flux.create(fluxSink -> {
-            acquire().subscribe(slot -> {
-                _getMempoolTransactions(fluxSink, false);
-            });
+            acquire()
+                    .doOnError(throwable -> fluxSink.error(throwable))
+                    .doOnNext(slot -> {
+                        _getMempoolTransactions(fluxSink, false);
+                    })
+                    .subscribe();
         });
     }
 
@@ -169,39 +188,48 @@ public class LocalTxMonitorClient extends QueryClient {
     /**
      * Stream available transactions from the mempool by automatically acquiring mempool snapshots.
      * It continuously acquires the mempool snapshots and streams all available transactions in that snapshot.
+     *
      * @return Flux for transactions (bytes)
      */
     public Flux<byte[]> streamMempoolTransactions() {
         return Flux.create(fluxSink -> {
-            acquire().subscribe(slot -> {
-                _getMempoolTransactions(fluxSink, true);
-            });
+            acquire().doOnNext(slot -> {
+                        _getMempoolTransactions(fluxSink, true);
+                    })
+                    .doOnError(throwable -> fluxSink.error(throwable))
+                    .subscribe();
         });
     }
 
     private void _getMempoolTransactions(FluxSink fluxSink, boolean stream) {
-        getNextTx().subscribe(bytes -> {
-            if (bytes == null || bytes.length == 0) {
-                if (!stream) {
-                    if (log.isDebugEnabled())
-                        log.debug("FluxSink.complete()");
-                    fluxSink.complete();
-                } else {
-                    if (log.isDebugEnabled())
-                        log.debug("Streaming mode. Re-acquire and wait for next set of transactions");
-                    acquire().subscribe(slot -> _getMempoolTransactions(fluxSink, stream));
-                }
+        getNextTx()
+                .doOnError(throwable -> fluxSink.error(throwable))
+                .doOnNext(bytes -> {
+                    if (bytes == null || bytes.length == 0) {
+                        if (!stream) {
+                            if (log.isDebugEnabled())
+                                log.debug("FluxSink.complete()");
+                            fluxSink.complete();
+                        } else {
+                            if (log.isDebugEnabled())
+                                log.debug("Streaming mode. Re-acquire and wait for next set of transactions");
+                            acquire()
+                                    .doOnError(throwable -> fluxSink.error(throwable))
+                                    .doOnNext(slot -> _getMempoolTransactions(fluxSink, stream))
+                                    .subscribe();
+                        }
 
-            } else {
-                fluxSink.next(bytes);
-                _getMempoolTransactions(fluxSink, stream);
-            }
-        });
+                    } else {
+                        fluxSink.next(bytes);
+                        _getMempoolTransactions(fluxSink, stream);
+                    }
+                }).subscribe();
     }
 
     /**
      * Get next transaction in the acquired snapshot.
      * This method should be called after {@link #acquire()} method.
+     *
      * @return Next transaction, null if there is no available transaction in the mempool snapshot
      */
     public Mono<byte[]> getNextTx() {

@@ -131,6 +131,10 @@ public abstract class NodeClient {
                 session.dispose();
             }
 
+            for (Agent agent: agents) {
+                agent.disconnected();
+            }
+
             //TODO some delay
             //Try to start again
             if (session != null && session.shouldReconnect()) {

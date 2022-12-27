@@ -82,6 +82,16 @@ public abstract class Agent<T extends AgentListener> {
         return agentListeners;
     }
 
+    /**
+     * This method is called after disconnection and during connection retry failure.
+     */
+    public final void disconnected() {
+        getAgentListeners().stream().forEach(agentListener -> agentListener.onDisconnect());
+    }
+
+    /**
+     * This method is called during connection start or reset
+     */
     public void reset() {
 
     }

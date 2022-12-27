@@ -80,6 +80,11 @@ public class LocalStateQueryClient extends QueryClient {
                     log.debug("Released >>>");
                 applyMonoSuccess(new MsgRelease(), null);
             }
+
+            @Override
+            public void onDisconnect() {
+                applyError("Connection Error !!!");
+            }
         });
     }
 
@@ -166,11 +171,14 @@ public class LocalStateQueryClient extends QueryClient {
         if (localStateQueryAgent.getCurrentState() == LocalStateQueryState.Idle) {
             //Auto acquire
             return Mono.create(monoSink -> {
-                acquire().subscribe(point -> {
-                    localStateQueryAgent.query(query);
-                    storeMonoSinkReference(query, monoSink);
-                    localStateQueryAgent.sendNextMessage();
-                });
+                acquire()
+                        .doOnNext(point -> {
+                            localStateQueryAgent.query(query);
+                            storeMonoSinkReference(query, monoSink);
+                            localStateQueryAgent.sendNextMessage();
+                        })
+                        .doOnError(throwable -> monoSink.error(throwable))
+                        .subscribe();
             });
         } else {
             return Mono.create(monoSink -> {

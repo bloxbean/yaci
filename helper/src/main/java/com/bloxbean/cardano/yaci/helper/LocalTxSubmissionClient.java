@@ -62,6 +62,11 @@ public class LocalTxSubmissionClient extends QueryClient {
 
                 applyMonoSuccess(txSubmissionRequest, txResult);
             }
+
+            @Override
+            public void onDisconnect() {
+                applyError("Connection Error !!!");
+            }
         });
     }
 

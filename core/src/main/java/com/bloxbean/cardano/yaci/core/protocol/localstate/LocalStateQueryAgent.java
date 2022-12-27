@@ -172,6 +172,7 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     @Override
     public void reset() {
+        this.currenState = Idle;
         acquiredCommands.clear();
         pendingQueryCommands.clear();
     }

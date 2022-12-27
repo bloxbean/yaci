@@ -121,6 +121,8 @@ public class LocalClientProvider {
             @Override
             public void handshakeOk() {
                 localStateQueryAgent.sendNextMessage();
+                //await acquire to keep the connection live
+                localTxMonitorAgent.awaitAcquire();
                 localTxMonitorAgent.sendNextMessage();
                 localTxSubmissionAgent.sendNextMessage();
             }

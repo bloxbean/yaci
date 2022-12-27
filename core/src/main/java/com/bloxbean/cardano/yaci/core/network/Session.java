@@ -40,11 +40,6 @@ class Session implements Disposable {
     }
 
     public Disposable start() throws InterruptedException {
-        handshakeAgent.reset();
-        for (Agent agent: agents) {
-            agent.reset();
-        }
-
         //Create a new connectFuture
         ChannelFuture connectFuture = null;
         while (connectFuture == null && shouldReconnect.get()) {
@@ -55,6 +50,12 @@ class Session implements Disposable {
                 Thread.sleep(8000);
                 log.debug("Trying to reconnect !!!");
             }
+        }
+
+        handshakeAgent.reset();
+        for (Agent agent: agents) {
+            agent.disconnected();
+            agent.reset();
         }
 
         activeChannel = connectFuture.channel();

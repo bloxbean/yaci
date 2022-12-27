@@ -18,4 +18,10 @@ public abstract class ReactiveFetcher<T> implements Fetcher<T> {
         if (monoSink != null)
             monoSink.success(result);
     }
+
+    protected void applyError(Object result) {
+        monoSinkMap.entrySet()
+                .stream().forEach(objectMonoSinkEntry ->
+                        objectMonoSinkEntry.getValue().error(new RuntimeException(String.valueOf(result))));
+    }
 }

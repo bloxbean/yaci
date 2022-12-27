@@ -162,7 +162,9 @@ public class LocalTxMonitorAgent extends Agent<LocalTxMonitorListener> {
     //TODO -- check
     @Override
     public void reset() {
+        this.currenState = Idle;
         acquiredCommands.clear();
+        pendingQueryQueue.clear();
     }
 
 
