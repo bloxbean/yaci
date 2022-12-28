@@ -92,7 +92,7 @@ class LocalTxMonitorClientIT extends BaseTest {
     @Test
     void whenGetCurrentMempoolTransactionsAsFlux_returnFlux() {
         localTxMonitorClient.acquire().block();
-        Flux<byte[]> flux = localTxMonitorClient.getCurrentMempoolTransactionsAs();
+        Flux<byte[]> flux = localTxMonitorClient.getCurrentMempoolTransactions();
 //        flux.subscribe(bytes -> System.out.println(TransactionUtil.getTxHash(bytes)));
 
         StepVerifier.create(flux)

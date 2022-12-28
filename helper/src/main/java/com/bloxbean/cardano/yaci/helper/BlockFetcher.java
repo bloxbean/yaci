@@ -87,6 +87,7 @@ public class BlockFetcher implements Fetcher<Block> {
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
+                blockfetchAgent.sendNextMessage();
                 keepAliveAgent.sendKeepAlive(1234);
             }
         });
