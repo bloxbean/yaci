@@ -27,6 +27,10 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
     private Era era;
     private Address address;
 
+    public UtxoByAddressQuery(Address address) {
+        this(Era.Alonzo, address);
+    }
+
     @Override
     public DataItem serialize() {
         Array array = new Array();

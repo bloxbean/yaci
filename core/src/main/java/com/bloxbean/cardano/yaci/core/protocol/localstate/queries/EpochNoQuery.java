@@ -17,6 +17,10 @@ import java.util.List;
 public class EpochNoQuery implements EraQuery<EpochNoQueryResult> {
     private Era era;
 
+    public EpochNoQuery() {
+        this.era = Era.Alonzo;
+    }
+
     @Override
     public DataItem serialize() {
         Array queryArray = new Array();
