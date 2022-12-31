@@ -1,7 +1,9 @@
-[![Clean, Build](https://github.com/bloxbean/yaci-core/actions/workflows/build.yml/badge.svg)](https://github.com/bloxbean/yaci-core/actions/workflows/build.yml)
+<div align="center">
+<img src="static/yaci.png" width="200">
 
-# Yaci 
-A Cardano Mini Protocols implementation in Java
+<h4>A Cardano Mini Protocols implementation in Java</h4>
+[![Clean, Build](https://github.com/bloxbean/yaci-core/actions/workflows/build.yml/badge.svg)](https://github.com/bloxbean/yaci-core/actions/workflows/build.yml)
+</div>
 
 ## Dependencies
 
