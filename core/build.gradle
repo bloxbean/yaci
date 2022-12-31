@@ -3,7 +3,7 @@ dependencies {
     implementation('co.nstant.in:cbor:0.9')
     api('org.slf4j:slf4j-api:1.7.36')
 
-    implementation('com.bloxbean.cardano:cardano-client-core:0.4.0')
+    implementation('com.bloxbean.cardano:cardano-client-core:0.4.2')
 }
 
 publishing {
