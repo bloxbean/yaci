@@ -13,6 +13,7 @@ import com.bloxbean.cardano.yaci.core.protocol.localtx.LocalTxSubmissionAgent;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.LocalTxSubmissionListener;
 import com.bloxbean.cardano.yaci.core.protocol.localtxmonitor.LocalTxMonitorAgent;
 import com.bloxbean.cardano.yaci.core.protocol.localtxmonitor.LocalTxMonitorListener;
+import com.bloxbean.cardano.yaci.helper.listener.LocalClientProviderListener;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -54,6 +55,7 @@ public class LocalClientProvider {
     private LocalStateQueryClient localStateQueryClient;
     private LocalTxMonitorClient localTxMonitorClient;
     private LocalTxSubmissionClient localTxSubmissionClient;
+    private LocalClientProviderListener localClientProviderListener;
 
     /**
      * Construct a LocalStateQueryClient
@@ -125,6 +127,9 @@ public class LocalClientProvider {
                 localTxMonitorAgent.awaitAcquire();
                 localTxMonitorAgent.sendNextMessage();
                 localTxSubmissionAgent.sendNextMessage();
+
+                if (localClientProviderListener != null)
+                    localClientProviderListener.onConnectionReady();
             }
         });
 
@@ -206,5 +211,13 @@ public class LocalClientProvider {
 
         if (listener != null)
             localTxSubmissionAgent.addListener(listener);
+    }
+
+    /**
+     * Set a {@link LocalClientProviderListener} to listen to local client provider level events
+     * @param listener
+     */
+    public void setLocalClientProviderListener(LocalClientProviderListener listener) {
+        this.localClientProviderListener = listener;
     }
 }
