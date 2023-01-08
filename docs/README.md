@@ -1,11 +1,11 @@
-# What's Yaci Core
+# What's Yaci
 
-Yaci Core implements Cardano's mini protocol in Java. It enables Java application to directly connects to a local or
+Yaci implements Cardano's mini protocol in Java. It enables Java application to directly connects to a local or
 remote Cardano node to retrieve data and do various operations supported through mini protocol.
 
 It's packaged as a library which can be used in any Java application through a maven or gradle dependency.
 
-## Components in Yaci Core
+## Components in Yaci
 
 The followings are the main components in Yaci Core. 
 

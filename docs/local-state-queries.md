@@ -24,17 +24,20 @@ To implement a new query, you can refer to an existing query's request and reply
 
 ### Connect to Local Node using LocalState protocol and start the agent
 
-Create a ```LocalStateQueryClient``` instance and use it to query the local Cardano node.
+To create a ``LocalStateQueryClient``, you need to first create ``LocalClientProvider``.
 
 ```java
- LocalStateQueryClient queryClient = new LocalStateQueryClient(nodeSocketFile, Constants.MAINNET_PROTOCOL_MAGIC);
- queryClient.start();
+LocalClientProvider localClientProvider = new LocalClientProvider(nodeSocketFile, protocolMagic);
+LocalStateQueryClient localStateQueryClient = localClientProvider.getLocalStateQueryClient();
+
+//Start localClientProvider
+localClientProvider.start();
 ```
 
-**To shutdown the query client**
+**To shutdown the LocalClientProvider**
 
 ```java
-queryClient.shutdown();
+localClientProvider.shutdown();
 ```
 
 **To reacquire at chain tip**
@@ -89,20 +92,20 @@ For non-blocking call, use ```Mono.subscribe()```.
 #### 4. Get current protocol parameters
 
 ```java
-Mono<CurrentProtocolParamQueryResult> mono = queryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Alonzo));
+Mono<CurrentProtocolParamQueryResult> mono = queryClient.executeQuery(new CurrentProtocolParamsQuery());
 CurrentProtocolParamQueryResult protocolParams = mono.block(Duration.ofSeconds(10));
 ```
 
 #### 5. Get Current Epoch No
 
 ```java
-Mono<EpochNoQueryResult> queryResultMono = queryClient.executeQuery(new EpochNoQuery(Era.Alonzo));
+Mono<EpochNoQueryResult> queryResultMono = queryClient.executeQuery(new EpochNoQuery());
 EpochNoQueryResult epochNoQueryResult = queryResultMono.block(Duration.ofSeconds(10));
 ```
 
 #### 6. Get Utxos by an address
 
 ```java
-Mono<UtxoByAddressQueryResult> queryResultMono = queryClient.executeQuery(new UtxoByAddressQuery(Era.Alonzo, new Address("addr1vpf...")));
+Mono<UtxoByAddressQueryResult> queryResultMono = queryClient.executeQuery(new UtxoByAddressQuery(new Address("addr1vpf...")));
 UtxoByAddressQueryResult utxoByAddressQueryResult = queryResultMono.block(Duration.ofSeconds(20));
 ```
