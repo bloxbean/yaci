@@ -44,7 +44,7 @@ public class BlockSync {
     }
 
     private void initializeAgentAndStart(Point point, BlockChainDataListener blockChainDataListener, boolean syncFromTip) {
-        n2NChainSyncFetcher = new N2NChainSyncFetcher(host, port, point, protocolMagic, false);
+        n2NChainSyncFetcher = new N2NChainSyncFetcher(host, port, point, protocolMagic, syncFromTip);
 
         BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(blockChainDataListener);
         ChainSyncListenerAdapter chainSyncAgentListener = new ChainSyncListenerAdapter(blockChainDataListener);
