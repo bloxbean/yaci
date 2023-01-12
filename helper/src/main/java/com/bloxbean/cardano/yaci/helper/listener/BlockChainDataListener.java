@@ -17,5 +17,7 @@ public interface BlockChainDataListener {
     default void onBlock(Block block) {}
     default void onRollback(Point point) {}
     default void onTransactions(Era era, BlockHeader blockHeader, List<Transaction> transactions) {}
+
     default void batchDone() {}
+    default void noBlockFound(Point from, Point to) {}
 }

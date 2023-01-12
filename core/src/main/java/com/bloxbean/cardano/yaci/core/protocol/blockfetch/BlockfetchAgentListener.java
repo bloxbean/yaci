@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.AgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 
 public interface BlockfetchAgentListener extends AgentListener {
     default void batchStarted() {
@@ -22,7 +23,7 @@ public interface BlockfetchAgentListener extends AgentListener {
 
     }
 
-    default void noBlockFound() {
+    default void noBlockFound(Point from, Point to) {
 
     }
 

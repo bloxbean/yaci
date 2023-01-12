@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
+import com.bloxbean.cardano.yaci.core.common.GenesisConfig;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.Era;
@@ -75,7 +76,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
             }
 
             log.warn("NoBlocks : {} to {}", from, to);
-            onNoBlocks();
+            onNoBlocks(from, to);
         } else if (message instanceof MsgBlock) {
             if (log.isDebugEnabled())
                 log.debug("Msg block");
@@ -83,8 +84,9 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
         }
     }
 
-    private void onNoBlocks() {
-        getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.noBlockFound());
+    private void onNoBlocks(Point fromPoint, Point toPoint) {
+        getAgentListeners().stream()
+                .forEach(blockfetchAgentListener -> blockfetchAgentListener.noBlockFound(fromPoint, toPoint));
     }
 
     private void onBachStart() {
@@ -106,14 +108,21 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
                     //move from cursor
                     counter++;
                     getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.byronEbBlockFound(block));
-                    this.from = new Point(0, block.getHeader().getBlockHash()); //TODO -- slot == 0??
+
+                    long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(Era.Byron,
+                            block.getHeader().getConsensusData().getEpoch(), 0);
+                    this.from = new Point(absoluteSlot, block.getHeader().getBlockHash());
                 } else if (eraValue == 1) {
                     ByronMainBlock block = ByronBlockSerializer.INSTANCE.deserializeDI(array);
 
                     //move from cursor
                     counter++;
                     getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.byronBlockFound(block));
-                    this.from = new Point(block.getHeader().getConsensusData().getSlotId().getSlot(), block.getHeader().getBlockHash());
+
+                    long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(Era.Byron,
+                            block.getHeader().getConsensusData().getSlotId().getEpoch(),
+                            block.getHeader().getConsensusData().getSlotId().getSlot());
+                    this.from = new Point(absoluteSlot, block.getHeader().getBlockHash());
                 }
             } else {
                 Block block = BlockSerializer.INSTANCE.deserializeDI(array);

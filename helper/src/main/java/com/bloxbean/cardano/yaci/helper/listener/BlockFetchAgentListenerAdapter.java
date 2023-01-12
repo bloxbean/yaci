@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
 import com.bloxbean.cardano.yaci.helper.model.Utxo;
 
@@ -118,7 +119,7 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
     }
 
     @Override
-    public void noBlockFound() {
-
+    public void noBlockFound(Point from, Point to) {
+        blockChainDataListener.noBlockFound(from, to);
     }
 }
