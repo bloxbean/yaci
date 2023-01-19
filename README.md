@@ -34,7 +34,7 @@ Gradle
 | `n2n Block-Fetch`        | Done           |     
 | `n2n Chain-Sync`         | Done           | 
 | `n2n TxSubmission`       | In Progress    | 
-| `n2n Keep-Alive`         | Not started    | 
+| `n2n Keep-Alive`         | Done    | 
 | `n2c Handshake`          | Done           | 
 | `n2c Chain-Sync`         | Done           | 
 | `n2c Local TxSubmission` | Done           | 
