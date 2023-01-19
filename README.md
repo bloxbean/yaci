@@ -14,14 +14,14 @@ Maven
 <dependency>
     <groupId>com.bloxbean.cardano</groupId>
     <artifactId>yaci-core</artifactId>
-    <version>0.1.7</version>
+    <version>0.1.8</version>
 </dependency>
 ```
 
 Gradle
 
 ```xml
- implementation('com.bloxbean.cardano:yaci-core:0.1.7')
+ implementation('com.bloxbean.cardano:yaci-core:0.1.8')
 ```
 
 ## [Documentation](docs/README.md)
