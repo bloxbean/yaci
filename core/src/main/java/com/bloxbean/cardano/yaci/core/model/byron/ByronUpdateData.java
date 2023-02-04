@@ -8,7 +8,9 @@ import lombok.*;
 @ToString
 @EqualsAndHashCode
 @Builder
-public class ByronEbBlock {
-    private ByronEbHead header;
-    private ByronEbBody body;
+public class ByronUpdateData {
+  private String appDiffHash;
+  private String pkgHash;
+  private String updaterHash;
+  private String metadataHash;
 }
