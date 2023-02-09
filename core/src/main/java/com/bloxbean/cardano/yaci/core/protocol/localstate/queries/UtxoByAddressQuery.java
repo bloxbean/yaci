@@ -7,7 +7,7 @@ import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.client.transaction.spec.MultiAsset;
 import com.bloxbean.cardano.client.transaction.spec.Value;
 import com.bloxbean.cardano.client.util.AssetUtil;
-import com.bloxbean.cardano.yaci.core.model.Era;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -28,7 +28,7 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
     private Address address;
 
     public UtxoByAddressQuery(Address address) {
-        this(Era.Alonzo, address);
+        this(Era.Babbage, address);
     }
 
     @Override
@@ -38,7 +38,6 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
 
         //address
         Array addArr = new Array();
-//        addArr.setChunked(true);
         addArr.add(new ByteString(address.getBytes()));
         addArr.setTag(258);
 
