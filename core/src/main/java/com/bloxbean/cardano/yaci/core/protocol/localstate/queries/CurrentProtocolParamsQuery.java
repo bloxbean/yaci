@@ -2,8 +2,8 @@ package com.bloxbean.cardano.yaci.core.protocol.localstate.queries;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.util.Tuple;
-import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -27,7 +27,7 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
     private Era era;
 
     public CurrentProtocolParamsQuery() {
-        era = Era.Alonzo;
+        era = Era.Babbage;
     }
 
     @Override

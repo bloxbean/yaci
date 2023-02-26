@@ -22,6 +22,7 @@ public class N2CVersionTableConstant {
     public final static long PROTOCOL_V12 = 32780;
     public final static long PROTOCOL_V13 = 32781;
     public final static long PROTOCOL_V14 = 32782;
+    public final static long PROTOCOL_V15 = 32783;
 
     public static VersionTable v4AndAbove(long networkMagic) {
         N2CVersionData versionData = new N2CVersionData(networkMagic);
@@ -38,6 +39,7 @@ public class N2CVersionTableConstant {
         versionTableMap.put(PROTOCOL_V12, versionData);
         versionTableMap.put(PROTOCOL_V13, versionData);
         versionTableMap.put(PROTOCOL_V14, versionData);
+        versionTableMap.put(PROTOCOL_V15, versionData);
 
         return new VersionTable(versionTableMap);
     }
@@ -55,6 +57,7 @@ public class N2CVersionTableConstant {
         versionTableMap.put(PROTOCOL_V12, versionData);
         versionTableMap.put(PROTOCOL_V13, versionData);
         versionTableMap.put(PROTOCOL_V14, versionData);
+        versionTableMap.put(PROTOCOL_V15, versionData);
 
         return new VersionTable(versionTableMap);
     }
@@ -71,6 +74,7 @@ public class N2CVersionTableConstant {
         versionTableMap.put(PROTOCOL_V12, versionData);
         versionTableMap.put(PROTOCOL_V13, versionData);
         versionTableMap.put(PROTOCOL_V14, versionData);
+        versionTableMap.put(PROTOCOL_V15, versionData);
 
         return new VersionTable(versionTableMap);
     }
@@ -85,6 +89,7 @@ public class N2CVersionTableConstant {
         versionTableMap.put(PROTOCOL_V12, versionData);
         versionTableMap.put(PROTOCOL_V13, versionData);
         versionTableMap.put(PROTOCOL_V14, versionData);
+        versionTableMap.put(PROTOCOL_V15, versionData);
 
         return new VersionTable(versionTableMap);
     }
@@ -107,6 +112,7 @@ public class N2CVersionTableConstant {
         versionTableMap.put(PROTOCOL_V12, versionData);
         versionTableMap.put(PROTOCOL_V13, versionData);
         versionTableMap.put(PROTOCOL_V14, versionData);
+        versionTableMap.put(PROTOCOL_V15, versionData);
 
         return new VersionTable(versionTableMap);
     }
