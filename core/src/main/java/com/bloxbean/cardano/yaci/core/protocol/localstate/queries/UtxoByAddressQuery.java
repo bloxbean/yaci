@@ -4,22 +4,19 @@ import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.address.Address;
 import com.bloxbean.cardano.client.api.model.Amount;
 import com.bloxbean.cardano.client.api.model.Utxo;
-import com.bloxbean.cardano.client.transaction.spec.MultiAsset;
-import com.bloxbean.cardano.client.transaction.spec.Value;
-import com.bloxbean.cardano.client.util.AssetUtil;
+import com.bloxbean.cardano.yaci.core.model.TransactionOutput;
+import com.bloxbean.cardano.yaci.core.model.serializers.TransactionOutputSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
-import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
-import static com.bloxbean.cardano.client.common.CardanoConstants.LOVELACE;
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
+import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
+import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toInt;
 
 @Getter
 @AllArgsConstructor
@@ -53,48 +50,27 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
 
         List<Utxo> utxoList = new ArrayList<>();
         for (DataItem key : utxoMap.getKeys()) {
-            //key is utxo = [hash idx datum_hash?]
+            //key is utxo = [hash idx]
             List<DataItem> keyDIList = ((Array) key).getDataItems();
             String txHash = toHex(keyDIList.get(0));
             int index = toInt(keyDIList.get(1));
-            String dataHash = null;
-            if (keyDIList.size() > 2)
-                dataHash = toHex(keyDIList.get(2));
 
-            Map valueMap = (Map) utxoMap.get(key);
-            List<Amount> amountList = new ArrayList<>();
-
-            // String assetName = toHex(valueMap.get(new UnsignedInteger(0)));
-            BigInteger coin = null;
-            DataItem valueDI = valueMap.get(new UnsignedInteger(1));
-            if (valueDI.getMajorType() == MajorType.UNSIGNED_INTEGER) { //only coin
-                coin = toBigInteger(valueDI);
-            } else if (valueDI.getMajorType() == MajorType.ARRAY) {
-                Value value = Value.deserialize((Array) valueDI);
-
-                coin = value.getCoin();
-
-                for (MultiAsset ma : value.getMultiAssets()) {
-                    ma.getAssets().forEach(asset -> {
-                        Amount assetAmount = new Amount(AssetUtil.getUnit(ma.getPolicyId(), asset), asset.getValue());
-                        amountList.add(assetAmount);
-                    });
-                }
-            }
-
-            Amount coinAmt = new Amount(LOVELACE, coin);
-            amountList.add(0, coinAmt);
-
+            TransactionOutput transactionOutput = TransactionOutputSerializer.INSTANCE.deserializeDI(utxoMap.get(key));
+            List<Amount> amountList = transactionOutput.getAmounts().stream()
+                    .map(amount -> new Amount(amount.getUnit(), amount.getQuantity()))
+                    .collect(Collectors.toList());
             Utxo utxo = Utxo.builder()
+                    .address(transactionOutput.getAddress())
                     .txHash(txHash)
                     .outputIndex(index)
                     .amount(amountList)
-                    .dataHash(dataHash)
+                    .dataHash(transactionOutput.getDatumHash())
+                    .inlineDatum(transactionOutput.getInlineDatum())
+                    .referenceScriptHash(transactionOutput.getScriptRef())
                     .build();
             utxoList.add(utxo);
         }
 
         return new UtxoByAddressQueryResult(utxoList);
     }
-
 }
