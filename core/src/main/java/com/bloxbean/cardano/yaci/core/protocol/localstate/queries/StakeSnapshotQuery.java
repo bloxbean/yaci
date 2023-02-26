@@ -6,7 +6,6 @@ import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -32,14 +31,12 @@ public class StakeSnapshotQuery implements EraQuery<StakeSnapshotQueryResult> {
         poolIdArray.setTag(258);
 
         array.add(poolIdArray);
-//        array.add(new ByteString(HexUtil.decodeHexString(poolId)));
 
         return wrapWithOuterArray(array);
     }
 
     @Override
     public StakeSnapshotQueryResult deserializeResult(DataItem[] di) {
-        System.out.println(HexUtil.encodeHexString(CborSerializationUtil.serialize(di)));
-        return new StakeSnapshotQueryResult();
+       throw new UnsupportedOperationException("Not implemented yet");
     }
 }

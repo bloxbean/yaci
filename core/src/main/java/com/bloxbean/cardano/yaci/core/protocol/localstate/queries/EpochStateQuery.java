@@ -5,8 +5,6 @@ import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
-import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.ToString;
@@ -31,11 +29,7 @@ public class EpochStateQuery implements EraQuery<EpochStateQueryResult> {
 
     @Override
     public EpochStateQueryResult deserializeResult(DataItem[] di) {
-        System.out.println(HexUtil.encodeHexString(CborSerializationUtil.serialize(di)));
-//        List<DataItem> dataItemList = extractResultArray(di[0]);
-//        long epochNo = ((UnsignedInteger) dataItemList.get(0)).getValue().longValue();
-//        return new EpochNoQueryResult(epochNo);
-        return new EpochStateQueryResult();
+        throw new UnsupportedOperationException("Not implemented yet");
     }
 
 }

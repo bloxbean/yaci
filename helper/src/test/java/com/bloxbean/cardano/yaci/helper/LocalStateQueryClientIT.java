@@ -1,7 +1,6 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.client.address.Address;
-import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.*;
@@ -20,7 +19,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-//@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
+@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 @Slf4j
 class LocalStateQueryClientIT extends BaseTest {
 
@@ -105,7 +104,6 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @Test
     void protocolParameters() {
-        localStateQueryClient.acquire(new Point(20228054, "56be0543cf5a2faab0d40d33476e325368fb858843ab8cfec66e816fc79e6b89")).block();
         Mono<CurrentProtocolParamQueryResult> mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(era));
         mono = mono.log();
 
@@ -213,7 +211,7 @@ class LocalStateQueryClientIT extends BaseTest {
         Mono<StakePoolParamQueryResult> mono = localStateQueryClient.executeQuery(new StakePoolParamsQuery(List.of("032a04334a846fdf542fd5633c9b3928998691b8276e004facbc8af1",
                 "0a4ed3c5cc11a044cff16f7045588c9b6f6c98f7154026a3a3f55f24")));
 
-        StakePoolParamQueryResult result = mono.block();
+        StakePoolParamQueryResult result = mono.block(Duration.ofSeconds(5));
         System.out.println(result);
     }
 
@@ -235,8 +233,8 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @Test
     void genesisConfigQuery() {
-        Mono<GenesisConfigQueryResult> mono = localStateQueryClient.executeQuery(new GenesisConfigQuery());
-        GenesisConfigQueryResult result = mono.block();
+        Mono<GenesisConfigQueryResult> mono = localStateQueryClient.executeQuery(new GenesisConfigQuery(Era.Babbage));
+        GenesisConfigQueryResult result = mono.block(Duration.ofSeconds(5));
 
         System.out.println(result);
     }

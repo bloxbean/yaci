@@ -6,7 +6,6 @@ import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -41,7 +40,6 @@ public class StakePoolParamsQuery implements EraQuery<StakePoolParamQueryResult>
 
     @Override
     public StakePoolParamQueryResult deserializeResult(DataItem[] di) {
-        System.out.println(HexUtil.encodeHexString(CborSerializationUtil.serialize(di)));
-        return new StakePoolParamQueryResult();
+        throw new UnsupportedOperationException("Not implemented yet");
     }
 }

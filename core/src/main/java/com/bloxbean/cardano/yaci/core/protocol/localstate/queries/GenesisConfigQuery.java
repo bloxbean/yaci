@@ -5,8 +5,6 @@ import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
-import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.ToString;
@@ -14,12 +12,9 @@ import lombok.ToString;
 @Getter
 @AllArgsConstructor
 @ToString
+//TODO -- Not implemented yet
 public class GenesisConfigQuery implements EraQuery<GenesisConfigQueryResult> {
     private Era era;
-
-    public GenesisConfigQuery() {
-        this.era = Era.Babbage;
-    }
 
     @Override
     public DataItem serialize() {
@@ -31,8 +26,7 @@ public class GenesisConfigQuery implements EraQuery<GenesisConfigQueryResult> {
 
     @Override
     public GenesisConfigQueryResult deserializeResult(DataItem[] di) {
-        System.out.printf(HexUtil.encodeHexString(CborSerializationUtil.serialize(di)));
-        return new GenesisConfigQueryResult();
+        throw new UnsupportedOperationException("Not implemented yet");
     }
 
 }

@@ -1,9 +1,11 @@
 package com.bloxbean.cardano.yaci.core.protocol.localstate.queries;
 
-import co.nstant.in.cbor.model.*;
+import co.nstant.in.cbor.model.Array;
+import co.nstant.in.cbor.model.ByteString;
+import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -37,7 +39,6 @@ public class PoolDistrQuery implements EraQuery<PoolDistrQueryResult> {
 
     @Override
     public PoolDistrQueryResult deserializeResult(DataItem[] di) {
-        System.out.println(HexUtil.encodeHexString(CborSerializationUtil.serialize(di)));
-        return new PoolDistrQueryResult();
+        throw new UnsupportedOperationException("Not implemented yet");
     }
 }
