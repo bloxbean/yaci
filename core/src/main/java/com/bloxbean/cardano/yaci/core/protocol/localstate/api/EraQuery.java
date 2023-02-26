@@ -3,7 +3,6 @@ package com.bloxbean.cardano.yaci.core.protocol.localstate.api;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
-import com.bloxbean.cardano.yaci.core.model.Era;
 
 import java.util.List;
 
