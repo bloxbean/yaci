@@ -8,7 +8,7 @@ import lombok.*;
 @ToString
 @EqualsAndHashCode
 @Builder
-public class ByronEbBlock {
-    private ByronEbHead header;
-    private ByronEbBody body;
+public class ByronScript {
+  private long scriptVersion;
+  private String script;
 }

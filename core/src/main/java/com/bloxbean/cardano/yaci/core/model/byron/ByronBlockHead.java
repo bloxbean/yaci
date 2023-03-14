@@ -11,9 +11,9 @@ import lombok.*;
 public class ByronBlockHead {
     private long protocolMagic;
     private String prevBlock;
-    private String bodyProof;
+    private ByronBlockProof bodyProof;
     private ByronBlockCons consensusData;
-    private String extraData;
+    private ByronBlockExtraData<String> extraData;
 
     //Derived Value
     private String blockHash;

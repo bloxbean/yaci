@@ -8,7 +8,10 @@ import lombok.*;
 @ToString
 @EqualsAndHashCode
 @Builder
-public class ByronEbBlock {
-    private ByronEbHead header;
-    private ByronEbBody body;
+public class ByronBlockProof {
+
+  private ByronTxProof txProof;
+  private ByronSscProof sscProof;
+  private String dlgProof;
+  private String updProof;
 }

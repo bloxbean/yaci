@@ -10,12 +10,9 @@ import java.util.List;
 @ToString
 @EqualsAndHashCode
 @Builder
-public class ByronTx {
-    private List<ByronTxIn> inputs;
-    private List<ByronTxOut> outputs;
-
-    //Derived
-    private String txHash;
-
-    //TODO -- Attributes
+public class ByronSecretProof {
+  private String extraGen;
+  private String proof;
+  private String parallelProofs;
+  private List<String> commitments;
 }

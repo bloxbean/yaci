@@ -1,9 +1,12 @@
 package com.bloxbean.cardano.yaci.core.model.byron;
 
 import com.bloxbean.cardano.yaci.core.model.Epoch;
+import com.bloxbean.cardano.yaci.core.model.byron.signature.BlockSignature;
 import lombok.*;
 
 import java.math.BigInteger;
+
+import static com.bloxbean.cardano.yaci.core.util.Constants.BYRON_SLOTS_PER_EPOCH;
 
 @Getter
 @AllArgsConstructor
@@ -15,5 +18,10 @@ public class ByronBlockCons {
     private Epoch slotId;
     private String pubKey;
     private BigInteger difficulty;
-    private String blockSig;
+    private BlockSignature blockSig;
+
+    //derive value
+    public long getAbsoluteSlot() {
+        return slotId.getEpoch() * BYRON_SLOTS_PER_EPOCH + slotId.getSlot();
+    }
 }

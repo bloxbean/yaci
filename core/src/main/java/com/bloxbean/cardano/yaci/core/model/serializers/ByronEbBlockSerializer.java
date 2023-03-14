@@ -9,11 +9,13 @@ import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlockCons;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBody;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
+import java.math.BigInteger;
 import java.util.List;
 
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
@@ -25,33 +27,30 @@ public enum ByronEbBlockSerializer implements Serializer<ByronEbBlock> {
     @Override
     public ByronEbBlock deserializeDI(DataItem di) {
         Array array = (Array) di;
-        int eraValue = ((UnsignedInteger)array.getDataItems().get(0)).getValue().intValue();
+        int eraValue = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
         Era era = EraUtil.getEra(eraValue);
-        if (era != Era.Byron && eraValue != 1)
+        if (era != Era.Byron && eraValue != 1) {
             throw new IllegalArgumentException("Not a Byron Eb block");
+        }
 
         Array mainBlkArray = (Array) array.getDataItems().get(1);
 
         //header
         Array headerArr = (Array) mainBlkArray.getDataItems().get(0);
+        Array bodyArr = (Array) mainBlkArray.getDataItems().get(1);
         ByronEbHead header = deserializeHeader(headerArr);
+        ByronEbBody body = deserializeBody(bodyArr);
         //TODO -- Other fields
 
-        ByronEbBlock block = ByronEbBlock.builder()
+        return ByronEbBlock.builder()
                 .header(header)
+                .body(body)
                 .build();
-
-        return block;
     }
 
-    public ByronEbHead deserializeHeader(Array headerArr) {
+    public static ByronEbHead deserializeHeader(Array headerArr) {
         long protocolMagic = toLong(headerArr.getDataItems().get(0));
         String prevBlockId = toHex(headerArr.getDataItems().get(1));
-
-        //String bodyProof = HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(CborSerializationUtil.serialize(headerArr.getDataItems().get(2))));
-        String bodyProof = HexUtil.encodeHexString(CborSerializationUtil.serialize(headerArr.getDataItems().get(2)));
-        ByronEbBlockCons consensusData = deserializeConsensusData(headerArr.getDataItems().get(3));
-        String extraData = HexUtil.encodeHexString(CborSerializationUtil.serialize(headerArr.getDataItems().get(4)));
 
         //Calculate block hash
         Array blockHashArray = new Array();
@@ -60,19 +59,25 @@ public enum ByronEbBlockSerializer implements Serializer<ByronEbBlock> {
         blockHashArray.add(headerArr);
         String blockHash = HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(CborSerializationUtil.serialize(blockHashArray)));
 
+        String bodyProof = HexUtil.encodeHexString(
+                CborSerializationUtil.serialize(headerArr.getDataItems().get(2)));
+        ByronEbBlockCons consensusData = deserializeConsensusData(headerArr.getDataItems().get(3));
+        String extraData = HexUtil.encodeHexString(
+                CborSerializationUtil.serialize(headerArr.getDataItems().get(4)));
+
         return new ByronEbHead(protocolMagic, prevBlockId, bodyProof, consensusData, extraData, blockHash);
     }
 
-    private ByronEbBlockCons deserializeConsensusData(DataItem dataItem) {
+    private static ByronEbBody deserializeBody(Array bodyArr) {
+        return new ByronEbBody();
+    }
+
+    private static ByronEbBlockCons deserializeConsensusData(DataItem dataItem) {
         Array consArray = (Array) dataItem;
         List<DataItem> consDIs = consArray.getDataItems();
 
         long epochId = toLong(consDIs.get(0));
-        Array difficultyArr = (Array) consDIs.get(1);
-        long[] difficulty = new long[difficultyArr.getDataItems().size()];
-        for (int i = 0; i < difficultyArr.getDataItems().size(); i++) {
-            difficulty[i] = toLong(difficultyArr.getDataItems().get(i));
-        }
+        BigInteger difficulty = CborSerializationUtil.toBigInteger(((Array) consDIs.get(1)).getDataItems().get(0));
 
         return new ByronEbBlockCons(epochId, difficulty);
     }

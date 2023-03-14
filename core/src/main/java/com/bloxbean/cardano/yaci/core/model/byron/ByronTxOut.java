@@ -11,6 +11,6 @@ import java.math.BigInteger;
 @EqualsAndHashCode
 @Builder
 public class ByronTxOut {
-    private String address;
+    private ByronAddress address;
     private BigInteger amount;
 }
