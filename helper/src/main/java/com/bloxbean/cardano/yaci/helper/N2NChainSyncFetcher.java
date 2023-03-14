@@ -155,16 +155,16 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
 
             @Override
             public void rollforwardByronEra(Tip tip, ByronBlockHead byronHead) {
-                long slot = byronHead.getConsensusData().getSlotId().getSlot();
+                long absoluteSlot = byronHead.getConsensusData().getAbsoluteSlot();
                 String hash = byronHead.getBlockHash();
-                resetBlockFetchAgentAndFetchBlock(slot, hash);
+                resetBlockFetchAgentAndFetchBlock(absoluteSlot, hash);
             }
 
             @Override
             public void rollforwardByronEra(Tip tip, ByronEbHead byronEbHead) {
                 long epoch = byronEbHead.getConsensusData().getEpoch();
                 String hash = byronEbHead.getBlockHash();
-                resetBlockFetchAgentAndFetchBlock(0, hash);
+                resetBlockFetchAgentAndFetchBlock(byronEbHead.getConsensusData().getAbsoluteSlot(), hash);
             }
 
             @Override
