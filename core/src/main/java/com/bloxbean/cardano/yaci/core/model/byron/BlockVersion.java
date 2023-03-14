@@ -10,7 +10,7 @@ import lombok.*;
 @Builder
 public class BlockVersion {
 
-  private short major;
-  private short minor;
-  private byte alt;
+    private short major;
+    private short minor;
+    private byte alt;
 }

@@ -14,5 +14,8 @@ public class ByronTx {
     private List<ByronTxIn> inputs;
     private List<ByronTxOut> outputs;
 
+    //Derived
+    private String txHash;
+
     //TODO -- Attributes
 }

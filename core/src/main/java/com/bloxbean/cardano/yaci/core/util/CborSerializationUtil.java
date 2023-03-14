@@ -55,6 +55,14 @@ public class CborSerializationUtil {
         return toBigInteger(valueItem).intValue();
     }
 
+    public static short toShort(DataItem valueItem) {
+        return toBigInteger(valueItem).shortValue();
+    }
+
+    public static byte toByte(DataItem valueItem) {
+        return toBigInteger(valueItem).byteValue();
+    }
+
     public static String toHex(DataItem di) {
         return HexUtil.encodeHexString(((ByteString)di).getBytes());
     }
