@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model.byron;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.*;
 
 import java.math.BigInteger;
@@ -17,6 +18,7 @@ public class ByronEbBlockCons {
     private BigInteger difficulty;
 
     //Derive
+    @JsonIgnore
     public long getAbsoluteSlot() {
         return epoch * BYRON_SLOTS_PER_EPOCH;
     }

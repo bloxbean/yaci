@@ -9,7 +9,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
-import java.util.Optional;
 
 @Data
 @NoArgsConstructor
@@ -21,7 +20,7 @@ public class Transaction {
     private String txHash;
     private TransactionBody body;
     private List<Utxo> utxos;
-    private Optional<Utxo> collateralReturnUtxo;
+    private Utxo collateralReturnUtxo;
     private Witnesses witnesses;
     private AuxData auxData;
     private boolean invalid;

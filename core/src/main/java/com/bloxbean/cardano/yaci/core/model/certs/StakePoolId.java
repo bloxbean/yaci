@@ -2,15 +2,16 @@ package com.bloxbean.cardano.yaci.core.model.certs;
 
 import com.bloxbean.cardano.client.crypto.Bech32;
 import com.bloxbean.cardano.client.util.HexUtil;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+import lombok.*;
 
 @Getter
+@AllArgsConstructor
+@NoArgsConstructor
+@Builder
 @EqualsAndHashCode
 @ToString
 public class StakePoolId {
-    private final String poolKeyHash;
+    private String poolKeyHash;
 
     public StakePoolId(byte[] poolKeyHashBytes) {
         if (poolKeyHashBytes != null)
