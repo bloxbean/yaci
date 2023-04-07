@@ -48,7 +48,7 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
                     .txHash(txBody.getTxHash())
                     .body(txBody)
                     .utxos(utxos)
-                    .collateralReturnUtxo(collateralReturnUtxo)
+                    .collateralReturnUtxo(collateralReturnUtxo.orElse(null))
                     .witnesses(witnesses)
                     .auxData(auxData)
                     .invalid(invalidTxn)

@@ -1,14 +1,13 @@
 package com.bloxbean.cardano.yaci.core.model;
 
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+import lombok.*;
 
 @Getter
 @AllArgsConstructor
-@ToString
+@NoArgsConstructor
+@Builder
 @EqualsAndHashCode
+@ToString
 public class ProtocolVersion {
     private long _1;
     private long _2;

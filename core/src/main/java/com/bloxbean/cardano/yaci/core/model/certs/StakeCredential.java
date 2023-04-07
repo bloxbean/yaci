@@ -9,19 +9,21 @@ import com.bloxbean.cardano.client.crypto.VerificationKey;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import lombok.*;
 
 import java.math.BigInteger;
 import java.util.List;
 
 @Getter
+@AllArgsConstructor
+@NoArgsConstructor
+@Builder
 @EqualsAndHashCode
 @ToString
 public class StakeCredential {
-    private final StakeCredType type;
-    private final String hash;
+    private StakeCredType type;
+    private String hash;
 
     private StakeCredential(StakeCredType type, byte[] hashBytes) {
         this.type = type;
@@ -86,6 +88,7 @@ public class StakeCredential {
         return array;
     }
 
+    @JsonIgnore
     public String getCborHex() {
         return HexUtil.encodeHexString(CborSerializationUtil.serialize(serialize()));
     }

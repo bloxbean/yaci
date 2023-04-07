@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -9,9 +10,9 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 @EqualsAndHashCode
 @ToString
-@Builder
 public class ProtocolParamUpdate {
     private Integer minFeeA; //0
     private Integer minFeeB; //1
@@ -21,6 +22,7 @@ public class ProtocolParamUpdate {
     private BigInteger keyDeposit; //5
     private BigInteger poolDeposit; //6
     private Integer maxEpoch; //7
+    @JsonProperty("nopt")
     private Integer nOpt; //8
     private BigDecimal poolPledgeInfluence; //rational //9
     private BigDecimal expansionRate; //unit interval //10

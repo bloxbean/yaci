@@ -6,9 +6,9 @@ import lombok.*;
 @Getter
 @AllArgsConstructor
 @NoArgsConstructor
+@Builder
 @EqualsAndHashCode
 @ToString
-@Builder
 public class PoolRegistration implements Certificate{
     private final CertificateType type = CertificateType.POOL_REGISTRATION;
 

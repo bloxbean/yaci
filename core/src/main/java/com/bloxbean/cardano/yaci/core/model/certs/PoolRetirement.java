@@ -1,12 +1,11 @@
 package com.bloxbean.cardano.yaci.core.model.certs;
 
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+import lombok.*;
 
 @Getter
 @AllArgsConstructor
+@NoArgsConstructor
+@Builder
 @EqualsAndHashCode
 @ToString
 public class PoolRetirement implements Certificate {

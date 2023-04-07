@@ -1,12 +1,11 @@
 package com.bloxbean.cardano.yaci.core.model;
 
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+import lombok.*;
 
 @Getter
 @AllArgsConstructor
+@NoArgsConstructor
+@Builder
 @ToString
 @EqualsAndHashCode
 public class VrfCert {
