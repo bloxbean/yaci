@@ -13,7 +13,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
-import java.time.Duration;
+import java.time.*;
 import java.util.List;
 import java.util.Optional;
 
@@ -236,6 +236,17 @@ class LocalStateQueryClientIT extends BaseTest {
         Mono<GenesisConfigQueryResult> mono = localStateQueryClient.executeQuery(new GenesisConfigQuery(Era.Babbage));
         GenesisConfigQueryResult result = mono.block(Duration.ofSeconds(5));
 
-        System.out.println(result);
+        LocalDate localDate = LocalDate.ofYearDay(2017, 30);
+        LocalTime localTime = LocalTime.ofNanoOfDay(0 / 1000);
+        assertThat(result.getSystemStartTime()).isAfter(LocalDateTime.of(localDate, localTime));
+        assertThat(result.getNetworkMagic()).isNotZero();
+        assertThat(result.getNetworkId()).isEqualTo(0);
+        assertThat(result.getSlotsPerKesPeriod()).isEqualTo(129600);
+        assertThat(result.getActiveSlotsCoeff()).isEqualTo(0.05);
+        assertThat(result.getSecurityParam()).isEqualTo(2160);
+        assertThat(result.getEpochLength()).isEqualTo(432000);
+        assertThat(result.getMaxKESEvolutions()).isEqualTo(62);
+        assertThat(result.getMaxLovelaceSupply()).isEqualTo(45000000000000000L);
+
     }
 }
