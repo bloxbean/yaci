@@ -98,21 +98,21 @@ subprojects {
     archivesBaseName = 'yaci-' + project.name
 
     dependencies {
-        api('org.slf4j:slf4j-api:1.7.36')
+        api libs.slf4j.api
 
-        compileOnly 'org.projectlombok:lombok:1.18.20'
-        annotationProcessor 'org.projectlombok:lombok:1.18.20'
+        compileOnly libs.lombok
+        annotationProcessor libs.lombok
 
-        testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
-        testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
-        testImplementation 'org.hamcrest:hamcrest-library:2.2'
-        testImplementation 'org.mockito:mockito-inline:3.7.7'
-        testImplementation 'org.mockito:mockito-junit-jupiter:3.7.7'
-        testImplementation 'org.assertj:assertj-core:3.21.0'
-        testRuntimeOnly 'org.slf4j:slf4j-log4j12:1.7.36'
+        testImplementation libs.junit.jupiter.api
+        testRuntimeOnly libs.junit.jupiter.engine
+        testImplementation libs.harmcrest.library
+        testImplementation libs.mockito.inline
+        testImplementation libs.mockito.junit.jupiter
+        testImplementation libs.assertj.core
+        testRuntimeOnly libs.slf4j.log4j
 
-        testCompileOnly 'org.projectlombok:lombok:1.18.20'
-        testAnnotationProcessor 'org.projectlombok:lombok:1.18.20'
+        testCompileOnly libs.lombok
+        testAnnotationProcessor libs.lombok
     }
 
     compileJava {

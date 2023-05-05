@@ -1,9 +1,9 @@
 dependencies {
-    implementation('io.netty:netty-all:4.1.86.Final')
-    implementation('co.nstant.in:cbor:0.9')
-    api('org.slf4j:slf4j-api:1.7.36')
+    implementation libs.netty
+    implementation libs.cbor
+    api libs.slf4j.api
 
-    implementation('com.bloxbean.cardano:cardano-client-core:0.4.3')
+    implementation libs.cardano.client.core
 }
 
 publishing {
