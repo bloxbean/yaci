@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.model.Block;
+import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -25,23 +26,27 @@ public class GenesisBlockFinder {
             public void onByronBlock(ByronMainBlock byronBlock) {
                 startPoint.setFirstBlock(new Point(byronBlock.getHeader().getConsensusData().getSlotId().getSlot(),
                         byronBlock.getHeader().getBlockHash()));
+                startPoint.setFirstBlockEra(Era.Byron);
                 countDownLatch.countDown();
             }
 
             @Override
             public void onByronEbBlock(ByronEbBlock byronEbBlock) {
                 startPoint.setGenesisBlock(new Point(0, byronEbBlock.getHeader().getBlockHash()));
+                startPoint.setGenesisBlockEra(Era.Byron);
                 countDownLatch.countDown();
             }
 
             @Override
             public void onBlock(Block block) {
-                if (block.getHeader().getHeaderBody().getBlockNumber() == 0)
+                if (block.getHeader().getHeaderBody().getBlockNumber() == 0) {
                     startPoint.setGenesisBlock(new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash()));
-                else if (block.getHeader().getHeaderBody().getBlockNumber() == 1)
+                    startPoint.setGenesisBlockEra(block.getEra());
+                } else if (block.getHeader().getHeaderBody().getBlockNumber() == 1) {
                     startPoint.setFirstBlock(new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash()));
-
+                    startPoint.setFirstBlockEra(block.getEra());
                     countDownLatch.countDown();
+                }
             }
         });
 

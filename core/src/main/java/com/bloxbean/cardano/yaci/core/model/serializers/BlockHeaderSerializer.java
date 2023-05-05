@@ -82,7 +82,8 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
         HeaderBody.HeaderBodyBuilder headerBodyBuilder = HeaderBody.builder();
         headerBodyBuilder.blockNumber(CborSerializationUtil.toBigInteger(headerBodyArr.get(0)).longValue());
         headerBodyBuilder.slot(CborSerializationUtil.toBigInteger(headerBodyArr.get(1)).longValue());
-        headerBodyBuilder.prevHash(CborSerializationUtil.toHex(headerBodyArr.get(2)));
+        if (headerBodyArr.get(2) != SimpleValue.NULL) //In Preview network, block 0 starts from Alonzo era
+            headerBodyBuilder.prevHash(CborSerializationUtil.toHex(headerBodyArr.get(2)));
         headerBodyBuilder.issuerVkey(CborSerializationUtil.toHex(headerBodyArr.get(3)));
         headerBodyBuilder.vrfVkey(CborSerializationUtil.toHex(headerBodyArr.get(4)));
 
