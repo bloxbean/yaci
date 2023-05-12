@@ -9,13 +9,11 @@ import com.bloxbean.cardano.yaci.core.protocol.localtx.model.TxSubmissionRequest
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
-@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 class LocalTxSubmissionClientIT extends BaseTest {
     @Test
     void submitTx() throws InterruptedException {

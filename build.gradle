@@ -2,6 +2,7 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id 'signing'
+    id 'org.unbroken-dome.test-sets' version("4.0.0")
 }
 
 repositories {
@@ -27,6 +28,11 @@ dependencies {
 }
 
 test {
+    useJUnitPlatform()
+}
+
+// Make all tests use JUnit 5
+tasks.withType(Test) {
     useJUnitPlatform()
 }
 
@@ -88,6 +94,7 @@ subprojects {
     apply plugin: 'java-library'
     apply plugin: 'maven-publish'
     apply plugin: 'signing'
+    apply plugin: 'org.unbroken-dome.test-sets'
 
     repositories {
         mavenLocal()
@@ -142,7 +149,12 @@ subprojects {
         archives javadocJar
     }
 
-    test {
+    testSets {
+        integrationTest
+    }
+
+    // Make all tests use JUnit 5
+    tasks.withType(Test) {
         useJUnitPlatform()
     }
 

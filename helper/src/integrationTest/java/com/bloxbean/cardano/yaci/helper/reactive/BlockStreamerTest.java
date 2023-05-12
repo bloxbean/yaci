@@ -11,7 +11,6 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableCon
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 
@@ -24,7 +23,6 @@ import java.util.function.Function;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
-@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 class BlockStreamerTest {
 
     @Test
