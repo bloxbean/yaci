@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol;
 
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 
@@ -14,6 +15,7 @@ public abstract class Agent<T extends AgentListener> {
     private Instant instant;
     private Channel channel;
     private final List<T> agentListeners = new ArrayList<>();
+    private AcceptVersion acceptVersion;
 
     public void setChannel(Channel channel) {
         if (this.channel != null && this.channel.isActive())
@@ -98,6 +100,24 @@ public abstract class Agent<T extends AgentListener> {
 
     public void shutdown() {
 
+    }
+
+    /**
+     * Accepted version during hashshake.
+     * This method should not be called directly by the application. It is invoked by the NodeClient during successful
+     * connection
+     * @param version
+     */
+    public void setAcceptedVersion(AcceptVersion version) {
+        this.acceptVersion = version;
+    }
+
+    /**
+     * Returns the version number accepted during handshake
+     * @return version
+     */
+    public AcceptVersion getAcceptedVersion() {
+        return acceptVersion;
     }
 
     public State getCurrentState() {

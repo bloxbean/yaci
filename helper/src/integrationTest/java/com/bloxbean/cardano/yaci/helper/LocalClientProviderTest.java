@@ -5,12 +5,10 @@ import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.SystemStartRes
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import reactor.core.publisher.Mono;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 class LocalClientProviderTest extends BaseTest {
 
     private LocalClientProvider localQueryProvider;

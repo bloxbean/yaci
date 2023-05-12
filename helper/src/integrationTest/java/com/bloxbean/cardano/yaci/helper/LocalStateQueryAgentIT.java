@@ -19,7 +19,6 @@ import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.SystemStartRes
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
@@ -30,7 +29,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
-@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 class LocalStateQueryAgentIT extends BaseTest {
 
     @Test

@@ -8,18 +8,20 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
-import java.time.*;
+import java.math.BigInteger;
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@EnabledIfEnvironmentVariable(named = "INT_TEST", matches = "true")
 @Slf4j
 class LocalStateQueryClientIT extends BaseTest {
 
@@ -110,7 +112,9 @@ class LocalStateQueryClientIT extends BaseTest {
         StepVerifier
                 .create(mono)
                 .expectNextMatches(protoParams -> protoParams.getProtocolParams().getCollateralPercent() == 150
-                        && protoParams.getProtocolParams().getMaxCollateralInputs().equals(3))
+                        && protoParams.getProtocolParams().getMaxCollateralInputs().equals(3)
+                        && protoParams.getProtocolParams().getMaxTxExMem().equals(BigInteger.valueOf(14000000))
+                )
                 .expectComplete()
                 .verify();
     }
@@ -129,7 +133,7 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @Test
     void utxoByAddress() {
-        Mono<UtxoByAddressQueryResult> mono = localStateQueryClient.executeQuery(new UtxoByAddressQuery(era, new Address("addr_test1vpfwv0ezc5g8a4mkku8hhy3y3vp92t7s3ul8g778g5yegsgalc6gc")));
+        Mono<UtxoByAddressQueryResult> mono = localStateQueryClient.executeQuery(new UtxoByAddressQuery(new Address("addr_test1vpfwv0ezc5g8a4mkku8hhy3y3vp92t7s3ul8g778g5yegsgalc6gc")));
         mono = mono.log();
 
         StepVerifier

@@ -36,9 +36,11 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
         if (message == null) return;
         if (message instanceof AcceptVersion) {
             log.info("Handshake Ok!!! {}", message);
+            setAcceptedVersion((AcceptVersion)message);
             handshakeOk();
         } else {
             log.error("Handshake failed!!! {}", message);
+            setAcceptedVersion(null);
             handshakeError(message);
         }
     }
