@@ -4,6 +4,7 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -22,7 +23,7 @@ public class StakeSnapshotQuery implements EraQuery<StakeSnapshotQueryResult> {
     }
 
     @Override
-    public DataItem serialize() {
+    public DataItem serialize(AcceptVersion protocolVersion) {
         Array array = new Array();
         array.add(new UnsignedInteger(20));
 
@@ -36,7 +37,7 @@ public class StakeSnapshotQuery implements EraQuery<StakeSnapshotQueryResult> {
     }
 
     @Override
-    public StakeSnapshotQueryResult deserializeResult(DataItem[] di) {
+    public StakeSnapshotQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
        throw new UnsupportedOperationException("Not implemented yet");
     }
 }

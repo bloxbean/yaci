@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.protocol.localstate.queries;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
 import lombok.AllArgsConstructor;
@@ -22,7 +23,7 @@ public class EpochNoQuery implements EraQuery<EpochNoQueryResult> {
     }
 
     @Override
-    public DataItem serialize() {
+    public DataItem serialize(AcceptVersion protocolVersion) {
         Array queryArray = new Array();
         queryArray.add(new UnsignedInteger(1));
 
@@ -30,7 +31,7 @@ public class EpochNoQuery implements EraQuery<EpochNoQueryResult> {
     }
 
     @Override
-    public EpochNoQueryResult deserializeResult(DataItem[] di) {
+    public EpochNoQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
         List<DataItem> dataItemList = extractResultArray(di[0]);
         long epochNo = ((UnsignedInteger) dataItemList.get(0)).getValue().longValue();
         return new EpochNoQueryResult(epochNo);

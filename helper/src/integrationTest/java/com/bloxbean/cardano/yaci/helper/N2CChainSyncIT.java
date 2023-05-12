@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
@@ -18,11 +17,11 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
-public class N2CChainSyncIT {
+public class N2CChainSyncIT extends BaseTest {
 
     @Test
     void testChainSync_fromOrigin_byronBlocks() throws InterruptedException {
-        N2CChainSyncFetcher chainSyncFetcher = new N2CChainSyncFetcher("/Users/satya/work/cardano-node/prepod/db/node.socket", Point.ORIGIN, Constants.PREPROD_PROTOCOL_MAGIC, false);
+        N2CChainSyncFetcher chainSyncFetcher = new N2CChainSyncFetcher(nodeSocketFile, Point.ORIGIN, protocolMagic, false);
 
         List<ByronEbBlock> genesisBlock = new ArrayList<>();
         List<ByronMainBlock> byronBlocks = new ArrayList<>();
@@ -57,7 +56,7 @@ public class N2CChainSyncIT {
 
     @Test
     void testChainSync_fromRecent() throws InterruptedException {
-        N2CChainSyncFetcher chainSyncFetcher = new N2CChainSyncFetcher("/Users/satya/work/cardano-node/prepod/db/node.socket", Point.ORIGIN, Constants.PREPROD_PROTOCOL_MAGIC, true);
+        N2CChainSyncFetcher chainSyncFetcher = new N2CChainSyncFetcher(nodeSocketFile, Point.ORIGIN, protocolMagic, true);
 
         List<Block> blocks = new ArrayList<>();
         CountDownLatch countDownLatch = new CountDownLatch(1);

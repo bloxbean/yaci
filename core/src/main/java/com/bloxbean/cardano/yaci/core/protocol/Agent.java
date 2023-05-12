@@ -108,7 +108,7 @@ public abstract class Agent<T extends AgentListener> {
      * connection
      * @param version
      */
-    public void setAcceptedVersion(AcceptVersion version) {
+    public void setProtocolVersion(AcceptVersion version) {
         this.acceptVersion = version;
     }
 
@@ -116,7 +116,7 @@ public abstract class Agent<T extends AgentListener> {
      * Returns the version number accepted during handshake
      * @return version
      */
-    public AcceptVersion getAcceptedVersion() {
+    public AcceptVersion getProtocolVersion() {
         return acceptVersion;
     }
 

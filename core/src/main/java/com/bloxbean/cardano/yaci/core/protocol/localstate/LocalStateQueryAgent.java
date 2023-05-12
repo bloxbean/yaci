@@ -107,7 +107,7 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
             query = null;
 
         byte[] result = msgResult.getResult();
-        QueryResult queryResult = query.deserializeResult(getAcceptedVersion(), CborSerializationUtil.deserialize(result));
+        QueryResult queryResult = query.deserializeResult(getProtocolVersion(), CborSerializationUtil.deserialize(result));
 
         getAgentListeners().stream().forEach(
                 listener -> listener.resultReceived(query, queryResult)
@@ -133,7 +133,7 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
     }
 
     public MsgQuery query(Query query) {
-        MsgQuery msgQuery = new MsgQuery(query);
+        MsgQuery msgQuery = new MsgQuery(query, getProtocolVersion());
         this.currenState.verifyMessageType(msgQuery);
 
         acquiredCommands.add(msgQuery);

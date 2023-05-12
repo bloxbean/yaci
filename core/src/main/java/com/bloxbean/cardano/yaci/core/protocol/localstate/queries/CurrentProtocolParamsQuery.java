@@ -33,7 +33,7 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
     }
 
     @Override
-    public DataItem serialize() {
+    public DataItem serialize(AcceptVersion protocolVersion) {
         //[0 [0 [Era query]]]
         Array queryArray = new Array();
         queryArray.add(new UnsignedInteger(3));
@@ -42,8 +42,8 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
     }
 
     @Override
-    public CurrentProtocolParamQueryResult deserializeResult(AcceptVersion handshakeVersion, DataItem[] di) {
-        if (handshakeVersion.getVersionNumber() <= PROTOCOL_V13) {
+    public CurrentProtocolParamQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
+        if (protocolVersion.getVersionNumber() <= PROTOCOL_V13) {
             return deserializeResultProtocolV13(di);
         } else {
             return deserializeResult(di);
@@ -215,7 +215,7 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
         return new CurrentProtocolParamQueryResult(protocolParams);
     }
 
-    @Override
+
     public CurrentProtocolParamQueryResult deserializeResult(DataItem[] di) {
         List<DataItem> dataItemList = ((Array) di[0]).getDataItems();
 

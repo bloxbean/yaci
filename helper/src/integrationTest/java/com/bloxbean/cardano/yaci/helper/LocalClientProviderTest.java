@@ -14,13 +14,10 @@ class LocalClientProviderTest extends BaseTest {
     private LocalClientProvider localQueryProvider;
     private LocalStateQueryClient localStateQueryClient;
 
-    LocalClientProviderTest(LocalStateQueryClient localStateQueryClient) {
-        this.localStateQueryClient = localStateQueryClient;
-    }
-
     @BeforeEach
     public void setup() {
         this.localQueryProvider = new LocalClientProvider(nodeSocketFile, protocolMagic);
+        this.localStateQueryClient = localQueryProvider.getLocalStateQueryClient();
         localQueryProvider.start();
     }
 

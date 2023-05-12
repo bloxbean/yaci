@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.protocol.localstate.queries;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Query;
 
 import java.util.List;
@@ -10,7 +11,7 @@ import java.util.List;
 public class SystemStartQuery implements Query<SystemStartResult> {
 
     @Override
-    public DataItem serialize() {
+    public DataItem serialize(AcceptVersion protocolVersion) {
         Array array = new Array();
         array.add(new UnsignedInteger(1));
 
@@ -18,7 +19,7 @@ public class SystemStartQuery implements Query<SystemStartResult> {
     }
 
     @Override
-    public SystemStartResult deserializeResult(DataItem[] di) {
+    public SystemStartResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
         List<DataItem> dataItemList = ((Array)di[0]).getDataItems();
 
         int type = ((UnsignedInteger)dataItemList.get(0)).getValue().intValue(); //4

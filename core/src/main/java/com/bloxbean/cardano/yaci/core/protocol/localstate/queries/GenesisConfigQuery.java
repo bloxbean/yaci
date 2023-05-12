@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.protocol.localstate.queries;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
 import lombok.AllArgsConstructor;
@@ -19,7 +20,7 @@ public class GenesisConfigQuery implements EraQuery<GenesisConfigQueryResult> {
     private Era era;
 
     @Override
-    public DataItem serialize() {
+    public DataItem serialize(AcceptVersion protocolVersion) {
         Array queryArray = new Array();
         queryArray.add(new UnsignedInteger(11));
 
@@ -27,7 +28,7 @@ public class GenesisConfigQuery implements EraQuery<GenesisConfigQueryResult> {
     }
 
     @Override
-    public GenesisConfigQueryResult deserializeResult(DataItem[] di) {
+    public GenesisConfigQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
         List<DataItem> dataItems = ((Array)extractResultArray(di[0]).get(0)).getDataItems();
 
         //System start [0]

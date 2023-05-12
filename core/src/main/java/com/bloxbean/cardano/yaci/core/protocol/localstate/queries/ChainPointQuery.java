@@ -5,6 +5,7 @@ import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Query;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
@@ -12,7 +13,7 @@ import java.util.List;
 
 public class ChainPointQuery implements Query<ChainPointQueryResult> {
     @Override
-    public DataItem serialize() {
+    public DataItem serialize(AcceptVersion protocolVersion) {
         Array array = new Array();
         array.add(new UnsignedInteger(3));
 
@@ -20,7 +21,7 @@ public class ChainPointQuery implements Query<ChainPointQueryResult> {
     }
 
     @Override
-    public ChainPointQueryResult deserializeResult(DataItem[] di) {
+    public ChainPointQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
         List<DataItem> dataItemList = ((Array)di[0]).getDataItems();
 
         int type = ((UnsignedInteger)dataItemList.get(0)).getValue().intValue(); //4

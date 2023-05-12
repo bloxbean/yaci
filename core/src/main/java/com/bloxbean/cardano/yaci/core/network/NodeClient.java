@@ -45,14 +45,14 @@ public abstract class NodeClient {
             @Override
             public void handshakeOk() {
                 for (Agent agent: agents) {
-                    agent.setAcceptedVersion(handshakeAgent.getAcceptedVersion());
+                    agent.setProtocolVersion(handshakeAgent.getProtocolVersion());
                 }
             }
 
             @Override
             public void handshakeError(Reason reason) {
                 for (Agent agent: agents) {
-                    agent.setAcceptedVersion(handshakeAgent.getAcceptedVersion());
+                    agent.setProtocolVersion(handshakeAgent.getProtocolVersion());
                 }
             }
         });

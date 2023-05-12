@@ -14,7 +14,7 @@ public enum MsgQuerySerializer implements Serializer<MsgQuery> {
     public DataItem serializeDI(@NonNull MsgQuery query) {
         Array array = new Array();
         array.add(new UnsignedInteger(3));
-        array.add(query.getQuery().serialize());
+        array.add(query.getQuery().serialize(query.getProtocolVersion()));
 
         return array;
     }

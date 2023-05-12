@@ -6,6 +6,8 @@ import com.bloxbean.cardano.client.api.model.Amount;
 import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.yaci.core.model.TransactionOutput;
 import com.bloxbean.cardano.yaci.core.model.serializers.TransactionOutputSerializer;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
 import lombok.AllArgsConstructor;
@@ -29,14 +31,17 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
     }
 
     @Override
-    public DataItem serialize() {
+    public DataItem serialize(AcceptVersion protocolVersion) {
         Array array = new Array();
         array.add(new UnsignedInteger(6));
 
         //address
         Array addArr = new Array();
         addArr.add(new ByteString(address.getBytes()));
-        addArr.setTag(258);
+
+        if (protocolVersion.getVersionNumber() <= N2CVersionTableConstant.PROTOCOL_V13) {
+            addArr.setTag(258);
+        }
 
         array.add(addArr);
 
@@ -44,7 +49,7 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
     }
 
     @Override
-    public UtxoByAddressQueryResult deserializeResult(DataItem[] di) {
+    public UtxoByAddressQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
         List<DataItem> utxoDIList = extractResultArray(di[0]);
         Map utxoMap = (Map) utxoDIList.get(0); //As only one address is passed, we are sure only one value in the list
 

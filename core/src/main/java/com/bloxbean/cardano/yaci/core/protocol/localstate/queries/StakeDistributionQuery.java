@@ -4,6 +4,7 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
 import lombok.AllArgsConstructor;
@@ -26,7 +27,7 @@ public class StakeDistributionQuery implements EraQuery<StakeDistributionQueryRe
     }
 
     @Override
-    public DataItem serialize() {
+    public DataItem serialize(AcceptVersion protocolVersion) {
         Array array = new Array();
         array.add(new UnsignedInteger(5));
 
@@ -34,7 +35,7 @@ public class StakeDistributionQuery implements EraQuery<StakeDistributionQueryRe
     }
 
     @Override
-    public StakeDistributionQueryResult deserializeResult(DataItem[] di) {
+    public StakeDistributionQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
         //A map of stake pool IDs (the hash of the stake pool operator's
         //verification key) to 'IndividualPoolStake'.
         List<DataItem> dataItems = extractResultArray(di[0]);

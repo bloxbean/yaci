@@ -49,6 +49,7 @@ class BlockStreamerTest {
 
     @Test
     void streamLatestFromMainnet() throws InterruptedException {
+        CountDownLatch countDownLatch = new CountDownLatch(2);
         Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.MAINNET,
                         Constants.WELL_KNOWN_MAINNET_POINT)
                 .stream()
@@ -57,7 +58,7 @@ class BlockStreamerTest {
                     System.out.println(String.format("Block : %d", block.getHeader().getHeaderBody().getBlockNumber()));
                     return block.getTransactionBodies();
                 })
-                //.take(2)
+                .take(2)
                 .flatMap(transactionBodies ->
                         Flux.fromStream(transactionBodies.stream().map(transactionBody -> transactionBody.getOutputs())))
                 .flatMap(transactionOutputs ->
@@ -67,16 +68,15 @@ class BlockStreamerTest {
 
         flux.subscribe(amount -> {
             System.out.println(String.format("%30s : %d", amount.getAssetName(), amount.getQuantity()));
+            countDownLatch.countDown();
         });
 
-        while (true) {
-            Thread.sleep(1000);
-        }
+        countDownLatch.await(60, TimeUnit.SECONDS);
     }
 
     @Test
-        // @Timeout(value = 80000, unit = TimeUnit.MILLISECONDS)
     void streamLatestFromPreprod_fromByron() throws InterruptedException {
+        CountDownLatch countDownLatch = new CountDownLatch(2);
         Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.PREPROD,
                         Constants.WELL_KNOWN_PREPROD_POINT)
                 .stream()
@@ -85,7 +85,7 @@ class BlockStreamerTest {
                     System.out.println(String.format("Block : %d", block.getHeader().getHeaderBody().getBlockNumber()));
                     return block.getTransactionBodies();
                 })
-                //.take(2)
+                .take(2)
                 .flatMap(transactionBodies ->
                         Flux.fromStream(transactionBodies.stream().map(transactionBody -> transactionBody.getOutputs())))
                 .flatMap(transactionOutputs ->
@@ -95,16 +95,16 @@ class BlockStreamerTest {
 
         flux.subscribe(amount -> {
             System.out.println(String.format("%30s : %d", amount.getAssetName(), amount.getQuantity()));
+            countDownLatch.countDown();
         });
 
-        while (true) {
-            Thread.sleep(1000);
-        }
+        countDownLatch.await(40, TimeUnit.SECONDS);
     }
 
     @Test
     @Timeout(value = 40000, unit = TimeUnit.MILLISECONDS)
     void streamFromPointFromMainnet() throws InterruptedException {
+        CountDownLatch countDownLatch = new CountDownLatch(2);
         Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.MAINNET, new Point(39916796, "e72579ff89dc9ed325b723a33624b596c08141c7bd573ecfff56a1f7229e4d09"))
                 .stream()
                 .map(block -> {
@@ -122,15 +122,15 @@ class BlockStreamerTest {
 
         flux.subscribe(amount -> {
             System.out.println(String.format("%30s : %d", amount.getAssetName(), amount.getQuantity()));
+            countDownLatch.countDown();
         });
 
-        while (true) {
-            Thread.sleep(1000);
-        }
+        countDownLatch.await(40, TimeUnit.SECONDS);
     }
 
     @Test
     void streamForRangeFromMainnet() throws InterruptedException {
+        CountDownLatch countDownLatch = new CountDownLatch(2);
         Point from = new Point(43847831, "15b9eeee849dd6386d3770b0745e0450190f7560e5159b1b3ab13b14b2684a45");
         Point to = new Point(43847844, "ff8d558a3d5a0e058beb3d94d26a567f75cd7d09ff5485aa0d0ebc38b61378d4");
 
@@ -154,10 +154,9 @@ class BlockStreamerTest {
 
         flux.subscribe(amount -> {
             System.out.println("I also got the amount>> " + amount);
+            countDownLatch.countDown();
         });
 
-        while (true) {
-            Thread.sleep(1000);
-        }
+        countDownLatch.await(40, TimeUnit.SECONDS);
     }
 }
