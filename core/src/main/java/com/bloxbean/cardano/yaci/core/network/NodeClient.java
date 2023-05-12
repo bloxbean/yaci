@@ -5,6 +5,8 @@ import com.bloxbean.cardano.yaci.core.network.handlers.MiniProtoRequestDataEncod
 import com.bloxbean.cardano.yaci.core.network.handlers.MiniProtoStreamingByteToMessageDecoder;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
@@ -34,6 +36,26 @@ public abstract class NodeClient {
         this.handshakeAgent = handshakeAgent;
         this.agents = agents;
         this.workerGroup = configureEventLoopGroup();
+
+        attachHandshakeListener();
+    }
+
+    private void attachHandshakeListener() {
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                for (Agent agent: agents) {
+                    agent.setAcceptedVersion(handshakeAgent.getAcceptedVersion());
+                }
+            }
+
+            @Override
+            public void handshakeError(Reason reason) {
+                for (Agent agent: agents) {
+                    agent.setAcceptedVersion(handshakeAgent.getAcceptedVersion());
+                }
+            }
+        });
     }
 
     public void start() {
