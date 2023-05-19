@@ -24,10 +24,12 @@ public class GenesisBlockFinder {
         blockSync.startSync(Point.ORIGIN, new BlockChainDataListener() {
             @Override
             public void onByronBlock(ByronMainBlock byronBlock) {
-                startPoint.setFirstBlock(new Point(byronBlock.getHeader().getConsensusData().getSlotId().getSlot(),
-                        byronBlock.getHeader().getBlockHash()));
-                startPoint.setFirstBlockEra(Era.Byron);
-                countDownLatch.countDown();
+                if (byronBlock.getHeader().getConsensusData().getDifficulty().longValue() == 1) {
+                    startPoint.setFirstBlock(new Point(byronBlock.getHeader().getConsensusData().getSlotId().getSlot(),
+                            byronBlock.getHeader().getBlockHash()));
+                    startPoint.setFirstBlockEra(Era.Byron);
+                    countDownLatch.countDown();
+                }
             }
 
             @Override
@@ -42,6 +44,7 @@ public class GenesisBlockFinder {
                 if (block.getHeader().getHeaderBody().getBlockNumber() == 0) {
                     startPoint.setGenesisBlock(new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash()));
                     startPoint.setGenesisBlockEra(block.getEra());
+                    countDownLatch.countDown();
                 } else if (block.getHeader().getHeaderBody().getBlockNumber() == 1) {
                     startPoint.setFirstBlock(new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash()));
                     startPoint.setFirstBlockEra(block.getEra());
