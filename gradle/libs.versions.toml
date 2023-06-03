@@ -1,5 +1,5 @@
 [libraries]
-cardano-client-core = "com.bloxbean.cardano:cardano-client-core:0.4.3"
+cardano-client-core = "com.bloxbean.cardano:cardano-client-core:0.5.0-alpha.2"
 cbor = "co.nstant.in:cbor:0.9"
 netty = "io.netty:netty-all:4.1.92.Final"
 project-reactor-core = "io.projectreactor:reactor-core:3.5.5"

@@ -2,8 +2,9 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
-import com.bloxbean.cardano.client.transaction.spec.PlutusV1Script;
-import com.bloxbean.cardano.client.transaction.spec.PlutusV2Script;
+import com.bloxbean.cardano.client.plutus.spec.PlutusV1Script;
+import com.bloxbean.cardano.client.plutus.spec.PlutusV2Script;
+import com.bloxbean.cardano.client.spec.Script;
 import com.bloxbean.cardano.client.transaction.spec.script.*;
 import com.bloxbean.cardano.client.util.JsonUtil;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
