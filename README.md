@@ -18,14 +18,14 @@ Maven
 <dependency>
     <groupId>com.bloxbean.cardano</groupId>
     <artifactId>yaci</artifactId>
-    <version>0.1.11</version>
+    <version>0.1.12</version>
 </dependency>
 ```
 
 Gradle
 
 ```xml
- implementation('com.bloxbean.cardano:yaci:0.1.11')
+ implementation('com.bloxbean.cardano:yaci:0.1.12')
 ```
 
 ## How to Use?
