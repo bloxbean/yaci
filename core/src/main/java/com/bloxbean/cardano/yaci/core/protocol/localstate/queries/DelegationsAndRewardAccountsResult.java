@@ -11,8 +11,8 @@ import java.util.Map;
 
 /**
  * Result of DelegationsAndRewardAccountsQuery. Contains delegations and rewards for stake addresses
- * Delegations are represented as Map of Stake address -> Delegated pool id in hex
- * Rewards are represented as Map of Stake address -> Rewards
+ * Delegations are represented as Map of Stake address - Delegated pool id in hex
+ * Rewards are represented as Map of Stake address - Rewards
  */
 @Getter
 @AllArgsConstructor

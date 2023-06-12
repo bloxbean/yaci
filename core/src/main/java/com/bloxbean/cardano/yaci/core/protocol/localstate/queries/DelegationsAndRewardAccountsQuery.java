@@ -71,7 +71,7 @@ public class DelegationsAndRewardAccountsQuery implements EraQuery<DelegationsAn
      * rwdr 	[flag bytestring] 	bytestring is the keyhash of the staking vkey
      * flag 	0/1 	0=keyhash 1=scripthash
      * result 	[[ delegation rewards] ]
-     * delegation 	{ * rwdr => poolid } 	poolid is a bytestring
+     * delegation 	{ * rwdr - poolid } 	poolid is a bytestring
      * Reference: https://arsmagna.xyz/docs/network-lsq/
      **/
     @Override
