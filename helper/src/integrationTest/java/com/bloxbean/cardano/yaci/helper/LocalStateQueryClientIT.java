@@ -17,8 +17,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -170,9 +169,9 @@ class LocalStateQueryClientIT extends BaseTest {
         epochNoQueryResult = queryResultMono.block(Duration.ofSeconds(20));
     }
 
-//    @Test
+    //    @Test
     void nestedCalls() throws InterruptedException {
-        Mono<CurrentProtocolParamQueryResult> mono= localQueryProvider.getTxMonitorClient()
+        Mono<CurrentProtocolParamQueryResult> mono = localQueryProvider.getTxMonitorClient()
                 .acquireAndGetMempoolSizeAndCapacity()
                 .filter(mempoolStatus -> mempoolStatus.getNumberOfTxs() == 0)
                 .flatMap(mempoolStatus -> localStateQueryClient.acquire())
@@ -227,7 +226,7 @@ class LocalStateQueryClientIT extends BaseTest {
         System.out.println(result);
     }
 
-//    @Test
+    //    @Test
     void epochStateQuery() {
         Mono<EpochStateQueryResult> mono = localStateQueryClient.executeQuery(new EpochStateQuery());
         EpochStateQueryResult result = mono.block();
@@ -253,4 +252,41 @@ class LocalStateQueryClientIT extends BaseTest {
         assertThat(result.getMaxLovelaceSupply()).isEqualTo(45000000000000000L);
 
     }
+
+    @Test
+    void delegationRewardsQuery() {
+        //Mix of regular staking key and script staking key to test if the sorting during input works, otherwise the request will fail
+        Set<Address> stakeAddresses = new LinkedHashSet<>(List.of(
+                new Address("stake_test1upfjudlteayz2ayenwkyqy77zxf92k69f28g0vur0rqmg3sjr95v7"),
+                new Address("stake_test1up97ct2wt8jqlly2cnkhuwc7tvevmjpp7h6ts3rucpksy8c8cnspn"),
+                new Address("stake_test1upkmrqs6qjmhwc89l3fzfvzf7vd0xl8zd5h76pah9kv4npc2ql0vf"),
+                new Address("stake_test1upzr8x6my8u5qfx74vgjsfexf2xf3qrfnmd6uahvu866xugj26s8g"),
+                new Address("stake_test1uret0j5crrwvvm6e94p20yfgyswwzvrr3hd8cz7n6h4qensv6502k"),
+                new Address("stake_test17qag3rt979nep9g2wtdwu8mr4gz6m4kjdpp5zp705km8wys6r5wgh"),//script 1,
+                new Address("stake_test17rgr608tyvgawu5ja328xy523rrj75xx5x492gltauc649czsnx8t"), //script 2
+                new Address("stake_test17p6ffq4jle9vw9daatwx0kclgfsqfqltkxgnl2q2yeq35cc9du8ml"), //script 3
+                new Address("stake_test17rqvxk8m24yfl3qveuj0r32tktk3eymjvlf2cujtdavqfvc4xpaer") //script 4
+        ));
+
+        stakeAddresses.forEach(address -> System.out.println("Input Address >> " + address.toBech32()));
+
+        Mono<DelegationsAndRewardAccountsResult> mono = localStateQueryClient.executeQuery(new DelegationsAndRewardAccountsQuery(stakeAddresses));
+        DelegationsAndRewardAccountsResult result = mono.block();
+
+        Map<Address, String> delegations = result.getDelegations();
+        Map<Address, BigInteger> rewards = result.getRewards();
+
+        System.out.println("######### Delegations and Rewards ########");
+        delegations.forEach((address, poolId) -> {
+            System.out.println("Delegation >> " + address.toBech32() + " : " + poolId);
+        });
+
+        rewards.forEach((address, reward) -> {
+            System.out.println("Reward >> " + address.toBech32() + " : " + reward);
+        });
+
+        assertThat(delegations).hasSizeGreaterThanOrEqualTo(5); //only 5 regular staking keys has delegations
+        assertThat(rewards).hasSizeGreaterThanOrEqualTo(5); //only 5 regular staking keys has rewards
+    }
+
 }
