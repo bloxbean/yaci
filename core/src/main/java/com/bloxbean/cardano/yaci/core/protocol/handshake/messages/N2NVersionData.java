@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.core.protocol.handshake.messages;
 
-import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
@@ -9,10 +8,19 @@ import lombok.ToString;
 @EqualsAndHashCode
 @ToString
 public class N2NVersionData extends VersionData {
-    private boolean initiatorAndResponderDiffusionMode;
+    private Boolean initiatorAndResponderDiffusionMode;
+    private Integer peerSharing;
+    private Boolean query;
 
-    public N2NVersionData(long networkMagic, boolean initiatorAndResponderDiffusionMode) {
+    public N2NVersionData(long networkMagic, Boolean initiatorAndResponderDiffusionMode) {
         super(networkMagic);
         this.initiatorAndResponderDiffusionMode = initiatorAndResponderDiffusionMode;
+    }
+
+    public N2NVersionData(long networkMagic, Boolean initiatorAndResponderDiffusionMode, Integer peerSharing, Boolean query) {
+        super(networkMagic);
+        this.initiatorAndResponderDiffusionMode = initiatorAndResponderDiffusionMode;
+        this.peerSharing = peerSharing;
+        this.query = query;
     }
 }
