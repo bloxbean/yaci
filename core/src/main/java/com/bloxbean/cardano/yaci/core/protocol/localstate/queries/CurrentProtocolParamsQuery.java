@@ -18,7 +18,7 @@ import java.math.BigInteger;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-import static com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant.PROTOCOL_V13;
+import static com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant.PROTOCOL_V14;
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
 
 @Getter
@@ -43,14 +43,14 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
 
     @Override
     public CurrentProtocolParamQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
-        if (protocolVersion.getVersionNumber() <= PROTOCOL_V13) {
-            return deserializeResultProtocolV13(di);
+        if (protocolVersion.getVersionNumber() == PROTOCOL_V14) {
+            return deserializeResultV14(di);
         } else {
             return deserializeResult(di);
         }
     }
 
-    public CurrentProtocolParamQueryResult deserializeResultProtocolV13(DataItem[] di) {
+    public CurrentProtocolParamQueryResult deserializeResult(DataItem[] di) {
         List<DataItem> dataItemList = ((Array) di[0]).getDataItems();
 
         int type = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue(); //4
@@ -216,7 +216,7 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
     }
 
 
-    public CurrentProtocolParamQueryResult deserializeResult(DataItem[] di) {
+    public CurrentProtocolParamQueryResult deserializeResultV14(DataItem[] di) {
         List<DataItem> dataItemList = ((Array) di[0]).getDataItems();
 
         int type = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue(); //4

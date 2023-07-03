@@ -37,6 +37,9 @@ public interface HandshakeStateBase extends State {
                     }
 
                     return message;
+                case 3:
+                    DataItem versionTableDI = array.getDataItems().get(1);
+                    return QueryReplySerializer.INSTANCE.deserializeDI(versionTableDI);
                 default:
                     throw new RuntimeException(String.format("Invalid msg id: %d", id));
             }
