@@ -89,7 +89,7 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
             TransactionOutput txOutput = txBody.getCollateralReturn();
             Utxo utxo = Utxo.builder()
                     .txHash(txBody.getTxHash())
-                    .index(0)
+                    .index(txBody.getOutputs().size())
                     .address(txOutput.getAddress())
                     .amounts(txOutput.getAmounts())
                     .datumHash(txOutput.getDatumHash())
