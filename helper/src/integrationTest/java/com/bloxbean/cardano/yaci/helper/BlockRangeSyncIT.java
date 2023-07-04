@@ -16,7 +16,7 @@ class BlockRangeSyncIT extends BaseTest{
 
     @Test
     void fetch() throws InterruptedException {
-        CountDownLatch countDownLatch = new CountDownLatch(2);
+        CountDownLatch countDownLatch = new CountDownLatch(3);
         List<Block> blocks = new ArrayList<>();
         BlockRangeSync blockRangeSync = new BlockRangeSync(node, nodePort, protocolMagic);
         blockRangeSync.start(new BlockChainDataListener() {
@@ -33,6 +33,7 @@ class BlockRangeSyncIT extends BaseTest{
         blockRangeSync.fetch(from, to);
 
         countDownLatch.await(60, TimeUnit.SECONDS);
+        blockRangeSync.stop();
         assertThat(blocks).hasSize(3);
         assertThat(blocks.get(0).getHeader().getHeaderBody().getSlot()).isEqualTo(13107194);
         assertThat(blocks.get(2).getHeader().getHeaderBody().getSlot()).isEqualTo(13107220);

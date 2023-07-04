@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit;
 class LocalTxSubmissionClientIT extends BaseTest {
     @Test
     void submitTx() throws InterruptedException {
-        LocalClientProvider localClientProvider = new LocalClientProvider(nodeSocketFile, N2CVersionTableConstant.v9AndAbove(protocolMagic));
+        LocalClientProvider localClientProvider = new LocalClientProvider(nodeSocketFile, N2CVersionTableConstant.v1AndAbove(protocolMagic));
         LocalTxSubmissionClient localTxSubmissionClient = localClientProvider.getTxSubmissionClient();
 
         CountDownLatch countDownLatch = new CountDownLatch(1);

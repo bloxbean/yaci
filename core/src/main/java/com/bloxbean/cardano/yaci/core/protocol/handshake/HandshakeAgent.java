@@ -2,7 +2,10 @@ package com.bloxbean.cardano.yaci.core.protocol.handshake;
 
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.*;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.ProposedVersions;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import lombok.extern.slf4j.Slf4j;
 
 import static com.bloxbean.cardano.yaci.core.protocol.handshake.HandshkeState.Propose;
@@ -38,6 +41,10 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
             log.info("Handshake Ok!!! {}", message);
             setProtocolVersion((AcceptVersion)message);
             handshakeOk();
+        } else if (message instanceof VersionTable) {
+            log.info("VersionTable received!!! {}", message);
+            //TODO -- Will be implemented for N2N 11,12 / N2C 15,16 with query attribute
+            throw new UnsupportedOperationException("msgQueryReply is not supported yet");
         } else {
             log.error("Handshake failed!!! {}", message);
             setProtocolVersion(null);

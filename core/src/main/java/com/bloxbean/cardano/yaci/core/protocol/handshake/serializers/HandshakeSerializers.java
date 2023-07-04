@@ -8,10 +8,10 @@ import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.Map;
 
+//TODO -- Explore option to split N2N and N2C serializers
 @Slf4j
 public class HandshakeSerializers {
 
@@ -43,14 +43,65 @@ public class HandshakeSerializers {
                             N2NVersionData versionData = (N2NVersionData) entry.getValue();
                             Array versionDataArray = new Array();
                             versionDataArray.add(new UnsignedInteger(versionData.getNetworkMagic()));
-                            versionDataArray.add(versionData.isInitiatorAndResponderDiffusionMode() ? SimpleValue.TRUE : SimpleValue.FALSE);
+                            versionDataArray.add(versionData.getInitiatorAndResponderDiffusionMode() ? SimpleValue.TRUE : SimpleValue.FALSE);
                             cborMap.put(new UnsignedInteger(entry.getKey()), versionDataArray);
-                        } else if (entry.getValue() instanceof N2CVersionData) {
+                        } else if (entry.getValue() instanceof OldN2CVersionData) {
                             cborMap.put(new UnsignedInteger(entry.getKey()), new UnsignedInteger(entry.getValue().getNetworkMagic()));
+                        } else if (entry.getValue() instanceof N2CVersionData) {
+                            N2CVersionData versionData = (N2CVersionData) entry.getValue();
+                            Array versionDataArray = new Array();
+                            versionDataArray.add(new UnsignedInteger(versionData.getNetworkMagic()));
+                            versionDataArray.add(versionData.isQuery() ? SimpleValue.TRUE : SimpleValue.FALSE);
+                            cborMap.put(new UnsignedInteger(entry.getKey()), versionDataArray);
                         }
                     });
 
             return cborMap;
+        }
+
+        @Override
+        public VersionTable deserializeDI(DataItem versionTableDI) {
+            co.nstant.in.cbor.model.Map cborMap = (co.nstant.in.cbor.model.Map) versionTableDI;
+            Map<Long, VersionData> versionDataMap = new HashMap<>();
+            cborMap.getKeys()
+                    .forEach(key -> {
+                        DataItem value = cborMap.get(key);
+                        if (value.getMajorType() == MajorType.UNSIGNED_INTEGER) { //Old N2C
+                            versionDataMap.put(((UnsignedInteger) key).getValue().longValue(),
+                                    new OldN2CVersionData(((UnsignedInteger) value).getValue().intValue()));
+                        } else if (value.getMajorType() == MajorType.ARRAY) {
+                            long versionNumber = ((UnsignedInteger) key).getValue().longValue();
+                            if (versionNumber > 32000) { //N2C
+                                Array versionDataArray = (Array) value;
+                                long networkMagic = ((UnsignedInteger) versionDataArray.getDataItems().get(0)).getValue().intValue();
+                                Boolean query = versionDataArray.getDataItems().get(1) == SimpleValue.TRUE ? Boolean.TRUE : Boolean.FALSE;
+
+                                versionDataMap.put(versionNumber, new N2CVersionData(networkMagic, query));
+                            } else { //N2N
+                                Array versionDataArray = (Array) value;
+                                if (versionDataArray.getDataItems().size() == 2) { //N2N 1,2,3,4,5,6,7,8,9,10
+                                    long networkMagic = ((UnsignedInteger) versionDataArray.getDataItems().get(0)).getValue().intValue();
+
+                                    DataItem initiatorAndResponderDiffusionModeDI = versionDataArray.getDataItems().get(1);
+                                    boolean iardm = initiatorAndResponderDiffusionModeDI == SimpleValue.TRUE ? true : false;
+
+                                    versionDataMap.put(versionNumber, new N2NVersionData(networkMagic, iardm));
+                                } else if (versionDataArray.getDataItems().size() == 4) { //N2N 11,12
+                                    long networkMagic = ((UnsignedInteger) versionDataArray.getDataItems().get(0)).getValue().intValue();
+
+                                    DataItem initiatorAndResponderDiffusionModeDI = versionDataArray.getDataItems().get(1);
+                                    boolean iardm = initiatorAndResponderDiffusionModeDI == SimpleValue.TRUE ? true : false;
+
+                                    int peerSharing = ((UnsignedInteger) versionDataArray.getDataItems().get(2)).getValue().intValue();
+                                    Boolean query = versionDataArray.getDataItems().get(3) == SimpleValue.TRUE ? Boolean.TRUE : Boolean.FALSE;
+
+                                    versionDataMap.put(versionNumber, new N2NVersionData(networkMagic, iardm, peerSharing, query));
+                                }
+                            }
+                        }
+                    });
+
+            return new VersionTable(versionDataMap);
         }
     }
 
@@ -79,7 +130,7 @@ public class HandshakeSerializers {
             } else if (versionDataDI.getMajorType() == MajorType.UNSIGNED_INTEGER) { //N2C
                 UnsignedInteger networkMagic = (UnsignedInteger) dataItems.get(2); //versiondata == networkmagic
 
-                return new AcceptVersion(versionNumber, new N2CVersionData(networkMagic.getValue().longValue()));
+                return new AcceptVersion(versionNumber, new OldN2CVersionData(networkMagic.getValue().longValue()));
             } else
                 throw new CborRuntimeException("Parsing error. Invalid dataitem type : " + versionDataDI);
         }
@@ -152,5 +203,12 @@ public class HandshakeSerializers {
         //TODO -- deserialize not used
     }
 
+    public enum QueryReplySerializer implements Serializer<VersionTable> {
+        INSTANCE;
 
+        @Override
+        public VersionTable deserializeDI(DataItem versionTableDI) {
+            return VersionTableSerializer.INSTANCE.deserializeDI(versionTableDI);
+        }
+    }
 }
