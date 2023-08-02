@@ -44,14 +44,7 @@ public class DelegationsAndRewardAccountsQuery implements EraQuery<DelegationsAn
         stakeAddresses.stream()
                 .forEach(stakeAddress -> {
                     Credential credential = stakeAddress.getDelegationCredential()
-                            .map(credBytes -> {
-                                Credential cred;
-                                if (stakeAddress.isStakeKeyHashInDelegationPart())
-                                    cred = Credential.fromKey(credBytes);
-                                else
-                                    cred = Credential.fromScript(credBytes);
-                                return cred;
-                            }).orElseThrow(() -> new IllegalArgumentException("Delegation credential not found for address: " + stakeAddress));
+                            .orElseThrow(() -> new IllegalArgumentException("Delegation credential not found for address: " + stakeAddress));
                     credentialAddressMap.put(credential, stakeAddress);
                 });
     }
