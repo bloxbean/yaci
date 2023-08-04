@@ -2,7 +2,7 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
 import co.nstant.in.cbor.model.Map;
-import com.bloxbean.cardano.client.util.AssetUtil;
+import com.bloxbean.cardano.client.api.util.AssetUtil;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
@@ -146,6 +146,9 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         if (collateralArray != null) {
             Set<TransactionInput> collateral = new HashSet<>();
             for (DataItem inputItem : collateralArray.getDataItems()) {
+                if (inputItem == Special.BREAK)
+                    continue;
+
                 TransactionInput ti = TransactionInputSerializer.INSTANCE.deserializeDI(inputItem);
                 collateral.add(ti);
             }
@@ -157,6 +160,9 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         if (requiredSignerArray != null) {
             Set<String> requiredSigners = new HashSet<>();
             for (DataItem requiredSigDI: requiredSignerArray.getDataItems()) {
+                if (requiredSigDI == Special.BREAK)
+                    continue;
+
                 ByteString requiredSigBS = (ByteString) requiredSigDI;
                 requiredSigners.add(HexUtil.encodeHexString(requiredSigBS.getBytes()));
             }
@@ -194,6 +200,9 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         if (referenceInputsArray != null) {
             Set<TransactionInput> referenceInputs = new LinkedHashSet<>();
             for (DataItem inputItem : referenceInputsArray.getDataItems()) {
+                if (inputItem == Special.BREAK)
+                    continue;
+
                 TransactionInput ti = TransactionInputSerializer.INSTANCE.deserializeDI(inputItem);
                 referenceInputs.add(ti);
             }
