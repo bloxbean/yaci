@@ -12,10 +12,10 @@ and interact with it in a variety of ways. With Yaci's simple APIs, you can list
 previous blocks, query information from a local node, monitor the local mempool, and submit transactions to a local node.
 
 **Latest Stable Release :** 
-- [0.1.12](https://github.com/bloxbean/yaci/releases/tag/v0.1.12) (Compatible with Cardano Client Lib 0.4.3)
-- [0.1.13-beta](https://github.com/bloxbean/yaci/releases/tag/v0.1.13-beta)(**Cardano Node 8.1.1** support and Compatible with Cardano Client Lib 0.4.3)
+- [0.1.14](https://github.com/bloxbean/yaci/releases/tag/v0.1.14)(**Cardano Node 8.1.1** support and Compatible with Cardano Client Lib 0.4.3)
 
-**Latest Beta Release :** [0.2.0-beta2](https://github.com/bloxbean/yaci/releases/tag/v0.2.0-beta2) (Compatible with Cardano Client Lib 0.5.0-alpha.2 and later)
+**Latest Beta Release :** 
+- [0.2.0-beta4](https://github.com/bloxbean/yaci/releases/tag/v0.2.0-beta4) (Compatible with Cardano Client Lib 0.5.0-alpha.4 and later)
 
 ## Dependencies
 
@@ -25,14 +25,14 @@ Maven
 <dependency>
     <groupId>com.bloxbean.cardano</groupId>
     <artifactId>yaci</artifactId>
-    <version>0.1.12</version>
+    <version>0.1.14</version>
 </dependency>
 ```
 
 Gradle
 
 ```xml
- implementation('com.bloxbean.cardano:yaci:0.1.12')
+ implementation('com.bloxbean.cardano:yaci:0.1.14')
 ```
 
 ## How to Use?
