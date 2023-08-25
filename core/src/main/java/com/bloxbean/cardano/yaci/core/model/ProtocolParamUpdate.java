@@ -39,6 +39,7 @@ public class ProtocolParamUpdate {
 
     //Alonzo changes
     private Map<Integer, String> costModels; //18
+    private String costModelsHash; //derived field
 
     //ex_unit_prices
     private BigDecimal priceMem; //19

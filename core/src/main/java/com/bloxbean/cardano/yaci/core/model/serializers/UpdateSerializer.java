@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
+import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.client.util.Tuple;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.core.model.Update;
@@ -122,6 +123,7 @@ public enum UpdateSerializer implements Serializer<Update> {
 
         //CostModels
         java.util.Map<Integer, String> costModelMap = null;
+        String costModelsHash = null;
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(18));
         if (itemDI != null) {
             costModelMap = new LinkedHashMap<>();
@@ -131,6 +133,9 @@ public enum UpdateSerializer implements Serializer<Update> {
                 String costModel = HexUtil.encodeHexString(CborSerializationUtil.serialize(itemDIMap.get(key)));
                 costModelMap.put(version, costModel);
             }
+
+            var cbor = CborSerializationUtil.serialize(itemDI);
+            costModelsHash = HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(cbor));
         }
 
         //exUnits prices
@@ -196,6 +201,7 @@ public enum UpdateSerializer implements Serializer<Update> {
                 .minPoolCost(minPoolCost)
                 .adaPerUtxoByte(adaPerUtxoBytes)
                 .costModels(costModelMap)
+                .costModelsHash(costModelsHash)
                 .priceMem(priceMem)
                 .priceStep(priceSteps)
                 .maxTxExMem(maxTxExMem)
