@@ -2,10 +2,7 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
-import com.bloxbean.cardano.yaci.core.model.BlockHeader;
-import com.bloxbean.cardano.yaci.core.model.HeaderBody;
-import com.bloxbean.cardano.yaci.core.model.ProtocolVersion;
-import com.bloxbean.cardano.yaci.core.model.VrfCert;
+import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -61,7 +58,13 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
         headerBodyBuilder.blockBodySize(CborSerializationUtil.toBigInteger(headerBodyArr.get(6)).longValue());
         headerBodyBuilder.blockBodyHash(CborSerializationUtil.toHex(headerBodyArr.get(7)));
 
-//        List<DataItem> operationalCerts = ((Array) headerBodyArr.get(8)).getDataItems(); 4 items
+        List<DataItem> operationalCerts = ((Array) headerBodyArr.get(8)).getDataItems(); //4 items
+        headerBodyBuilder.operationalCert(OperationalCert.builder()
+                .hotVKey(CborSerializationUtil.toHex(operationalCerts.get(0)))
+                .sequenceNumber(CborSerializationUtil.toBigInteger(operationalCerts.get(1)).intValue())
+                .kesPeriod(CborSerializationUtil.toBigInteger(operationalCerts.get(2)).intValue())
+                .sigma(CborSerializationUtil.toHex(operationalCerts.get(3)))
+                .build());
 
         List<DataItem> protocolVersionArr = ((Array) headerBodyArr.get(9)).getDataItems();
         ProtocolVersion protocolVersion = new ProtocolVersion(CborSerializationUtil.toBigInteger(protocolVersionArr.get(0)).longValue(),
