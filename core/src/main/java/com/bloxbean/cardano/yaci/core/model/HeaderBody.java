@@ -19,6 +19,7 @@ public class HeaderBody {
     private VrfCert vrfResult; //babbage
     private long blockBodySize;
     private String blockBodyHash;
+    private OperationalCert operationalCert;
     private ProtocolVersion protocolVersion;
     //Derived value
     private String blockHash;
