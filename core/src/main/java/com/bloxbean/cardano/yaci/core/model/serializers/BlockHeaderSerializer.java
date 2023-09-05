@@ -99,7 +99,14 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
         headerBodyBuilder.blockBodySize(CborSerializationUtil.toBigInteger(headerBodyArr.get(7)).longValue());
         headerBodyBuilder.blockBodyHash(CborSerializationUtil.toHex(headerBodyArr.get(8)));
 
-//        headerBody.setOpCertificate() 4 items
+        //Operational Certificate 4 items
+        headerBodyBuilder.operationalCert(OperationalCert.builder()
+                .hotVKey(CborSerializationUtil.toHex(headerBodyArr.get(9)))
+                .sequenceNumber(CborSerializationUtil.toBigInteger(headerBodyArr.get(10)).intValue())
+                .kesPeriod(CborSerializationUtil.toBigInteger(headerBodyArr.get(11)).intValue())
+                .sigma(CborSerializationUtil.toHex(headerBodyArr.get(12)))
+                .build());
+
         ProtocolVersion protocolVersion = new ProtocolVersion(CborSerializationUtil.toBigInteger(headerBodyArr.get(13)).longValue(),
                 CborSerializationUtil.toBigInteger(headerBodyArr.get(14)).longValue());
         headerBodyBuilder.protocolVersion(protocolVersion);
