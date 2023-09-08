@@ -15,11 +15,11 @@ public class ChainSyncListenerAdapter implements ChainSyncAgentListener {
     }
 
     public void intersactFound(Tip tip, Point point) {
-
+        blockChainDataListener.intersactFound(tip, point);
     }
 
     public void intersactNotFound(Tip tip) {
-
+        blockChainDataListener.intersactNotFound(tip);
     }
 
     public void rollforward(Tip tip, BlockHeader blockHeader) {

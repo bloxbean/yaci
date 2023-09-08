@@ -6,6 +6,7 @@ import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
 
 import java.util.List;
@@ -20,4 +21,17 @@ public interface BlockChainDataListener {
 
     default void batchDone() {}
     default void noBlockFound(Point from, Point to) {}
+
+    /**
+     * Called when an intersection is found. This is available only for {@link com.bloxbean.cardano.yaci.helper.BlockSync} (Block sync protocol)
+     * @param tip
+     * @param point
+     */
+    default void intersactFound(Tip tip, Point point) {}
+
+    /**
+     * Called when an intersection is not found. This is available only for {@link com.bloxbean.cardano.yaci.helper.BlockSync} (Block sync protocol)
+     * @param tip
+     */
+    default void intersactNotFound(Tip tip) {}
 }
