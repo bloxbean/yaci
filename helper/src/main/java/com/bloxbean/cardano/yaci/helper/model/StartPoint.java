@@ -12,9 +12,8 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Builder
 public class StartPoint {
-    private Point genesisBlock;
+    private String genesisHash;
     private Point firstBlock;
 
-    private Era genesisBlockEra;
     private Era firstBlockEra;
 }
