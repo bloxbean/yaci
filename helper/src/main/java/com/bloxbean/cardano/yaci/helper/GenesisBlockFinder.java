@@ -19,35 +19,25 @@ public class GenesisBlockFinder {
     }
 
     public Optional<StartPoint> getGenesisAndFirstBlock() {
-        CountDownLatch countDownLatch = new CountDownLatch(2);
+        CountDownLatch countDownLatch = new CountDownLatch(1);
         StartPoint startPoint = new StartPoint();
         blockSync.startSync(Point.ORIGIN, new BlockChainDataListener() {
             @Override
-            public void onByronBlock(ByronMainBlock byronBlock) {
-                if (byronBlock.getHeader().getConsensusData().getDifficulty().longValue() == 1) {
-                    startPoint.setFirstBlock(new Point(byronBlock.getHeader().getConsensusData().getSlotId().getSlot(),
-                            byronBlock.getHeader().getBlockHash()));
-                    startPoint.setFirstBlockEra(Era.Byron);
-                    countDownLatch.countDown();
-                }
-            }
-
-            @Override
             public void onByronEbBlock(ByronEbBlock byronEbBlock) {
-                startPoint.setGenesisBlock(new Point(0, byronEbBlock.getHeader().getBlockHash()));
-                startPoint.setGenesisBlockEra(Era.Byron);
+                startPoint.setFirstBlock(new Point(0, byronEbBlock.getHeader().getBlockHash()));
+                startPoint.setFirstBlockEra(Era.Byron);
+
+                startPoint.setGenesisHash(byronEbBlock.getHeader().getPrevBlock());
                 countDownLatch.countDown();
             }
 
             @Override
             public void onBlock(Block block) {
                 if (block.getHeader().getHeaderBody().getBlockNumber() == 0) {
-                    startPoint.setGenesisBlock(new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash()));
-                    startPoint.setGenesisBlockEra(block.getEra());
-                    countDownLatch.countDown();
-                } else if (block.getHeader().getHeaderBody().getBlockNumber() == 1) {
                     startPoint.setFirstBlock(new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash()));
                     startPoint.setFirstBlockEra(block.getEra());
+
+                    startPoint.setGenesisHash(block.getHeader().getHeaderBody().getPrevHash());
                     countDownLatch.countDown();
                 }
             }
@@ -60,7 +50,7 @@ public class GenesisBlockFinder {
         }
         blockSync.stop();
 
-        if (startPoint.getFirstBlock() == null || startPoint.getGenesisBlock() == null)
+        if (startPoint.getFirstBlock() == null)
             return Optional.empty();
         else
             return Optional.of(startPoint);
