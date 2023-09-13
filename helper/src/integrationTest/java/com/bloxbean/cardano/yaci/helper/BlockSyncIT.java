@@ -2,7 +2,6 @@ package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
@@ -28,17 +27,14 @@ public class BlockSyncIT extends BaseTest {
         AtomicLong blockNo = new AtomicLong();
         CountDownLatch countDownLatch = new CountDownLatch(1);
         blockSync.startSyncFromTip(new BlockChainDataListener() {
-            @Override
-            public void onBlock(Block block) {
+
+            public void onBlock(Era era, Block block, List<Transaction> transactions) {
                 System.out.println(block.getHeader().getHeaderBody().getBlockNumber());
                 blockNo.set(block.getHeader().getHeaderBody().getBlockNumber());
+                System.out.println("# of transactions >> " + transactions.size());
                 countDownLatch.countDown();
             }
 
-            @Override
-            public void onTransactions(Era era, BlockHeader blockHeader, List<Transaction> transactions) {
-                System.out.println("# of transactions >> " + transactions.size());
-            }
         });
 
         countDownLatch.await(60, TimeUnit.SECONDS);
@@ -51,19 +47,14 @@ public class BlockSyncIT extends BaseTest {
 
         AtomicLong blockNo = new AtomicLong();
         AtomicInteger noOfTxs = new AtomicInteger();
-        CountDownLatch countDownLatch = new CountDownLatch(4);
+        CountDownLatch countDownLatch = new CountDownLatch(2);
         blockSync.startSync(new Point(13107195, "ad2ceec67a07069d6e9295ed2144015860602c29f42505dc6ea2f55b9fc0dd93"),
                 new BlockChainDataListener() {
             @Override
-            public void onBlock(Block block) {
+            public void onBlock(Era era, Block block, List<Transaction> transactions) {
                 System.out.println(block.getHeader().getHeaderBody().getBlockNumber());
                 if (blockNo.get() == 0)
                     blockNo.set(block.getHeader().getHeaderBody().getBlockNumber());
-                countDownLatch.countDown();
-            }
-
-                    @Override
-            public void onTransactions(Era era, BlockHeader blockHeader, List<Transaction> transactions) {
                 System.out.println("# of transactions >> " + transactions.size());
                 noOfTxs.set(transactions.size());
                 countDownLatch.countDown();
