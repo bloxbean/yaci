@@ -3,11 +3,12 @@ package com.bloxbean.cardano.yaci.helper;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.model.StartPoint;
+import com.bloxbean.cardano.yaci.helper.model.Transaction;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -32,7 +33,7 @@ public class GenesisBlockFinder {
             }
 
             @Override
-            public void onBlock(Block block) {
+            public void onBlock(Era era, Block block, List<Transaction> transactions) {
                 if (block.getHeader().getHeaderBody().getBlockNumber() == 0) {
                     startPoint.setFirstBlock(new Point(block.getHeader().getHeaderBody().getSlot(), block.getHeader().getHeaderBody().getBlockHash()));
                     startPoint.setFirstBlockEra(block.getEra());

@@ -59,8 +59,7 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
         }
 
 
-        blockChainDataListener.onBlock(block);
-        blockChainDataListener.onTransactions(block.getEra(), block.getHeader(), transactionEvents);
+        blockChainDataListener.onBlock(block.getEra(), block, transactionEvents);
     }
 
     private List<Utxo> getUtxosFromOutput(TransactionBody txBody) {

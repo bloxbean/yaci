@@ -1,8 +1,10 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.model.Block;
+import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
+import com.bloxbean.cardano.yaci.helper.model.Transaction;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -21,7 +23,7 @@ class BlockRangeSyncIT extends BaseTest{
         BlockRangeSync blockRangeSync = new BlockRangeSync(node, nodePort, protocolMagic);
         blockRangeSync.start(new BlockChainDataListener() {
             @Override
-            public void onBlock(Block block) {
+            public void onBlock(Era era, Block block, List<Transaction> transactions) {
                 System.out.println(block.getHeader().getHeaderBody().getBlockNumber());
                 blocks.add(block);
                 countDownLatch.countDown();
