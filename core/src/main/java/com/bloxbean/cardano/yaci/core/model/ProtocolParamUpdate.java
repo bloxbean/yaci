@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model;
 
+import com.bloxbean.cardano.yaci.core.util.Tuple;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
 
@@ -28,7 +29,7 @@ public class ProtocolParamUpdate {
     private BigDecimal expansionRate; //unit interval //10
     private BigDecimal treasuryGrowthRate; //11
     private BigDecimal decentralisationParam; //12
-    private String extraEntropy; //TODO //13
+    private Tuple<Integer, String> extraEntropy; //13
     private Integer protocolMajorVer; //14
     private Integer protocolMinorVer; //14
     private BigInteger minUtxo; //TODO //15
