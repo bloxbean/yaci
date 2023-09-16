@@ -2,12 +2,12 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
-import com.bloxbean.cardano.client.util.Tuple;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.core.model.Update;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.core.util.Tuple;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -90,7 +90,7 @@ public enum UpdateSerializer implements Serializer<Update> {
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(12));
         BigDecimal decentralizationParam = itemDI != null ? toRationalNumber(itemDI) : null;
 
-        String extraEntropy = null;
+        Tuple<Integer, String> extraEntropy = null;
 //                $nonce /= [ 0 // 1, bytes .size 32 ]
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(13)); //Removed
         if (itemDI != null) {
@@ -100,7 +100,7 @@ public enum UpdateSerializer implements Serializer<Update> {
             if (extraEntropyDIList.size() == 2) {
                 extraEntropy_2 = HexUtil.encodeHexString(toBytes(extraEntropyDIList.get(1)));
             }
-            extraEntropy = List.of(extraEntropy_1, extraEntropy_2).toString();
+            extraEntropy = new Tuple<>(extraEntropy_1, extraEntropy_2);
         }
 
         Integer protocolMajorVersion = null;
