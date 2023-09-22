@@ -5,6 +5,7 @@ import co.nstant.in.cbor.model.Map;
 import com.bloxbean.cardano.client.api.util.AssetUtil;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
+import com.bloxbean.cardano.yaci.core.model.conway.VotingProcedures;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -208,6 +209,16 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
             }
             transactionBodyBuilder.referenceInputs(referenceInputs);
         }
+
+        //TODO voting procedures 19
+        DataItem votingProceduresDI = bodyMap.get(new UnsignedInteger(19));
+        if (votingProceduresDI != null) {
+            VotingProcedures votingProcedures = VotingProceduresSerializer.INSTANCE.deserializeDI(votingProceduresDI);
+            transactionBodyBuilder.votingProcedures(votingProcedures);
+        }
+        //TODO proposal procedure 20
+        //TODO Current Treasury Value 21
+        //TODO Positive Coin 22
 
         return transactionBodyBuilder.build();
 

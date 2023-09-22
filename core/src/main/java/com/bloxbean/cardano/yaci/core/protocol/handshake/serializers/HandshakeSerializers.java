@@ -44,6 +44,10 @@ public class HandshakeSerializers {
                             Array versionDataArray = new Array();
                             versionDataArray.add(new UnsignedInteger(versionData.getNetworkMagic()));
                             versionDataArray.add(versionData.getInitiatorAndResponderDiffusionMode() ? SimpleValue.TRUE : SimpleValue.FALSE);
+
+                            //TODO -- check with existing node versions
+                            versionDataArray.add(versionData.getPeerSharing() == null? new UnsignedInteger(0) : new UnsignedInteger(versionData.getPeerSharing()));
+                            versionDataArray.add(versionData.getQuery() ? SimpleValue.TRUE : SimpleValue.FALSE);
                             cborMap.put(new UnsignedInteger(entry.getKey()), versionDataArray);
                         } else if (entry.getValue() instanceof OldN2CVersionData) {
                             cborMap.put(new UnsignedInteger(entry.getKey()), new UnsignedInteger(entry.getValue().getNetworkMagic()));
