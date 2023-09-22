@@ -19,6 +19,8 @@ public class EraUtil {
                 return Era.Alonzo;
             case 6:
                 return Era.Babbage;
+            case 7:
+                return Era.CONWAY;
             default:
                 return null;
         }

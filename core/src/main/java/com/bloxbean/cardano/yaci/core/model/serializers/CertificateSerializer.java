@@ -7,10 +7,12 @@ import com.bloxbean.cardano.client.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
 import com.bloxbean.cardano.yaci.core.model.certs.GenesisKeyDelegation;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 import java.util.Objects;
 
+@Slf4j
 public enum CertificateSerializer implements Serializer<Certificate> {
     INSTANCE;
 
@@ -58,6 +60,21 @@ public enum CertificateSerializer implements Serializer<Certificate> {
             case 6:
                 //Move instateneous rewards certs
                 certificate = MoveInstantaneousRewardsSerializer.INSTANCE.deserializeDI(certArray);
+                break;
+            case 7:
+            case 8:
+            case 9:
+            case 10:
+            case 11:
+            case 12:
+            case 13:
+            case 14:
+            case 15:
+            case 16:
+            case 17:
+            case 18:
+                log.warn("Certificate type {} is not supported yet", type);
+                certificate = null;
                 break;
             default:
                 throw new CborRuntimeException("Certificate deserialization failed. Unknown type : " + type);

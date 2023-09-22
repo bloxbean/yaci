@@ -29,38 +29,22 @@ public class N2NVersionTableConstant {
         versionTableMap.put(PROTOCOL_V8, versionData);
         versionTableMap.put(PROTOCOL_V9, versionData);
         versionTableMap.put(PROTOCOL_V10, versionData);
-        versionTableMap.put(PROTOCOL_V11, versionData);
-        versionTableMap.put(PROTOCOL_V12, versionData);
 
         return new VersionTable(versionTableMap);
     }
 
-    public static VersionTable v6AndAbove(long networkMagic) {
-        N2NVersionData versionData = new N2NVersionData(networkMagic, false);
+    public static VersionTable v11AndAbove(long networkMagic) {
+        return v11AndAbove(networkMagic, false, 0, false);
+    }
+
+    public static VersionTable v11AndAbove(long networkMagic, boolean initiatorAndResponderDiffusionMode, int peerSharing, boolean query) {
+        N2NVersionData versionData = new N2NVersionData(networkMagic, initiatorAndResponderDiffusionMode, peerSharing, query);
 
         Map<Long, VersionData> versionTableMap = new HashMap<>();
-        versionTableMap.put(PROTOCOL_V6, versionData);
-        versionTableMap.put(PROTOCOL_V7, versionData);
-        versionTableMap.put(PROTOCOL_V8, versionData);
-        versionTableMap.put(PROTOCOL_V9, versionData);
-        versionTableMap.put(PROTOCOL_V10, versionData);
         versionTableMap.put(PROTOCOL_V11, versionData);
         versionTableMap.put(PROTOCOL_V12, versionData);
 
         return new VersionTable(versionTableMap);
     }
 
-    public static VersionTable v7AndAbove(long networkMagic) {
-        N2NVersionData versionData = new N2NVersionData(networkMagic, false);
-
-        Map<Long, VersionData> versionTableMap = new HashMap<>();
-        versionTableMap.put(PROTOCOL_V7, versionData);
-        versionTableMap.put(PROTOCOL_V8, versionData);
-        versionTableMap.put(PROTOCOL_V9, versionData);
-        versionTableMap.put(PROTOCOL_V10, versionData);
-        versionTableMap.put(PROTOCOL_V11, versionData);
-        versionTableMap.put(PROTOCOL_V12, versionData);
-
-        return new VersionTable(versionTableMap);
-    }
 }

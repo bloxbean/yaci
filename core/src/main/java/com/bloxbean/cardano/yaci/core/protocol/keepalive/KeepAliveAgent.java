@@ -60,7 +60,10 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
             log.info("MsgKeepAliveResponse: {}", message);
             handleKeepAliveResponse((MsgKeepAliveResponse) message);
         } else {
-            log.error("Invalid message !!! {}", message);
+            if (message instanceof MsgKeepAlive) {
+                log.warn("//TODO We should not receive MsgKeepAlive message. {}", message);
+            } else
+                log.error("Invalid message !!! {}", message);
         }
     }
 

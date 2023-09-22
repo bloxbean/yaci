@@ -35,6 +35,9 @@ public interface ChainSyncStateBase extends State {
                     return IntersectNotFoundSerializer.INSTANCE.deserialize(bytes);
                 case 7:
                     return new ChainSyncMsgDone();
+                case 4: //TODO -- should not come here. But for conway, it's coming. Need to check
+                    log.error("ChainSync reply received. But it's not expected. So ignoring it: " + HexUtil.encodeHexString(bytes));
+                    return null;
                 default:
                     throw new RuntimeException(String.format("Invalid msg id: %d", id));
             }
