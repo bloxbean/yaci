@@ -17,7 +17,9 @@ public enum VotingProceduresSerializer implements Serializer<VotingProcedures> {
     INSTANCE;
 
     /**
+     * {@literal
      * voting_procedures = { + voter => { + gov_action_id => voting_procedure } }
+     * }
      *
      * @param di
      * @return

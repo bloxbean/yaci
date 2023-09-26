@@ -8,7 +8,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
+ * {@literal
  * committee = [{ committee_cold_credential => epoch }, unit_interval]
+ * }
  */
 @Getter
 @AllArgsConstructor

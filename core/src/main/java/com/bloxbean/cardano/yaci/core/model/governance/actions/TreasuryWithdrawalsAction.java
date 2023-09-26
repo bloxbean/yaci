@@ -8,7 +8,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
+ * {@literal
  * treasury_withdrawals_action = (2, { reward_account => coin })
+ * }
  */
 @Getter
 @AllArgsConstructor
