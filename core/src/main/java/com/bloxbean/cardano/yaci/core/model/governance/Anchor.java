@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.core.model.conway;
+package com.bloxbean.cardano.yaci.core.model.governance;
 
 import lombok.*;
 

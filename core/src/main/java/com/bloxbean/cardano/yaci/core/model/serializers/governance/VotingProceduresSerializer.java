@@ -1,9 +1,10 @@
-package com.bloxbean.cardano.yaci.core.model.serializers;
+package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 
 import co.nstant.in.cbor.model.*;
-import com.bloxbean.cardano.yaci.core.model.conway.*;
+import com.bloxbean.cardano.yaci.core.model.governance.*;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -11,6 +12,7 @@ import java.util.List;
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toUnicodeString;
 
+@Slf4j
 public enum VotingProceduresSerializer implements Serializer<VotingProcedures> {
     INSTANCE;
 
@@ -22,7 +24,7 @@ public enum VotingProceduresSerializer implements Serializer<VotingProcedures> {
      */
     @Override
     public VotingProcedures deserializeDI(DataItem di) {
-        System.out.println("VotingProceduresSerializer.deserializeDI ------");
+        log.trace("VotingProceduresSerializer.deserializeDI ------");
 
         Map votingProceduresMap = (Map) di;
 
@@ -92,7 +94,7 @@ public enum VotingProceduresSerializer implements Serializer<VotingProcedures> {
     private java.util.Map<GovActionId, VotingProcedure> deserializeVotingProcedureMap(Map votingProcedureMapDI) {
         java.util.Map<GovActionId, VotingProcedure> votingProcedureMap = new LinkedHashMap<>();
         votingProcedureMapDI.getKeys().forEach(key -> {
-            GovActionId govActionId = deserializeGovActionId((Array) key);
+            GovActionId govActionId = GovActionIdSerializer.INSTANCE.deserializeDI(key);
             VotingProcedure votingProcedure = deserializeVotingProcedure((Array) votingProcedureMapDI.get(key));
             votingProcedureMap.put(govActionId, votingProcedure);
         });
@@ -100,26 +102,6 @@ public enum VotingProceduresSerializer implements Serializer<VotingProcedures> {
         return votingProcedureMap;
     }
 
-    /**
-     * gov_action_id =
-     * [ transaction_id   : $hash32
-     * , gov_action_index : uint
-     * ]
-     *
-     * @param key
-     * @return
-     */
-    private GovActionId deserializeGovActionId(Array key) {
-        if (key != null && key.getDataItems().size() != 2)
-            throw new IllegalArgumentException("Invalid gov_action_id array. Expected 2 items. Found : "
-                    + key.getDataItems().size());
-
-        List<DataItem> diList = key.getDataItems();
-        String txId = HexUtil.encodeHexString(((ByteString) diList.get(0)).getBytes());
-        int govActionIndex = ((UnsignedInteger) diList.get(1)).getValue().intValue();
-
-        return new GovActionId(txId, govActionIndex);
-    }
 
     /**
      * voting_procedure =

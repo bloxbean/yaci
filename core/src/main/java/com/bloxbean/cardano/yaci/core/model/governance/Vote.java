@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.core.model.conway;
+package com.bloxbean.cardano.yaci.core.model.governance;
 
 public enum Vote {
     NO(0), YES(1), ABSTAIN(2);

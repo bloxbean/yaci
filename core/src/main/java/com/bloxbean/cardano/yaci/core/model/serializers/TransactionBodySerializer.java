@@ -5,7 +5,10 @@ import co.nstant.in.cbor.model.Map;
 import com.bloxbean.cardano.client.api.util.AssetUtil;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
-import com.bloxbean.cardano.yaci.core.model.conway.VotingProcedures;
+import com.bloxbean.cardano.yaci.core.model.governance.ProposalProcedure;
+import com.bloxbean.cardano.yaci.core.model.governance.VotingProcedures;
+import com.bloxbean.cardano.yaci.core.model.serializers.governance.ProposalProcedureSerializer;
+import com.bloxbean.cardano.yaci.core.model.serializers.governance.VotingProceduresSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -16,6 +19,8 @@ import lombok.extern.slf4j.Slf4j;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+
+import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toBigInteger;
 
 @Slf4j
 public enum TransactionBodySerializer implements Serializer<TransactionBody> {
@@ -118,7 +123,7 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
                     ByteString assetNameBS = (ByteString) assetKey;
 
                     DataItem assetValueDI = assetsMap.get(assetKey);
-                    BigInteger value = CborSerializationUtil.toBigInteger(assetValueDI);
+                    BigInteger value = toBigInteger(assetValueDI);
 
                     String hexName = HexUtil.encodeHexString(assetNameBS.getBytes(), false);
                     String assetName = StringUtil.isUtf8(assetNameBS.getBytes())?
@@ -210,15 +215,39 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
             transactionBodyBuilder.referenceInputs(referenceInputs);
         }
 
-        //TODO voting procedures 19
+        //Voting procedures 19
         DataItem votingProceduresDI = bodyMap.get(new UnsignedInteger(19));
         if (votingProceduresDI != null) {
             VotingProcedures votingProcedures = VotingProceduresSerializer.INSTANCE.deserializeDI(votingProceduresDI);
             transactionBodyBuilder.votingProcedures(votingProcedures);
         }
-        //TODO proposal procedure 20
-        //TODO Current Treasury Value 21
-        //TODO Positive Coin 22
+        //Proposal procedure 20
+        DataItem proposalProcedureDI = bodyMap.get(new UnsignedInteger(20));
+        if (proposalProcedureDI != null) {
+            List<ProposalProcedure> proposalProcedures = new ArrayList<>();
+            for (DataItem ppDI: ((Array)proposalProcedureDI).getDataItems()) {
+                if (ppDI == Special.BREAK)
+                    continue;
+                ProposalProcedure proposalProcedure = ProposalProcedureSerializer.INSTANCE.deserializeDI(proposalProcedureDI);
+                proposalProcedures.add(proposalProcedure);
+            }
+            System.out.println(proposalProcedures);
+            transactionBodyBuilder.proposalProcedures(proposalProcedures);
+        }
+
+        //Current Treasury Value 21
+        DataItem currentTreasuryValueDI = bodyMap.get(new UnsignedInteger(21));
+        if (currentTreasuryValueDI != null) {
+            BigInteger currentTreasuryValue = toBigInteger(currentTreasuryValueDI);
+            transactionBodyBuilder.currentTreasuryValue(currentTreasuryValue);
+        }
+
+        //Donatioin Coin 22
+        DataItem donationDI = bodyMap.get(new UnsignedInteger(22));
+        if (donationDI != null) {
+            BigInteger donation = toBigInteger(donationDI);
+            transactionBodyBuilder.donation(donation);
+        }
 
         return transactionBodyBuilder.build();
 

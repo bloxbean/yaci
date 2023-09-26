@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.core.model.conway;
+package com.bloxbean.cardano.yaci.core.model.governance;
 
 public enum VoterType {
     CONSTITUTIONAL_COMMITTEE_HOT_KEY_HASH, //0
