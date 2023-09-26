@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.SimpleValue;
 import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 
@@ -15,6 +16,9 @@ public enum AnchorSerializer implements Serializer<Anchor> {
 
     @Override
     public Anchor deserializeDI(DataItem di) {
+        if (di == null || di == SimpleValue.NULL)
+            return null;
+
         return deserializeAnchor((Array) di);
     }
 
@@ -28,9 +32,6 @@ public enum AnchorSerializer implements Serializer<Anchor> {
      * @return
      */
     private Anchor deserializeAnchor(Array array) {
-        if (array == null)
-            return null;
-
         if (array != null && array.getDataItems().size() != 2)
             throw new IllegalArgumentException("Invalid anchor array. Expected 2 items. Found : "
                     + array.getDataItems().size());

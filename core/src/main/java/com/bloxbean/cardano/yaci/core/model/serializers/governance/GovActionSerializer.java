@@ -33,20 +33,15 @@ import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
  * // new_constitution
  * // info_action
  * ]
- * <p>
+ * {@literal
  * parameter_change_action = (0, gov_action_id / null, protocol_param_update)
- * <p>
  * hard_fork_initiation_action = (1, gov_action_id / null, [protocol_version])
- * <p>
  * treasury_withdrawals_action = (2, { reward_account => coin })
- * <p>
  * no_confidence = (3, gov_action_id / null)
- * <p>
  * update_committee = (4, gov_action_id / null, set<committee_cold_credential>, { committee_cold_credential => epoch }, unit_interval)
- * <p>
  * new_constitution = (5, gov_action_id / null, constitution)
- * <p>
  * committee = [{ committee_cold_credential => epoch }, unit_interval]
+ * }
  */
 //TODO -- Test this class
 public enum GovActionSerializer implements Serializer<GovAction> {

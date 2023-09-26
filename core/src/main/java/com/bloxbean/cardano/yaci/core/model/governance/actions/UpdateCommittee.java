@@ -12,7 +12,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
+ * {@literal
  * update_committee = (4, gov_action_id / null, set<committee_cold_credential>, { committee_cold_credential => epoch }, unit_interval)
+ * }
  */
 @Getter
 @AllArgsConstructor

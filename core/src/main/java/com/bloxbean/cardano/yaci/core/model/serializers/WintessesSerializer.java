@@ -16,6 +16,8 @@ import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import java.util.ArrayList;
 import java.util.List;
 
+import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
+
 //TODO -- More testing required for deserialization --> serialization
 public enum WintessesSerializer implements Serializer<Witnesses> {
     INSTANCE;
@@ -30,6 +32,7 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
         DataItem plutusDataArray = witnessMap.get(new UnsignedInteger(4));
         DataItem redeemerArray = witnessMap.get(new UnsignedInteger(5));
         DataItem plutusV2ScriptArray = witnessMap.get(new UnsignedInteger(6));
+        DataItem plutusV3ScriptArray = witnessMap.get(new UnsignedInteger(7));
 
         //vk witnesses
         List<VkeyWitness> vkeyWitnessList = new ArrayList<>();
@@ -135,7 +138,25 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
             }
         }
 
-        return new Witnesses(vkeyWitnessList, nativeScripts, bootstrapWitnesses, plutusV1Scripts, datumList, redeemerList, plutusV2Scripts);
+        //plutus_v3 script (Conway era)
+        List<PlutusScript> plutusV3Scripts = new ArrayList<>();
+        if (plutusV3ScriptArray != null) {
+            List<DataItem> plutusV3ScriptDIList = ((Array) plutusV3ScriptArray).getDataItems();
+            try {
+                for (DataItem plutusV3ScriptDI : plutusV3ScriptDIList) {
+                    if (plutusV3ScriptDI == Special.BREAK) continue;
+                    String scriptCborHex = toHex(plutusV3ScriptArray);
+
+                    PlutusScript plutusScript = new PlutusScript(String.valueOf(3), scriptCborHex);
+                    plutusV3Scripts.add(plutusScript);
+
+                }
+            } catch (Exception e) {
+                throw new CborRuntimeException("Plutus V3 script deserialization failed", e);
+            }
+        }
+
+        return new Witnesses(vkeyWitnessList, nativeScripts, bootstrapWitnesses, plutusV1Scripts, datumList, redeemerList, plutusV2Scripts, plutusV3Scripts);
     }
 
     private BootstrapWitness deserializeBootstrapWitness(Array bootstrapWitnessDI) {
