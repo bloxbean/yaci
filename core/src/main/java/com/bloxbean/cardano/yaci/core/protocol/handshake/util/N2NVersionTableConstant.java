@@ -29,6 +29,8 @@ public class N2NVersionTableConstant {
         versionTableMap.put(PROTOCOL_V8, versionData);
         versionTableMap.put(PROTOCOL_V9, versionData);
         versionTableMap.put(PROTOCOL_V10, versionData);
+        versionTableMap.put(PROTOCOL_V11, versionData);
+        versionTableMap.put(PROTOCOL_V12, versionData);
 
         return new VersionTable(versionTableMap);
     }
