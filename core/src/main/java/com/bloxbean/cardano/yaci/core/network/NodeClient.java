@@ -113,6 +113,27 @@ public abstract class NodeClient {
         }
     }
 
+    public void restartSession() {
+        if (session != null) {
+            session.disableReconnection();
+            session.dispose();
+            session = null;
+        }
+
+        //TODO -- find a better way to wait for session to close
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        for (var agent: agents) {
+            agent.reset();
+        }
+
+        start();
+    }
+
     /**
      * Create Socket address. This method is invoked from  {@link #start()}
      *
