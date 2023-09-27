@@ -228,10 +228,9 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
             for (DataItem ppDI: ((Array)proposalProcedureDI).getDataItems()) {
                 if (ppDI == Special.BREAK)
                     continue;
-                ProposalProcedure proposalProcedure = ProposalProcedureSerializer.INSTANCE.deserializeDI(proposalProcedureDI);
+                ProposalProcedure proposalProcedure = ProposalProcedureSerializer.INSTANCE.deserializeDI(ppDI);
                 proposalProcedures.add(proposalProcedure);
             }
-            System.out.println(proposalProcedures);
             transactionBodyBuilder.proposalProcedures(proposalProcedures);
         }
 

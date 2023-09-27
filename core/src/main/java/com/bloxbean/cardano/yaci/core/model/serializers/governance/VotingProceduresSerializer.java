@@ -41,7 +41,6 @@ public enum VotingProceduresSerializer implements Serializer<VotingProcedures> {
             votingProcedures.getVoting().put(voter, votingProcedureMap);
         });
 
-        System.out.println(votingProcedures);
         return votingProcedures;
     }
 

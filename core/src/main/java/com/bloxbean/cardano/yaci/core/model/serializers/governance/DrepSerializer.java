@@ -28,15 +28,15 @@ public enum DrepSerializer implements Serializer<Drep> {
         int key = toInt(dataItemList.get(0));
 
         switch (key) {
-            case 1:
+            case 0:
                 String addKeyHash = toHex(dataItemList.get(1));
                 return Drep.addrKeyHash(addKeyHash);
-            case 2:
+            case 1:
                 String scriptHash = toHex(dataItemList.get(1));
                 return Drep.scriptHash(scriptHash);
-            case 3:
+            case 2:
                 return Drep.abstain();
-            case 4:
+            case 3:
                 return Drep.noConfidence();
             default:
                 throw new IllegalArgumentException("Invalid Drep key: " + key);
