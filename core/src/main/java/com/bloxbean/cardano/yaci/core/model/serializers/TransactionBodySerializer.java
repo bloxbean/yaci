@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 import co.nstant.in.cbor.model.*;
 import co.nstant.in.cbor.model.Map;
 import com.bloxbean.cardano.client.api.util.AssetUtil;
+import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
@@ -20,15 +21,18 @@ import java.util.*;
 public enum TransactionBodySerializer implements Serializer<TransactionBody> {
     INSTANCE;
 
-    @Override
-    public TransactionBody deserializeDI(DataItem di) {
+    public TransactionBody deserializeDI(DataItem di, byte[] txBytes) {
         Map bodyMap = (Map) di;
 
         TransactionBody.TransactionBodyBuilder transactionBodyBuilder = TransactionBody.builder();
 
         //derive
-        String txHash = TxUtil.calculateTxHash(CborSerializationUtil.serialize(di, false)); //disable canonical ordering
+        String txHash = TxUtil.calculateTxHash(txBytes);
         transactionBodyBuilder.txHash(txHash);
+
+        if (YaciConfig.INSTANCE.isReturnTxBodyCbor()) {
+            transactionBodyBuilder.cbor(HexUtil.encodeHexString(txBytes));
+        }
 
         Array inputArray =  (Array)bodyMap.get(new UnsignedInteger(0));
         Set<TransactionInput> inputs = new LinkedHashSet<>();

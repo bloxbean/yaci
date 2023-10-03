@@ -11,4 +11,5 @@ import lombok.*;
 public class ByronEbBlock {
     private ByronEbHead header;
     private ByronEbBody body;
+    private String cbor;
 }

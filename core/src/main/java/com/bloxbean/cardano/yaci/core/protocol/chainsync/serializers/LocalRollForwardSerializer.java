@@ -30,7 +30,8 @@ public enum LocalRollForwardSerializer implements Serializer<LocalRollForward> {
         int rollForwardType = toInt(contentDI.get(0));
 
         ByteString blockContent = (ByteString) contentDI.get(1);
-        Array blockArray = (Array) CborSerializationUtil.deserializeOne(blockContent.getBytes());
+        byte[] blockBytes = blockContent.getBytes();
+        Array blockArray = (Array) CborSerializationUtil.deserializeOne(blockBytes);
 
         int eraValue = ((UnsignedInteger)blockArray.getDataItems().get(0)).getValue().intValue();
         Era era = EraUtil.getEra(eraValue);
@@ -40,12 +41,12 @@ public enum LocalRollForwardSerializer implements Serializer<LocalRollForward> {
         ByronMainBlock byronMainBlock = null;
         if (era == Era.Byron) {
             if (eraValue == 0) {
-                byronEbBlock = ByronEbBlockSerializer.INSTANCE.deserializeDI(blockArray);
+                byronEbBlock = ByronEbBlockSerializer.INSTANCE.deserialize(blockBytes);
             } else {
-                byronMainBlock = ByronBlockSerializer.INSTANCE.deserializeDI(blockArray);
+                byronMainBlock = ByronBlockSerializer.INSTANCE.deserialize(blockBytes);
             }
         } else {
-            block = BlockSerializer.INSTANCE.deserializeDI(blockArray);
+            block = BlockSerializer.INSTANCE.deserialize(blockBytes);
         }
 
         Tip tip = TipSerializer.INSTANCE.deserializeDI(contentDI.get(2));

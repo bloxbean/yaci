@@ -103,7 +103,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
 
             if (era == Era.Byron) {
                 if (eraValue == 0) { //Epoch boundry block
-                    ByronEbBlock block = ByronEbBlockSerializer.INSTANCE.deserializeDI(array);
+                    ByronEbBlock block = ByronEbBlockSerializer.INSTANCE.deserialize(body);
 
                     //move from cursor
                     counter++;
@@ -113,7 +113,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
                             block.getHeader().getConsensusData().getEpoch(), 0);
                     this.from = new Point(absoluteSlot, block.getHeader().getBlockHash());
                 } else if (eraValue == 1) {
-                    ByronMainBlock block = ByronBlockSerializer.INSTANCE.deserializeDI(array);
+                    ByronMainBlock block = ByronBlockSerializer.INSTANCE.deserialize(body);
 
                     //move from cursor
                     counter++;
@@ -125,7 +125,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
                     this.from = new Point(absoluteSlot, block.getHeader().getBlockHash());
                 }
             } else {
-                Block block = BlockSerializer.INSTANCE.deserializeDI(array);
+                Block block = BlockSerializer.INSTANCE.deserialize(body);
                 if (log.isDebugEnabled())
                     log.info("Block >> {}, {}, {}", eraValue, block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot());
 
