@@ -16,5 +16,5 @@ import lombok.*;
 @ToString
 public class Constitution {
     private Anchor anchor;
-    private String scripthash;
+    private String scripthash; //TODO: Use Optional ?
 }

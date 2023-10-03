@@ -27,10 +27,10 @@ public class UpdateCommittee implements GovAction {
 
     private GovActionId govActionId;
     @Builder.Default
-    private Set<Credential> committeeColdCredential = new LinkedHashSet<>();
+    private Set<Credential> membersForRemoval = new LinkedHashSet<>();
 
     @Builder.Default
-    private Map<Credential, Integer> committeeColdCredentialEpoch = new LinkedHashMap<>();
-    private BigDecimal threshold; //TODO?? Check the correct name.
+    private Map<Credential, Integer> newMembersAndTerms = new LinkedHashMap<>();
+    private BigDecimal quorumThreshold; //TODO?? Check the correct name.
 
 }

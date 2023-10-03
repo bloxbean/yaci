@@ -7,8 +7,6 @@ import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
 import lombok.extern.slf4j.Slf4j;
@@ -18,11 +16,12 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 @Slf4j
 public class ConwayEraIT extends BaseTest{
 
-    //@Test
+    @Test
     void syncTest() throws Exception {
         //BlockSync blockSync = new BlockSync(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.SANCHONET_PROTOCOL_MAGIC, Constants.WELL_KNOWN_SANCHONET_POINT);
         BlockSync blockSync = new BlockSync(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.SANCHONET_PROTOCOL_MAGIC, Constants.WELL_KNOWN_SANCHONET_POINT);
@@ -53,8 +52,7 @@ public class ConwayEraIT extends BaseTest{
     @Test
     void syncFromTip() throws Exception {
         //BlockSync blockSync = new BlockSync(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.SANCHONET_PROTOCOL_MAGIC, Constants.WELL_KNOWN_SANCHONET_POINT);
-        BlockSync blockSync = new BlockSync(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.WELL_KNOWN_SANCHONET_POINT,
-                N2NVersionTableConstant.v11AndAbove(Constants.SANCHONET_PROTOCOL_MAGIC));
+        BlockSync blockSync = new BlockSync(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.SANCHONET_PROTOCOL_MAGIC, Constants.WELL_KNOWN_SANCHONET_POINT);
 //        BlockSync blockSync = new BlockSync("localhost", 30000, Constants.PREPROD_PROTOCOL_MAGIC, Constants.WELL_KNOWN_PREPROD_POINT);
         blockSync.startSyncFromTip(new BlockChainDataListener() {
             public void onBlock(Era era, Block block, List<Transaction> transactions) {
@@ -62,6 +60,10 @@ public class ConwayEraIT extends BaseTest{
                 System.out.println(block.getHeader().getHeaderBody().getBlockHash());
                 System.out.println(block.getHeader().getHeaderBody().getSlot());
                 System.out.println("# of transactions >> " + transactions.size());
+                System.out.println("Voting Procedures: " + transactions.stream().map(t -> t.getBody().getVotingProcedures()).collect(Collectors.toList()));
+                System.out.println("Proposal Procedures: " + transactions.stream().map(t -> t.getBody().getProposalProcedures()).collect(Collectors.toList()));
+                System.out.println("Current Treasury Value: " + transactions.stream().map(t -> t.getBody().getCurrentTreasuryValue()).collect(Collectors.toList()));
+                System.out.println("Dontation: " + transactions.stream().map(t -> t.getBody().getDonation()).collect(Collectors.toList()));
             }
 
             @Override
@@ -79,10 +81,9 @@ public class ConwayEraIT extends BaseTest{
             Thread.sleep(5000);
     }
 
-//    @Test
+    @Test
     public void fetchBlock() throws InterruptedException {
-        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Constants.SANCHONET_PROTOCOL_MAGIC);
-        BlockFetcher blockFetcher = new BlockFetcher(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, versionTable);
+        BlockFetcher blockFetcher = new BlockFetcher(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.SANCHONET_PROTOCOL_MAGIC);
 
         CountDownLatch countDownLatch = new CountDownLatch(1);
 
@@ -100,7 +101,7 @@ public class ConwayEraIT extends BaseTest{
 
         });
         Point knownPoint = new Point(20, "6a7d97aae2a65ca790fd14802808b7fce00a3362bd7b21c4ed4ccb4296783b98");
-        TipFinder tipFinder = new TipFinder(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.WELL_KNOWN_SANCHONET_POINT, versionTable);
+        TipFinder tipFinder = new TipFinder(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.WELL_KNOWN_SANCHONET_POINT, Constants.SANCHONET_PROTOCOL_MAGIC);
         Tip tip = tipFinder.find().block(Duration.ofSeconds(5));
         //Byron blocks
 //        Point from = new Point(0, "f0f7892b5c333cffc4b3c4344de48af4cc63f55e44936196f365a9ef2244134f");
