@@ -13,7 +13,7 @@ class BlockSerializerTest {
     void deserializeDI() {
         String cborHex = "";
 
-         Block block = BlockSerializer.INSTANCE.deserializeDI(CborSerializationUtil.deserializeOne(HexUtil.decodeHexString(cborHex)));
+         Block block = BlockSerializer.INSTANCE.deserialize(HexUtil.decodeHexString(cborHex));
 
         System.out.println(block);
     }

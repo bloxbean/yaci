@@ -20,6 +20,7 @@ import java.util.Set;
 public class TransactionBody {
     //Derived
     private String txHash;
+    private String cbor; //tx body cbor
 
     private Set<TransactionInput> inputs;
     private List<TransactionOutput> outputs;

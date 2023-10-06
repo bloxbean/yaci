@@ -6,6 +6,7 @@ import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.client.util.JsonUtil;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
+import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlockCons;
@@ -25,7 +26,12 @@ public enum ByronEbBlockSerializer implements Serializer<ByronEbBlock> {
     INSTANCE;
 
     @Override
-    public ByronEbBlock deserializeDI(DataItem di) {
+    public ByronEbBlock deserialize(byte[] bytes) {
+        DataItem dataItem = CborSerializationUtil.deserializeOne(bytes);
+        return deserializeByronEbBlock(dataItem, bytes);
+    }
+
+    private ByronEbBlock deserializeByronEbBlock(DataItem di, byte[] blockBody) {
         Array array = (Array) di;
         int eraValue = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
         Era era = EraUtil.getEra(eraValue);
@@ -42,9 +48,12 @@ public enum ByronEbBlockSerializer implements Serializer<ByronEbBlock> {
         ByronEbBody body = deserializeBody(bodyArr);
         //TODO -- Other fields
 
+        String cbor = YaciConfig.INSTANCE.isReturnBlockCbor()? HexUtil.encodeHexString(blockBody) : null;
+
         return ByronEbBlock.builder()
                 .header(header)
                 .body(body)
+                .cbor(cbor)
                 .build();
     }
 

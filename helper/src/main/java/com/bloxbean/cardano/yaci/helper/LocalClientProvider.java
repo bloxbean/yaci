@@ -146,6 +146,10 @@ public class LocalClientProvider {
         n2cClient.start();
     }
 
+    public void reconnect() {
+        n2cClient.restartSession();
+    }
+
     public LocalStateQueryClient getLocalStateQueryClient() {
         return localStateQueryClient;
     }
