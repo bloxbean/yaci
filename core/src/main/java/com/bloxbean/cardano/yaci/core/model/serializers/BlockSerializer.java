@@ -2,9 +2,12 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
+import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.core.util.Tuple;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,11 +22,10 @@ public enum BlockSerializer implements Serializer<Block> {
     @Override
     public Block deserialize(byte[] bytes) {
         DataItem dataItem = CborSerializationUtil.deserializeOne(bytes);
-        return deserializeDI(dataItem);
+        return deserializeBlock(dataItem, bytes);
     }
 
-    @Override
-    public Block deserializeDI(DataItem di) {
+    private Block deserializeBlock(DataItem di, byte[] blockBody) {
         Array array = (Array) di;
         int eraValue = ((UnsignedInteger)array.getDataItems().get(0)).getValue().intValue();
         Era era = EraUtil.getEra(eraValue);
@@ -38,6 +40,7 @@ public enum BlockSerializer implements Serializer<Block> {
         blockBuilder.header(blockHeader);
 
         //transaction bodies 1
+        /**
         Array txnBodiesArr = (Array) blockArray.getDataItems().get(1);
 
         List<TransactionBody> txnBodies = new ArrayList<>();
@@ -45,6 +48,15 @@ public enum BlockSerializer implements Serializer<Block> {
             if (txnBodyDI == Special.BREAK)
                 continue;
             TransactionBody txBody = TransactionBodySerializer.INSTANCE.deserializeDI(txnBodyDI);
+            txnBodies.add(txBody);
+        }
+        **/
+
+        //Extract transaction bodies from block bytes directly to keep the tx hash same
+        List<Tuple<DataItem, byte[]>> txBodyTuples = TransactionBodyExtractor.getTxBodiesFromBlock(blockBody);
+        List<TransactionBody> txnBodies = new ArrayList<>();
+        for (var tuple: txBodyTuples) {
+            TransactionBody txBody = TransactionBodySerializer.INSTANCE.deserializeDI(tuple._1, tuple._2);
             txnBodies.add(txBody);
         }
         blockBuilder.transactionBodies(txnBodies);
@@ -86,6 +98,10 @@ public enum BlockSerializer implements Serializer<Block> {
                 invalidTransactions.add(toInt(txIndexDI));
             }
             blockBuilder.invalidTransactions(invalidTransactions);
+        }
+
+        if (YaciConfig.INSTANCE.isReturnBlockCbor()) {
+            blockBuilder.cbor(HexUtil.encodeHexString(blockBody));
         }
 
         return blockBuilder.build();
