@@ -13,25 +13,30 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
 public class ConwayEraIT extends BaseTest{
 
     @Test
     void syncTest() throws Exception {
-        //BlockSync blockSync = new BlockSync(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.SANCHONET_PROTOCOL_MAGIC, Constants.WELL_KNOWN_SANCHONET_POINT);
         BlockSync blockSync = new BlockSync(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.SANCHONET_PROTOCOL_MAGIC, Constants.WELL_KNOWN_SANCHONET_POINT);
-//        BlockSync blockSync = new BlockSync("localhost", 30000, Constants.PREPROD_PROTOCOL_MAGIC, Constants.WELL_KNOWN_PREPROD_POINT);
+        CountDownLatch countDownLatch = new CountDownLatch(5);
+        List<Block> blocks = new ArrayList<>();
         blockSync.startSync(Point.ORIGIN, new BlockChainDataListener() {
             public void onBlock(Era era, Block block, List<Transaction> transactions) {
                 System.out.println(block.getHeader().getHeaderBody().getBlockNumber());
                 System.out.println(block.getHeader().getHeaderBody().getBlockHash());
                 System.out.println(block.getHeader().getHeaderBody().getSlot());
                 System.out.println("# of transactions >> " + transactions.size());
+                blocks.add(block);
+                countDownLatch.countDown();
             }
 
             @Override
@@ -45,15 +50,16 @@ public class ConwayEraIT extends BaseTest{
             }
         });
 
-        while (true)
-            Thread.sleep(5000);
+        countDownLatch.await(30, TimeUnit.SECONDS);
+        assertThat(blocks).hasSize(5);
     }
 
     @Test
     void syncFromTip() throws Exception {
-        //BlockSync blockSync = new BlockSync(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.SANCHONET_PROTOCOL_MAGIC, Constants.WELL_KNOWN_SANCHONET_POINT);
         BlockSync blockSync = new BlockSync(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.SANCHONET_PROTOCOL_MAGIC, Constants.WELL_KNOWN_SANCHONET_POINT);
-//        BlockSync blockSync = new BlockSync("localhost", 30000, Constants.PREPROD_PROTOCOL_MAGIC, Constants.WELL_KNOWN_PREPROD_POINT);
+
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+        List<Block> blocks = new ArrayList<>();
         blockSync.startSyncFromTip(new BlockChainDataListener() {
             public void onBlock(Era era, Block block, List<Transaction> transactions) {
                 System.out.println(block.getHeader().getHeaderBody().getBlockNumber());
@@ -64,6 +70,8 @@ public class ConwayEraIT extends BaseTest{
                 System.out.println("Proposal Procedures: " + transactions.stream().map(t -> t.getBody().getProposalProcedures()).collect(Collectors.toList()));
                 System.out.println("Current Treasury Value: " + transactions.stream().map(t -> t.getBody().getCurrentTreasuryValue()).collect(Collectors.toList()));
                 System.out.println("Dontation: " + transactions.stream().map(t -> t.getBody().getDonation()).collect(Collectors.toList()));
+                blocks.add(block);
+                countDownLatch.countDown();
             }
 
             @Override
@@ -77,8 +85,8 @@ public class ConwayEraIT extends BaseTest{
             }
         });
 
-        while (true)
-            Thread.sleep(5000);
+        countDownLatch.await(60, TimeUnit.SECONDS);
+        assertThat(blocks).hasSize(1);
     }
 
     @Test
@@ -86,10 +94,7 @@ public class ConwayEraIT extends BaseTest{
         BlockFetcher blockFetcher = new BlockFetcher(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.SANCHONET_PROTOCOL_MAGIC);
 
         CountDownLatch countDownLatch = new CountDownLatch(1);
-
         AtomicInteger count = new AtomicInteger(0);
-
-//        List<Block> blocks = new ArrayList<>();
         blockFetcher.start(block -> {
             if (count.get() % 1000 == 0)
                 log.info("Block >>> {} -- {} -- {} -- {}", block.getHeader().getHeaderBody().getBlockNumber(),
@@ -97,24 +102,19 @@ public class ConwayEraIT extends BaseTest{
                         block.getHeader().getHeaderBody().getSlot(), block.getEra());
 
             count.incrementAndGet();
-//            countDownLatch.countDown();
-
+            countDownLatch.countDown();
         });
-        Point knownPoint = new Point(20, "6a7d97aae2a65ca790fd14802808b7fce00a3362bd7b21c4ed4ccb4296783b98");
+
         TipFinder tipFinder = new TipFinder(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.WELL_KNOWN_SANCHONET_POINT, Constants.SANCHONET_PROTOCOL_MAGIC);
         Tip tip = tipFinder.find().block(Duration.ofSeconds(5));
-        //Byron blocks
-//        Point from = new Point(0, "f0f7892b5c333cffc4b3c4344de48af4cc63f55e44936196f365a9ef2244134f");
-//        Point to = new Point(5, "365201e928da50760fce4bdad09a7338ba43a43aff1c0e8d3ec458388c932ec8");
 
         Point from = Constants.WELL_KNOWN_SANCHONET_POINT;
-        Point to = tip.getPoint();//new Point(8569937, "8264c74dcdf7afc02e0c176090af367b2662326d623a478710d54e22bf749ebd");
+        Point to = tip.getPoint();
         blockFetcher.fetch(from, to);
 
-        while (true)
-            Thread.sleep(5000);
-//        blockFetcher.shutdown();
+        countDownLatch.await(30, TimeUnit.SECONDS);
 
-//        assertThat(blocks.get(0).getHeader().getHeaderBody().getBlockNumber()).isEqualTo(287622);
+        blockFetcher.shutdown();
+        assertThat(count.get()).isGreaterThanOrEqualTo(1);
     }
 }
