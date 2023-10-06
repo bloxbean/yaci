@@ -13,7 +13,12 @@ previous blocks, query information from a local node, monitor the local mempool,
 
 **Latest Stable Release :** 
 - [0.1.14](https://github.com/bloxbean/yaci/releases/tag/v0.1.14) (**Cardano Node 8.1.1** support and Compatible with Cardano Client Lib 0.4.3)
-- [0.2.0](https://github.com/bloxbean/yaci/releases/tag/v0.2.0) (Compatible with Cardano Client Lib 0.5.0-beta1 and later)
+- [0.2.5](https://github.com/bloxbean/yaci/releases/tag/v0.2.5) (Compatible with Cardano Client Lib 0.5.0)
+
+**Latest Beta Release :**
+- [0.3.0-beta1](https://github.com/bloxbean/yaci/releases/tag/v0.3.0-beta1) (Supports [SanchoNet](https://sancho.network/)) 
+
+  **Development Branch:** sanchonet
 
 ## Dependencies
 
@@ -23,14 +28,14 @@ Maven
 <dependency>
     <groupId>com.bloxbean.cardano</groupId>
     <artifactId>yaci</artifactId>
-    <version>0.1.14</version>
+    <version>0.2.5</version>
 </dependency>
 ```
 
 Gradle
 
 ```xml
- implementation('com.bloxbean.cardano:yaci:0.1.14')
+ implementation('com.bloxbean.cardano:yaci:0.2.5')
 ```
 
 ## How to Use?
