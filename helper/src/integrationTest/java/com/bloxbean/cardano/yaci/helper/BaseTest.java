@@ -9,5 +9,5 @@ public class BaseTest {
     protected long protocolMagic = Constants.PREPROD_PROTOCOL_MAGIC;
     protected Point knownPoint = new Point(13003663, "b896e43a25de269cfc47be7afbcbf00cad41a5011725c2732393f1b4508cf41d");
 
-    protected String nodeSocketFile = "/Users/satya/work/cardano-node/preprod/db/node.socket";
+    protected String nodeSocketFile = "/Users/satya/work/cardano-node/preprod-8.1.2/db/node.socket";
 }
