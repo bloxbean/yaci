@@ -157,6 +157,11 @@ public class BlockFetcher implements Fetcher<Block> {
         n2nClient.shutdown();
     }
 
+    public void sendKeepAliveMessage(int cookie) {
+        if (n2nClient.isRunning())
+            keepAliveAgent.sendKeepAlive(cookie);
+    }
+
 //    public static void main(String[] args) {
 //        //shelley
 //        Point from = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");

@@ -3,6 +3,7 @@ plugins {
     id 'maven-publish'
     id 'signing'
     id 'org.unbroken-dome.test-sets' version("4.0.0")
+    id 'org.ajoberstar.grgit' version '5.2.0'
 }
 
 repositories {
@@ -90,6 +91,11 @@ if (isReleaseVersion && !project.hasProperty("skipSigning")) {
     }
 }
 
+def commit_id=getCheckedOutGitCommitHash()
+if (project.version.endsWith("-SNAPSHOT")) {
+    version = "${project.version}".replace("-SNAPSHOT", "-${commit_id}-SNAPSHOT")
+}
+
 subprojects {
     apply plugin: 'java-library'
     apply plugin: 'maven-publish'
@@ -103,6 +109,11 @@ subprojects {
 
     //Jars are with yaci prefix
     archivesBaseName = 'yaci-' + project.name
+
+   // def commit_id=getCheckedOutGitCommitHash()
+    if (project.version.endsWith("-SNAPSHOT")) {
+        version = "${project.version}".replace("-SNAPSHOT", "-${commit_id}-SNAPSHOT")
+    }
 
     dependencies {
         api libs.slf4j.api
@@ -218,3 +229,6 @@ subprojects {
     }
 }
 
+def getCheckedOutGitCommitHash() {
+    grgit.head().abbreviatedId
+}

@@ -61,6 +61,10 @@ public class BlockRangeSync {
         blockFetcher.fetch(from, to);
     }
 
+    public void sendKeepAliveMessage(int cookie) {
+        blockFetcher.sendKeepAliveMessage(cookie);
+    }
+
     /**
      * Stop the fetcher
      */

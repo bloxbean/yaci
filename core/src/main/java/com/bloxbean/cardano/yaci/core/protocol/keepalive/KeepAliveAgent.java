@@ -57,7 +57,7 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
     protected void processResponse(Message message) {
         if (message == null) return;
         if (message instanceof MsgKeepAliveResponse) {
-            log.info("MsgKeepAliveResponse: {}", message);
+            log.debug("MsgKeepAliveResponse: {}", message);
             handleKeepAliveResponse((MsgKeepAliveResponse) message);
         } else {
             if (message instanceof MsgKeepAlive) {
