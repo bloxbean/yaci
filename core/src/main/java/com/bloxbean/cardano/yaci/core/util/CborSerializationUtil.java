@@ -12,6 +12,7 @@ import lombok.NonNull;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.math.RoundingMode;
 
 public class CborSerializationUtil {
 
@@ -87,7 +88,11 @@ public class CborSerializationUtil {
         Number numerator = rdi.getNumerator();
         Number denominator = rdi.getDenominator();
 
-        return new BigDecimal(numerator.getValue()).divide(new BigDecimal(denominator.getValue()));
+        try {
+            return new BigDecimal(numerator.getValue()).divide(new BigDecimal(denominator.getValue()));
+        } catch (ArithmeticException e) { //set scale and try again
+            return new BigDecimal(numerator.getValue()).divide(new BigDecimal(denominator.getValue()), 10, RoundingMode.HALF_UP);
+        }
     }
 
     /**
