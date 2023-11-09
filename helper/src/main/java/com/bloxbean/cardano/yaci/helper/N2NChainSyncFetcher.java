@@ -44,7 +44,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
     private KeepAliveAgent keepAliveAgent;
     private ChainsyncAgent chainSyncAgent;
     private BlockfetchAgent blockFetchAgent;
-    private TCPNodeClient n2CClient;
+    private TCPNodeClient n2nClient;
 
     /**
      * Construct {@link N2NChainSyncFetcher} to sync the blockchain
@@ -193,7 +193,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
             }
         });
 
-        n2CClient = new TCPNodeClient(host, port, handshakeAgent, keepAliveAgent,
+        n2nClient = new TCPNodeClient(host, port, handshakeAgent, keepAliveAgent,
                 chainSyncAgent, blockFetchAgent);
     }
 
@@ -224,7 +224,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
             }
         });
 
-        n2CClient.start();
+        n2nClient.start();
     }
 
     /**
@@ -253,6 +253,11 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
             chainSyncAgent.addListener(listener);
     }
 
+    public void sendKeepAliveMessage(int cookie) {
+        if (n2nClient.isRunning())
+            keepAliveAgent.sendKeepAlive(cookie);
+    }
+
     /**
      * Check if the connection is alive
      *
@@ -260,7 +265,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
      */
     @Override
     public boolean isRunning() {
-        return n2CClient.isRunning();
+        return n2nClient.isRunning();
     }
 
     /**
@@ -268,7 +273,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
      */
     @Override
     public void shutdown() {
-        n2CClient.shutdown();
+        n2nClient.shutdown();
     }
 
     public static void main(String[] args) throws Exception {

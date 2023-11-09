@@ -79,6 +79,11 @@ public class BlockSync {
         initializeAgentAndStart(wellKnownPoint, blockChainDataListener, true);
     }
 
+    public void sendKeepAliveMessage(int cookie) {
+        if (n2NChainSyncFetcher.isRunning())
+            n2NChainSyncFetcher.sendKeepAliveMessage(cookie);
+    }
+
     /**
      * Stop the fetcher
      */
