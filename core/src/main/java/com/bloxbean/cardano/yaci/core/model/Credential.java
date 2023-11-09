@@ -58,7 +58,7 @@ public class Credential {
     public static Credential deserialize(Array stakeCredArray)  {
         List<DataItem> dataItemList = stakeCredArray.getDataItems();
         if (dataItemList == null || dataItemList.size() != 2)
-            throw new CborRuntimeException("StakeCredential deserialization failed. Invalid number of DataItem(s) : "
+            throw new CborRuntimeException("Credential deserialization failed. Invalid number of DataItem(s) : "
                     + (dataItemList != null ? String.valueOf(dataItemList.size()) : null));
 
         UnsignedInteger typeDI = (UnsignedInteger) dataItemList.get(0);
@@ -70,7 +70,7 @@ public class Credential {
         } else if (typeBI.intValue() == 1) {
             return Credential.fromScriptHash(hashDI.getBytes());
         } else {
-            throw new CborRuntimeException("StakeCredential deserialization failed. Invalid StakeCredType : "
+            throw new CborRuntimeException("Credential deserialization failed. Invalid CredType : "
                     + typeBI.intValue());
         }
     }
@@ -82,7 +82,7 @@ public class Credential {
         } else if (type == StakeCredType.SCRIPTHASH) {
             array.add(new UnsignedInteger(1));
         } else {
-            throw new CborRuntimeException("Invalid stake credential type : " + type);
+            throw new CborRuntimeException("Invalid credential type : " + type);
         }
 
         array.add(new ByteString(HexUtil.decodeHexString(hash)));
