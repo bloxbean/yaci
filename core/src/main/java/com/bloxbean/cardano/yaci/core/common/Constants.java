@@ -27,7 +27,7 @@ public class Constants {
     public final static String PREVIEW_IOHK_RELAY_ADDR = "preview-node.world.dev.cardano.org";
     public final static int PREVIEW_IOHK_RELAY_PORT = 30002;
 
-    public final static String SANCHONET_PUBLIC_RELAY_ADDR = "sanchonet-node.world.dev.cardano.org";
-    public final static int SANCHONET_PUBLIC_RELAY_PORT = 30004;
+    public final static String SANCHONET_PUBLIC_RELAY_ADDR = "sanchonet-node.play.dev.cardano.org";
+    public final static int SANCHONET_PUBLIC_RELAY_PORT = 3001;
 
 }
