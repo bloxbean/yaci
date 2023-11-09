@@ -2,8 +2,10 @@ package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.SimpleValue;
 import com.bloxbean.cardano.yaci.core.model.Credential;
 import com.bloxbean.cardano.yaci.core.model.certs.ResignCommitteeColdCert;
+import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 
 import java.util.List;
@@ -20,6 +22,13 @@ public enum ResignCommitteeColdCertSerializer implements Serializer<ResignCommit
         List<DataItem> dataItemList = certArray.getDataItems();
 
         Credential committeeColdCred = Credential.deserialize((Array) dataItemList.get(1));
-        return new ResignCommitteeColdCert(committeeColdCred);
+
+        var anchorDI = dataItemList.get(2);
+        Anchor anchor = null;
+        if (anchorDI != SimpleValue.NULL) {
+            anchor = AnchorSerializer.INSTANCE.deserializeDI(anchorDI);
+        }
+
+        return new ResignCommitteeColdCert(committeeColdCred, anchor);
     }
 }
