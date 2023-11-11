@@ -3,14 +3,14 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 import co.nstant.in.cbor.model.Number;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.address.util.AddressUtil;
-import com.bloxbean.cardano.client.util.AssetUtil;
+import com.bloxbean.cardano.client.api.util.AssetUtil;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.Amount;
 import com.bloxbean.cardano.yaci.core.model.TransactionOutput;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
-import com.bloxbean.cardano.yaci.core.util.StringUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.core.util.StringUtil;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
@@ -167,6 +167,7 @@ public enum TransactionOutputSerializer implements Serializer<TransactionOutput>
                                 .unit(policyId + "." + hexName)
                                 .policyId(policyId)
                                 .assetName(assetName)
+                                .assetNameBytes(assetNameBS.getBytes())
                                 .quantity(value).build();
 
                         amounts.add(amount);
