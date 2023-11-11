@@ -1,7 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.model.*;
 import co.nstant.in.cbor.model.Map;
+import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.api.util.AssetUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
@@ -11,7 +11,6 @@ import com.bloxbean.cardano.yaci.core.model.governance.VotingProcedures;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.ProposalProcedureSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.VotingProceduresSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.StringUtil;
 import com.bloxbean.cardano.yaci.core.util.TxUtil;
@@ -137,6 +136,7 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
                             .unit(policyId + "." + hexName)
                             .policyId(policyId)
                             .assetName(assetName)
+                            .assetNameBytes(assetNameBS.getBytes())
                             .quantity(value).build();
 
                     mintAssets.add(amount);
