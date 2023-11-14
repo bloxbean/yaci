@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil.getArrayBytes;
 
@@ -37,11 +38,11 @@ public class DatumWitnessHashTest {
                 })
                 .filter(list -> list != null && !list.isEmpty())
                 .flatMap(List::stream)
-                .toList();
+                .collect(Collectors.toList());
 
         List<String> hashes = datumOfWitness.stream()
                 .map(bytes -> HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(bytes)))
-                .toList();
+                .collect(Collectors.toList());
 
         List<String> list = List.of("25828c5a756ccd2f2cac104308be8a4393888642809ea6e6ca0ba0cab8901a63",
                 "ff5f5c41a5884f08c6e2055d2c44d4b2548b5fc30b47efaa7d337219190886c5",
@@ -75,11 +76,11 @@ public class DatumWitnessHashTest {
                 })
                 .filter(list -> list != null && !list.isEmpty())
                 .flatMap(List::stream)
-                .toList();
+                .collect(Collectors.toList());
 
         List<String> hashes = datumOfWitness.stream()
                 .map(bytes -> HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(bytes)))
-                .toList();
+                .collect(Collectors.toList());
 
         List<String> list = List.of("8828013bf8f54bec83b14f96ced5b9061f231c51fc981bd9931a4cf7edc39537");
         Assertions.assertTrue(!hashes.isEmpty());
@@ -109,11 +110,11 @@ public class DatumWitnessHashTest {
                 })
                 .filter(list -> !list.isEmpty())
                 .flatMap(List::stream)
-                .toList();
+                .collect(Collectors.toList());
 
         List<String> hashes = datumOfWitness.stream()
                 .map(bytes -> HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(bytes)))
-                .toList();
+                .collect(Collectors.toList());
         List<String> list = List.of("39152a2baaed845b183470a092674d3b7923ed278197d4d6c8e3dadd225306bb");
 
         Assertions.assertTrue(!hashes.isEmpty());
@@ -147,11 +148,11 @@ public class DatumWitnessHashTest {
                 })
                 .filter(list -> !list.isEmpty())
                 .flatMap(List::stream)
-                .toList();
+                .collect(Collectors.toList());
 
         List<String> hashes = datumOfWitness.stream()
                 .map(bytes -> HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(bytes)))
-                .toList();
+                .collect(Collectors.toList());
         List<String> list = List.of("6e30ba9e2f411e40b031121ddef5821b1cf6627fa618fd3a45936d567b7b0683");
 
         Assertions.assertTrue(!hashes.isEmpty());
@@ -198,7 +199,7 @@ public class DatumWitnessHashTest {
 
         List<String> hashes = datumBytes.stream()
                 .map(bytes -> HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(bytes)))
-                .toList();
+                .collect(Collectors.toList());
         Assertions.assertTrue(hashes.size() == expectHashOne.size());
         Assertions.assertTrue(!hashes.isEmpty());
         for (int i = 0; i < hashes.size(); i++) {
@@ -263,7 +264,7 @@ public class DatumWitnessHashTest {
 
         hashes = datumBytes.stream()
                 .map(bytes -> HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(bytes)))
-                .toList();
+                .collect(Collectors.toList());
 
         Assertions.assertTrue(hashes.size() == expectHash.size());
         Assertions.assertTrue(!hashes.isEmpty());
@@ -283,7 +284,7 @@ public class DatumWitnessHashTest {
 
         List<String> hashes = datumBytes.stream()
                 .map(bytes -> HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(bytes)))
-                .toList();
+                .collect(Collectors.toList());
 
         Assertions.assertEquals(expectHash, hashes);
     }
@@ -301,7 +302,7 @@ public class DatumWitnessHashTest {
 
         List<String> hashes = datumBytes.stream()
                 .map(bytes -> HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(bytes)))
-                .toList();
+                .collect(Collectors.toList());
 
         Assertions.assertEquals(expectHash, hashes);
     }
@@ -320,7 +321,7 @@ public class DatumWitnessHashTest {
 
         List<String> hashes = datumBytes.stream()
                 .map(bytes -> HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(bytes)))
-                .toList();
+                .collect(Collectors.toList());
 
         Assertions.assertEquals(expectHash, hashes);
     }
