@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.DataItem;
+import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
 import com.bloxbean.cardano.yaci.core.util.TxUtil;

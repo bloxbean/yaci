@@ -10,8 +10,8 @@ import com.bloxbean.cardano.client.util.JsonUtil;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import lombok.SneakyThrows;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,10 +19,11 @@ import java.util.List;
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
 
 //TODO -- More testing required for deserialization --> serialization
-public enum WintessesSerializer implements Serializer<Witnesses> {
+public enum WitnessesSerializer implements Serializer<Witnesses> {
     INSTANCE;
 
     @Override
+    @SneakyThrows
     public Witnesses deserializeDI(DataItem di) {
         Map witnessMap = (Map) di;
         DataItem vkWitnessesArray = witnessMap.get(new UnsignedInteger(0));
@@ -101,7 +102,8 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
             for (DataItem plutusDataDI : plutusDataDIList) {
                 if (plutusDataDI == Special.BREAK)
                     continue;
-                Datum datum = new Datum(HexUtil.encodeHexString(CborSerializationUtil.serialize(plutusDataDI, false)), ""); //TODO -- convert to json later'
+               // Datum datum = new Datum(HexUtil.encodeHexString(CborSerializationUtil.serialize(plutusDataDI, false)), ""); //TODO -- convert to json later'
+                Datum datum = Datum.from(plutusDataDI);
                 datumList.add(datum);
 //                plutusDataList.add(PlutusData.deserialize(plutusDataDI));
             }
@@ -113,7 +115,8 @@ public enum WintessesSerializer implements Serializer<Witnesses> {
             List<DataItem> redeemerDIList = ((Array) redeemerArray).getDataItems();
             for (DataItem redeemerDI : redeemerDIList) {
                 if (redeemerDI == Special.BREAK) continue;
-                Redeemer redeemer = new Redeemer(HexUtil.encodeHexString(CborSerializationUtil.serialize(redeemerDI, false)));
+                //Redeemer redeemer = new Redeemer(HexUtil.encodeHexString(CborSerializationUtil.serialize(redeemerDI, false)));
+                Redeemer redeemer = Redeemer.deserialize((Array) redeemerDI);
                 redeemerList.add(redeemer);
                // redeemers.add(Redeemer.deserialize((Array) redeemerDI)); //TODO -- convert redeemer to json
             }

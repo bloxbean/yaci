@@ -57,7 +57,7 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
                     for (DataItem auxScriptDI : auxiliaryScriptsArray.getDataItems()) {
                         if (auxScriptDI == SimpleValue.BREAK)
                             continue;
-                        nativeScripts.add(WintessesSerializer.INSTANCE.deserializeNativeScript((Array) auxScriptDI));
+                        nativeScripts.add(WitnessesSerializer.INSTANCE.deserializeNativeScript((Array) auxScriptDI));
                     }
                 }
             }
