@@ -1,6 +1,9 @@
 package com.bloxbean.cardano.yaci.helper;
 
+import com.bloxbean.cardano.client.util.JsonUtil;
+import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.model.Block;
+import com.bloxbean.cardano.yaci.core.model.Redeemer;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -13,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -75,6 +79,33 @@ class BlockFetcherIT extends BaseTest {
         assertThat(blocks.get(0).getHeader().getBlockHash()).isEqualTo("f3d7cd6f93cb4c59b61b28ac974f4a4dccfc44a4c83c1998aad17bb6b7b03446");
         assertThat(blocks.get(1).getHeader().getBlockHash()).isEqualTo("ab0a64eaf8bc9e96e4df7161d3ace4d32e88cab2315f952665807509e49892eb");
         assertThat(blocks.get(2).getHeader().getBlockHash()).isEqualTo("f5441700216e5516c6dc19e7eb616f0bf1d04dd1368add35e3a7fd114e30b880");
+    }
+
+    @Test
+    public void fetchBlock_verifyRedeemerCbor_whenSerDeserMismatch() throws InterruptedException {
+        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Constants.PREVIEW_PROTOCOL_MAGIC);
+        BlockFetcher blockFetcher = new BlockFetcher(Constants.PREVIEW_IOHK_RELAY_ADDR, Constants.PREVIEW_IOHK_RELAY_PORT, versionTable);
+
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+
+        AtomicReference<Redeemer> redeemerAtomicReference = new AtomicReference<>();
+        blockFetcher.start(block -> {
+            log.info("Block >>> {} -- {} {}", block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot() + "  ", block.getEra());
+            redeemerAtomicReference.set(block.getTransactionWitness().get(0).getRedeemers().get(0));
+            System.out.println(JsonUtil.getPrettyJson(block));
+            countDownLatch.countDown();
+        });
+
+        Point from = new Point(2340288, "7b1e3f57a73c5656599de4f38b0f44b78c7ea650e07a81e6cdd13a6f2ede31c4");
+        Point to = new Point(2340288, "7b1e3f57a73c5656599de4f38b0f44b78c7ea650e07a81e6cdd13a6f2ede31c4");
+        blockFetcher.fetch(from, to);
+
+        countDownLatch.await(10, TimeUnit.SECONDS);
+        blockFetcher.shutdown();
+
+        var redeemer = redeemerAtomicReference.get();
+        assertThat(redeemer.getCbor()).isEqualTo("840100d8799fbfff01ff821a0008efb61a125066ec");
+        assertThat(redeemer.getData().getCbor()).isEqualTo("d8799fbfff01ff");
     }
 
     /** Not able to fetch block 0

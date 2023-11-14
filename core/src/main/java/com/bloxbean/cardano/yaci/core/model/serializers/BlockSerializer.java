@@ -4,18 +4,26 @@ import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
+import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
+import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+import static com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil.getArrayBytes;
+import static com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil.getRedeemerFields;
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toInt;
 
+@Slf4j
 public enum BlockSerializer implements Serializer<Block> {
     INSTANCE;
 
@@ -67,9 +75,13 @@ public enum BlockSerializer implements Serializer<Block> {
         for (DataItem witnessesDI: witnessesListArr.getDataItems()) {
             if (witnessesDI == SimpleValue.BREAK)
                 continue;
-            Witnesses witnesses = WintessesSerializer.INSTANCE.deserializeDI(witnessesDI);
+            Witnesses witnesses = WitnessesSerializer.INSTANCE.deserializeDI(witnessesDI);
             witnessesSet.add(witnesses);
         }
+
+        //To fix #37 incorrect redeemer & datum hash due to cbor serialization <--> deserialization issue
+        //Get redeemer and datum bytes directly without full deserialization
+        handleWitnessDatumRedeemer(blockHeader.getHeaderBody().getBlockNumber(), witnessesSet, blockBody);
         blockBuilder.transactionWitness(witnessesSet);
 
         //auxiliary data
@@ -105,5 +117,95 @@ public enum BlockSerializer implements Serializer<Block> {
         }
 
         return blockBuilder.build();
+    }
+
+    @SneakyThrows
+    private void handleWitnessDatumRedeemer(long block, List<Witnesses> witnesses, byte[] rawBlockBytes) {
+        if (witnesses != null && !witnesses.isEmpty()) {
+            final List<byte[]> transactionWitness = WitnessUtil.getWitnessRawData(rawBlockBytes);
+
+            for (int witnessIndex = 0; witnessIndex < transactionWitness.size(); witnessIndex++) {
+
+                final var witnessFields = WitnessUtil.getWitnessFields(
+                        transactionWitness.get(witnessIndex));
+                Witnesses witness = witnesses.get(witnessIndex);
+
+                if (witness.getDatums() != null && !witness.getDatums().isEmpty()) {
+
+                    var datumBytes = getArrayBytes(witnessFields.get(BigInteger.valueOf(4L)));
+                    final List<Datum> datums = witness.getDatums();
+
+                    if (datumBytes.size() != datums.size()) {
+                        log.error("block: {} datum does not have the same size", block);
+                    } else {
+                        if (datums != null && !datums.isEmpty()) {
+                            for (int datumIndex = 0; datumIndex < datums.size(); datumIndex++) {
+
+                                final Datum datum = datums.get(datumIndex);
+                                final byte[] rawCbor = datumBytes.get(datumIndex);
+
+                                final var cbor = HexUtil.encodeHexString(rawCbor);
+                                final var hash = Datum.cborToHash(rawCbor);
+
+                                if (!datum.getHash().equals(hash)) {
+                                    log.warn("Datum Hash Mismatch : {} - {} - {}", block, datum.getHash(), hash);
+                                }
+
+                                var updatedDatum = datum.toBuilder()
+                                        .cbor(cbor)
+                                        .hash(hash)
+                                        .build();
+
+                                datums.set(datumIndex, updatedDatum);
+                            }
+                        }
+                    }
+                }
+
+                /*
+                 * redeemer = [ tag: redeemer_tag, index: uint, data: plutus_data, ex_units: ex_units ]
+                 */
+                List<Redeemer> redeemers = witness.getRedeemers();
+                if (redeemers != null && !redeemers.isEmpty()) {
+                    var redeemerArrayBytes = getArrayBytes(witnessFields.get(BigInteger.valueOf(5L)));
+                    if (redeemerArrayBytes.size() != redeemers.size()) {
+                        log.error("block: {} redeemer does not have the same size", block);
+                    } else {
+                        for (int redeemerIdx = 0; redeemerIdx < redeemers.size(); redeemerIdx++) {
+                            var redeemer = redeemers.get(redeemerIdx);
+                            var redeemerBytes = redeemerArrayBytes.get(redeemerIdx);
+                            var redeemerFields = getRedeemerFields(redeemerBytes);
+
+                            if (redeemerFields.size() != 4) {
+                                throw new IllegalStateException("Redeemer missing field");
+                            }
+
+                            var actualRedeemerData = redeemerFields.get(2);
+                            var redeemerData = redeemer.getData();
+                            final var cbor = HexUtil.encodeHexString(actualRedeemerData);
+                            final var hash = Datum.cborToHash(actualRedeemerData);
+
+                            if (!redeemerData.getHash().equals(hash)) {
+                                log.warn("Redeemer data hash mismatch : {} - {} - {}",
+                                        block, redeemerData.getHash(), hash);
+                            }
+
+                            var updatedRedeemerData = redeemerData.toBuilder()
+                                    .cbor(cbor)
+                                    .hash(hash)
+                                    .build();
+
+                            var updatedRedeemer = redeemer.toBuilder()
+                                    .cbor(HexUtil.encodeHexString(redeemerBytes))
+                                    .data(updatedRedeemerData)
+                                    .build();
+
+                            redeemers.set(redeemerIdx, updatedRedeemer);
+                        }
+                    }
+                }
+
+            }
+        }
     }
 }
