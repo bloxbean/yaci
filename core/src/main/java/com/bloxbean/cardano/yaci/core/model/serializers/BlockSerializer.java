@@ -177,7 +177,9 @@ public enum BlockSerializer implements Serializer<Block> {
                             var redeemerFields = getRedeemerFields(redeemerBytes);
 
                             if (redeemerFields.size() != 4) {
-                                throw new IllegalStateException("Redeemer missing field");
+                                log.error("Missing redeemer fields. Expected size 4, but found {}", redeemerFields.size());
+                                continue;
+                                //throw new IllegalStateException("Redeemer missing field");
                             }
 
                             var actualRedeemerData = redeemerFields.get(2);
