@@ -148,7 +148,7 @@ public enum BlockSerializer implements Serializer<Block> {
                                 final var hash = Datum.cborToHash(rawCbor);
 
                                 if (!datum.getHash().equals(hash)) {
-                                    log.warn("Datum Hash Mismatch : {} - {} - {}", block, datum.getHash(), hash);
+                                    log.debug("Datum Hash Mismatch : {} - {} - {}", block, datum.getHash(), hash);
                                 }
 
                                 var updatedDatum = datum.toBuilder()
@@ -188,7 +188,7 @@ public enum BlockSerializer implements Serializer<Block> {
                             final var hash = Datum.cborToHash(actualRedeemerData);
 
                             if (!redeemerData.getHash().equals(hash)) {
-                                log.warn("Redeemer data hash mismatch : {} - {} - {}",
+                                log.debug("Redeemer data hash mismatch : {} - {} - {}",
                                         block, redeemerData.getHash(), hash);
                             }
 
