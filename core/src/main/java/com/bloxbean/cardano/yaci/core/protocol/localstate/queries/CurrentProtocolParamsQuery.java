@@ -2,6 +2,8 @@ package com.bloxbean.cardano.yaci.core.protocol.localstate.queries;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.util.Tuple;
+import com.bloxbean.cardano.yaci.core.model.DrepVoteThresholds;
+import com.bloxbean.cardano.yaci.core.model.PoolVotingThresholds;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
@@ -18,12 +20,13 @@ import java.math.BigInteger;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-import static com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant.PROTOCOL_V14;
+import static com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant.*;
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
 
 @Getter
 @AllArgsConstructor
 @ToString
+//Haskell -- ouroboros-consensus/ouroboros-consensus-cardano/src/shelley/Ouroboros/Consensus/Shelley/Ledger/Query.hs
 public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParamQueryResult> {
     @NonNull
     private Era era;
@@ -43,14 +46,14 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
 
     @Override
     public CurrentProtocolParamQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
-        if (protocolVersion.getVersionNumber() == PROTOCOL_V14) {
-            return deserializeResultV14(di);
-        } else {
+        if (protocolVersion.getVersionNumber() < PROTOCOL_V14 || protocolVersion.getVersionNumber() == PROTOCOL_V15) {
+            return deserializeResultTillV13(di);
+        } else { //V14, V16 and above
             return deserializeResult(di);
         }
     }
 
-    public CurrentProtocolParamQueryResult deserializeResult(DataItem[] di) {
+    public CurrentProtocolParamQueryResult deserializeResultTillV13(DataItem[] di) {
         List<DataItem> dataItemList = ((Array) di[0]).getDataItems();
 
         int type = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue(); //4
@@ -216,7 +219,7 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
     }
 
 
-    public CurrentProtocolParamQueryResult deserializeResultV14(DataItem[] di) {
+    public CurrentProtocolParamQueryResult deserializeResult(DataItem[] di) {
         List<DataItem> dataItemList = ((Array) di[0]).getDataItems();
 
         int type = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue(); //4
@@ -330,6 +333,87 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
         itemDI = paramsDIList.get(21);
         maxCollateralInputs = itemDI != null ? toInt(itemDI) : null;
 
+        //Pool Voting Threshold
+        itemDI = paramsDIList.get(22);
+        BigDecimal motionNoConfidence = null;
+        BigDecimal committeeNormal = null;
+        BigDecimal committeeNoConfidence = null;
+        BigDecimal hardForkInitiation = null;
+        if (itemDI != null) {
+            List<DataItem> poolVotingThresholdList = ((Array) itemDI).getDataItems();
+            if (poolVotingThresholdList.size() != 4)
+                throw new IllegalStateException("Invalid pool voting threshold list");
+
+            var pvtMotionNoConfidenceDI = (RationalNumber) poolVotingThresholdList.get(0);
+            var pvtCommitteeNormalDI = (RationalNumber) poolVotingThresholdList.get(1);
+            var pvtCommitteeNoConfidenceDI = (RationalNumber) poolVotingThresholdList.get(2);
+            var pvtHardForkInitiationDI = (RationalNumber) poolVotingThresholdList.get(3);
+
+            motionNoConfidence = toRationalNumber(pvtMotionNoConfidenceDI);
+            committeeNormal = toRationalNumber(pvtCommitteeNormalDI);
+            committeeNoConfidence = toRationalNumber(pvtCommitteeNoConfidenceDI);
+            hardForkInitiation = toRationalNumber(pvtHardForkInitiationDI);
+        }
+
+        //DRep voting thresholds
+        itemDI = paramsDIList.get(23);
+        BigDecimal dvtMotionNoConfidence = null;
+        BigDecimal dvtCommitteeNormal = null;
+        BigDecimal dvtCommitteeNoConfidence = null;
+        BigDecimal dvtUpdateToConstitution = null;
+        BigDecimal dvtHardForkInitiation = null;
+        BigDecimal dvtPPNetworkGroup = null;
+        BigDecimal dvtPPEconomicGroup = null;
+        BigDecimal dvtPPTechnicalGroup = null;
+        BigDecimal dvtPPGovGroup = null;
+        BigDecimal dvtTreasuryWithdrawal = null;
+
+        if (itemDI != null) {
+            List<DataItem> dRepVotingThresholdList = ((Array) itemDI).getDataItems();
+            if (dRepVotingThresholdList.size() != 10)
+                throw new IllegalStateException("Invalid dRep voting threshold list");
+
+            var dvtMotionNoConfidenceDI = (RationalNumber) dRepVotingThresholdList.get(0);
+            var dvtCommitteeNormalDI = (RationalNumber) dRepVotingThresholdList.get(1);
+            var dvtCommitteeNoConfidenceDI = (RationalNumber) dRepVotingThresholdList.get(2);
+            var dvtUpdateToConstitutionDI = (RationalNumber) dRepVotingThresholdList.get(3);
+            var dvtHardForkInitiationDI = (RationalNumber) dRepVotingThresholdList.get(4);
+            var dvtPPNetworkGroupDI = (RationalNumber) dRepVotingThresholdList.get(5);
+            var dvtPPEconomicGroupDI = (RationalNumber) dRepVotingThresholdList.get(6);
+            var dvtPPTechnicalGroupDI = (RationalNumber) dRepVotingThresholdList.get(7);
+            var dvtPPGovGroupDI = (RationalNumber) dRepVotingThresholdList.get(8);
+            var dvtTreasuryWithdrawalDI = (RationalNumber) dRepVotingThresholdList.get(9);
+
+            dvtMotionNoConfidence = toRationalNumber(dvtMotionNoConfidenceDI);
+            dvtCommitteeNormal = toRationalNumber(dvtCommitteeNormalDI);
+            dvtCommitteeNoConfidence = toRationalNumber(dvtCommitteeNoConfidenceDI);
+            dvtUpdateToConstitution = toRationalNumber(dvtUpdateToConstitutionDI);
+            dvtHardForkInitiation = toRationalNumber(dvtHardForkInitiationDI);
+            dvtPPNetworkGroup = toRationalNumber(dvtPPNetworkGroupDI);
+            dvtPPEconomicGroup = toRationalNumber(dvtPPEconomicGroupDI);
+            dvtPPTechnicalGroup = toRationalNumber(dvtPPTechnicalGroupDI);
+            dvtPPGovGroup = toRationalNumber(dvtPPGovGroupDI);
+            dvtTreasuryWithdrawal = toRationalNumber(dvtTreasuryWithdrawalDI);
+        }
+
+        itemDI = paramsDIList.get(24);
+        Integer minCommitteeSize = itemDI != null ? toInt(itemDI) : null;
+
+        itemDI = paramsDIList.get(25);
+        Integer committeeTermLimit = itemDI != null ? toInt(itemDI) : null;
+
+        itemDI = paramsDIList.get(26);
+        Integer governanceActionValidityPeriod = itemDI != null ? toInt(itemDI) : null;
+
+        itemDI = paramsDIList.get(27);
+        BigInteger governanceActionDeposit = itemDI != null ? toBigInteger(itemDI) : null;
+
+        itemDI = paramsDIList.get(28);
+        BigInteger drepDeposit = itemDI != null ? toBigInteger(itemDI) : null;
+
+        itemDI = paramsDIList.get(29);
+        Integer drepInactivityPeriod = itemDI != null ? toInt(itemDI) : null;
+
         ProtocolParamUpdate protocolParams = ProtocolParamUpdate.builder()
                 .minFeeA(minFeeA)
                 .minFeeB(minFeeB)
@@ -357,6 +441,30 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
                 .maxValSize(maxValueSize)
                 .collateralPercent(collateralPercent)
                 .maxCollateralInputs(maxCollateralInputs)
+                .poolVotingThresholds(PoolVotingThresholds.builder()
+                        .motionNoConfidence(motionNoConfidence)
+                        .committeeNormal(committeeNormal)
+                        .committeeNoConfidence(committeeNoConfidence)
+                        .hardForkInitiation(hardForkInitiation)
+                        .build())
+                .dRepVoteThresholds(DrepVoteThresholds.builder()
+                        .motionNoConfidence(dvtMotionNoConfidence)
+                        .committeeNormal(dvtCommitteeNormal)
+                        .committeeNoConfidence(dvtCommitteeNoConfidence)
+                        .updateConstitution(dvtUpdateToConstitution)
+                        .hardForkInitiation(dvtHardForkInitiation)
+                        .ppNetworkGroup(dvtPPNetworkGroup)
+                        .ppEconomicGroup(dvtPPEconomicGroup)
+                        .ppTechnicalGroup(dvtPPTechnicalGroup)
+                        .ppGovernanceGroup(dvtPPGovGroup)
+                        .treasuryWithdrawal(dvtTreasuryWithdrawal)
+                        .build())
+                .minCommitteeSize(minCommitteeSize)
+                .committeeTermLimit(committeeTermLimit)
+                .governanceActionValidityPeriod(governanceActionValidityPeriod)
+                .governanceActionDeposit(governanceActionDeposit)
+                .drepDeposit(drepDeposit)
+                .drepInactivityPeriod(drepInactivityPeriod)
                 .build();
 
         return new CurrentProtocolParamQueryResult(protocolParams);
