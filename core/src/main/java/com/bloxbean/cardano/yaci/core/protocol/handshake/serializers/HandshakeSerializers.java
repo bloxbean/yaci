@@ -4,6 +4,7 @@ import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.*;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +45,12 @@ public class HandshakeSerializers {
                             Array versionDataArray = new Array();
                             versionDataArray.add(new UnsignedInteger(versionData.getNetworkMagic()));
                             versionDataArray.add(versionData.getInitiatorAndResponderDiffusionMode() ? SimpleValue.TRUE : SimpleValue.FALSE);
+
+                            //TODO -- check with existing node versions
+                            if (entry.getKey() >= N2NVersionTableConstant.PROTOCOL_V11) {
+                                versionDataArray.add(versionData.getPeerSharing() == null ? new UnsignedInteger(0) : new UnsignedInteger(versionData.getPeerSharing()));
+                                versionDataArray.add(versionData.getQuery() ? SimpleValue.TRUE : SimpleValue.FALSE);
+                            }
                             cborMap.put(new UnsignedInteger(entry.getKey()), versionDataArray);
                         } else if (entry.getValue() instanceof OldN2CVersionData) {
                             cborMap.put(new UnsignedInteger(entry.getKey()), new UnsignedInteger(entry.getValue().getNetworkMagic()));

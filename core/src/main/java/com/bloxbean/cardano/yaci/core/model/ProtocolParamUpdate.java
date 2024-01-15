@@ -64,4 +64,14 @@ public class ProtocolParamUpdate {
 //    private String coinsPerUtxoSize;
 //    @Deprecated
 //    private String coinsPerUtxoWord;
+
+    //Conway era fields
+    private PoolVotingThresholds poolVotingThresholds; //25
+    private DrepVoteThresholds dRepVoteThresholds; //26
+    private Integer minCommitteeSize; //27
+    private Integer committeeTermLimit; //28
+    private Integer governanceActionValidityPeriod; //29
+    private BigInteger governanceActionDeposit; //30
+    private BigInteger drepDeposit; //31
+    private Integer drepInactivityPeriod; //32
 }

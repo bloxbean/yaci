@@ -1,6 +1,8 @@
 package com.bloxbean.cardano.yaci.core.model;
 
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
+import com.bloxbean.cardano.yaci.core.model.governance.ProposalProcedure;
+import com.bloxbean.cardano.yaci.core.model.governance.VotingProcedures;
 import lombok.*;
 
 import java.math.BigInteger;
@@ -43,4 +45,10 @@ public class TransactionBody {
     private TransactionOutput collateralReturn;
     private BigInteger totalCollateral;
     private Set<TransactionInput> referenceInputs;
+
+    //Conway
+    private VotingProcedures votingProcedures;
+    private List<ProposalProcedure> proposalProcedures;
+    private BigInteger currentTreasuryValue;
+    private BigInteger donation;
 }

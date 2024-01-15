@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.client.address.Address;
+import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.*;
@@ -105,7 +106,14 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @Test
     void protocolParameters() {
-        Mono<CurrentProtocolParamQueryResult> mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(era));
+        Mono<CurrentProtocolParamQueryResult> mono = null;
+
+        if (protocolMagic == Constants.SANCHONET_PROTOCOL_MAGIC) {
+            mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Conway));
+        } else {
+            mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Babbage));
+        }
+
         mono = mono.log();
 
         StepVerifier

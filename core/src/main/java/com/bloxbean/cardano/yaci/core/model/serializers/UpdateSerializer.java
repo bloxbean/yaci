@@ -2,6 +2,8 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
+import com.bloxbean.cardano.yaci.core.model.DrepVoteThresholds;
+import com.bloxbean.cardano.yaci.core.model.PoolVotingThresholds;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.core.model.Update;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
@@ -180,6 +182,31 @@ public enum UpdateSerializer implements Serializer<Update> {
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(24));
         Integer maxCollateralPercent = itemDI != null ? toInt(itemDI) : null;
 
+        //Conway era protocol parameters
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(25));
+        PoolVotingThresholds poolVotingThresholds = deserializePoolVotingThresholds(itemDI);
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(26));
+        DrepVoteThresholds drepVoteThresholds = deserializeDrepVoteThresholds(itemDI);
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(27));
+        Integer minCommitteeSize = itemDI != null ? toInt(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(28));
+        Integer committeeTermLimit = itemDI != null ? toInt(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(29));
+        Integer goveranceActionValidityPeriod = itemDI != null ? toInt(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(30));
+        BigInteger governanceActionDeposit = itemDI != null ? toBigInteger(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(31));
+        BigInteger drepDeposit = itemDI != null ? toBigInteger(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(32));
+        Integer drepInactivityPeriod = itemDI != null ? toInt(itemDI) : null;
+
         ProtocolParamUpdate protocolParamUpdate = ProtocolParamUpdate.builder()
                 .minFeeA(minFeeA)
                 .minFeeB(minFeeB)
@@ -211,6 +238,14 @@ public enum UpdateSerializer implements Serializer<Update> {
                 .maxValSize(maxValueSize)
                 .collateralPercent(collateralPercent)
                 .maxCollateralInputs(maxCollateralPercent)
+                .poolVotingThresholds(poolVotingThresholds)
+                .dRepVoteThresholds(drepVoteThresholds)
+                .minCommitteeSize(minCommitteeSize)
+                .committeeTermLimit(committeeTermLimit)
+                .governanceActionValidityPeriod(goveranceActionValidityPeriod)
+                .governanceActionDeposit(governanceActionDeposit)
+                .drepDeposit(drepDeposit)
+                .drepInactivityPeriod(drepInactivityPeriod)
                 .build();
         return protocolParamUpdate;
     }
@@ -233,5 +268,80 @@ public enum UpdateSerializer implements Serializer<Update> {
         BigDecimal stepPrice = toRationalNumber(stepPriceRN);
 
         return new Tuple<>(memPrice, stepPrice);
+    }
+
+    /**
+     * pool_voting_thresholds =
+     *   [ unit_interval ; motion no confidence
+     *   , unit_interval ; committee normal
+     *   , unit_interval ; committee no confidence
+     *   , unit_interval ; hard fork initiation
+     *   ]
+     * @param itemDI
+     * @return
+     */
+    private PoolVotingThresholds deserializePoolVotingThresholds(DataItem itemDI) {
+        if (itemDI == null)
+            return null;
+
+        List<DataItem> poolVotingThresholds = ((Array) itemDI).getDataItems();
+        BigDecimal motionNoConfidence = toRationalNumber((RationalNumber) poolVotingThresholds.get(0));
+        BigDecimal committeeNormal = toRationalNumber((RationalNumber) poolVotingThresholds.get(1));
+        BigDecimal committeeNoConfidence = toRationalNumber((RationalNumber) poolVotingThresholds.get(2));
+        BigDecimal hardForkInitiation = toRationalNumber((RationalNumber) poolVotingThresholds.get(3));
+
+        return PoolVotingThresholds.builder()
+                .motionNoConfidence(motionNoConfidence)
+                .committeeNormal(committeeNormal)
+                .committeeNoConfidence(committeeNoConfidence)
+                .hardForkInitiation(hardForkInitiation)
+                .build();
+
+    }
+
+    /**
+     * drep_voting_thresholds =
+     *   [ unit_interval ; motion no confidence
+     *   , unit_interval ; committee normal
+     *   , unit_interval ; committee no confidence
+     *   , unit_interval ; update constitution
+     *   , unit_interval ; hard fork initiation
+     *   , unit_interval ; PP network group
+     *   , unit_interval ; PP economic group
+     *   , unit_interval ; PP technical group
+     *   , unit_interval ; PP governance group
+     *   , unit_interval ; treasury withdrawal
+     *   ]
+     * @param itemDI
+     * @return
+     */
+    private DrepVoteThresholds deserializeDrepVoteThresholds(DataItem itemDI) {
+        if (itemDI == null)
+            return null;
+
+        List<DataItem> drepVotingThresholds = ((Array) itemDI).getDataItems();
+        BigDecimal motionNoConfidence = toRationalNumber((RationalNumber) drepVotingThresholds.get(0));
+        BigDecimal committeeNormal = toRationalNumber((RationalNumber) drepVotingThresholds.get(1));
+        BigDecimal committeeNoConfidence = toRationalNumber((RationalNumber) drepVotingThresholds.get(2));
+        BigDecimal updateConstitution = toRationalNumber((RationalNumber) drepVotingThresholds.get(3));
+        BigDecimal hardForkInitiation = toRationalNumber((RationalNumber) drepVotingThresholds.get(4));
+        BigDecimal ppNetworkGroup = toRationalNumber((RationalNumber) drepVotingThresholds.get(5));
+        BigDecimal ppEconomicGroup = toRationalNumber((RationalNumber) drepVotingThresholds.get(6));
+        BigDecimal ppTechnicalGroup = toRationalNumber((RationalNumber) drepVotingThresholds.get(7));
+        BigDecimal ppGovernanceGroup = toRationalNumber((RationalNumber) drepVotingThresholds.get(8));
+        BigDecimal treasuryWithdrawal = toRationalNumber((RationalNumber) drepVotingThresholds.get(9));
+
+        return DrepVoteThresholds.builder()
+                .motionNoConfidence(motionNoConfidence)
+                .committeeNormal(committeeNormal)
+                .committeeNoConfidence(committeeNoConfidence)
+                .updateConstitution(updateConstitution)
+                .hardForkInitiation(hardForkInitiation)
+                .ppNetworkGroup(ppNetworkGroup)
+                .ppEconomicGroup(ppEconomicGroup)
+                .ppTechnicalGroup(ppTechnicalGroup)
+                .ppGovernanceGroup(ppGovernanceGroup)
+                .treasuryWithdrawal(treasuryWithdrawal)
+                .build();
     }
 }

@@ -26,4 +26,5 @@ public class Witnesses {
     private List<Redeemer> redeemers = new ArrayList<>();
 
     private List<PlutusScript> plutusV2Scripts = new ArrayList<>();
+    private List<PlutusScript> plutusV3Scripts = new ArrayList<>();
 }

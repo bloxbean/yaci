@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.core.model.serializers;
+package com.bloxbean.cardano.yaci.core.model.serializers.util;
 
 import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborException;
@@ -15,7 +15,7 @@ import java.util.List;
 //This is only for Shelley and post Shelley era blocks
 public class TransactionBodyExtractor {
 
-    private static final int INFINITY = -1;
+    public static final int INFINITY = -1;
 
     @SneakyThrows
     public static List<Tuple<DataItem, byte[]>> getTxBodiesFromBlock(byte[] blockBody) {
@@ -62,7 +62,7 @@ public class TransactionBodyExtractor {
         return txBodyTuples;
     }
 
-    private static byte[] getSymbolBytes(int start, byte[] src){
+    public static byte[] getSymbolBytes(int start, byte[] src){
         if(start >= src.length){
             return new byte[]{};
         }
@@ -71,7 +71,7 @@ public class TransactionBodyExtractor {
         return symbol;
     }
 
-    private static long getLength(int initialByte, byte[] symbols) throws CborException {
+    public static long getLength(int initialByte, byte[] symbols) throws CborException {
         switch (AdditionalInformation.ofByte(initialByte)) {
             case DIRECT:
                 return initialByte & 31;

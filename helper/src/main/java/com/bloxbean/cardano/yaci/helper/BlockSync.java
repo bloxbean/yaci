@@ -1,6 +1,8 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.listener.BlockFetchAgentListenerAdapter;
 import com.bloxbean.cardano.yaci.helper.listener.ChainSyncListenerAdapter;
@@ -12,8 +14,8 @@ import com.bloxbean.cardano.yaci.helper.listener.ChainSyncListenerAdapter;
 public class BlockSync {
     private String host;
     private int port;
-    private long protocolMagic;
     private Point wellKnownPoint;
+    private VersionTable versionTable;
 
     private N2NChainSyncFetcher n2NChainSyncFetcher;
 
@@ -25,10 +27,21 @@ public class BlockSync {
      * @param wellKnownPoint A wellknown point
      */
     public BlockSync(String host, int port, long protocolMagic, Point wellKnownPoint) {
+        this(host, port, wellKnownPoint, N2NVersionTableConstant.v4AndAbove(protocolMagic));
+    }
+
+    /**
+     * Construct a BlockSync instance
+     * @param host Cardano node host
+     * @param port Cardano node port
+     * @param wellKnownPoint A wellknown point
+     * @param versionTable {@link VersionTable} instance
+     */
+    public BlockSync(String host, int port, Point wellKnownPoint, VersionTable versionTable) {
         this.host = host;
         this.port = port;
-        this.protocolMagic = protocolMagic;
         this.wellKnownPoint = wellKnownPoint;
+        this.versionTable = versionTable;
     }
 
     /**
@@ -44,7 +57,7 @@ public class BlockSync {
     }
 
     private void initializeAgentAndStart(Point point, BlockChainDataListener blockChainDataListener, boolean syncFromTip) {
-        n2NChainSyncFetcher = new N2NChainSyncFetcher(host, port, point, protocolMagic, syncFromTip);
+        n2NChainSyncFetcher = new N2NChainSyncFetcher(host, port, point, versionTable, syncFromTip);
 
         BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(blockChainDataListener);
         ChainSyncListenerAdapter chainSyncAgentListener = new ChainSyncListenerAdapter(blockChainDataListener);
@@ -64,6 +77,11 @@ public class BlockSync {
             n2NChainSyncFetcher.shutdown();
 
         initializeAgentAndStart(wellKnownPoint, blockChainDataListener, true);
+    }
+
+    public void sendKeepAliveMessage(int cookie) {
+        if (n2NChainSyncFetcher.isRunning())
+            n2NChainSyncFetcher.sendKeepAliveMessage(cookie);
     }
 
     /**

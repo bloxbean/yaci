@@ -1,20 +1,38 @@
 package com.bloxbean.cardano.yaci.helper;
 
+import com.bloxbean.cardano.client.account.Account;
+import com.bloxbean.cardano.client.address.Address;
+import com.bloxbean.cardano.client.common.model.Networks;
+import com.bloxbean.cardano.client.transaction.spec.*;
+import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.UtxoByAddressQuery;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.UtxoByAddressQueryResult;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.LocalTxSubmissionListener;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgAcceptTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgRejectTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.model.TxSubmissionRequest;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Mono;
 
+import java.math.BigInteger;
+import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import static com.bloxbean.cardano.client.common.ADAConversionUtil.adaToLovelace;
+import static com.bloxbean.cardano.yaci.core.util.Constants.LOVELACE;
+import static org.assertj.core.api.Assertions.assertThat;
+
 @Slf4j
 class LocalTxSubmissionClientIT extends BaseTest {
+
     @Test
     void submitTx() throws InterruptedException {
         LocalClientProvider localClientProvider = new LocalClientProvider(nodeSocketFile, N2CVersionTableConstant.v1AndAbove(protocolMagic));
@@ -52,6 +70,72 @@ class LocalTxSubmissionClientIT extends BaseTest {
 //        TxResult txResult = txResultMono.block(Duration.ofSeconds(20));
 //        System.out.println(txResult);
 //        assertThat(txResult.getErrorCbor()).isNotNull();
+    }
+
+    @SneakyThrows
+    @Test
+    void submitTx_validTx() {
+        LocalClientProvider localClientProvider = new LocalClientProvider(nodeSocketFile, N2CVersionTableConstant.v1AndAbove(protocolMagic));
+        LocalTxSubmissionClient localTxSubmissionClient = localClientProvider.getTxSubmissionClient();
+
+        localClientProvider.start();
+
+        String senderAddr = "addr_test1qp8mg8c5950hhrj3mkfr9ggseae2aj24ya2rndegwzuuyr202959apwtpv7sp0t6vfjnzyr0232uent4urdx7snr23yqa533ha";
+        String mnemonic = "wrist approve ethics forest knife treat noise great three simple prize happy toe dynamic number hunt trigger install wrong change decorate vendor glow erosion";
+
+        Era era = null;
+        if (protocolMagic == Constants.SANCHONET_PROTOCOL_MAGIC) {
+            era = Era.Conway;
+        } else {
+            era = Era.Babbage;
+        }
+
+        Mono<UtxoByAddressQueryResult> mono = localClientProvider.getLocalStateQueryClient()
+                .executeQuery(new UtxoByAddressQuery(era, new Address(senderAddr)));
+        var utxoQueryResult = mono.block(Duration.ofSeconds(5));
+
+        System.out.println(utxoQueryResult);
+
+        var utxo = utxoQueryResult.getUtxoList()
+                .stream()
+                .filter(u -> {
+                    if (u.getAmount().size() > 1)
+                        return false;
+                    var qty = u.getAmount().stream().filter(a -> a.getUnit().equals(LOVELACE)).findFirst().get().getQuantity().longValue();
+                    return qty > 1200000L;
+                }).findFirst().get();
+
+        var amount = utxo.getAmount().get(0).getQuantity();
+        BigInteger feeAmt = adaToLovelace(0.50);
+        var finalAmount = amount.subtract(feeAmt);
+
+        TransactionBody transactionBody = TransactionBody
+                .builder()
+                .inputs(List.of(new TransactionInput(utxo.getTxHash(), utxo.getOutputIndex())))
+                .outputs(List.of(
+                        TransactionOutput.builder()
+                                .address(senderAddr)
+                                .value(Value.builder()
+                                        .coin(finalAmount)
+                                        .build())
+                                .build()
+                ))
+                .fee(feeAmt)
+                .build();
+
+        Transaction transaction = Transaction.builder()
+                .body(transactionBody)
+                .build();
+
+        Account account = new Account(Networks.testnet(), mnemonic);
+        var signedTransaction = account.sign(transaction);
+
+        var txSubmissionRequest = new TxSubmissionRequest(TxBodyType.BABBAGE, signedTransaction.serialize());
+        var txResult = localTxSubmissionClient.submitTx(txSubmissionRequest).block(Duration.ofSeconds(20));
+
+        System.out.println(signedTransaction.serializeToHex());
+        System.out.println(txResult);
+        assertThat(txResult.isAccepted()).isTrue();
     }
 
 }

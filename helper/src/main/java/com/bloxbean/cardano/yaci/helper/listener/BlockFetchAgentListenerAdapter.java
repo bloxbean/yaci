@@ -113,6 +113,11 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
     }
 
     @Override
+    public void batchStarted() {
+        blockChainDataListener.batchStarted();
+    }
+
+    @Override
     public void batchDone() {
         blockChainDataListener.batchDone();
     }
@@ -120,5 +125,10 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
     @Override
     public void noBlockFound(Point from, Point to) {
         blockChainDataListener.noBlockFound(from, to);
+    }
+
+    @Override
+    public void onDisconnect() {
+        blockChainDataListener.onDisconnect();
     }
 }

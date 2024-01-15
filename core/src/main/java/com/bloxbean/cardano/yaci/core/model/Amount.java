@@ -15,5 +15,6 @@ public class Amount {
     private String policyId;
     //utf-8 assetname
     private String assetName;
+    private byte[] assetNameBytes;
     private BigInteger quantity;
 }

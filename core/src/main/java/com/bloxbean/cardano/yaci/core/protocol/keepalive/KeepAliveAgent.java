@@ -57,10 +57,13 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
     protected void processResponse(Message message) {
         if (message == null) return;
         if (message instanceof MsgKeepAliveResponse) {
-            log.info("MsgKeepAliveResponse: {}", message);
+            log.debug("MsgKeepAliveResponse: {}", message);
             handleKeepAliveResponse((MsgKeepAliveResponse) message);
         } else {
-            log.error("Invalid message !!! {}", message);
+            if (message instanceof MsgKeepAlive) {
+                log.warn("//TODO We should not receive MsgKeepAlive message. {}", message);
+            } else
+                log.error("Invalid message !!! {}", message);
         }
     }
 

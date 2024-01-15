@@ -9,8 +9,8 @@ import lombok.ToString;
 @ToString
 public class N2NVersionData extends VersionData {
     private Boolean initiatorAndResponderDiffusionMode;
-    private Integer peerSharing;
-    private Boolean query;
+    private Integer peerSharing = 0;
+    private Boolean query = Boolean.FALSE;
 
     public N2NVersionData(long networkMagic, Boolean initiatorAndResponderDiffusionMode) {
         super(networkMagic);
