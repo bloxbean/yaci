@@ -18,7 +18,7 @@ previous blocks, query information from a local node, monitor the local mempool,
 **Latest Beta Release :**
 - [0.3.0-beta3](https://github.com/bloxbean/yaci/releases/tag/v0.3.0-beta3) (Supports [SanchoNet](https://sancho.network/)) 
 
-  **Development Branch:** sanchonet
+  **Development Branch:** main
 
 ## Dependencies
 
