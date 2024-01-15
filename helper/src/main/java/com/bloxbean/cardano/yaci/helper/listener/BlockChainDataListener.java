@@ -17,6 +17,14 @@ public interface BlockChainDataListener {
     default void onBlock(Era era, Block block, List<Transaction> transactions) {}
     default void onRollback(Point point) {}
 
+    /**
+     * Called when a batch fetch starts (Block Fetch protocol)
+     */
+    default void batchStarted() {}
+
+    /**
+     * Called when a batch fetch completes (Block Fetch protocol)
+     */
     default void batchDone() {}
     default void noBlockFound(Point from, Point to) {}
 
@@ -32,4 +40,6 @@ public interface BlockChainDataListener {
      * @param tip
      */
     default void intersactNotFound(Tip tip) {}
+
+    default void onDisconnect() {}
 }

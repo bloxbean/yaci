@@ -39,4 +39,9 @@ public class ChainSyncListenerAdapter implements ChainSyncAgentListener {
     public void rollforwardByronEra(Tip tip, ByronBlockHead byronBlockHead) {
 
     }
+
+    @Override
+    public void onDisconnect() {
+        this.blockChainDataListener.onDisconnect();
+    }
 }
