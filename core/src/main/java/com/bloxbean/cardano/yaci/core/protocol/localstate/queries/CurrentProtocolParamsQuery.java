@@ -46,12 +46,12 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
 
     @Override
     public CurrentProtocolParamQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
-        var dataItemList = ((Array)di[0]).getDataItems();
+        List<DataItem> paramsDIList = ((Array) extractResultArray(di[0]).get(0)).getDataItems();
 
         if (protocolVersion.getVersionNumber() < PROTOCOL_V14 || protocolVersion.getVersionNumber() == PROTOCOL_V15) {
             return deserializeResultTillV13(di);
         } else { //V14, V16 and above
-            if (dataItemList.size() == 23) //Till Babbage
+            if (paramsDIList.size() == 23) //Till Babbage
                 return deserializeResultTillV13(di);
             else
                 return deserializeResult(di);
