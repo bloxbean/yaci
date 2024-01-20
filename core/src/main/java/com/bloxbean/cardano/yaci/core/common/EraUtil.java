@@ -20,7 +20,7 @@ public class EraUtil {
             case 6:
                 return Era.Babbage;
             case 7:
-                return Era.CONWAY;
+                return Era.Conway;
             default:
                 return null;
         }

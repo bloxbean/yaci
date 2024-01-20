@@ -24,14 +24,14 @@ import java.math.BigDecimal;
 @Builder
 @ToString
 public class DrepVoteThresholds {
-    private BigDecimal motionNoConfidence;
-    private BigDecimal committeeNormal;
-    private BigDecimal committeeNoConfidence;
-    private BigDecimal updateConstitution;
-    private BigDecimal hardForkInitiation;
-    private BigDecimal ppNetworkGroup;
-    private BigDecimal ppEconomicGroup;
-    private BigDecimal ppTechnicalGroup;
-    private BigDecimal ppGovernanceGroup;
-    private BigDecimal treasuryWithdrawal;
+    private BigDecimal dvtMotionNoConfidence;
+    private BigDecimal dvtCommitteeNormal;
+    private BigDecimal dvtCommitteeNoConfidence;
+    private BigDecimal dvtUpdateToConstitution;
+    private BigDecimal dvtHardForkInitiation;
+    private BigDecimal dvtPPNetworkGroup;
+    private BigDecimal dvtPPEconomicGroup;
+    private BigDecimal dvtPPTechnicalGroup;
+    private BigDecimal dvtPPGovGroup;
+    private BigDecimal dvtTreasuryWithdrawal;
 }

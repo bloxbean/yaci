@@ -239,13 +239,13 @@ public enum UpdateSerializer implements Serializer<Update> {
                 .collateralPercent(collateralPercent)
                 .maxCollateralInputs(maxCollateralPercent)
                 .poolVotingThresholds(poolVotingThresholds)
-                .dRepVoteThresholds(drepVoteThresholds)
-                .minCommitteeSize(minCommitteeSize)
-                .committeeTermLimit(committeeTermLimit)
-                .governanceActionValidityPeriod(goveranceActionValidityPeriod)
-                .governanceActionDeposit(governanceActionDeposit)
+                .drepVotingThresholds(drepVoteThresholds)
+                .committeeMinSize(minCommitteeSize)
+                .committeeMaxTermLength(committeeTermLimit)
+                .govActionLifetime(goveranceActionValidityPeriod)
+                .govActionDeposit(governanceActionDeposit)
                 .drepDeposit(drepDeposit)
-                .drepInactivityPeriod(drepInactivityPeriod)
+                .drepActivity(drepInactivityPeriod)
                 .build();
         return protocolParamUpdate;
     }
@@ -291,10 +291,10 @@ public enum UpdateSerializer implements Serializer<Update> {
         BigDecimal hardForkInitiation = toRationalNumber((RationalNumber) poolVotingThresholds.get(3));
 
         return PoolVotingThresholds.builder()
-                .motionNoConfidence(motionNoConfidence)
-                .committeeNormal(committeeNormal)
-                .committeeNoConfidence(committeeNoConfidence)
-                .hardForkInitiation(hardForkInitiation)
+                .pvtMotionNoConfidence(motionNoConfidence)
+                .pvtCommitteeNormal(committeeNormal)
+                .pvtCommitteeNoConfidence(committeeNoConfidence)
+                .pvtHardForkInitiation(hardForkInitiation)
                 .build();
 
     }
@@ -332,16 +332,16 @@ public enum UpdateSerializer implements Serializer<Update> {
         BigDecimal treasuryWithdrawal = toRationalNumber((RationalNumber) drepVotingThresholds.get(9));
 
         return DrepVoteThresholds.builder()
-                .motionNoConfidence(motionNoConfidence)
-                .committeeNormal(committeeNormal)
-                .committeeNoConfidence(committeeNoConfidence)
-                .updateConstitution(updateConstitution)
-                .hardForkInitiation(hardForkInitiation)
-                .ppNetworkGroup(ppNetworkGroup)
-                .ppEconomicGroup(ppEconomicGroup)
-                .ppTechnicalGroup(ppTechnicalGroup)
-                .ppGovernanceGroup(ppGovernanceGroup)
-                .treasuryWithdrawal(treasuryWithdrawal)
+                .dvtMotionNoConfidence(motionNoConfidence)
+                .dvtCommitteeNormal(committeeNormal)
+                .dvtCommitteeNoConfidence(committeeNoConfidence)
+                .dvtUpdateToConstitution(updateConstitution)
+                .dvtHardForkInitiation(hardForkInitiation)
+                .dvtPPNetworkGroup(ppNetworkGroup)
+                .dvtPPEconomicGroup(ppEconomicGroup)
+                .dvtPPTechnicalGroup(ppTechnicalGroup)
+                .dvtPPGovGroup(ppGovernanceGroup)
+                .dvtTreasuryWithdrawal(treasuryWithdrawal)
                 .build();
     }
 }

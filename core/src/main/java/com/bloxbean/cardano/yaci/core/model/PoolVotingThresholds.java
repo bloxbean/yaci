@@ -18,8 +18,8 @@ import java.math.BigDecimal;
 @Builder
 @ToString
 public class PoolVotingThresholds {
-    private BigDecimal motionNoConfidence;
-    private BigDecimal committeeNormal;
-    private BigDecimal committeeNoConfidence;
-    private BigDecimal hardForkInitiation;
+    private BigDecimal pvtMotionNoConfidence;
+    private BigDecimal pvtCommitteeNormal;
+    private BigDecimal pvtCommitteeNoConfidence;
+    private BigDecimal pvtHardForkInitiation;
 }
