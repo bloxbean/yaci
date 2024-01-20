@@ -67,11 +67,11 @@ public class ProtocolParamUpdate {
 
     //Conway era fields
     private PoolVotingThresholds poolVotingThresholds; //25
-    private DrepVoteThresholds dRepVoteThresholds; //26
-    private Integer minCommitteeSize; //27
-    private Integer committeeTermLimit; //28
-    private Integer governanceActionValidityPeriod; //29
-    private BigInteger governanceActionDeposit; //30
+    private DrepVoteThresholds drepVotingThresholds; //26
+    private Integer committeeMinSize; //27
+    private Integer committeeMaxTermLength; //28
+    private Integer govActionLifetime; //29
+    private BigInteger govActionDeposit; //30
     private BigInteger drepDeposit; //31
-    private Integer drepInactivityPeriod; //32
+    private Integer drepActivity; //32
 }
