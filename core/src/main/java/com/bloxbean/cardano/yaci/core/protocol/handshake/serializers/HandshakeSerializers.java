@@ -44,7 +44,7 @@ public class HandshakeSerializers {
                             N2NVersionData versionData = (N2NVersionData) entry.getValue();
                             Array versionDataArray = new Array();
                             versionDataArray.add(new UnsignedInteger(versionData.getNetworkMagic()));
-                            versionDataArray.add(versionData.getDiffusionMode() ? SimpleValue.TRUE : SimpleValue.FALSE);
+                            versionDataArray.add(versionData.getInitiatorAndResponderDiffusionMode() ? SimpleValue.TRUE : SimpleValue.FALSE);
 
                             //TODO -- check with existing node versions
                             if (entry.getKey() >= N2NVersionTableConstant.PROTOCOL_V11) {
