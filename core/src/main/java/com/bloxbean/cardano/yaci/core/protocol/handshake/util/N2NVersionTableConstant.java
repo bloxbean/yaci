@@ -7,6 +7,8 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import java.util.HashMap;
 import java.util.Map;
 
+import static com.bloxbean.cardano.yaci.core.protocol.handshake.messages.N2NVersionData.InitiatorOnlyDiffusionMode;
+
 public class N2NVersionTableConstant {
     public final static long PROTOCOL_V4 = 4;
     public final static long PROTOCOL_V5 = 5;
@@ -20,7 +22,7 @@ public class N2NVersionTableConstant {
     public final static long PROTOCOL_V13 = 13;
 
     public static VersionTable v4AndAbove(long networkMagic) {
-        N2NVersionData versionData = new N2NVersionData(networkMagic, false);
+        N2NVersionData versionData = new N2NVersionData(networkMagic, InitiatorOnlyDiffusionMode);
 
         Map<Long, VersionData> versionTableMap = new HashMap<>();
         versionTableMap.put(PROTOCOL_V4, versionData);
@@ -38,11 +40,11 @@ public class N2NVersionTableConstant {
     }
 
     public static VersionTable v11AndAbove(long networkMagic) {
-        return v11AndAbove(networkMagic, false, 0, false);
+        return v11AndAbove(networkMagic, InitiatorOnlyDiffusionMode, 0, false);
     }
 
-    public static VersionTable v11AndAbove(long networkMagic, boolean initiatorAndResponderDiffusionMode, int peerSharing, boolean query) {
-        N2NVersionData versionData = new N2NVersionData(networkMagic, initiatorAndResponderDiffusionMode, peerSharing, query);
+    public static VersionTable v11AndAbove(long networkMagic, boolean diffusionMode, int peerSharing, boolean query) {
+        N2NVersionData versionData = new N2NVersionData(networkMagic, diffusionMode, peerSharing, query);
 
         Map<Long, VersionData> versionTableMap = new HashMap<>();
         versionTableMap.put(PROTOCOL_V11, versionData);
