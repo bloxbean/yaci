@@ -53,6 +53,7 @@ class BlockFetcherIT extends BaseTest {
         assertThat(blocks.get(0).getHeader().getHeaderBody().getBlockNumber()).isEqualTo(287622);
     }
 
+
     @Test
     @Disabled
     public void fetchBlock_tillTip() throws InterruptedException {
@@ -80,8 +81,14 @@ class BlockFetcherIT extends BaseTest {
         Point to = new Point(50468813, "2fb2554a9fec38ce4b8121c001087f867b1bd19cda11e93dc5475dc253baf0e9");
         blockFetcher.fetch(from, to);
 
-        while (true)
+        while (true) {
+            if (count.get() % 5000 == 0) {
+                int random =(int) Math.random()*(65000-0+1)+0;
+                blockFetcher.sendKeepAliveMessage(random);
+            }
+
             Thread.sleep(1000);
+        }
     }
 
     @Test

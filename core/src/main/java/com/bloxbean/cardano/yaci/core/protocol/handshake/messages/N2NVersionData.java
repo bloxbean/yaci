@@ -8,21 +8,18 @@ import lombok.ToString;
 @EqualsAndHashCode
 @ToString
 public class N2NVersionData extends VersionData {
-    public static final boolean InitiatorOnlyDiffusionMode = true;
-    public static final boolean InitiatorAndResponderDiffusionMode = false;
-
-    private Boolean diffusionMode;
+    private Boolean initiatorOnlyDiffusionMode;
     private Integer peerSharing = 0;
     private Boolean query = Boolean.FALSE;
 
-    public N2NVersionData(long networkMagic, Boolean diffusionMode) {
+    public N2NVersionData(long networkMagic, Boolean initiatorOnlyDiffusionMode) {
         super(networkMagic);
-        this.diffusionMode = diffusionMode;
+        this.initiatorOnlyDiffusionMode = initiatorOnlyDiffusionMode;
     }
 
-    public N2NVersionData(long networkMagic, Boolean diffusionMode, Integer peerSharing, Boolean query) {
+    public N2NVersionData(long networkMagic, Boolean initiatorOnlyDiffusionMode, Integer peerSharing, Boolean query) {
         super(networkMagic);
-        this.diffusionMode = diffusionMode;
+        this.initiatorOnlyDiffusionMode = initiatorOnlyDiffusionMode;
         this.peerSharing = peerSharing;
         this.query = query;
     }
