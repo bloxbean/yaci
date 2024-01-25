@@ -44,7 +44,7 @@ public class HandshakeSerializers {
                             N2NVersionData versionData = (N2NVersionData) entry.getValue();
                             Array versionDataArray = new Array();
                             versionDataArray.add(new UnsignedInteger(versionData.getNetworkMagic()));
-                            versionDataArray.add(versionData.getInitiatorAndResponderDiffusionMode() ? SimpleValue.TRUE : SimpleValue.FALSE);
+                            versionDataArray.add(versionData.getInitiatorOnlyDiffusionMode() ? SimpleValue.TRUE : SimpleValue.FALSE);
 
                             //TODO -- check with existing node versions
                             if (entry.getKey() >= N2NVersionTableConstant.PROTOCOL_V11) {
@@ -89,20 +89,20 @@ public class HandshakeSerializers {
                                 if (versionDataArray.getDataItems().size() == 2) { //N2N 1,2,3,4,5,6,7,8,9,10
                                     long networkMagic = ((UnsignedInteger) versionDataArray.getDataItems().get(0)).getValue().intValue();
 
-                                    DataItem initiatorAndResponderDiffusionModeDI = versionDataArray.getDataItems().get(1);
-                                    boolean iardm = initiatorAndResponderDiffusionModeDI == SimpleValue.TRUE ? true : false;
+                                    DataItem initiatorOnlyDiffusionModeDI = versionDataArray.getDataItems().get(1);
+                                    boolean iodm = initiatorOnlyDiffusionModeDI == SimpleValue.TRUE ? true : false;
 
-                                    versionDataMap.put(versionNumber, new N2NVersionData(networkMagic, iardm));
+                                    versionDataMap.put(versionNumber, new N2NVersionData(networkMagic, iodm));
                                 } else if (versionDataArray.getDataItems().size() == 4) { //N2N 11,12
                                     long networkMagic = ((UnsignedInteger) versionDataArray.getDataItems().get(0)).getValue().intValue();
 
-                                    DataItem initiatorAndResponderDiffusionModeDI = versionDataArray.getDataItems().get(1);
-                                    boolean iardm = initiatorAndResponderDiffusionModeDI == SimpleValue.TRUE ? true : false;
+                                    DataItem initiatorOnlyDiffusionModeDI = versionDataArray.getDataItems().get(1);
+                                    boolean iodm = initiatorOnlyDiffusionModeDI == SimpleValue.TRUE ? true : false;
 
                                     int peerSharing = ((UnsignedInteger) versionDataArray.getDataItems().get(2)).getValue().intValue();
                                     Boolean query = versionDataArray.getDataItems().get(3) == SimpleValue.TRUE ? Boolean.TRUE : Boolean.FALSE;
 
-                                    versionDataMap.put(versionNumber, new N2NVersionData(networkMagic, iardm, peerSharing, query));
+                                    versionDataMap.put(versionNumber, new N2NVersionData(networkMagic, iodm, peerSharing, query));
                                 }
                             }
                         }

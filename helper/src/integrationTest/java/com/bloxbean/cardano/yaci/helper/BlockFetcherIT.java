@@ -10,12 +10,14 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,6 +51,44 @@ class BlockFetcherIT extends BaseTest {
         blockFetcher.shutdown();
 
         assertThat(blocks.get(0).getHeader().getHeaderBody().getBlockNumber()).isEqualTo(287622);
+    }
+
+
+    @Test
+    @Disabled
+    public void fetchBlock_tillTip() throws InterruptedException {
+        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(protocolMagic);
+        BlockFetcher blockFetcher = new BlockFetcher(node, nodePort, versionTable);
+
+        AtomicInteger count = new AtomicInteger(0);
+        blockFetcher.addBlockFetchListener(new BlockfetchAgentListener() {
+            @Override
+            public void byronBlockFound(ByronMainBlock byronBlock) {
+                if (count.incrementAndGet() % 1000 == 0)
+                    System.out.println("Byron Block >> " + byronBlock.getHeader().getConsensusData().getDifficulty());
+                count.incrementAndGet();
+            }
+
+            @Override
+            public void blockFound(Block block) {
+                if (count.incrementAndGet() % 1000 == 0)
+                    System.out.println("Block >> " + block.getHeader().getHeaderBody().getBlockNumber());
+            }
+        });
+        blockFetcher.start();
+
+        Point from = new Point(2, "1d031daf47281f69cd95ab929c269fd26b1434a56a5bbbd65b7afe85ef96b233");
+        Point to = new Point(50468813, "2fb2554a9fec38ce4b8121c001087f867b1bd19cda11e93dc5475dc253baf0e9");
+        blockFetcher.fetch(from, to);
+
+        while (true) {
+            if (count.get() % 5000 == 0) {
+                int random =(int) Math.random()*(65000-0+1)+0;
+                blockFetcher.sendKeepAliveMessage(random);
+            }
+
+            Thread.sleep(1000);
+        }
     }
 
     @Test
