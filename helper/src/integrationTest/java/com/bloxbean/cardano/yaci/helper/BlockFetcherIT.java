@@ -77,12 +77,25 @@ class BlockFetcherIT extends BaseTest {
         });
         blockFetcher.start();
 
-        Point from = new Point(2, "1d031daf47281f69cd95ab929c269fd26b1434a56a5bbbd65b7afe85ef96b233");
-        Point to = new Point(50468813, "2fb2554a9fec38ce4b8121c001087f867b1bd19cda11e93dc5475dc253baf0e9");
+        Point from = null;
+        Point to = null;
+        if (protocolMagic == Constants.SANCHONET_PROTOCOL_MAGIC) {
+            from = new Point(60, "8f4e50c397cf0796e6ac9b6db9fc0b761a29f1a040a7f1cfaa35513e3cc4db38");
+            to = new Point(19397676, "804046ba432b676895198d2dc9ae8f0f842f7dd74b8aba71f12dc98594548361");
+        } else if (protocolMagic == Constants.PREPROD_PROTOCOL_MAGIC) {
+            from = new Point(2, "1d031daf47281f69cd95ab929c269fd26b1434a56a5bbbd65b7afe85ef96b233");
+            to = new Point(50468813, "2fb2554a9fec38ce4b8121c001087f867b1bd19cda11e93dc5475dc253baf0e9");
+        } else if (protocolMagic == Constants.MAINNET_PROTOCOL_MAGIC) {
+            from = new Point(1, "1dbc81e3196ba4ab9dcb07e1c37bb28ae1c289c0707061f28b567c2f48698d50");
+            to = new Point(114620634, "fc1e525bd6406a1bf01b2423ea761336546ff14fc5bb3c4b711b60f57ae143a4");
+        }
+
         blockFetcher.fetch(from, to);
 
+        int aliveCount = 0;
         while (true) {
-            if (count.get() % 5000 == 0) {
+            aliveCount++;
+            if (aliveCount % 10 == 0) {
                 int random =(int) Math.random()*(65000-0+1)+0;
                 blockFetcher.sendKeepAliveMessage(random);
             }
@@ -149,40 +162,40 @@ class BlockFetcherIT extends BaseTest {
     }
 
     /** Not able to fetch block 0
-    @Test
-    public void fetchGenesisBlockByron() throws InterruptedException {
-        BlockFetcher blockFetcher = new BlockFetcher(node, nodePort, protocolMagic);
+     @Test
+     public void fetchGenesisBlockByron() throws InterruptedException {
+     BlockFetcher blockFetcher = new BlockFetcher(node, nodePort, protocolMagic);
 
-        CountDownLatch countDownLatch = new CountDownLatch(2);
-        List<ByronBlock> blocks = new ArrayList<>();
-        blockFetcher.addBlockFetchListener(new BlockfetchAgentListener() {
-            @Override
-            public void byronBlockFound(ByronMainBlock byronBlock) {
-                System.out.println("Byron Block >> " + byronBlock.getHeader().getConsensusData());
-                blocks.add(byronBlock);
-                countDownLatch.countDown();
-            }
+     CountDownLatch countDownLatch = new CountDownLatch(2);
+     List<ByronBlock> blocks = new ArrayList<>();
+     blockFetcher.addBlockFetchListener(new BlockfetchAgentListener() {
+     @Override
+     public void byronBlockFound(ByronMainBlock byronBlock) {
+     System.out.println("Byron Block >> " + byronBlock.getHeader().getConsensusData());
+     blocks.add(byronBlock);
+     countDownLatch.countDown();
+     }
 
-            @Override
-            public void byronEbBlockFound(ByronEbBlock byronEbBlock) {
-                System.out.println("Byron Block >> " + byronEbBlock.getHeader().getConsensusData());
-                blocks.add(byronEbBlock);
-                countDownLatch.countDown();
-            }
-        });
+     @Override
+     public void byronEbBlockFound(ByronEbBlock byronEbBlock) {
+     System.out.println("Byron Block >> " + byronEbBlock.getHeader().getConsensusData());
+     blocks.add(byronEbBlock);
+     countDownLatch.countDown();
+     }
+     });
 
-        blockFetcher.start();
+     blockFetcher.start();
 
-        Point from = new Point(0, "9ad7ff320c9cf74e0f5ee78d22a85ce42bb0a487d0506bf60cfb5a91ea4497d2");
-        Point to = new Point(1, "1d031daf47281f69cd95ab929c269fd26b1434a56a5bbbd65b7afe85ef96b233");
-        blockFetcher.fetch(from, to);
+     Point from = new Point(0, "9ad7ff320c9cf74e0f5ee78d22a85ce42bb0a487d0506bf60cfb5a91ea4497d2");
+     Point to = new Point(1, "1d031daf47281f69cd95ab929c269fd26b1434a56a5bbbd65b7afe85ef96b233");
+     blockFetcher.fetch(from, to);
 
-        countDownLatch.await(100, TimeUnit.SECONDS);
-        blockFetcher.shutdown();
+     countDownLatch.await(100, TimeUnit.SECONDS);
+     blockFetcher.shutdown();
 
-        assertThat(blocks).hasSize(3);
-        assertThat(blocks.get(0).getHeader().getBlockHash()).isEqualTo("9ad7ff320c9cf74e0f5ee78d22a85ce42bb0a487d0506bf60cfb5a91ea4497d2");
-        assertThat(blocks.get(1).getHeader().getBlockHash()).isEqualTo("ab0a64eaf8bc9e96e4df7161d3ace4d32e88cab2315f952665807509e49892eb");
-    }
- **/
+     assertThat(blocks).hasSize(3);
+     assertThat(blocks.get(0).getHeader().getBlockHash()).isEqualTo("9ad7ff320c9cf74e0f5ee78d22a85ce42bb0a487d0506bf60cfb5a91ea4497d2");
+     assertThat(blocks.get(1).getHeader().getBlockHash()).isEqualTo("ab0a64eaf8bc9e96e4df7161d3ace4d32e88cab2315f952665807509e49892eb");
+     }
+     **/
 }
