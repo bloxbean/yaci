@@ -63,7 +63,7 @@ Gradle
 | Other tasks              | Status                                                        |
 |--------------------------|---------------------------------------------------------------|
 | `Block Parsing`          | Tx Inputs, Tx Outputs, MultiAssets, Mint, Certificate         |
-| `Eras`                   | Done (Byron, Shelley, Alonzo, Babbage) |   
+| `Eras`                   | Done (Byron, Shelley, Alonzo, Babbage, Conway) |   
 |                          |                                                               |
 
 
