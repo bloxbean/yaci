@@ -92,15 +92,16 @@ class BlockFetcherIT extends BaseTest {
 
         blockFetcher.fetch(from, to);
 
-        int aliveCount = 0;
         while (true) {
-            aliveCount++;
-            if (aliveCount % 10 == 0) {
-                int random =(int) Math.random()*(65000-0+1)+0;
-                blockFetcher.sendKeepAliveMessage(random);
-            }
+            int min = 1;
+            int max = 65000;
+            int randomNum = (int)(Math.random() * (max - min + 1)) + min;
+            blockFetcher.sendKeepAliveMessage(randomNum);
 
-            Thread.sleep(1000);
+            System.out.println("Last Keep Alive Message Time : " + blockFetcher.getLastKeepAliveResponseTime());
+            System.out.println("Last Keep Alive Message Cookie : " + blockFetcher.getLastKeepAliveResponseCookie());
+
+            Thread.sleep(3000);
         }
     }
 
