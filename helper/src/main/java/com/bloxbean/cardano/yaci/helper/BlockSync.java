@@ -79,9 +79,29 @@ public class BlockSync {
         initializeAgentAndStart(wellKnownPoint, blockChainDataListener, true);
     }
 
+    /**
+     * Send keep alive message
+     * @param cookie
+     */
     public void sendKeepAliveMessage(int cookie) {
         if (n2NChainSyncFetcher.isRunning())
             n2NChainSyncFetcher.sendKeepAliveMessage(cookie);
+    }
+
+    /**
+     * Get the last keep alive response cookie
+     * @return
+     */
+    public int getLastKeepAliveResponseCookie() {
+        return n2NChainSyncFetcher.getLastKeepAliveResponseCookie();
+    }
+
+    /**
+     * Get the last keep alive response time
+     * @return
+     */
+    public long getLastKeepAliveResponseTime() {
+        return n2NChainSyncFetcher.getLastKeepAliveResponseTime();
     }
 
     /**

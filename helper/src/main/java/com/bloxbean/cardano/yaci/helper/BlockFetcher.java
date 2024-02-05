@@ -55,6 +55,9 @@ public class BlockFetcher implements Fetcher<Block> {
     private BlockfetchAgent blockfetchAgent;
     private TCPNodeClient n2nClient;
 
+    private int lastKeepAliveResponseCookie = 0;
+    private long lastKeepAliveResponseTime = 0;
+
     /**
      * Constructor to create BlockFetcher instance
      * @param host Cardano node host
@@ -90,6 +93,11 @@ public class BlockFetcher implements Fetcher<Block> {
                 blockfetchAgent.sendNextMessage();
                 keepAliveAgent.sendKeepAlive(1234);
             }
+        });
+
+        keepAliveAgent.addListener(response -> {
+            lastKeepAliveResponseCookie = response.getCookie();
+            lastKeepAliveResponseTime = System.currentTimeMillis();
         });
     }
 
@@ -162,18 +170,20 @@ public class BlockFetcher implements Fetcher<Block> {
             keepAliveAgent.sendKeepAlive(cookie);
     }
 
-//    public static void main(String[] args) {
-//        //shelley
-//        Point from = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
-//        Point to = new Point(70223766, "21155bb822637508a91e9952e712040c0ea45107fb91898bfe8c9a95389b0d90");
-//
-//        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic());
-//        BlockFetcher blockFetcher = new BlockFetcher("192.168.0.228", 6000, versionTable);
-//
-//        blockFetcher.start(block -> {
-//            log.info("Block >>> {} -- {} {}", block.getHeader().getHeaderBody().getBlockNumber(), block.getHeader().getHeaderBody().getSlot() + "  ", block.getEra());
-//        });
-//
-//        blockFetcher.fetch(from, to);
-//    }
+    /**
+     * Get the last keep alive response cookie
+     * @return
+     */
+    public int getLastKeepAliveResponseCookie() {
+        return lastKeepAliveResponseCookie;
+    }
+
+    /**
+     * Get the last keep alive response time
+     * @return
+     */
+    public long getLastKeepAliveResponseTime() {
+        return lastKeepAliveResponseTime;
+    }
+
 }

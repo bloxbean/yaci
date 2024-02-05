@@ -46,6 +46,9 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
     private BlockfetchAgent blockFetchAgent;
     private TCPNodeClient n2nClient;
 
+    private int lastKeepAliveResponseCookie = 0;
+    private long lastKeepAliveResponseTime = 0;
+
     /**
      * Construct {@link N2NChainSyncFetcher} to sync the blockchain
      *
@@ -193,6 +196,11 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
             }
         });
 
+        keepAliveAgent.addListener(response -> {
+            lastKeepAliveResponseCookie = response.getCookie();
+            lastKeepAliveResponseTime = System.currentTimeMillis();
+        });
+
         n2nClient = new TCPNodeClient(host, port, handshakeAgent, keepAliveAgent,
                 chainSyncAgent, blockFetchAgent);
     }
@@ -253,9 +261,29 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
             chainSyncAgent.addListener(listener);
     }
 
+    /**
+     * Send keep alive message
+     * @param cookie
+     */
     public void sendKeepAliveMessage(int cookie) {
         if (n2nClient.isRunning())
             keepAliveAgent.sendKeepAlive(cookie);
+    }
+
+    /**
+     * Get the last keep alive response cookie
+     * @return
+     */
+    public int getLastKeepAliveResponseCookie() {
+        return lastKeepAliveResponseCookie;
+    }
+
+    /**
+     * Get the last keep alive response time
+     * @return
+     */
+    public long getLastKeepAliveResponseTime() {
+        return lastKeepAliveResponseTime;
     }
 
     /**
