@@ -91,4 +91,10 @@ public class BlockSync {
         n2NChainSyncFetcher.shutdown();
     }
 
+    /**
+     * Check if the connection is alive
+     */
+    public boolean isRunning() {
+        return n2NChainSyncFetcher.isRunning();
+    }
 }

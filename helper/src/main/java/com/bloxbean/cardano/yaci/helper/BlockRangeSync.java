@@ -71,4 +71,11 @@ public class BlockRangeSync {
     public void stop() {
         blockFetcher.shutdown();
     }
+
+    /**
+     * Check if the connection is alive
+     */
+    public boolean isRunning() {
+        return blockFetcher.isRunning();
+    }
 }
