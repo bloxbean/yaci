@@ -61,8 +61,28 @@ public class BlockRangeSync {
         blockFetcher.fetch(from, to);
     }
 
+    /**
+     * Send keep alive message
+     * @param cookie
+     */
     public void sendKeepAliveMessage(int cookie) {
         blockFetcher.sendKeepAliveMessage(cookie);
+    }
+
+    /**
+     * Get the last keep alive response cookie
+     * @return
+     */
+    public int getLastKeepAliveResponseCookie() {
+        return blockFetcher.getLastKeepAliveResponseCookie();
+    }
+
+    /**
+     * Get the last keep alive response time
+     * @return
+     */
+    public long getLastKeepAliveResponseTime() {
+        return blockFetcher.getLastKeepAliveResponseTime();
     }
 
     /**

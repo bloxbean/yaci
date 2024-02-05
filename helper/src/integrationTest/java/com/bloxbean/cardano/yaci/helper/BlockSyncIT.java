@@ -7,6 +7,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -39,6 +40,36 @@ public class BlockSyncIT extends BaseTest {
 
         countDownLatch.await(60, TimeUnit.SECONDS);
         assertThat(blockNo.get()).isGreaterThan(420800);
+    }
+
+    @Test
+    @Disabled
+    void syncFromTip_dontStop() throws InterruptedException {
+        BlockSync blockSync = new BlockSync(node, nodePort, protocolMagic, Constants.WELL_KNOWN_PREPROD_POINT);
+
+        blockSync.startSyncFromTip(new BlockChainDataListener() {
+
+            public void onBlock(Era era, Block block, List<Transaction> transactions) {
+                System.out.println(block.getHeader().getHeaderBody().getBlockNumber());
+                System.out.println("# of transactions >> " + transactions.size());
+            }
+
+        });
+
+        int aliveCount = 0;
+        while (true) {
+            aliveCount++;
+            if (aliveCount % 10 == 0) {
+                int min = 1;
+                int max = 65000;
+                int randomNum = (int)(Math.random() * (max - min + 1)) + min;
+                blockSync.sendKeepAliveMessage(randomNum);
+            }
+
+            System.out.println("Last Keep Alive Message Time : " + blockSync.getLastKeepAliveResponseTime());
+            System.out.println("Last Keep Alive Message Cookie : " + blockSync.getLastKeepAliveResponseCookie());
+            Thread.sleep(2000);
+        }
     }
 
     @Test
