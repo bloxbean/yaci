@@ -148,7 +148,7 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
             try {
                 for (DataItem plutusV3ScriptDI : plutusV3ScriptDIList) {
                     if (plutusV3ScriptDI == Special.BREAK) continue;
-                    String scriptCborHex = toHex(plutusV3ScriptArray);
+                    String scriptCborHex = toHex(plutusV3ScriptDI);
 
                     PlutusScript plutusScript = new PlutusScript(String.valueOf(3), scriptCborHex);
                     plutusV3Scripts.add(plutusScript);
