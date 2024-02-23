@@ -19,8 +19,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-import static com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil.getArrayBytes;
-import static com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil.getRedeemerFields;
+import static com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil.*;
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toInt;
 
 @Slf4j
@@ -163,47 +162,99 @@ public enum BlockSerializer implements Serializer<Block> {
                 }
 
                 /*
-                 * redeemer = [ tag: redeemer_tag, index: uint, data: plutus_data, ex_units: ex_units ]
+                 * redeemers =
+                 *     [ + [ tag: redeemer_tag, index: uint, data: plutus_data, ex_units: ex_units ] ]
+                 *     / { + [ tag: redeemer_tag, index: uint ] => [ data: plutus_data, ex_units: ex_units ] }
                  */
                 List<Redeemer> redeemers = witness.getRedeemers();
                 if (redeemers != null && !redeemers.isEmpty()) {
-                    var redeemerArrayBytes = getArrayBytes(witnessFields.get(BigInteger.valueOf(5L)));
-                    if (redeemerArrayBytes.size() != redeemers.size()) {
-                        log.error("block: {} redeemer does not have the same size", block);
-                    } else {
-                        for (int redeemerIdx = 0; redeemerIdx < redeemers.size(); redeemerIdx++) {
-                            var redeemer = redeemers.get(redeemerIdx);
-                            var redeemerBytes = redeemerArrayBytes.get(redeemerIdx);
-                            var redeemerFields = getRedeemerFields(redeemerBytes);
 
-                            if (redeemerFields.size() != 4) {
-                                log.error("Missing redeemer fields. Expected size 4, but found {}", redeemerFields.size());
-                                continue;
-                                //throw new IllegalStateException("Redeemer missing field");
+                    var redeemersBytes = witnessFields.get(BigInteger.valueOf(5L));
+
+                    //Isolate the first 3 bits of the byte, which represent the "major type" in CBOR's encoding structure. (0xe0 = 11100000)
+                    var majorType = MajorType.ofByte(redeemersBytes[0] & 0xe0);
+
+                     if (majorType == MajorType.ARRAY) {
+                        var redeemerArrayBytes = getArrayBytes(redeemersBytes);
+                        if (redeemerArrayBytes.size() != redeemers.size()) {
+                            log.error("block: {} redeemer does not have the same size", block);
+                        } else {
+                            for (int redeemerIdx = 0; redeemerIdx < redeemers.size(); redeemerIdx++) {
+                                var redeemer = redeemers.get(redeemerIdx);
+                                var redeemerBytes = redeemerArrayBytes.get(redeemerIdx);
+                                var redeemerFields = getRedeemerFields(redeemerBytes);
+
+                                if (redeemerFields.size() != 4) {
+                                    log.error("Missing redeemer fields. Expected size 4, but found {}", redeemerFields.size());
+                                    continue;
+                                    //throw new IllegalStateException("Redeemer missing field");
+                                }
+
+                                var actualRedeemerData = redeemerFields.get(2);
+                                var redeemerData = redeemer.getData();
+                                final var cbor = HexUtil.encodeHexString(actualRedeemerData);
+                                final var hash = Datum.cborToHash(actualRedeemerData);
+
+                                if (!redeemerData.getHash().equals(hash)) {
+                                    log.debug("Redeemer data hash mismatch : {} - {} - {}",
+                                            block, redeemerData.getHash(), hash);
+                                }
+
+                                var updatedRedeemerData = redeemerData.toBuilder()
+                                        .cbor(cbor)
+                                        .hash(hash)
+                                        .build();
+
+                                var updatedRedeemer = redeemer.toBuilder()
+                                        .cbor(HexUtil.encodeHexString(redeemerBytes))
+                                        .data(updatedRedeemerData)
+                                        .build();
+
+                                redeemers.set(redeemerIdx, updatedRedeemer);
                             }
-
-                            var actualRedeemerData = redeemerFields.get(2);
-                            var redeemerData = redeemer.getData();
-                            final var cbor = HexUtil.encodeHexString(actualRedeemerData);
-                            final var hash = Datum.cborToHash(actualRedeemerData);
-
-                            if (!redeemerData.getHash().equals(hash)) {
-                                log.debug("Redeemer data hash mismatch : {} - {} - {}",
-                                        block, redeemerData.getHash(), hash);
-                            }
-
-                            var updatedRedeemerData = redeemerData.toBuilder()
-                                    .cbor(cbor)
-                                    .hash(hash)
-                                    .build();
-
-                            var updatedRedeemer = redeemer.toBuilder()
-                                    .cbor(HexUtil.encodeHexString(redeemerBytes))
-                                    .data(updatedRedeemerData)
-                                    .build();
-
-                            redeemers.set(redeemerIdx, updatedRedeemer);
                         }
+                    } else if (majorType == MajorType.MAP) {
+                        List<Tuple<byte[], byte[]>> redeemerMapEntriesBytes = getRedeemerMapBytes(redeemersBytes);
+                        if (redeemerMapEntriesBytes.size() != redeemers.size()) {
+                            log.error("block: {} redeemer does not have the same size", block);
+                        } else {
+                            for (int redeemerIdx = 0; redeemerIdx < redeemers.size(); redeemerIdx++) {
+                                var redeemer = redeemers.get(redeemerIdx);
+                                var redeemerBytesKeyValueTuple = redeemerMapEntriesBytes.get(redeemerIdx);
+
+                                //Get value field, as we only need redeemer data
+                                var redeemerFields = getRedeemerFields(redeemerBytesKeyValueTuple._2);
+
+                                if (redeemerFields.size() != 2) {
+                                    log.error("Missing redeemer fields in value. Expected size 2, but found {}", redeemerFields.size());
+                                    continue;
+                                }
+
+                                var actualRedeemerData = redeemerFields.get(1);
+                                var redeemerData = redeemer.getData();
+                                final var cbor = HexUtil.encodeHexString(actualRedeemerData);
+                                final var hash = Datum.cborToHash(actualRedeemerData);
+
+                                if (!redeemerData.getHash().equals(hash)) {
+                                    log.debug("Redeemer data hash mismatch : {} - {} - {}",
+                                            block, redeemerData.getHash(), hash);
+                                }
+
+                                var updatedRedeemerData = redeemerData.toBuilder()
+                                        .cbor(cbor)
+                                        .hash(hash)
+                                        .build();
+
+                                var updatedRedeemer = redeemer.toBuilder()
+                                        //.cbor(HexUtil.encodeHexString(redeemerBytes))
+                                        .data(updatedRedeemerData)
+                                        .build();
+
+                                redeemers.set(redeemerIdx, updatedRedeemer);
+                            }
+                        }
+                    } else {
+                        throw new IllegalStateException("Invalid major type for redeemer list bytes : " + majorType);
                     }
                 }
 

@@ -1,16 +1,28 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.CborException;
+import co.nstant.in.cbor.model.Array;
+import co.nstant.in.cbor.model.DataItem;
+import com.bloxbean.cardano.client.plutus.spec.BigIntPlutusData;
+import com.bloxbean.cardano.client.plutus.spec.RedeemerTag;
 import com.bloxbean.cardano.yaci.core.model.Datum;
+import com.bloxbean.cardano.yaci.core.model.Redeemer;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
 import com.bloxbean.cardano.yaci.core.util.CborLoader;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import com.bloxbean.cardano.yaci.core.util.Tuple;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import static com.bloxbean.cardano.yaci.core.model.serializers.WitnessUtilTest.createRedeemerArray;
+import static com.bloxbean.cardano.yaci.core.model.serializers.WitnessUtilTest.createRedeemerKeyValue;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class RedeemerTest {
     private static final String RAW_CBOR_BLOCK_286677_PREPROD = "preprod286677.txt";
@@ -216,6 +228,78 @@ class RedeemerTest {
                 Assertions.assertEquals(expectedRedeemersSize, redeemerArraysBytes.size());
             }
         }
+    }
+
+    @Test
+    void arrayRedeemer_deserialize() throws Exception {
+        var redeemer1 = createRedeemerArray(2, 1, new BigIntPlutusData(BigInteger.valueOf(777000)),
+                BigInteger.valueOf(22000), BigInteger.valueOf(33000));
+        var redeemer2 = createRedeemerArray(3, 0, new BigIntPlutusData(BigInteger.valueOf(1000)),
+                BigInteger.valueOf(2000), BigInteger.valueOf(3000));
+
+        Array redeemersArray = new Array();
+        redeemersArray.add(redeemer1);
+        redeemersArray.add(redeemer2);
+
+        var redeemerBytes = CborSerializationUtil.serialize(redeemersArray);
+
+        var deRedeemerArray = (Array) CborSerializationUtil.deserializeOne(redeemerBytes);
+
+        List<Redeemer> redeemers = new ArrayList<>();
+        for (DataItem di : deRedeemerArray.getDataItems()) {
+            Redeemer redeemer = Redeemer.deserializePreConway((Array) di);
+            redeemers.add(redeemer);
+        }
+
+        assertThat(redeemers.size()).isEqualTo(2);
+        assertThat(redeemers.get(0).getTag()).isEqualTo(RedeemerTag.Cert);
+        assertThat(redeemers.get(0).getIndex()).isEqualTo(1);
+        assertThat(redeemers.get(0).getData().getCbor()).isEqualTo(BigIntPlutusData.of(777000).serializeToHex());
+        assertThat(redeemers.get(0).getExUnits().getMem()).isEqualTo(BigInteger.valueOf(22000));
+        assertThat(redeemers.get(0).getExUnits().getSteps()).isEqualTo(BigInteger.valueOf(33000));
+
+        assertThat(redeemers.get(1).getTag()).isEqualTo(RedeemerTag.Reward);
+        assertThat(redeemers.get(1).getIndex()).isEqualTo(0);
+        assertThat(redeemers.get(1).getData().getCbor()).isEqualTo(BigIntPlutusData.of(1000).serializeToHex());
+        assertThat(redeemers.get(1).getExUnits().getMem()).isEqualTo(BigInteger.valueOf(2000));
+        assertThat(redeemers.get(1).getExUnits().getSteps()).isEqualTo(BigInteger.valueOf(3000));
+    }
+
+    @Test
+    void mapRedeemer_deserialize() throws Exception {
+        var redeemerTuple1 = createRedeemerKeyValue(2, 1, new BigIntPlutusData(BigInteger.valueOf(777000)),
+                BigInteger.valueOf(22000), BigInteger.valueOf(33000));
+        var redeemerTuple2 = createRedeemerKeyValue(3, 0, new BigIntPlutusData(BigInteger.valueOf(1000)),
+                BigInteger.valueOf(2000), BigInteger.valueOf(3000));
+
+        co.nstant.in.cbor.model.Map redeemerMap = new co.nstant.in.cbor.model.Map();
+        redeemerMap.put(redeemerTuple1._1, redeemerTuple1._2);
+        redeemerMap.put(redeemerTuple2._1, redeemerTuple2._2);
+
+        var redeemerBytes = CborSerializationUtil.serialize(redeemerMap);
+
+        List<Tuple<byte[], byte[]>> deRedeemerList = WitnessUtil.getRedeemerMapBytes(redeemerBytes);
+        List<Redeemer> redeemers = new ArrayList<>();
+        for (var redeemerTuple : deRedeemerList) {
+            var keyArrayDI = (Array) CborSerializationUtil.deserializeOne(redeemerTuple._1);
+            var valueArrayDI = (Array) CborSerializationUtil.deserializeOne(redeemerTuple._2);
+
+            Redeemer redeemer = Redeemer.deserialize(keyArrayDI, valueArrayDI);
+            redeemers.add(redeemer);
+        }
+
+        assertThat(redeemers.size()).isEqualTo(2);
+        assertThat(redeemers.get(0).getTag()).isEqualTo(RedeemerTag.Cert);
+        assertThat(redeemers.get(0).getIndex()).isEqualTo(1);
+        assertThat(redeemers.get(0).getData().getCbor()).isEqualTo(BigIntPlutusData.of(777000).serializeToHex());
+        assertThat(redeemers.get(0).getExUnits().getMem()).isEqualTo(BigInteger.valueOf(22000));
+        assertThat(redeemers.get(0).getExUnits().getSteps()).isEqualTo(BigInteger.valueOf(33000));
+
+        assertThat(redeemers.get(1).getTag()).isEqualTo(RedeemerTag.Reward);
+        assertThat(redeemers.get(1).getIndex()).isEqualTo(0);
+        assertThat(redeemers.get(1).getData().getCbor()).isEqualTo(BigIntPlutusData.of(1000).serializeToHex());
+        assertThat(redeemers.get(1).getExUnits().getMem()).isEqualTo(BigInteger.valueOf(2000));
+        assertThat(redeemers.get(1).getExUnits().getSteps()).isEqualTo(BigInteger.valueOf(3000));
     }
 
     private static byte[] getBlockFromResource(String path) {

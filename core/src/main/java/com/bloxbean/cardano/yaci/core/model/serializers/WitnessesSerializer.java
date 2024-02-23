@@ -31,7 +31,7 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
         DataItem bootstrapWitnessArray = witnessMap.get(new UnsignedInteger(2));
         DataItem plutusScriptArray = witnessMap.get(new UnsignedInteger(3));
         DataItem plutusDataArray = witnessMap.get(new UnsignedInteger(4));
-        DataItem redeemerArray = witnessMap.get(new UnsignedInteger(5));
+        DataItem redeemersDI = witnessMap.get(new UnsignedInteger(5));
         DataItem plutusV2ScriptArray = witnessMap.get(new UnsignedInteger(6));
         DataItem plutusV3ScriptArray = witnessMap.get(new UnsignedInteger(7));
 
@@ -111,14 +111,21 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
 
         //redeemers
         List<Redeemer> redeemerList = new ArrayList<>();
-        if (redeemerArray != null) {
-            List<DataItem> redeemerDIList = ((Array) redeemerArray).getDataItems();
-            for (DataItem redeemerDI : redeemerDIList) {
-                if (redeemerDI == Special.BREAK) continue;
-                //Redeemer redeemer = new Redeemer(HexUtil.encodeHexString(CborSerializationUtil.serialize(redeemerDI, false)));
-                Redeemer redeemer = Redeemer.deserialize((Array) redeemerDI);
-                redeemerList.add(redeemer);
-               // redeemers.add(Redeemer.deserialize((Array) redeemerDI)); //TODO -- convert redeemer to json
+        if (redeemersDI != null) {
+            if (redeemersDI instanceof Array) {
+                List<DataItem> redeemerDIList = ((Array) redeemersDI).getDataItems();
+                for (DataItem redeemerDI : redeemerDIList) {
+                    if (redeemerDI == Special.BREAK) continue;
+                    Redeemer redeemer = Redeemer.deserializePreConway((Array) redeemerDI);
+                    redeemerList.add(redeemer);
+                }
+            } else if (redeemersDI instanceof Map) { //conway era
+                var redeemersMap = (Map) redeemersDI;
+                for (DataItem key : redeemersMap.getKeys()) {
+                    var valueDI = redeemersMap.get(key);
+                    Redeemer redeemer = Redeemer.deserialize((Array)key, (Array) valueDI);
+                    redeemerList.add(redeemer);
+                }
             }
         }
 
@@ -152,7 +159,6 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
 
                     PlutusScript plutusScript = new PlutusScript(String.valueOf(3), scriptCborHex);
                     plutusV3Scripts.add(plutusScript);
-
                 }
             } catch (Exception e) {
                 throw new CborRuntimeException("Plutus V3 script deserialization failed", e);

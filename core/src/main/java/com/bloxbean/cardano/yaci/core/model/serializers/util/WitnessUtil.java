@@ -5,6 +5,7 @@ import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.AdditionalInformation;
 import co.nstant.in.cbor.model.Special;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.yaci.core.util.Tuple;
 
 import java.io.ByteArrayInputStream;
 import java.math.BigInteger;
@@ -85,6 +86,37 @@ public final class WitnessUtil {
         }
 
         return witnessMap;
+    }
+
+    //Conway era
+    public static List<Tuple<byte[], byte[]>> getRedeemerMapBytes(byte[] redeemerBytes)
+            throws CborException {
+        var redeemerList = new ArrayList<Tuple<byte[], byte[]>>();
+
+        ByteArrayInputStream stream = new ByteArrayInputStream(redeemerBytes);
+        CborDecoder decoder = new CborDecoder(stream);
+
+        stream.read();
+
+        while (stream.available() > 0) {
+            int keyStartFrom = redeemerBytes.length - stream.available();
+            int previousAvailable = stream.available();
+            var keyDI = decoder.decodeNext();
+            int currentAvailable = stream.available();
+            final byte[] keyBytes = new byte[previousAvailable - currentAvailable];
+            System.arraycopy(redeemerBytes, keyStartFrom, keyBytes, 0, keyBytes.length);
+
+            int valueStartFrom = redeemerBytes.length - stream.available();
+            previousAvailable = stream.available();
+            var valueDI = decoder.decodeNext();
+            currentAvailable = stream.available();
+            final byte[] valueBytes = new byte[previousAvailable - currentAvailable];
+            System.arraycopy(redeemerBytes, valueStartFrom, valueBytes, 0, valueBytes.length);
+
+            redeemerList.add(new Tuple<>(keyBytes, valueBytes));
+        }
+
+        return redeemerList;
     }
 
     /**
