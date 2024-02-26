@@ -16,4 +16,5 @@ public class AuxData {
     private List<NativeScript> nativeScripts;
     private List<PlutusScript> plutusV1Scripts;
     private List<PlutusScript> plutusV2Scripts;
+    private List<PlutusScript> plutusV3Scripts;
 }

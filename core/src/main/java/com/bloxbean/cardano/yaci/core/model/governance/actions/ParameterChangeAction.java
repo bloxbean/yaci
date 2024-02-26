@@ -6,7 +6,9 @@ import com.bloxbean.cardano.yaci.core.model.governance.GovActionType;
 import lombok.*;
 
 /**
- * parameter_change_action = (0, gov_action_id / null, protocol_param_update)
+ * {@literal
+ * parameter_change_action = (0, gov_action_id / null, protocol_param_update, policy_hash / null)
+ * }
  */
 @Getter
 @AllArgsConstructor
@@ -19,4 +21,5 @@ public class ParameterChangeAction implements GovAction {
 
     private GovActionId govActionId;
     private ProtocolParamUpdate protocolParamUpdate;
+    private String policyHash; //script hash
 }

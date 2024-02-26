@@ -1,12 +1,8 @@
 package com.bloxbean.cardano.yaci.core.model;
 
-import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
-import com.bloxbean.cardano.client.exception.CborDeserializationException;
-import com.bloxbean.cardano.client.plutus.spec.ExUnits;
-import com.bloxbean.cardano.client.plutus.spec.RedeemerTag;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -26,11 +22,10 @@ public class Redeemer {
     private ExUnits exUnits;
     private String cbor;
 
-    public static Redeemer deserializePreConway(Array redeemerDI)
-            throws CborDeserializationException, CborException {
+    public static Redeemer deserializePreConway(Array redeemerDI) {
         List<DataItem> redeemerDIList = redeemerDI.getDataItems();
         if (redeemerDIList == null || redeemerDIList.size() != 4) {
-            throw new CborDeserializationException(
+            throw new CborRuntimeException(
                     "Redeemer deserialization error. Invalid no of DataItems");
         }
 
@@ -74,8 +69,9 @@ public class Redeemer {
 
     }
 
+    @SneakyThrows
     private static Redeemer getRedeemer(Array redeemerDI, UnsignedInteger tagDI, UnsignedInteger indexDI,
-                                        DataItem dataDI, Array exUnitDI) throws CborDeserializationException, CborException {
+                                        DataItem dataDI, Array exUnitDI) {
         Redeemer redeemer = new Redeemer();
 
         // Tag
@@ -88,6 +84,10 @@ public class Redeemer {
             redeemer.setTag(RedeemerTag.Cert);
         } else if (tagValue == 3) {
             redeemer.setTag(RedeemerTag.Reward);
+        } else if (tagValue == 4) {
+            redeemer.setTag(RedeemerTag.Voting);
+        } else if (tagValue == 5) {
+            redeemer.setTag(RedeemerTag.Proposing);
         }
 
         // Index

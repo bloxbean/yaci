@@ -207,6 +207,9 @@ public enum UpdateSerializer implements Serializer<Update> {
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(32));
         Integer drepInactivityPeriod = itemDI != null ? toInt(itemDI) : null;
 
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(33));
+        Integer minFeeRefScriptCostPerByte = itemDI != null ? toInt(itemDI) : null;
+
         ProtocolParamUpdate protocolParamUpdate = ProtocolParamUpdate.builder()
                 .minFeeA(minFeeA)
                 .minFeeB(minFeeB)
@@ -246,6 +249,7 @@ public enum UpdateSerializer implements Serializer<Update> {
                 .govActionDeposit(governanceActionDeposit)
                 .drepDeposit(drepDeposit)
                 .drepActivity(drepInactivityPeriod)
+                .minFeeRefScriptCostPerByte(minFeeRefScriptCostPerByte)
                 .build();
         return protocolParamUpdate;
     }
@@ -289,12 +293,14 @@ public enum UpdateSerializer implements Serializer<Update> {
         BigDecimal committeeNormal = toRationalNumber((RationalNumber) poolVotingThresholds.get(1));
         BigDecimal committeeNoConfidence = toRationalNumber((RationalNumber) poolVotingThresholds.get(2));
         BigDecimal hardForkInitiation = toRationalNumber((RationalNumber) poolVotingThresholds.get(3));
+        BigDecimal ppSecurityGroup = toRationalNumber((RationalNumber) poolVotingThresholds.get(4));
 
         return PoolVotingThresholds.builder()
                 .pvtMotionNoConfidence(motionNoConfidence)
                 .pvtCommitteeNormal(committeeNormal)
                 .pvtCommitteeNoConfidence(committeeNoConfidence)
                 .pvtHardForkInitiation(hardForkInitiation)
+                .pvtPPSecurityGroup(ppSecurityGroup)
                 .build();
 
     }

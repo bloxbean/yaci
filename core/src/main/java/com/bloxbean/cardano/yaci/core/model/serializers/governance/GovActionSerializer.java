@@ -14,6 +14,7 @@ import com.bloxbean.cardano.yaci.core.model.governance.actions.*;
 import com.bloxbean.cardano.yaci.core.model.serializers.UpdateSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.WithdrawalsSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -78,7 +79,14 @@ public enum GovActionSerializer implements Serializer<GovAction> {
         GovActionId govActionId = getGovActionId(actionIdDI);
 
         ProtocolParamUpdate protocolParamUpdate = UpdateSerializer.INSTANCE.getProtocolParams((Map) govActionArray.get(2));
-        return new ParameterChangeAction(govActionId, protocolParamUpdate);
+
+        String policyHash = null;
+        if (govActionArray.size() > 3) { //TODO -- Remove this once the node supports policy hash
+            var policyHashDI = govActionArray.get(3);
+            policyHash = policyHashDI == SimpleValue.NULL ? null : HexUtil.encodeHexString(toBytes(policyHashDI));
+        }
+
+        return new ParameterChangeAction(govActionId, protocolParamUpdate, policyHash);
     }
 
     private GovAction deserializeHardForkInitiationAction(List<DataItem> govActionArray) {
@@ -99,7 +107,14 @@ public enum GovActionSerializer implements Serializer<GovAction> {
 
     private GovAction deserializeTreasuryWithdrawalAction(List<DataItem> govActionArray) {
         java.util.Map<String, BigInteger> withdrawals = WithdrawalsSerializer.INSTANCE.deserializeDI(govActionArray.get(1));
-        return new TreasuryWithdrawalsAction(withdrawals);
+
+        String policyHash = null;
+        if (govActionArray.size() > 2) { //TODO -- Remove this once the node supports policy hash
+            var policyHashDI = govActionArray.get(2);
+            policyHash = policyHashDI == SimpleValue.NULL ? null : HexUtil.encodeHexString(toBytes(policyHashDI));
+        }
+
+        return new TreasuryWithdrawalsAction(withdrawals, policyHash);
     }
 
     private GovAction deserializeNoConfidenceAction(List<DataItem> govActionArray) {

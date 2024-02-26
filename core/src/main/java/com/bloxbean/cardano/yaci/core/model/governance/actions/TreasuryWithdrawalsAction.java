@@ -9,7 +9,7 @@ import java.util.Map;
 
 /**
  * {@literal
- * treasury_withdrawals_action = (2, { reward_account => coin })
+ * treasury_withdrawals_action = (2, { reward_account => coin }, policy_hash / null)
  * }
  */
 @Getter
@@ -23,4 +23,5 @@ public class TreasuryWithdrawalsAction implements GovAction {
 
     @Builder.Default
     private Map<String, BigInteger> withdrawals = new LinkedHashMap<>();
+    private String policyHash;
 }

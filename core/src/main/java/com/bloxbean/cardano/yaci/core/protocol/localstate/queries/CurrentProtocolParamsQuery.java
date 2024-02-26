@@ -344,20 +344,23 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
         BigDecimal committeeNormal = null;
         BigDecimal committeeNoConfidence = null;
         BigDecimal hardForkInitiation = null;
+        BigDecimal ppSecurityGroup = null;
         if (itemDI != null) {
             List<DataItem> poolVotingThresholdList = ((Array) itemDI).getDataItems();
-            if (poolVotingThresholdList.size() != 4)
+            if (poolVotingThresholdList.size() != 5)
                 throw new IllegalStateException("Invalid pool voting threshold list");
 
             var pvtMotionNoConfidenceDI = (RationalNumber) poolVotingThresholdList.get(0);
             var pvtCommitteeNormalDI = (RationalNumber) poolVotingThresholdList.get(1);
             var pvtCommitteeNoConfidenceDI = (RationalNumber) poolVotingThresholdList.get(2);
             var pvtHardForkInitiationDI = (RationalNumber) poolVotingThresholdList.get(3);
+            var pvtPPSecurityGroupDI = (RationalNumber) poolVotingThresholdList.get(4);
 
             motionNoConfidence = toRationalNumber(pvtMotionNoConfidenceDI);
             committeeNormal = toRationalNumber(pvtCommitteeNormalDI);
             committeeNoConfidence = toRationalNumber(pvtCommitteeNoConfidenceDI);
             hardForkInitiation = toRationalNumber(pvtHardForkInitiationDI);
+            ppSecurityGroup = toRationalNumber(pvtPPSecurityGroupDI);
         }
 
         //DRep voting thresholds
@@ -419,6 +422,12 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
         itemDI = paramsDIList.get(29);
         Integer drepInactivityPeriod = itemDI != null ? toInt(itemDI) : null;
 
+        Integer minFeeRefScriptCostPerByte = null; //TODO -- Remove if condition once this is available in the node release
+        if (paramsDIList.size() > 30) {
+            itemDI = paramsDIList.get(30);
+            minFeeRefScriptCostPerByte = itemDI != null ? toInt(itemDI) : null;
+        }
+
         ProtocolParamUpdate protocolParams = ProtocolParamUpdate.builder()
                 .minFeeA(minFeeA)
                 .minFeeB(minFeeB)
@@ -451,6 +460,7 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
                         .pvtCommitteeNormal(committeeNormal)
                         .pvtCommitteeNoConfidence(committeeNoConfidence)
                         .pvtHardForkInitiation(hardForkInitiation)
+                        .pvtPPSecurityGroup(ppSecurityGroup)
                         .build())
                 .drepVotingThresholds(DrepVoteThresholds.builder()
                         .dvtMotionNoConfidence(dvtMotionNoConfidence)
@@ -470,6 +480,7 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
                 .govActionDeposit(governanceActionDeposit)
                 .drepDeposit(drepDeposit)
                 .drepActivity(drepInactivityPeriod)
+                .minFeeRefScriptCostPerByte(minFeeRefScriptCostPerByte)
                 .build();
 
         return new CurrentProtocolParamQueryResult(protocolParams);
