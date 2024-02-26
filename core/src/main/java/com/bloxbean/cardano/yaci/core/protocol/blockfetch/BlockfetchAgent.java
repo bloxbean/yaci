@@ -137,9 +137,17 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
         } catch (Exception e) {
             errorBlks++;
             log.error("Error in parsing", e);
-            Array headerArray = (Array) ((Array)array.getDataItems().get(1)).getDataItems().get(0);
-            BlockHeader blockHeader = BlockHeaderSerializer.INSTANCE.getBlockHeaderFromHeaderArray(headerArray);
-            log.error("BlockHeader >> Block No: " + blockHeader.getHeaderBody().getBlockNumber() +", Slot: " + blockHeader.getHeaderBody().getSlot());
+
+            //Catch exception to avoid exception propagation
+            try {
+                Array headerArray = (Array) ((Array) array.getDataItems().get(1)).getDataItems().get(0);
+                BlockHeader blockHeader = BlockHeaderSerializer.INSTANCE.getBlockHeaderFromHeaderArray(headerArray);
+                log.error("BlockHeader >> Block No: " + blockHeader.getHeaderBody().getBlockNumber() + ", Slot: " + blockHeader.getHeaderBody().getSlot());
+            } catch (Exception e1) {
+                log.error("Error in parsing block header", e1);
+            }
+
+            getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.onParsingError(e));
         }
     }
 
