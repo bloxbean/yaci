@@ -8,6 +8,6 @@ import lombok.*;
 @ToString
 @Builder
 public class PlutusScript {
-    private String type;
+    private PlutusScriptType type;
     private String content;
 }

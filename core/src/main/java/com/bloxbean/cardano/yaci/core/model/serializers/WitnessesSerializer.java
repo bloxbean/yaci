@@ -2,8 +2,6 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
-import com.bloxbean.cardano.client.plutus.spec.PlutusV1Script;
-import com.bloxbean.cardano.client.plutus.spec.PlutusV2Script;
 import com.bloxbean.cardano.client.spec.Script;
 import com.bloxbean.cardano.client.transaction.spec.script.*;
 import com.bloxbean.cardano.client.util.JsonUtil;
@@ -82,12 +80,11 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
                 for (DataItem plutusV1ScriptDI : plutusV1ScriptDIList) {
                     if (plutusV1ScriptDI == Special.BREAK)
                         continue;
-                    PlutusV1Script plutusV1Script = PlutusV1Script.deserialize((ByteString) plutusV1ScriptDI);
 
-                    if (plutusV1Script != null) {
-                        PlutusScript plutusScript = new PlutusScript(String.valueOf(plutusV1Script.getScriptType()), plutusV1Script.getCborHex());
-                        plutusV1Scripts.add(plutusScript);
-                    }
+                    String scriptCborHex = toHex(plutusV1ScriptDI);
+
+                    PlutusScript plutusScript = new PlutusScript(PlutusScriptType.PlutusScriptV1, scriptCborHex);
+                    plutusV1Scripts.add(plutusScript);
                 }
             } catch (Exception e) {
                 throw new CborRuntimeException("PlutusV1 script deserialization failed", e);
@@ -136,12 +133,12 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
             try {
                 for (DataItem plutusV2ScriptDI : plutusV2ScriptDIList) {
                     if (plutusV2ScriptDI == Special.BREAK) continue;
-                    PlutusV2Script plutusV2Script = PlutusV2Script.deserialize((ByteString) plutusV2ScriptDI);
 
-                    if (plutusV2Script != null) {
-                        PlutusScript plutusScript = new PlutusScript(String.valueOf(plutusV2Script.getScriptType()), plutusV2Script.getCborHex());
-                        plutusV2Scripts.add(plutusScript);
-                    }
+                    String scriptCborHex = toHex(plutusV2ScriptDI);
+
+                    PlutusScript plutusScript = new PlutusScript(PlutusScriptType.PlutusScriptV2, scriptCborHex);
+                    plutusV2Scripts.add(plutusScript);
+
                 }
             } catch (Exception e) {
                 throw new CborRuntimeException("Plutus V2 script deserialization failed", e);
@@ -157,7 +154,7 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
                     if (plutusV3ScriptDI == Special.BREAK) continue;
                     String scriptCborHex = toHex(plutusV3ScriptDI);
 
-                    PlutusScript plutusScript = new PlutusScript(String.valueOf(3), scriptCborHex);
+                    PlutusScript plutusScript = new PlutusScript(PlutusScriptType.PlutusScriptV3, scriptCborHex);
                     plutusV3Scripts.add(plutusScript);
                 }
             } catch (Exception e) {
