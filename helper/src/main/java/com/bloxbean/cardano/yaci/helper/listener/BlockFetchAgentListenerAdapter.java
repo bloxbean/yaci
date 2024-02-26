@@ -131,4 +131,9 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
     public void onDisconnect() {
         blockChainDataListener.onDisconnect();
     }
+
+    @Override
+    public void onParsingError(Exception e) {
+        blockChainDataListener.onParsingError(e);
+    }
 }

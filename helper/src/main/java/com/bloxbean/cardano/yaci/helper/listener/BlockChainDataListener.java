@@ -42,4 +42,6 @@ public interface BlockChainDataListener {
     default void intersactNotFound(Tip tip) {}
 
     default void onDisconnect() {}
+
+    default void onParsingError(Exception e) {}
 }

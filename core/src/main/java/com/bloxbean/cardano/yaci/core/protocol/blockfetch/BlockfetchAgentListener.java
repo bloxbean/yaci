@@ -35,4 +35,8 @@ public interface BlockfetchAgentListener extends AgentListener {
 
     }
 
+    default void onParsingError(Exception e) {
+
+    }
+
 }
