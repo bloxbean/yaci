@@ -8,13 +8,13 @@ import com.bloxbean.cardano.client.util.JsonUtil;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
-import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import lombok.SneakyThrows;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
+import static com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString;
 
 //TODO -- More testing required for deserialization --> serialization
 public enum WitnessesSerializer implements Serializer<Witnesses> {
@@ -81,7 +81,7 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
                     if (plutusV1ScriptDI == Special.BREAK)
                         continue;
 
-                    String scriptCborHex = toHex(plutusV1ScriptDI);
+                    String scriptCborHex = encodeHexString(CborSerializationUtil.serialize(plutusV1ScriptDI, false));
 
                     PlutusScript plutusScript = new PlutusScript(PlutusScriptType.PlutusScriptV1, scriptCborHex);
                     plutusV1Scripts.add(plutusScript);
@@ -134,7 +134,7 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
                 for (DataItem plutusV2ScriptDI : plutusV2ScriptDIList) {
                     if (plutusV2ScriptDI == Special.BREAK) continue;
 
-                    String scriptCborHex = toHex(plutusV2ScriptDI);
+                    String scriptCborHex = encodeHexString(CborSerializationUtil.serialize(plutusV2ScriptDI, false));
 
                     PlutusScript plutusScript = new PlutusScript(PlutusScriptType.PlutusScriptV2, scriptCborHex);
                     plutusV2Scripts.add(plutusScript);
@@ -152,7 +152,8 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
             try {
                 for (DataItem plutusV3ScriptDI : plutusV3ScriptDIList) {
                     if (plutusV3ScriptDI == Special.BREAK) continue;
-                    String scriptCborHex = toHex(plutusV3ScriptDI);
+
+                    String scriptCborHex = encodeHexString(CborSerializationUtil.serialize(plutusV3ScriptDI, false));
 
                     PlutusScript plutusScript = new PlutusScript(PlutusScriptType.PlutusScriptV3, scriptCborHex);
                     plutusV3Scripts.add(plutusScript);
@@ -175,10 +176,10 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
         DataItem chainCodeDI = dataItemList.get(2);
         DataItem attributesDI = dataItemList.get(3);
 
-        String pubKey = HexUtil.encodeHexString(((ByteString) vkeyDI).getBytes());
-        String signature = HexUtil.encodeHexString(((ByteString) sigDI).getBytes());
-        String chainCode = HexUtil.encodeHexString(((ByteString) chainCodeDI).getBytes());
-        String attributes = HexUtil.encodeHexString(((ByteString) attributesDI).getBytes());
+        String pubKey = encodeHexString(((ByteString) vkeyDI).getBytes());
+        String signature = encodeHexString(((ByteString) sigDI).getBytes());
+        String chainCode = encodeHexString(((ByteString) chainCodeDI).getBytes());
+        String attributes = encodeHexString(((ByteString) attributesDI).getBytes());
 
         return new BootstrapWitness(pubKey, signature, chainCode, attributes);
     }
@@ -191,8 +192,8 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
         DataItem vkeyDI = dataItemList.get(0);
         DataItem sigDI = dataItemList.get(1);
 
-        String key = HexUtil.encodeHexString(((ByteString) vkeyDI).getBytes());
-        String signature = HexUtil.encodeHexString(((ByteString) sigDI).getBytes());
+        String key = encodeHexString(((ByteString) vkeyDI).getBytes());
+        String signature = encodeHexString(((ByteString) sigDI).getBytes());
 
         return new VkeyWitness(key, signature);
     }
