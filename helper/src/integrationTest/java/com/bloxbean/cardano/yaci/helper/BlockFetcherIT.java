@@ -80,8 +80,8 @@ class BlockFetcherIT extends BaseTest {
         Point from = null;
         Point to = null;
         if (protocolMagic == Constants.SANCHONET_PROTOCOL_MAGIC) {
-            from = new Point(60, "8f4e50c397cf0796e6ac9b6db9fc0b761a29f1a040a7f1cfaa35513e3cc4db38");
-            to = new Point(19397676, "804046ba432b676895198d2dc9ae8f0f842f7dd74b8aba71f12dc98594548361");
+            from = new Point(1020, "6924ebdac53dc23c8d29ee10b2c8e2b7ea500243006befa388faed6db587a269");
+            to = new Point(22214398, "5c9cb0742f12c528908a595f27152b0080843d2c2d65a11fa36ec18307355588");
         } else if (protocolMagic == Constants.PREPROD_PROTOCOL_MAGIC) {
             from = new Point(2, "1d031daf47281f69cd95ab929c269fd26b1434a56a5bbbd65b7afe85ef96b233");
             to = new Point(50468813, "2fb2554a9fec38ce4b8121c001087f867b1bd19cda11e93dc5475dc253baf0e9");
