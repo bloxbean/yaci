@@ -127,7 +127,7 @@ subprojects {
         testImplementation libs.mockito.inline
         testImplementation libs.mockito.junit.jupiter
         testImplementation libs.assertj.core
-        testRuntimeOnly libs.slf4j.log4j
+        testRuntimeOnly libs.slf4j.reload4j
 
         testCompileOnly libs.lombok
         testAnnotationProcessor libs.lombok

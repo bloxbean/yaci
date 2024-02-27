@@ -1,14 +1,14 @@
 [libraries]
-cardano-client-core = "com.bloxbean.cardano:cardano-client-core:0.5.0"
+cardano-client-core = "com.bloxbean.cardano:cardano-client-core:0.5.1"
 cbor = "co.nstant.in:cbor:0.9"
-netty = "io.netty:netty-all:4.1.97.Final"
-project-reactor-core = "io.projectreactor:reactor-core:3.5.5"
-project-reactor-test = "io.projectreactor:reactor-test:3.5.5"
+netty = "io.netty:netty-all:4.1.107.Final"
+project-reactor-core = "io.projectreactor:reactor-core:3.6.3"
+project-reactor-test = "io.projectreactor:reactor-test:3.6.3"
 
-slf4j-api = "org.slf4j:slf4j-api:1.7.36"
-slf4j-log4j="org.slf4j:slf4j-log4j12:1.7.36"
+slf4j-api = "org.slf4j:slf4j-api:2.0.11"
+slf4j-reload4j="org.slf4j:slf4j-reload4j:2.0.11"
 
-lombok="org.projectlombok:lombok:1.18.20"
+lombok="org.projectlombok:lombok:1.18.30"
 
 junit-jupiter-api="org.junit.jupiter:junit-jupiter-api:5.8.1"
 junit-jupiter-engine="org.junit.jupiter:junit-jupiter-engine:5.8.1"
