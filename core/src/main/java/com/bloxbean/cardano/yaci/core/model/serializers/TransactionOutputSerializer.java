@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static com.bloxbean.cardano.yaci.core.util.Constants.LOVELACE;
+import static com.bloxbean.cardano.yaci.core.util.StringUtil.sanitize;
 
 public enum TransactionOutputSerializer implements Serializer<TransactionOutput> {
     INSTANCE;
@@ -166,7 +167,7 @@ public enum TransactionOutputSerializer implements Serializer<TransactionOutput>
                         Amount amount = Amount.builder()
                                 .unit(policyId + "." + hexName)
                                 .policyId(policyId)
-                                .assetName(assetName)
+                                .assetName(sanitize(assetName))
                                 .assetNameBytes(assetNameBS.getBytes())
                                 .quantity(value).build();
 

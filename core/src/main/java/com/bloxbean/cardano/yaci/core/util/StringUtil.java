@@ -20,4 +20,10 @@ public class StringUtil {
         return true;
 
     }
+
+    public static String sanitize(String input) {
+        if(input == null)
+            return null;
+        return input.replace('\u0000', ' ');
+    }
 }
