@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toBigInteger;
+import static com.bloxbean.cardano.yaci.core.util.StringUtil.sanitize;
 
 @Slf4j
 public enum TransactionBodySerializer implements Serializer<TransactionBody> {
@@ -135,7 +136,7 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
                     Amount amount = Amount.builder()
                             .unit(policyId + "." + hexName)
                             .policyId(policyId)
-                            .assetName(assetName)
+                            .assetName(sanitize(assetName))
                             .assetNameBytes(assetNameBS.getBytes())
                             .quantity(value).build();
 
