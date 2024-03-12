@@ -229,6 +229,36 @@ class BlockFetcherIT extends BaseTest {
         assertThat(amounts).hasSize(0);
     }
 
+    @Test
+    public void fetchBlock_metadataWithArrayKey() throws InterruptedException {
+        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(protocolMagic);
+        BlockFetcher blockFetcher = new BlockFetcher(node, nodePort, versionTable);
+
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+
+        StringBuilder sb = new StringBuilder();
+        blockFetcher.addBlockFetchListener(new BlockfetchAgentListener() {
+            @Override
+            public void blockFound(Block block) {
+                var metatdataJson = block.getAuxiliaryDataMap().get(2).getMetadataJson();
+                System.out.println(metatdataJson);
+                sb.append(metatdataJson);
+                countDownLatch.countDown();
+            }
+        });
+        blockFetcher.start();
+
+        Point from = new Point(54478325, "2cbc2a95ed9ab49b10d9016cc0201c19749c79ba28c9b55ff70860e65d67d077");
+        Point to = new Point(54478325, "2cbc2a95ed9ab49b10d9016cc0201c19749c79ba28c9b55ff70860e65d67d077");
+
+        blockFetcher.fetch(from, to);
+
+        countDownLatch.await(10, TimeUnit.SECONDS);
+        blockFetcher.shutdown();
+
+        assertThat(sb.toString()).isNotEqualTo("null");
+    }
+
         /** Not able to fetch block 0
          @Test
          public void fetchGenesisBlockByron() throws InterruptedException {
