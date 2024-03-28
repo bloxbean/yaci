@@ -89,7 +89,7 @@ class ServerSession implements Disposable {
             }
         });
 
-        handshake();
+//        handshake();
         return this;
     }
 
@@ -117,10 +117,14 @@ class ServerSession implements Disposable {
     }
 
     public void handshake() {
-        //Handshake First
+        log.info("handshake");
         while (!handshakeAgent.isDone()) {
+            log.info("not done");
             if (handshakeAgent.hasAgency())
+                log.info("has agency");
                 handshakeAgent.sendNextMessage();
+                log.info("message sent");
+
             try {
                 Thread.sleep(100);
             } catch (InterruptedException e) {
