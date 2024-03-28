@@ -7,6 +7,7 @@ import com.bloxbean.cardano.client.crypto.bip32.util.BytesUtil;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Segment;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ReplayingDecoder;
@@ -53,6 +54,7 @@ public class MiniProtoStreamingByteToMessageDecoder
             byte[] bytes = protocolChannel.getBytes();
 
             bytes = BytesUtil.merge(bytes, payload);
+//            log.info("channel bytes: {}", HexUtil.encodeHexString(bytes));
             try {
                 while (true && bytes.length != 0) {
                     //TODO -- Remove later after testing

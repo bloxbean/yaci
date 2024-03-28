@@ -31,6 +31,7 @@ public interface HandshakeStateBase extends State {
                     log.info("1 - bytesHex: {}", bytesHex);
                     return AcceptVersionSerializer.INSTANCE.deserialize(bytes);
                 case 2:
+                    log.info("2 - bytesHex: {}", bytesHex);
                     DataItem refuseDI = array.getDataItems().get(1);
                     Message message = ReasonVersionMismatchSerializer.INSTANCE.deserializeDI(refuseDI);
 
@@ -44,6 +45,7 @@ public interface HandshakeStateBase extends State {
 
                     return message;
                 case 3:
+                    log.info("3 - bytesHex: {}", bytesHex);
                     DataItem versionTableDI = array.getDataItems().get(1);
                     return QueryReplySerializer.INSTANCE.deserializeDI(versionTableDI);
                 default:

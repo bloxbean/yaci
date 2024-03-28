@@ -30,6 +30,7 @@ public class TxSubmissionAgent extends Agent {
 
     @Override
     public Message buildNextMessage() {
+        log.info("buildNextMessage");
         switch ((TxSubmissionState) currentState) {
             case Init:
                 return new Init();
@@ -70,6 +71,7 @@ public class TxSubmissionAgent extends Agent {
 
     @Override
     public void processResponse(Message message) {
+        log.info("buildNextMessage: {}", message);
         if (message == null) return;
         if (message instanceof RequestTxIds) {
             if (((RequestTxIds) message).isBlocking()) {

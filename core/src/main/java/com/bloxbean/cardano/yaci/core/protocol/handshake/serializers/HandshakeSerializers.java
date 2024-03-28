@@ -128,6 +128,34 @@ public class HandshakeSerializers {
         INSTANCE;
 
         @Override
+        public byte[] serialize(AcceptVersion acceptVersion) {
+
+            log.info("hello!");
+
+            var versionData = (N2NVersionData) acceptVersion.getVersionData();
+
+            var array = new Array();
+            array.add(new UnsignedInteger(1L));
+            array.add(new UnsignedInteger(acceptVersion.getVersionNumber()));
+
+            Array versionDataArray = new Array();
+            versionDataArray.add(new UnsignedInteger(versionData.getNetworkMagic()));
+            versionDataArray.add(versionData.getInitiatorOnlyDiffusionMode() ? SimpleValue.TRUE : SimpleValue.FALSE);
+
+            //TODO -- check with existing node versions
+            if (acceptVersion.getVersionNumber() >= N2NVersionTableConstant.PROTOCOL_V11) {
+                versionDataArray.add(versionData.getPeerSharing() == null ? new UnsignedInteger(0) : new UnsignedInteger(versionData.getPeerSharing()));
+                versionDataArray.add(versionData.getQuery() ? SimpleValue.TRUE : SimpleValue.FALSE);
+            }
+
+            array.add(versionDataArray);
+
+            log.info(HexUtil.encodeHexString(CborSerializationUtil.serialize(array)));
+
+            return CborSerializationUtil.serialize(array);
+        }
+
+        @Override
         public AcceptVersion deserializeDI(DataItem di) {
             Array array = (Array) di;
             List<DataItem> dataItems = array.getDataItems();
@@ -153,6 +181,8 @@ public class HandshakeSerializers {
             } else
                 throw new CborRuntimeException("Parsing error. Invalid dataitem type : " + versionDataDI);
         }
+
+
     }
 
     public enum ReasonVersionMismatchSerializer implements Serializer<ReasonVersionMismatch> {
