@@ -11,8 +11,8 @@ public enum HandshakeState implements HandshakeStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return !YaciConfig.INSTANCE.isServer();
+        public boolean hasAgency(boolean isClient) {
+            return isClient;
         }
     },
     Confirm {
@@ -22,8 +22,8 @@ public enum HandshakeState implements HandshakeStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return YaciConfig.INSTANCE.isServer();
+        public boolean hasAgency(boolean isClient) {
+            return !isClient;
         }
     },
     Done {
@@ -33,8 +33,8 @@ public enum HandshakeState implements HandshakeStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return false;
+        public boolean hasAgency(boolean isClient) {
+            return !isClient;
         }
     }
 

@@ -19,6 +19,7 @@ public class LocalTxSubmissionAgent extends Agent<LocalTxSubmissionListener> {
     private Queue<TxSubmissionRequest> pendingQueue;
 
     public LocalTxSubmissionAgent() {
+        super(true);
         txnQueue = new ConcurrentLinkedQueue<>();
         pendingQueue = new ConcurrentLinkedQueue<>();
         this.currentState = LocalTxSubmissionState.Idle;

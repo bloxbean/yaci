@@ -20,7 +20,7 @@ public class MainServer {
         var txSubmissionAgent = new TxSubmissionAgent();
         var blockfetchAgent = new BlockfetchAgent();
 
-        NodeServer nodeServer = new NodeServer(31000, handshakeAgent, keepAliveAgent, txSubmissionAgent, blockfetchAgent);
+        NodeServer nodeServer = new NodeServer(31001, handshakeAgent, keepAliveAgent, txSubmissionAgent, blockfetchAgent);
         nodeServer.start();
 
     }

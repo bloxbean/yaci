@@ -32,6 +32,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
     private long errorBlks;
 
     public BlockfetchAgent() {
+        super(true);
         this.currentState = Idle;
 
         this.startTime = System.currentTimeMillis();

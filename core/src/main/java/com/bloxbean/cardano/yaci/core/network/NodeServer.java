@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
@@ -27,6 +28,7 @@ public class NodeServer {
     private HandshakeAgent handshakeAgent;
     private Agent[] agents;
     private EventLoopGroup workerGroup;
+    private EventLoopGroup bossWorkerGroup;
     private ServerSession session;
 
     public NodeServer(int port, HandshakeAgent handshakeAgent, Agent... agents) {
@@ -36,6 +38,7 @@ public class NodeServer {
         this.handshakeAgent = handshakeAgent;
         this.agents = agents;
         this.workerGroup = configureEventLoopGroup();
+        this.bossWorkerGroup = configureEventLoopGroup();
 
         attachHandshakeListener();
     }
@@ -63,8 +66,9 @@ public class NodeServer {
             throw new RuntimeException("Session already available. Only one session is allowed per N2NClient. To start again, please call shutdown() first.");
 
         try {
+
             ServerBootstrap b = new ServerBootstrap();
-            b.group(workerGroup)
+            b.group(bossWorkerGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
                     .childHandler(new ChannelInitializer<SocketChannel>() {
                         @Override
@@ -73,7 +77,10 @@ public class NodeServer {
                                     new MiniProtoStreamingByteToMessageDecoder(agents),
                                     new MiniProtoClientInboundHandler(handshakeAgent, agents));
                         }
-                    });
+                    }).option(ChannelOption.SO_BACKLOG, 128);
+
+//            bootstrap.option(ChannelOption.SO_KEEPALIVE, true);
+//            bootstrap.option(ChannelOption.TCP_NODELAY, true);
 
             session = new ServerSession(port, b, handshakeAgent, agents);
             session.setSessionListener(sessionListener);

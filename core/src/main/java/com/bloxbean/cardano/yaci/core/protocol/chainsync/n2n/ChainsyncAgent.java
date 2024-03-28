@@ -23,6 +23,7 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     private long startTime;
 
     public ChainsyncAgent(Point[] knownPoints) {
+        super(true);
         this.currentState = Idle;
         this.knownPoints = knownPoints;
 
@@ -31,6 +32,7 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     public ChainsyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo) {
+        super(true);
         this.currentState = Idle;
         this.knownPoints = knownPoints;
         this.stopAt = stopSlotNo;

@@ -21,6 +21,7 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     private int counter = 0;
 
     public LocalChainSyncAgent(Point[] knownPoints) {
+        super(true);
         this.currentState = Idle;
         this.knownPoints = knownPoints;
 
@@ -29,6 +30,7 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     }
 
     public LocalChainSyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo) {
+        super(true);
         this.currentState = Idle;
         this.knownPoints = knownPoints;
         this.stopAt = stopSlotNo;

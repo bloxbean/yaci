@@ -24,6 +24,7 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
     private Queue<Query> pendingQueryCommands;
 
     public LocalStateQueryAgent() {
+        super(true);
         this.currentState = Idle;
 
         acquiredCommands = new ConcurrentLinkedQueue<>();

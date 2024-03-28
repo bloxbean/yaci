@@ -17,6 +17,11 @@ public class TxSubmissionAgent extends Agent {
     private final List<String> reqNonBlockingTxIds;
 
     public TxSubmissionAgent() {
+        this(true);
+    }
+
+    public TxSubmissionAgent(Boolean isClient) {
+        super(isClient);
         this.currentState = TxSubmissionState.Init;
         txs = new HashMap<>();
         reqTxIds = new ArrayList<>();

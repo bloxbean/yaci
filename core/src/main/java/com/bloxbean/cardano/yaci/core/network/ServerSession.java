@@ -80,6 +80,7 @@ class ServerSession implements Disposable {
                     if (sessionListener != null)
                         sessionListener.disconnected();
                 });
+                cf.sync();
 
             } else {
                 log.error("Connection failed");
@@ -126,7 +127,7 @@ class ServerSession implements Disposable {
                 log.info("message sent");
 
             try {
-                Thread.sleep(100);
+                Thread.sleep(1000);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }

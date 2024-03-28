@@ -18,8 +18,8 @@ public enum KeepAliveState implements KeepAliveStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return !YaciConfig.INSTANCE.isServer();
+        public boolean hasAgency(boolean isClient) {
+            return isClient;
         }
     },
     Server {
@@ -29,8 +29,8 @@ public enum KeepAliveState implements KeepAliveStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return YaciConfig.INSTANCE.isServer();
+        public boolean hasAgency(boolean isClient) {
+            return !isClient;
         }
     },
     Done {
@@ -40,7 +40,7 @@ public enum KeepAliveState implements KeepAliveStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
+        public boolean hasAgency(boolean isClient) {
             return false;
         }
     }
