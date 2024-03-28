@@ -10,8 +10,8 @@ public enum HandshkeState implements HandshakeStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return true;
+        public boolean hasAgency(boolean isClient) {
+            return isClient;
         }
     },
     Confirm {
@@ -21,8 +21,8 @@ public enum HandshkeState implements HandshakeStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return false;
+        public boolean hasAgency(boolean isClient) {
+            return !isClient;
         }
     },
     Done {
@@ -32,7 +32,7 @@ public enum HandshkeState implements HandshakeStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
+        public boolean hasAgency(boolean isClient) {
             return false;
         }
     }

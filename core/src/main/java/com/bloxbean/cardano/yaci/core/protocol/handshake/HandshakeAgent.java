@@ -14,7 +14,8 @@ import static com.bloxbean.cardano.yaci.core.protocol.handshake.HandshkeState.Pr
 public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     private final VersionTable versionTable;
 
-    public HandshakeAgent(VersionTable versionTable) {
+    public HandshakeAgent(VersionTable versionTable, boolean isClient) {
+        super(isClient);
         this.versionTable = versionTable;
         this.currenState = Propose;
     }
