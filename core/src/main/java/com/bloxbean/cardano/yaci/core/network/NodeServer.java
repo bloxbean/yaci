@@ -75,8 +75,9 @@ public class NodeServer {
                         }
                     });
 
-            var f = b.bind("0.0.0.0", port).sync();
-f.channel().closeFuture().
+            session = new ServerSession(port, b, handshakeAgent, agents);
+            session.setSessionListener(sessionListener);
+            session.start();
 
         } catch (Exception e) {
             log.error("Error", e);

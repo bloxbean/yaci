@@ -9,7 +9,9 @@ import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 //TODO -- Explore option to split N2N and N2C serializers
@@ -29,6 +31,16 @@ public class HandshakeSerializers {
                 log.debug(HexUtil.encodeHexString(CborSerializationUtil.serialize(array)));
             return CborSerializationUtil.serialize(array);
         }
+
+        @Override
+        public ProposedVersions deserializeDI(DataItem di) {
+            var map = ((Array) di).getDataItems().get(1);
+            var versionTableDI = (co.nstant.in.cbor.model.Map) map;
+            var versionTable = HandshakeSerializers.VersionTableSerializer.INSTANCE.deserializeDI(versionTableDI);
+            return new ProposedVersions(versionTable);
+        }
+
+
     }
 
     public enum VersionTableSerializer implements Serializer<VersionTable> {
