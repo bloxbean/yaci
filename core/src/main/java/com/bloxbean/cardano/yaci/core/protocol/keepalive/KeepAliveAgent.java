@@ -37,6 +37,7 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
 
     @Override
     protected Message buildNextMessage() {
+        log.info("buildNextMessage");
         if (shutDown)
             return new MsgDone();
 
@@ -55,13 +56,14 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
 
     @Override
     protected void processResponse(Message message) {
+        log.info("MsgKeepAliveResponse: {}", message);
         if (message == null) return;
         if (message instanceof MsgKeepAliveResponse) {
-            log.debug("MsgKeepAliveResponse: {}", message);
+            log.info("MsgKeepAliveResponse: {}", message);
             handleKeepAliveResponse((MsgKeepAliveResponse) message);
         } else {
             if (message instanceof MsgKeepAlive) {
-                log.warn("//TODO We should not receive MsgKeepAlive message. {}", message);
+                log.info("//TODO We should not receive MsgKeepAlive message. {}", message);
             } else
                 log.error("Invalid message !!! {}", message);
         }
