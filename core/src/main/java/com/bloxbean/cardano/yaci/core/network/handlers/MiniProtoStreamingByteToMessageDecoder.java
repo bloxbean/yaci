@@ -15,19 +15,21 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.*;
 
 @Slf4j
-public class MiniProtoStreamingByteToMessageDecoder extends ReplayingDecoder<Segment> {
+public class MiniProtoStreamingByteToMessageDecoder
+        extends ReplayingDecoder<Segment> {
     private final Map<Integer, ProtocolChannel> protocolChannelMap;
 
     public MiniProtoStreamingByteToMessageDecoder(Agent... agents) {
         protocolChannelMap = new HashMap<>();
         protocolChannelMap.put(0, new ProtocolChannel()); //For handshake channel
-        for (Agent agent : agents) {
+        for (Agent agent: agents) {
             protocolChannelMap.put(agent.getProtocolId(), new ProtocolChannel());
         }
     }
 
     @Override
-    protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
+    protected void decode(ChannelHandlerContext ctx,
+                          ByteBuf in, List<Object> out) {
         try {
             int timestamp = (int) in.readUnsignedInt();
 
@@ -73,7 +75,7 @@ public class MiniProtoStreamingByteToMessageDecoder extends ReplayingDecoder<Seg
 
                         int i = 0;
                         //check for array
-                        for (DataItem di : diList) {
+                        for (DataItem di: diList) {
                             if (i == 0) {
                                 finalDIs.add(diList.get(0));
                                 i++;

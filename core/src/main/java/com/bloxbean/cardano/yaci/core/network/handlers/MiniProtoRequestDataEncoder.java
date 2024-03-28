@@ -10,7 +10,8 @@ import lombok.extern.slf4j.Slf4j;
 public class MiniProtoRequestDataEncoder extends MessageToByteEncoder<Segment> {
 
     @Override
-    protected void encode(ChannelHandlerContext ctx, Segment msg, ByteBuf out) throws Exception {
+    protected void encode(ChannelHandlerContext ctx,
+                          Segment msg, ByteBuf out) throws Exception {
         msg.serialize(out);
     }
 }
