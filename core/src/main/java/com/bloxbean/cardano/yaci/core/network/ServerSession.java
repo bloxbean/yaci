@@ -80,7 +80,6 @@ class ServerSession implements Disposable {
                     if (sessionListener != null)
                         sessionListener.disconnected();
                 });
-                cf.sync();
 
             } else {
                 log.error("Connection failed");
