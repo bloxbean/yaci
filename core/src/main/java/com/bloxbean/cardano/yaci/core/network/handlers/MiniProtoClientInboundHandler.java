@@ -32,6 +32,11 @@ public class MiniProtoClientInboundHandler extends ChannelInboundHandlerAdapter 
             if (segment.getProtocol() == handshakeAgent.getProtocolId()) {
                 Message message = handshakeAgent.deserializeResponse(segment.getPayload());
                 handshakeAgent.receiveResponse(message);
+                // if server side, we need to send message back with accepted version
+                log.info("handshakeAgent.hasAgency(): {}", handshakeAgent.hasAgency());
+                if (handshakeAgent.hasAgency()) {
+                    handshakeAgent.sendNextMessage();
+                }
             } else {
                 for (Agent agent : agents) {
                     if (!agent.isDone() && agent.getProtocolId() == segment.getProtocol()) {

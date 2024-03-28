@@ -17,7 +17,7 @@ public class TxSubmissionAgent extends Agent {
     private final List<String> reqNonBlockingTxIds;
 
     public TxSubmissionAgent() {
-        this.currenState = TxSubmissionState.Init;
+        this.currentState = TxSubmissionState.Init;
         txs = new HashMap<>();
         reqTxIds = new ArrayList<>();
         reqNonBlockingTxIds = new ArrayList<>();
@@ -30,7 +30,8 @@ public class TxSubmissionAgent extends Agent {
 
     @Override
     public Message buildNextMessage() {
-        switch ((TxSubmissionState) currenState) {
+        log.info("buildNextMessage");
+        switch ((TxSubmissionState) currentState) {
             case Init:
                 return new Init();
             case TxIdsNonBlocking:
@@ -70,6 +71,7 @@ public class TxSubmissionAgent extends Agent {
 
     @Override
     public void processResponse(Message message) {
+        log.info("buildNextMessage: {}", message);
         if (message == null) return;
         if (message instanceof RequestTxIds) {
             if (((RequestTxIds) message).isBlocking()) {
@@ -96,11 +98,11 @@ public class TxSubmissionAgent extends Agent {
 
     @Override
     public boolean isDone() {
-        return this.currenState == TxSubmissionState.Done;
+        return this.currentState == TxSubmissionState.Done;
     }
 
     @Override
     public void reset() {
-        this.currenState = TxSubmissionState.Init;
+        this.currentState = TxSubmissionState.Init;
     }
 }

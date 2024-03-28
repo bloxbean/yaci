@@ -1,33 +1,34 @@
 package com.bloxbean.cardano.yaci.core.protocol.handshake;
 
+import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 
-public enum HandshkeState implements HandshakeStateBase {
+public enum HandshakeState implements HandshakeStateBase {
     Propose {
         @Override
-        public HandshkeState nextState(Message message) {
+        public HandshakeState nextState(Message message) {
             return Confirm;
         }
 
         @Override
         public boolean hasAgency() {
-            return true;
+            return !YaciConfig.INSTANCE.isServer();
         }
     },
     Confirm {
         @Override
-        public HandshkeState nextState(Message message) {
+        public HandshakeState nextState(Message message) {
             return Done;
         }
 
         @Override
         public boolean hasAgency() {
-            return false;
+            return YaciConfig.INSTANCE.isServer();
         }
     },
     Done {
         @Override
-        public HandshkeState nextState(Message message) {
+        public HandshakeState nextState(Message message) {
             return this;
         }
 

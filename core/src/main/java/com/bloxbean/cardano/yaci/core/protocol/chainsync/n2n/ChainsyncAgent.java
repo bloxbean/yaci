@@ -3,7 +3,7 @@ package com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.*;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshkeState;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeState;
 import lombok.extern.slf4j.Slf4j;
 
 import static com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncState.Done;
@@ -23,7 +23,7 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     private long startTime;
 
     public ChainsyncAgent(Point[] knownPoints) {
-        this.currenState = Idle;
+        this.currentState = Idle;
         this.knownPoints = knownPoints;
 
         if (knownPoints != null && knownPoints.length > 0)
@@ -31,7 +31,7 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     public ChainsyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo) {
-        this.currenState = Idle;
+        this.currentState = Idle;
         this.knownPoints = knownPoints;
         this.stopAt = stopSlotNo;
         this.agentNo = agentNo;
@@ -158,7 +158,7 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
             }
 
             if (stopAt != 0 && rollForward.getBlockHeader().getHeaderBody().getSlot() >= stopAt) {
-                this.currenState = HandshkeState.Done;
+                this.currentState = HandshakeState.Done;
             }
         }
 
@@ -189,11 +189,11 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
 
     @Override
     public boolean isDone() {
-        return currenState == Done;
+        return currentState == Done;
     }
 
     public void reset() {
-        this.currenState = Idle;
+        this.currentState = Idle;
         this.counter = 0;
     }
 

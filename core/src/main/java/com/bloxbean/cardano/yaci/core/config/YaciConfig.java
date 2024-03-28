@@ -6,12 +6,28 @@ package com.bloxbean.cardano.yaci.core.config;
 public enum YaciConfig {
     INSTANCE;
 
+    private boolean isServer;
     private boolean returnBlockCbor;
     private boolean returnTxBodyCbor;
 
     YaciConfig() {
         returnBlockCbor = false;
         returnTxBodyCbor = false;
+    }
+
+    /**
+     * Whether Yaci mini protocol implementation is running in server mode
+     * @return true is yaci is running in Server Mode
+     */
+    public boolean isServer() {
+        return isServer;
+    }
+
+    /**
+     * Sets Yaci mini protocol implementation to run in Server Mode
+     */
+    public void setServer(boolean server) {
+        isServer = server;
     }
 
     /**

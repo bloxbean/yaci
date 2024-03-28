@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.keepalive;
 
+import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.messages.MsgDone;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.messages.MsgKeepAlive;
@@ -18,7 +19,7 @@ public enum KeepAliveState implements KeepAliveStateBase {
 
         @Override
         public boolean hasAgency() {
-            return true;
+            return !YaciConfig.INSTANCE.isServer();
         }
     },
     Server {
@@ -29,7 +30,7 @@ public enum KeepAliveState implements KeepAliveStateBase {
 
         @Override
         public boolean hasAgency() {
-            return false;
+            return YaciConfig.INSTANCE.isServer();
         }
     },
     Done {

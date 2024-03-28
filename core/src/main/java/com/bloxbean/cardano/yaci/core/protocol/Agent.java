@@ -11,7 +11,7 @@ import java.util.List;
 
 @Slf4j
 public abstract class Agent<T extends AgentListener> {
-    protected State currenState;
+    protected State currentState;
     private Instant instant;
     private Channel channel;
     private final List<T> agentListeners = new ArrayList<>();
@@ -25,8 +25,10 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     public void sendRequest(Message message) {
-        if (currenState.hasAgency()) {
-            currenState = currenState.nextState(message);
+        if (currentState.hasAgency()) {
+            log.info("currentState before: {}", currentState);
+            currentState = currentState.nextState(message);
+            log.info("currentState after: {}", currentState);
         } else {
             //TODO
             log.info("Agency = false-----------");
@@ -34,26 +36,33 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     public Message deserializeResponse(byte[] bytes) {
-        return this.currenState.handleInbound(bytes);
+        return this.currentState.handleInbound(bytes);
     }
 
     public synchronized final void receiveResponse(Message message) {
-        State oldState = currenState;
-        currenState = currenState.nextState(message);
+        State oldState = currentState;
+//        log.info("currentState, before: {}, agency: {}", currentState, currentState.hasAgency());
+        currentState = currentState.nextState(message);
+//        log.info("currentState, after: {}, agency: {}", currentState, currentState.hasAgency());
 
         processResponse(message);
         //Notify
-        getAgentListeners().forEach(agentListener -> agentListener.onStateUpdate(oldState, currenState));
+        getAgentListeners().forEach(agentListener -> agentListener.onStateUpdate(oldState, currentState));
     }
 
     public final void sendNextMessage() {
+        log.info("sendNextMessage");
         if (this.hasAgency()) {
+            log.info("hasAgency");
             Message message = this.buildNextMessage();
+            log.info("message: {}", message);
             if (message == null)
                 return;
 
             if (instant == null)
                 instant = Instant.now();
+
+            log.info("instant: {}", instant);
 
             int elapseTime = Duration.between(instant, Instant.now()).getNano() / 1000;
             instant = Instant.now();
@@ -63,13 +72,15 @@ public abstract class Agent<T extends AgentListener> {
                     .payload(message.serialize())
                     .build();
 
+            log.info("instant: {}", instant);
             channel.writeAndFlush(segment);
+
             this.sendRequest(message);
         }
     }
 
     public final boolean hasAgency() {
-        return currenState.hasAgency();
+        return currentState.hasAgency();
     }
 
     public final synchronized void addListener(T agentListener) {
@@ -121,7 +132,7 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     public State getCurrentState() {
-        return currenState;
+        return currentState;
     }
 
     public abstract int getProtocolId();
