@@ -2,9 +2,9 @@ package com.bloxbean.cardano.yaci.core.protocol.keepalive;
 
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
+import com.bloxbean.cardano.yaci.core.protocol.keepalive.messages.MsgDone;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.messages.MsgKeepAlive;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.messages.MsgKeepAliveResponse;
-import com.bloxbean.cardano.yaci.core.protocol.keepalive.messages.MsgDone;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Queue;
@@ -20,9 +20,12 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
     private boolean shutDown;
     private Queue<MsgKeepAlive> reqQueue;
 
+    private int cookie;
+
     public KeepAliveAgent() {
         this(true);
     }
+
     public KeepAliveAgent(boolean isClient) {
         super(isClient);
         this.currentState = Client;
@@ -31,7 +34,7 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
 
     @Override
     public int getProtocolId() {
-       return 8;
+        return 8;
     }
 
     @Override
@@ -53,6 +56,8 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
                     int random = new Random().nextInt(MAX_NUM - 0 + 1) + 0;
                     return new MsgKeepAlive(random);
                 }
+            case Server:
+                return new MsgKeepAliveResponse(cookie);
             default:
                 return null;
         }
@@ -62,21 +67,23 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
     protected void processResponse(Message message) {
         log.info("MsgKeepAliveResponse: {}", message);
         if (message == null) return;
-        if (message instanceof MsgKeepAliveResponse) {
+        if (message instanceof MsgKeepAlive) {
+            log.info("MsgKeepAlive: {}", message);
+            var keepAlive = (MsgKeepAlive) message;
+            handleKeepAlive(keepAlive);
+            this.cookie = keepAlive.getCookie();
+        } else if (message instanceof MsgKeepAliveResponse) {
             log.info("MsgKeepAliveResponse: {}", message);
             handleKeepAliveResponse((MsgKeepAliveResponse) message);
-        } else {
-            if (message instanceof MsgKeepAlive) {
-                log.info("//TODO We should not receive MsgKeepAlive message. {}", message);
-            } else
-                log.error("Invalid message !!! {}", message);
         }
     }
 
+    private void handleKeepAlive(MsgKeepAlive keepAlive) {
+        getAgentListeners().stream().forEach(listener -> listener.keepAlive(keepAlive));
+    }
+
     private void handleKeepAliveResponse(MsgKeepAliveResponse keepAliveResponse) {
-        getAgentListeners().stream().forEach(
-                listener -> listener.keepAliveResponse(keepAliveResponse)
-        );
+        getAgentListeners().stream().forEach(listener -> listener.keepAliveResponse(keepAliveResponse));
     }
 
     @Override

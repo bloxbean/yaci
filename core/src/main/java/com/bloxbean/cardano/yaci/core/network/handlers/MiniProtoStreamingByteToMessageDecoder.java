@@ -128,6 +128,9 @@ public class MiniProtoStreamingByteToMessageDecoder
 
     private ProtocolChannel getProtocolChannel(int protocol) {
         ProtocolChannel protocolChannel = protocolChannelMap.get(protocol);
+        if (protocolChannel == null) {
+            log.warn("no channel for protocol: {}", protocol);
+        }
         return protocolChannel;
     }
 

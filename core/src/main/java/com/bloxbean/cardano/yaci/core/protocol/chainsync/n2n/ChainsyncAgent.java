@@ -22,13 +22,17 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
 
     private long startTime;
 
-    public ChainsyncAgent(Point[] knownPoints) {
-        super(true);
+    public ChainsyncAgent(Point[] knownPoints, boolean isClient) {
+        super(isClient);
         this.currentState = Idle;
         this.knownPoints = knownPoints;
 
         if (knownPoints != null && knownPoints.length > 0)
             log.info("Trying to find the point " + knownPoints[0]);
+    }
+
+    public ChainsyncAgent(Point[] knownPoints) {
+        this(knownPoints, true);
     }
 
     public ChainsyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo) {

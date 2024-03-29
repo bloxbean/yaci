@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class Main {
     public void start() throws InterruptedException {
         VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Constants.MAINNET_PROTOCOL_MAGIC);
-        BlockFetcher blockFetcher = new BlockFetcher("localhost", 31001, versionTable);
+        BlockFetcher blockFetcher = new BlockFetcher("localhost", 31000, versionTable);
 
         YaciConfig.INSTANCE.setReturnBlockCbor(true);
         YaciConfig.INSTANCE.setReturnTxBodyCbor(true);

@@ -10,6 +10,9 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
+import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveListener;
+import com.bloxbean.cardano.yaci.core.protocol.keepalive.messages.MsgKeepAlive;
+import com.bloxbean.cardano.yaci.core.protocol.keepalive.messages.MsgKeepAliveResponse;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
 
@@ -95,9 +98,18 @@ public class BlockFetcher implements Fetcher<Block> {
             }
         });
 
-        keepAliveAgent.addListener(response -> {
-            lastKeepAliveResponseCookie = response.getCookie();
-            lastKeepAliveResponseTime = System.currentTimeMillis();
+        keepAliveAgent.addListener(new KeepAliveListener() {
+            @Override
+            public void keepAlive(MsgKeepAlive keepAlive) {
+
+            }
+
+            @Override
+            public void keepAliveResponse(MsgKeepAliveResponse keepAliveResponse) {
+                lastKeepAliveResponseCookie = keepAliveResponse.getCookie();
+                lastKeepAliveResponseTime = System.currentTimeMillis();
+            }
+
         });
     }
 

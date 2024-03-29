@@ -17,12 +17,16 @@ public interface KeepAliveStateBase extends State {
         try {
             Array array = (Array) CborSerializationUtil.deserializeOne(bytes);
             int id = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
+            var bytesHex = HexUtil.encodeHexString(bytes);
             switch (id) {
                 case 0:
+                    log.info("0 - bytesHex: {}", bytesHex);
                     return KeepAliveSerializers.MsgKeepAliveSerializer.INSTANCE.deserialize(bytes); //Not used. Empty implementation as we are the sender here.
                 case 1:
+                    log.info("1 - bytesHex: {}", bytesHex);
                     return KeepAliveSerializers.MsgKeepAliveResponseSerializer.INSTANCE.deserialize(bytes);
                 case 2:
+                    log.info("2 - bytesHex: {}", bytesHex);
                     return KeepAliveSerializers.MsgDoneSerializer.INSTANCE.deserialize(bytes);
                 default:
                     throw new RuntimeException(String.format("Invalid msg id: %d", id));
