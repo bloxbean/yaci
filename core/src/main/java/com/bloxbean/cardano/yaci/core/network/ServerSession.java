@@ -5,6 +5,9 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.group.ChannelGroup;
+import io.netty.channel.group.DefaultChannelGroup;
+import io.netty.util.concurrent.GlobalEventExecutor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.SocketAddress;
@@ -42,6 +45,7 @@ class ServerSession implements Disposable {
     }
 
     public Disposable start() throws InterruptedException {
+
         //Create a new connectFuture
         ChannelFuture connectFuture = null;
         while (connectFuture == null && shouldReconnect.get()) {
@@ -62,10 +66,10 @@ class ServerSession implements Disposable {
 
         activeChannel = connectFuture.channel();
 
-        handshakeAgent.setChannel(activeChannel);
-        for (Agent agent: agents) {
-            agent.setChannel(activeChannel);
-        }
+//        handshakeAgent.setChannel(activeChannel);
+//        for (Agent agent: agents) {
+//            agent.setChannel(activeChannel);
+//        }
 
         connectFuture.addListeners((ChannelFuture cf) -> {
             if (cf.isSuccess()) {

@@ -79,7 +79,12 @@ public abstract class Agent<T extends AgentListener> {
                     .build();
 
             log.info("instant: {}", instant);
-            channel.writeAndFlush(segment);
+            try {
+//                https://stackoverflow.com/questions/59786786/netty-client-do-not-send-data
+                channel.writeAndFlush(segment).sync();
+            }catch (Exception e) {
+                log.warn("tada", e);
+            }
 
             this.sendRequest(message);
         }

@@ -77,10 +77,9 @@ public class NodeServer {
                                     new MiniProtoStreamingByteToMessageDecoder(agents),
                                     new MiniProtoClientInboundHandler(handshakeAgent, agents));
                         }
-                    }).option(ChannelOption.SO_BACKLOG, 128);
-
-//            bootstrap.option(ChannelOption.SO_KEEPALIVE, true);
-//            bootstrap.option(ChannelOption.TCP_NODELAY, true);
+                    }).option(ChannelOption.SO_BACKLOG, 128)
+                    .childOption(ChannelOption.SO_KEEPALIVE, true)
+                    .childOption(ChannelOption.TCP_NODELAY, true);
 
             session = new ServerSession(port, b, handshakeAgent, agents);
             session.setSessionListener(sessionListener);
