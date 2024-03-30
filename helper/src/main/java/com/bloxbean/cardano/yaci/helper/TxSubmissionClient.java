@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionState;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxIds;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxs;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.TxUtil;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
@@ -80,6 +81,7 @@ public class TxSubmissionClient implements Fetcher<byte[]> {
 
     @Override
     public void start(Consumer<byte[]> consumer) {
+        log.info("Starting...");
         n2nClient.start();
         txSubmissionAgent.sendNextMessage();
     }
