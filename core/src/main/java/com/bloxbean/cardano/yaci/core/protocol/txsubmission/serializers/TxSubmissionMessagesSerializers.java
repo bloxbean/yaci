@@ -72,14 +72,26 @@ public class TxSubmissionMessagesSerializers {
             Array array = new Array();
             array.add(new UnsignedInteger(1));
 
-            Map map = new Map();
-            if (replyTxIds.getTxIdAndSizeMap() != null) {
-                replyTxIds.getTxIdAndSizeMap().forEach((id, size) -> {
-                      map.put(new ByteString(HexUtil.decodeHexString(id)), new UnsignedInteger(size));
-                });
-            }
+//            Map map = new Map();
+//            if (replyTxIds.getTxIdAndSizeMap() != null) {
+//                replyTxIds.getTxIdAndSizeMap().forEach((id, size) -> {
+//                      map.put(new ByteString(HexUtil.decodeHexString(id)), new UnsignedInteger(size));
+//                });
+//            }
+//
+//            array.add(map);
 
-            array.add(map);
+            var pairs = new Array();
+
+            replyTxIds.getTxIdAndSizeMap().forEach((id, size) -> {
+                var pair = new Array();
+                pair.add(new ByteString(HexUtil.decodeHexString(id)));
+                pair.add(new UnsignedInteger(size));
+                pairs.add(pair);
+            });
+
+            array.add(pairs);
+
 
             return CborSerializationUtil.serialize(array);
         }

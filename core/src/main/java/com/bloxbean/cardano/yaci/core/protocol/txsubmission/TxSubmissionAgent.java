@@ -28,12 +28,15 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
     @Override
     public Message buildNextMessage() {
+        log.info("state: {}", currenState);
         switch ((TxSubmissionState) currenState) {
             case Init:
                 return new Init();
             case TxIdsNonBlocking:
             case TxIdsBlocking:
-                return getReplyTxIds();
+                var replyTxIds = getReplyTxIds();
+                log.info("retrieving txIds: {}", replyTxIds);
+                return replyTxIds;
             case Txs:
                 return getReplyTxs();
             default:
@@ -44,9 +47,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     private ReplyTxIds getReplyTxIds() {
         if (!txs.isEmpty()) {
             ReplyTxIds replyTxIds = new ReplyTxIds();
-            txs.forEach((id, txBytes) -> {
-                replyTxIds.addTxId(id, txBytes.length);
-            });
+            txs.forEach((id, txBytes) -> replyTxIds.addTxId(id, txBytes.length));
             return replyTxIds;
         } else
             return new ReplyTxIds();
@@ -102,16 +103,20 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     private void addTxToQueue(int numTxToAdd) {
+        log.info("numTxToAdd: {}", numTxToAdd);
         if (!txs.isEmpty()) {
             txs.keySet()
                     .stream()
                     .filter(txHash -> !reqTxIds.contains(txHash))
                     .limit(numTxToAdd)
                     .forEach(reqTxIds::add);
+        } else {
+            log.info("Nothing to do, txs is empty");
         }
     }
 
     private void removeAcknowledgedTxs(int numAcknowledgedTransactions) {
+        log.info("numAcknowledgedTransactions: {}", numAcknowledgedTransactions);
         if (numAcknowledgedTransactions > 0) {
             var numTxToRemove = Math.min(numAcknowledgedTransactions, reqTxIds.size());
             var ackedTxIds = reqTxIds.subList(0, numTxToRemove);
@@ -126,8 +131,11 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     public void enqueueTransaction(String txHash, byte[] txBytes) {
+        log.info("enqueuing tx: {}", txHash);
         txs.put(txHash, txBytes);
+        log.info("num pending tx: {}", txs.size());
         if (TxSubmissionState.TxIdsBlocking.equals(currenState)) {
+            log.info("blocking, adding to queue and submitting");
             addTxToQueue(1);
             this.sendNextMessage();
         }

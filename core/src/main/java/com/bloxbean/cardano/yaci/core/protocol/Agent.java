@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.protocol;
 
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 
@@ -57,12 +58,17 @@ public abstract class Agent<T extends AgentListener> {
 
             int elapseTime = Duration.between(instant, Instant.now()).getNano() / 1000;
             instant = Instant.now();
+
+            var messageBytes = message.serialize();
+            log.info("bytes: {}", HexUtil.encodeHexString(messageBytes));
+
             Segment segment = Segment.builder()
                     .timestamp(elapseTime)
                     .protocol((short) this.getProtocolId())
-                    .payload(message.serialize())
+                    .payload(messageBytes)
                     .build();
 
+            log.info("before writeAndFlush");
             channel.writeAndFlush(segment);
             this.sendRequest(message);
         }
