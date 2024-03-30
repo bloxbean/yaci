@@ -14,13 +14,11 @@ import java.util.Map;
 public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     private final Map<String, byte[]> txs;
     private final List<String> reqTxIds;
-    private final List<String> reqNonBlockingTxIds;
 
     public TxSubmissionAgent() {
         this.currenState = TxSubmissionState.Init;
         txs = new HashMap<>();
         reqTxIds = new ArrayList<>();
-        reqNonBlockingTxIds = new ArrayList<>();
     }
 
     @Override
@@ -84,16 +82,47 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     private void handleRequestTxs(RequestTxs requestTxs) {
         // nothing to do here I guess, as ack is sent with next id requests
         log.info("RequestTxs >>" + requestTxs);
+        getAgentListeners().forEach(listener -> listener.handleRequestTxs(requestTxs));
     }
 
     private void handleRequestTxIdsNonBlocking(RequestTxIds requestTxIds) {
         // process ack
         log.info("RequestTxIdsNonBlocking >> " + requestTxIds);
+        removeAcknowledgedTxs(requestTxIds.getAckTxIds());
+        addTxToQueue(requestTxIds.getReqTxIds());
+        getAgentListeners().forEach(listener -> listener.handleRequestTxIdsNonBlocking(requestTxIds));
     }
 
     private void handleRequestTxIdsBlocking(RequestTxIds requestTxIds) {
         // process ack
         log.info("RequestTxIdsBlocking >> " + requestTxIds);
+        removeAcknowledgedTxs(requestTxIds.getAckTxIds());
+        addTxToQueue(requestTxIds.getReqTxIds());
+        getAgentListeners().forEach(listener -> listener.handleRequestTxIdsBlocking(requestTxIds));
+    }
+
+    private void addTxToQueue(int numTxToAdd) {
+        if (!txs.isEmpty()) {
+            txs.keySet()
+                    .stream()
+                    .filter(txHash -> !reqTxIds.contains(txHash))
+                    .limit(numTxToAdd)
+                    .forEach(reqTxIds::add);
+        }
+    }
+
+    private void removeAcknowledgedTxs(int numAcknowledgedTransactions) {
+        if (numAcknowledgedTransactions > 0) {
+            var numTxToRemove = Math.min(numAcknowledgedTransactions, reqTxIds.size());
+            var ackedTxIds = reqTxIds.subList(0, numTxToRemove);
+            ackedTxIds.forEach(txHash -> {
+                // remove from map
+                txs.remove(txHash);
+                // removed from queue
+                reqTxIds.remove(txHash);
+            });
+        }
+
     }
 
     public void enqueueTransaction(String txHash, byte[] txBytes) {
@@ -102,6 +131,10 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         if (states.contains((TxSubmissionState) currenState)) {
             this.sendNextMessage();
         }
+    }
+
+    public boolean hasPendingTx() {
+        return !txs.isEmpty();
     }
 
     @Override

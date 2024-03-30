@@ -5,6 +5,10 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionAgent;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionState;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxIds;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxs;
 import com.bloxbean.cardano.yaci.core.util.TxUtil;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +47,35 @@ public class TxSubmissionClient implements Fetcher<byte[]> {
                 txSubmissionAgent.sendNextMessage();
             }
         });
+
+        txSubmissionAgent.addListener(new TxSubmissionListener() {
+            @Override
+            public void handleRequestTxs(RequestTxs requestTxs) {
+                txSubmissionAgent.sendNextMessage();
+            }
+
+            @Override
+            public void handleRequestTxIdsNonBlocking(RequestTxIds requestTxIds) {
+                submit(false);
+            }
+
+            @Override
+            public void handleRequestTxIdsBlocking(RequestTxIds requestTxIds) {
+                submit(true);
+            }
+
+            private void submit(boolean isBlocking) {
+                if (isBlocking) {
+                    if (txSubmissionAgent.hasPendingTx()) {
+                        txSubmissionAgent.sendNextMessage();
+                    }
+                } else {
+                    txSubmissionAgent.sendNextMessage();
+                }
+            }
+
+        });
+
     }
 
     @Override
