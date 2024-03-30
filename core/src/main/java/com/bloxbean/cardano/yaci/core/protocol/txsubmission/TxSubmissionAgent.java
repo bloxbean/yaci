@@ -127,8 +127,8 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
     public void enqueueTransaction(String txHash, byte[] txBytes) {
         txs.put(txHash, txBytes);
-        var states = List.of(TxSubmissionState.TxIdsBlocking, TxSubmissionState.TxIdsNonBlocking);
-        if (states.contains((TxSubmissionState) currenState)) {
+        if (TxSubmissionState.TxIdsBlocking.equals(currenState)) {
+            addTxToQueue(1);
             this.sendNextMessage();
         }
     }
