@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 @Slf4j
-public class TxSubmissionAgent extends Agent {
+public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     private final Map<String, byte[]> txs;
     private final List<String> reqTxIds;
     private final List<String> reqNonBlockingTxIds;
@@ -34,8 +34,7 @@ public class TxSubmissionAgent extends Agent {
             case Init:
                 return new Init();
             case TxIdsNonBlocking:
-                return getReplyTxIds();
-            case  TxIdsBlocking:
+            case TxIdsBlocking:
                 return getReplyTxIds();
             case Txs:
                 return getReplyTxs();
@@ -45,7 +44,7 @@ public class TxSubmissionAgent extends Agent {
     }
 
     private ReplyTxIds getReplyTxIds() {
-        if (txs != null && txs.size() > 0) {
+        if (!txs.isEmpty()) {
             ReplyTxIds replyTxIds = new ReplyTxIds();
             txs.forEach((id, txBytes) -> {
                 replyTxIds.addTxId(id, txBytes.length);
@@ -60,7 +59,7 @@ public class TxSubmissionAgent extends Agent {
             return new ReplyTxs();
 
         ReplyTxs replyTxs = new ReplyTxs();
-        for (String txId: reqTxIds) {
+        for (String txId : reqTxIds) {
             byte[] tx = txs.get(txId);
             replyTxs.addTx(tx);
         }
@@ -83,15 +82,26 @@ public class TxSubmissionAgent extends Agent {
     }
 
     private void handleRequestTxs(RequestTxs requestTxs) {
+        // nothing to do here I guess, as ack is sent with next id requests
         log.info("RequestTxs >>" + requestTxs);
     }
 
     private void handleRequestTxIdsNonBlocking(RequestTxIds requestTxIds) {
+        // process ack
         log.info("RequestTxIdsNonBlocking >> " + requestTxIds);
     }
 
     private void handleRequestTxIdsBlocking(RequestTxIds requestTxIds) {
+        // process ack
         log.info("RequestTxIdsBlocking >> " + requestTxIds);
+    }
+
+    public void enqueueTransaction(String txHash, byte[] txBytes) {
+        txs.put(txHash, txBytes);
+        var states = List.of(TxSubmissionState.TxIdsBlocking, TxSubmissionState.TxIdsNonBlocking);
+        if (states.contains((TxSubmissionState) currenState)) {
+            this.sendNextMessage();
+        }
     }
 
     @Override
