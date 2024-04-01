@@ -26,7 +26,9 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     public void sendRequest(Message message) {
+        log.info("sendRequest");
         if (currenState.hasAgency()) {
+            log.info("hasAgency");
             currenState = currenState.nextState(message);
         } else {
             //TODO
@@ -70,6 +72,7 @@ public abstract class Agent<T extends AgentListener> {
 
             log.info("before writeAndFlush");
             channel.writeAndFlush(segment);
+            log.info("after");
             this.sendRequest(message);
         }
     }

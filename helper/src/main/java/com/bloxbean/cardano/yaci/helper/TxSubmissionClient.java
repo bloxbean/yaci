@@ -57,12 +57,12 @@ public class TxSubmissionClient implements Fetcher<byte[]> {
 
             @Override
             public void handleRequestTxIdsNonBlocking(RequestTxIds requestTxIds) {
-                submit(false);
+//                submit(false);
             }
 
             @Override
             public void handleRequestTxIdsBlocking(RequestTxIds requestTxIds) {
-                submit(true);
+//                submit(true);
             }
 
             private void submit(boolean isBlocking) {

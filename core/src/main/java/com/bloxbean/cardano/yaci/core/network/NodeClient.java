@@ -69,8 +69,8 @@ public abstract class NodeClient {
 
             configureChannel(b);
 
-            List<Agent> allAgents = Arrays.stream(agents).collect(Collectors.toList());
-            allAgents.add(0, handshakeAgent);
+//            List<Agent> allAgents = Arrays.stream(agents).collect(Collectors.toList());
+//            allAgents.add(0, handshakeAgent);
 
             b.handler(new ChannelInitializer<Channel>() {
 

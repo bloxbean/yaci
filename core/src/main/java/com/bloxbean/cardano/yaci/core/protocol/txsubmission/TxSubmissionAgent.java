@@ -74,8 +74,11 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
     @Override
     public void processResponse(Message message) {
-        if (message == null) return;
-        if (message instanceof RequestTxIds) {
+        if (message == null) {
+            return;
+        } else if (message instanceof Init) {
+            log.warn("init");
+        } else if (message instanceof RequestTxIds) {
             if (((RequestTxIds) message).isBlocking()) {
                 handleRequestTxIdsBlocking((RequestTxIds) message);
             } else {
@@ -143,7 +146,9 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         if (TxSubmissionState.TxIdsBlocking.equals(currenState)) {
             log.info("blocking, adding to queue and submitting");
             addTxToQueue(1);
-            this.sendNextMessage();
+//            if (reqTxIds.size() >= 3) {
+                this.sendNextMessage();
+//            }
         }
     }
 

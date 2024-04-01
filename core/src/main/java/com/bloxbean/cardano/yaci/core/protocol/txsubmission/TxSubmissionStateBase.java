@@ -16,6 +16,7 @@ public interface TxSubmissionStateBase extends State {
     Logger log = LoggerFactory.getLogger(TxSubmissionStateBase.class);
 
     default Message handleInbound(byte[] bytes) {
+        log.info("bla");
         try {
             DataItem di = CborSerializationUtil.deserializeOne(bytes);
             Array array = (Array) di;

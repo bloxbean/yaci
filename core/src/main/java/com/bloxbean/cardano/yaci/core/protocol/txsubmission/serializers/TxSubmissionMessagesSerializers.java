@@ -6,10 +6,12 @@ import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 public class TxSubmissionMessagesSerializers {
 
     public enum InitSerializer implements Serializer<Init> {
@@ -69,29 +71,28 @@ public class TxSubmissionMessagesSerializers {
 
         @Override
         public byte[] serialize(ReplyTxIds replyTxIds) {
+
             Array array = new Array();
             array.add(new UnsignedInteger(1));
 
-//            Map map = new Map();
-//            if (replyTxIds.getTxIdAndSizeMap() != null) {
-//                replyTxIds.getTxIdAndSizeMap().forEach((id, size) -> {
-//                      map.put(new ByteString(HexUtil.decodeHexString(id)), new UnsignedInteger(size));
-//                });
-//            }
-//
-//            array.add(map);
-
             var pairs = new Array();
+            // Starts the chunking, (see below for break)
+            pairs.setChunked(true);
 
-//            if (replyTxIds.getTxIdAndSizeMap() != null) {
-            replyTxIds.getTxIdAndSizeMap().forEach((id, size) -> {
-                var pair = new Array();
-                pair.add(new ByteString(HexUtil.decodeHexString(id)));
-                pair.add(new UnsignedInteger(size));
-                pairs.add(pair);
-            });
-//            }
+            if (replyTxIds.getTxIdAndSizeMap() != null) {
+                replyTxIds.getTxIdAndSizeMap().forEach((id, size) -> {
+                    var pair = new Array();
+                    var era = new Array();
+                    era.add(new UnsignedInteger(5));
+                    era.add(new ByteString(HexUtil.decodeHexString(id)));
+                    pair.add(era);
+                    pair.add(new UnsignedInteger(size));
+                    pairs.add(pair);
+                });
+            }
 
+            // stops the chunking
+            pairs.add(SimpleValue.BREAK);
             array.add(pairs);
 
 
@@ -128,10 +129,17 @@ public class TxSubmissionMessagesSerializers {
             if (label != 2)
                 throw new CborRuntimeException("Parsing error. Invalid label: " + di);
 
+            // list of pairs
             Array txIdArray = (Array) dataItemList.get(1);
             List<String> txIds = new ArrayList<>();
             for (DataItem txIdDI : txIdArray.getDataItems()) {
-                String txId = HexUtil.encodeHexString(((ByteString) txIdDI).getBytes());
+                // if we get to the end of the list exit.
+                if (txIdDI instanceof Special) {
+                    break;
+                }
+                var pairs = (Array) txIdDI;
+                String txId = HexUtil.encodeHexString(((ByteString) pairs.getDataItems().get(1)).getBytes());
+                log.info("txId: {}", txId);
                 txIds.add(txId);
             }
 
@@ -148,10 +156,13 @@ public class TxSubmissionMessagesSerializers {
             array.add(new UnsignedInteger(3));
 
             Array txArray = new Array();
+//            txArray.setChunked(true);
+
             if (replyTxs.getTxns() != null) {
                 replyTxs.getTxns().forEach(tx -> txArray.add(new ByteString(tx)));
             }
 
+//            txArray.add(SimpleValue.BREAK);
             array.add(txArray);
 
             return CborSerializationUtil.serialize(array);
