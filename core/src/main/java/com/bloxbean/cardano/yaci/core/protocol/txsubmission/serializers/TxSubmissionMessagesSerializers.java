@@ -13,7 +13,7 @@ import java.util.List;
 public class TxSubmissionMessagesSerializers {
 
     public enum InitSerializer implements Serializer<Init> {
-            INSTANCE;
+        INSTANCE;
 
         @Override
         public byte[] serialize(Init object) {
@@ -26,7 +26,7 @@ public class TxSubmissionMessagesSerializers {
         @Override
         public Init deserializeDI(DataItem di) { //Not used
             Array array = (Array) di;
-            int label = ((UnsignedInteger)array.getDataItems().get(0)).getValue().intValue();
+            int label = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
             if (label == 6)
                 return new Init();
             else
@@ -40,7 +40,7 @@ public class TxSubmissionMessagesSerializers {
         @Override
         public byte[] serialize(RequestTxIds requestTxIds) { //Not Used
             Array array = new Array();
-            array.add(requestTxIds.isBlocking()? SimpleValue.TRUE: SimpleValue.FALSE);
+            array.add(requestTxIds.isBlocking() ? SimpleValue.TRUE : SimpleValue.FALSE);
             array.add(new UnsignedInteger(requestTxIds.getAckTxIds()));
             array.add(new UnsignedInteger(requestTxIds.getReqTxIds()));
 
@@ -52,13 +52,13 @@ public class TxSubmissionMessagesSerializers {
             Array array = (Array) di;
 
             List<DataItem> dataItemList = array.getDataItems();
-            int label = ((UnsignedInteger)dataItemList.get(0)).getValue().intValue();
+            int label = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue();
             if (label != 0)
                 throw new CborRuntimeException("Parsing error. Invalid label: " + di);
 
             boolean isBlocking = dataItemList.get(1) == SimpleValue.TRUE;
-            short count1 = ((UnsignedInteger)dataItemList.get(2)).getValue().shortValue();
-            short count2 = ((UnsignedInteger)dataItemList.get(3)).getValue().shortValue();
+            short count1 = ((UnsignedInteger) dataItemList.get(2)).getValue().shortValue();
+            short count2 = ((UnsignedInteger) dataItemList.get(3)).getValue().shortValue();
 
             return new RequestTxIds(isBlocking, count1, count2);
         }
@@ -83,12 +83,14 @@ public class TxSubmissionMessagesSerializers {
 
             var pairs = new Array();
 
+//            if (replyTxIds.getTxIdAndSizeMap() != null) {
             replyTxIds.getTxIdAndSizeMap().forEach((id, size) -> {
                 var pair = new Array();
                 pair.add(new ByteString(HexUtil.decodeHexString(id)));
                 pair.add(new UnsignedInteger(size));
                 pairs.add(pair);
             });
+//            }
 
             array.add(pairs);
 
@@ -109,7 +111,7 @@ public class TxSubmissionMessagesSerializers {
 
             Array txIdArray = new Array();
             if (requestTxs.getTxIds() != null) {
-                requestTxs.getTxIds().forEach(txId -> txIdArray.add(new ByteString(HexUtil.decodeHexString(txId))) );
+                requestTxs.getTxIds().forEach(txId -> txIdArray.add(new ByteString(HexUtil.decodeHexString(txId))));
             }
 
             array.add(txIdArray);
@@ -122,14 +124,14 @@ public class TxSubmissionMessagesSerializers {
             Array array = (Array) di;
             List<DataItem> dataItemList = array.getDataItems();
 
-            int label = ((UnsignedInteger)dataItemList.get(0)).getValue().intValue();
+            int label = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue();
             if (label != 2)
                 throw new CborRuntimeException("Parsing error. Invalid label: " + di);
 
             Array txIdArray = (Array) dataItemList.get(1);
             List<String> txIds = new ArrayList<>();
-            for (DataItem txIdDI: txIdArray.getDataItems()) {
-                String txId = HexUtil.encodeHexString(((ByteString)txIdDI).getBytes());
+            for (DataItem txIdDI : txIdArray.getDataItems()) {
+                String txId = HexUtil.encodeHexString(((ByteString) txIdDI).getBytes());
                 txIds.add(txId);
             }
 
@@ -147,7 +149,7 @@ public class TxSubmissionMessagesSerializers {
 
             Array txArray = new Array();
             if (replyTxs.getTxns() != null) {
-                replyTxs.getTxns().forEach(tx -> txArray.add(new ByteString(tx)) );
+                replyTxs.getTxns().forEach(tx -> txArray.add(new ByteString(tx)));
             }
 
             array.add(txArray);
@@ -160,14 +162,14 @@ public class TxSubmissionMessagesSerializers {
             Array array = (Array) di;
             List<DataItem> dataItemList = array.getDataItems();
 
-            int label = ((UnsignedInteger)dataItemList.get(0)).getValue().intValue();
+            int label = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue();
             if (label != 3)
                 throw new CborRuntimeException("Parsing error. Invalid label: " + di);
 
             Array txArray = (Array) dataItemList.get(1);
             List<byte[]> txs = new ArrayList<>();
-            for (DataItem txDI: txArray.getDataItems()) {
-                byte[] tx = ((ByteString)txDI).getBytes();
+            for (DataItem txDI : txArray.getDataItems()) {
+                byte[] tx = ((ByteString) txDI).getBytes();
                 txs.add(tx);
             }
 
@@ -190,7 +192,7 @@ public class TxSubmissionMessagesSerializers {
         public MsgDone deserialize(byte[] bytes) {
             DataItem di = CborSerializationUtil.deserializeOne(bytes);
 
-            int key = ((UnsignedInteger)((Array) di).getDataItems().get(0)).getValue().intValue();
+            int key = ((UnsignedInteger) ((Array) di).getDataItems().get(0)).getValue().intValue();
             if (key == 4)
                 return new MsgDone();
             else

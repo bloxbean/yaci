@@ -83,7 +83,7 @@ public class TxSubmissionClient implements Fetcher<byte[]> {
     public void start(Consumer<byte[]> consumer) {
         log.info("Starting...");
         n2nClient.start();
-        txSubmissionAgent.sendNextMessage();
+//        txSubmissionAgent.sendNextMessage();
     }
 
     @Override

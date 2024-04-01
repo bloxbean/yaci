@@ -26,6 +26,12 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         return 4;
     }
 
+    public void sendNextMessage() {
+        log.info("sendNextMessage");
+        super.sendNextMessage();
+    }
+
+
     @Override
     public Message buildNextMessage() {
         log.info("state: {}", currenState);

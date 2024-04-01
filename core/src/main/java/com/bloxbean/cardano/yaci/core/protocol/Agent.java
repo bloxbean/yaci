@@ -47,7 +47,7 @@ public abstract class Agent<T extends AgentListener> {
         getAgentListeners().forEach(agentListener -> agentListener.onStateUpdate(oldState, currenState));
     }
 
-    public final void sendNextMessage() {
+    public  void sendNextMessage() {
         if (this.hasAgency()) {
             Message message = this.buildNextMessage();
             if (message == null)
