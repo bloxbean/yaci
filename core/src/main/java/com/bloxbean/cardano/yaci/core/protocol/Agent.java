@@ -26,9 +26,7 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     public void sendRequest(Message message) {
-        log.info("sendRequest");
         if (currenState.hasAgency()) {
-            log.info("hasAgency");
             currenState = currenState.nextState(message);
         } else {
             //TODO
@@ -61,13 +59,10 @@ public abstract class Agent<T extends AgentListener> {
             int elapseTime = Duration.between(instant, Instant.now()).getNano() / 1000;
             instant = Instant.now();
 
-            var messageBytes = message.serialize();
-            log.info("bytes: {}", HexUtil.encodeHexString(messageBytes));
-
             Segment segment = Segment.builder()
                     .timestamp(elapseTime)
                     .protocol((short) this.getProtocolId())
-                    .payload(messageBytes)
+                    .payload(message.serialize())
                     .build();
 
             channel.writeAndFlush(segment);

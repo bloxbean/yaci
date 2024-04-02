@@ -32,22 +32,18 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     public void sendNextMessage() {
-        log.info("sendNextMessage");
         super.sendNextMessage();
     }
 
 
     @Override
     public Message buildNextMessage() {
-        log.info("state: {}", currenState);
         switch ((TxSubmissionState) currenState) {
             case Init:
                 return new Init();
             case TxIdsNonBlocking:
             case TxIdsBlocking:
-                var replyTxIds = getReplyTxIds();
-                log.info("retrieving txIds: {}", replyTxIds);
-                return replyTxIds;
+                return getReplyTxIds();
             case Txs:
                 return getReplyTxs();
             default:
