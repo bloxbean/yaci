@@ -79,7 +79,6 @@ public class TxSubmissionClient {
     }
 
     public void start() {
-        log.info("Starting...");
         n2nClient.start();
     }
 

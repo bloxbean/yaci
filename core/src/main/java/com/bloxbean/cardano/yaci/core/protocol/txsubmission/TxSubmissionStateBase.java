@@ -20,25 +20,18 @@ public interface TxSubmissionStateBase extends State {
             DataItem di = CborSerializationUtil.deserializeOne(bytes);
             Array array = (Array) di;
             int id = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
-            var bytesHex = HexUtil.encodeHexString(bytes);
             switch (id) {
                 case 6:
-                    log.info("{} - bytesHex: {}", id, bytesHex);
                     return InitSerializer.INSTANCE.deserialize(bytes);
                 case 0:
-                    log.info("{} - bytesHex: {}", id, bytesHex);
                     return RequestTxIdsSerializer.INSTANCE.deserialize(bytes);
                 case 1:
-                    log.info("{} - bytesHex: {}", id, bytesHex);
                     return ReplyTxIdsSerializer.INSTANCE.deserialize(bytes);
                 case 2:
-                    log.info("{} - bytesHex: {}", id, bytesHex);
                     return RequestTxsSerializer.INSTANCE.deserialize(bytes);
                 case 3:
-                    log.info("{} - bytesHex: {}", id, bytesHex);
                     return ReplyTxsSerializer.INSTANCE.deserialize(bytes);
                 case 4:
-                    log.info("{} - bytesHex: {}", id, bytesHex);
                     return MsgDoneSerializer.INSTANCE.deserialize(bytes);
                 default:
                     throw new RuntimeException(String.format("Invalid msg id: %d", id));
