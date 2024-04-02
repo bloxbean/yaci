@@ -139,7 +139,6 @@ public class TxSubmissionMessagesSerializers {
                 }
                 var pairs = (Array) txIdDI;
                 String txId = HexUtil.encodeHexString(((ByteString) pairs.getDataItems().get(1)).getBytes());
-                log.info("txId: {}", txId);
                 txIds.add(txId);
             }
 
