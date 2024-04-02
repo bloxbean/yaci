@@ -129,6 +129,12 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         }
     }
 
+    private void addTxToQueue(String txHash) {
+        if (!pendingTxIds.contains(txHash)) {
+            pendingTxIds.add(txHash);
+        }
+    }
+
     private void removeAcknowledgedTxs(int numAcknowledgedTransactions) {
         if (numAcknowledgedTransactions > 0) {
             var numTxToRemove = Math.min(numAcknowledgedTransactions, pendingTxIds.size());
@@ -144,15 +150,18 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     public void enqueueTransaction(String txHash, byte[] txBytes) {
+        if (txs.containsKey(txHash)) {
+            return;
+        }
         txs.put(txHash, txBytes);
         if (TxSubmissionState.TxIdsBlocking.equals(currenState)) {
-            addTxToQueue(1);
+            addTxToQueue(txHash);
             this.sendNextMessage();
         }
     }
 
     public boolean hasPendingTx() {
-        return !txs.isEmpty();
+        return !pendingTxIds.isEmpty();
     }
 
     @Override
