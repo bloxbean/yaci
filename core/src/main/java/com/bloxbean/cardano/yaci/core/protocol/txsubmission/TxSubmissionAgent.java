@@ -5,10 +5,9 @@ import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Map;
-import java.util.Optional;
-import java.util.Vector;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 @Slf4j
 public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
@@ -138,7 +137,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     private void removeAcknowledgedTxs(int numAcknowledgedTransactions) {
         if (numAcknowledgedTransactions > 0) {
             var numTxToRemove = Math.min(numAcknowledgedTransactions, pendingTxIds.size());
-            var ackedTxIds = pendingTxIds.subList(0, numTxToRemove);
+            var ackedTxIds = new ArrayList<>(pendingTxIds.subList(0, numTxToRemove));
             ackedTxIds.forEach(txHash -> {
                 // remove from map
                 txs.remove(txHash);
