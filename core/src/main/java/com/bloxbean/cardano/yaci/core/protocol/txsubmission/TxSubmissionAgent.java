@@ -13,12 +13,20 @@ import java.util.Map;
 @Slf4j
 public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     private final Map<String, byte[]> txs;
-    private final List<String> reqTxIds;
+    /**
+     * Is the queue of TX received from client
+     */
+    private final List<String> pendingTxIds;
+    /**
+     * It's the temporary list of TX ids requested from Server
+     */
+    private final List<String> requestedTxIds;
 
     public TxSubmissionAgent() {
         this.currenState = TxSubmissionState.Init;
         txs = new HashMap<>();
-        reqTxIds = new ArrayList<>();
+        pendingTxIds = new ArrayList<>();
+        requestedTxIds = new ArrayList<>();
     }
 
     @Override
@@ -60,23 +68,26 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     private ReplyTxs getReplyTxs() {
-        if (reqTxIds.isEmpty())
+        if (requestedTxIds.isEmpty())
             return new ReplyTxs();
 
         ReplyTxs replyTxs = new ReplyTxs();
-        for (String txId : reqTxIds) {
-            byte[] tx = txs.get(txId);
+        for (String txId : requestedTxIds) {
+            byte[] tx = txs.remove(txId);
             replyTxs.addTx(tx);
         }
+        // Ids of requested TXs don't seem to be acked from server.
+        // Removing them right away now.
+        requestedTxIds.forEach(pendingTxIds::remove);
 
         return replyTxs;
     }
 
     @Override
     public void processResponse(Message message) {
-        if (message == null) {
-            return;
-        } else if (message instanceof Init) {
+        if (message == null) return;
+
+        if (message instanceof Init) {
             log.warn("init");
         } else if (message instanceof RequestTxIds) {
             if (((RequestTxIds) message).isBlocking()) {
@@ -90,8 +101,9 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     private void handleRequestTxs(RequestTxs requestTxs) {
-        // nothing to do here I guess, as ack is sent with next id requests
         log.info("RequestTxs >>" + requestTxs);
+        requestedTxIds.clear();
+        requestedTxIds.addAll(requestTxs.getTxIds());
         getAgentListeners().forEach(listener -> listener.handleRequestTxs(requestTxs));
     }
 
@@ -116,39 +128,33 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         if (!txs.isEmpty()) {
             txs.keySet()
                     .stream()
-                    .filter(txHash -> !reqTxIds.contains(txHash))
+                    .filter(txHash -> !pendingTxIds.contains(txHash))
                     .limit(numTxToAdd)
-                    .forEach(reqTxIds::add);
+                    .forEach(pendingTxIds::add);
         } else {
             log.info("Nothing to do, txs is empty");
         }
     }
 
     private void removeAcknowledgedTxs(int numAcknowledgedTransactions) {
-        log.info("numAcknowledgedTransactions: {}", numAcknowledgedTransactions);
         if (numAcknowledgedTransactions > 0) {
-            var numTxToRemove = Math.min(numAcknowledgedTransactions, reqTxIds.size());
-            var ackedTxIds = reqTxIds.subList(0, numTxToRemove);
+            var numTxToRemove = Math.min(numAcknowledgedTransactions, pendingTxIds.size());
+            var ackedTxIds = pendingTxIds.subList(0, numTxToRemove);
             ackedTxIds.forEach(txHash -> {
                 // remove from map
                 txs.remove(txHash);
                 // removed from queue
-                reqTxIds.remove(txHash);
+                pendingTxIds.remove(txHash);
             });
         }
 
     }
 
     public void enqueueTransaction(String txHash, byte[] txBytes) {
-        log.info("enqueuing tx: {}", txHash);
         txs.put(txHash, txBytes);
-        log.info("num pending tx: {}", txs.size());
         if (TxSubmissionState.TxIdsBlocking.equals(currenState)) {
-            log.info("blocking, adding to queue and submitting");
             addTxToQueue(1);
-//            if (reqTxIds.size() >= 3) {
-                this.sendNextMessage();
-//            }
+            this.sendNextMessage();
         }
     }
 

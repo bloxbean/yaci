@@ -70,9 +70,7 @@ public abstract class Agent<T extends AgentListener> {
                     .payload(messageBytes)
                     .build();
 
-            log.info("before writeAndFlush");
             channel.writeAndFlush(segment);
-            log.info("after");
             this.sendRequest(message);
         }
     }

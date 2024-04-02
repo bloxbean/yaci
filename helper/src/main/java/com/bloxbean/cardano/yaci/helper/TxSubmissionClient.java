@@ -21,7 +21,7 @@ import java.util.function.Consumer;
  * Tx submission with Node to Node protocol
  */
 @Slf4j
-public class TxSubmissionClient implements Fetcher<byte[]> {
+public class TxSubmissionClient {
     private String host;
     private int port;
     private VersionTable versionTable;
@@ -56,12 +56,12 @@ public class TxSubmissionClient implements Fetcher<byte[]> {
 
             @Override
             public void handleRequestTxIdsNonBlocking(RequestTxIds requestTxIds) {
-//                submit(false);
+                submit(false);
             }
 
             @Override
             public void handleRequestTxIdsBlocking(RequestTxIds requestTxIds) {
-//                submit(true);
+                submit(true);
             }
 
             private void submit(boolean isBlocking) {
@@ -78,28 +78,22 @@ public class TxSubmissionClient implements Fetcher<byte[]> {
 
     }
 
-    @Override
-    public void start(Consumer<byte[]> consumer) {
+    public void start() {
         log.info("Starting...");
         n2nClient.start();
-//        txSubmissionAgent.sendNextMessage();
     }
 
-    @Override
     public void shutdown() {
         n2nClient.shutdown();
     }
 
-    @Override
     public boolean isRunning() {
         return n2nClient.isRunning();
     }
 
     public void submitTxBytes(byte[] txBytes) {
-        var txHash1 = TxUtil.calculateTxHash(txBytes);
-        var txHash2 = TransactionUtil.getTxHash(txBytes);
-        log.info("txHash1: {}, txHash2: {}", txHash1, txHash2);
-        this.submitTxBytes(txHash2, txBytes);
+        var txHash = TransactionUtil.getTxHash(txBytes);
+        this.submitTxBytes(txHash, txBytes);
     }
 
     public void submitTxBytes(String txHash, byte[] txBytes) {
