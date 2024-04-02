@@ -5,6 +5,7 @@ import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
+import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionAgent;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxIds;
@@ -27,6 +28,7 @@ public class TxSubmissionClient {
     private VersionTable versionTable;
     private HandshakeAgent handshakeAgent;
     private TxSubmissionAgent txSubmissionAgent;
+    private KeepAliveAgent keepAliveAgent;
     private TCPNodeClient n2nClient;
 
     public TxSubmissionClient(String host, int port, VersionTable versionTable) {
@@ -39,12 +41,15 @@ public class TxSubmissionClient {
     private void init() {
         handshakeAgent = new HandshakeAgent(versionTable);
         txSubmissionAgent = new TxSubmissionAgent();
-        n2nClient = new TCPNodeClient(host, port, handshakeAgent, txSubmissionAgent);
+        keepAliveAgent = new KeepAliveAgent();
+
+        n2nClient = new TCPNodeClient(host, port, handshakeAgent, txSubmissionAgent, keepAliveAgent);
 
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
                 log.info("Handshake okay: {}:{}", host, port);
+                keepAliveAgent.sendKeepAlive(1234);
                 txSubmissionAgent.sendNextMessage();
             }
         });
@@ -98,6 +103,13 @@ public class TxSubmissionClient {
 
     public void submitTxBytes(String txHash, byte[] txBytes) {
         txSubmissionAgent.enqueueTransaction(txHash, txBytes);
+    }
+
+    public void sendKeepAlive() {
+        int min = 1;
+        int max = 65000;
+        int randomNum = (int)(Math.random() * (max - min + 1)) + min;
+        keepAliveAgent.sendKeepAlive(randomNum);
     }
 
 }
