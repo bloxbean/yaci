@@ -13,17 +13,17 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     /**
      * Is the queue of TX received from client
      */
-    private final List<String> pendingTxIds;
+    private final Vector<String> pendingTxIds;
     /**
      * It's the temporary list of TX ids requested from Server
      */
-    private final List<String> requestedTxIds;
+    private final Vector<String> requestedTxIds;
 
     public TxSubmissionAgent() {
         this.currenState = TxSubmissionState.Init;
         txs = new HashMap<>();
-        pendingTxIds = new ArrayList<>();
-        requestedTxIds = new ArrayList<>();
+        pendingTxIds = new Vector<>();
+        requestedTxIds = new Vector<>();
     }
 
     @Override
