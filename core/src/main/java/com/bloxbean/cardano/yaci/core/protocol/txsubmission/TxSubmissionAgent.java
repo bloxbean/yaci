@@ -5,10 +5,7 @@ import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Slf4j
 public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
@@ -59,9 +56,10 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     private ReplyTxIds getReplyTxIds() {
-        if (!txs.isEmpty()) {
+        if (!pendingTxIds.isEmpty()) {
             ReplyTxIds replyTxIds = new ReplyTxIds();
-            txs.forEach((id, txBytes) -> replyTxIds.addTxId(id, txBytes.length));
+            pendingTxIds.forEach(id -> Optional.ofNullable(txs.get(id))
+                    .ifPresent(txBytes -> replyTxIds.addTxId(id, txBytes.length)));
             return replyTxIds;
         } else
             return new ReplyTxIds();
@@ -101,7 +99,6 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     private void handleRequestTxs(RequestTxs requestTxs) {
-        log.info("RequestTxs >>" + requestTxs);
         requestedTxIds.clear();
         requestedTxIds.addAll(requestTxs.getTxIds());
         getAgentListeners().forEach(listener -> listener.handleRequestTxs(requestTxs));
@@ -109,7 +106,6 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
     private void handleRequestTxIdsNonBlocking(RequestTxIds requestTxIds) {
         // process ack
-        log.info("RequestTxIdsNonBlocking >> " + requestTxIds);
         removeAcknowledgedTxs(requestTxIds.getAckTxIds());
         addTxToQueue(requestTxIds.getReqTxIds());
         getAgentListeners().forEach(listener -> listener.handleRequestTxIdsNonBlocking(requestTxIds));
@@ -117,14 +113,12 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
     private void handleRequestTxIdsBlocking(RequestTxIds requestTxIds) {
         // process ack
-        log.info("RequestTxIdsBlocking >> " + requestTxIds);
         removeAcknowledgedTxs(requestTxIds.getAckTxIds());
         addTxToQueue(requestTxIds.getReqTxIds());
         getAgentListeners().forEach(listener -> listener.handleRequestTxIdsBlocking(requestTxIds));
     }
 
     private void addTxToQueue(int numTxToAdd) {
-        log.info("numTxToAdd: {}", numTxToAdd);
         if (!txs.isEmpty()) {
             txs.keySet()
                     .stream()
@@ -132,7 +126,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
                     .limit(numTxToAdd)
                     .forEach(pendingTxIds::add);
         } else {
-            log.info("Nothing to do, txs is empty");
+            log.debug("Nothing to do, txs is empty");
         }
     }
 
