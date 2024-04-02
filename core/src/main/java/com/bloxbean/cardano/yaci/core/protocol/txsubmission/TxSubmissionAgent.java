@@ -5,7 +5,10 @@ import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.*;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Vector;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
@@ -21,7 +24,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
     public TxSubmissionAgent() {
         this.currenState = TxSubmissionState.Init;
-        txs = new HashMap<>();
+        txs = new ConcurrentHashMap<>();
         pendingTxIds = new Vector<>();
         requestedTxIds = new Vector<>();
     }
