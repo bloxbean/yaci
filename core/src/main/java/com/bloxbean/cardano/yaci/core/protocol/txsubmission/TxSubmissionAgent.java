@@ -170,6 +170,9 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
     @Override
     public void reset() {
+        txs.clear();
+        pendingTxIds.clear();
+        requestedTxIds.clear();
         this.currenState = TxSubmissionState.Init;
     }
 }
