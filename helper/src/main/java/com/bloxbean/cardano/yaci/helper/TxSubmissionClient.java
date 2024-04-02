@@ -44,6 +44,7 @@ public class TxSubmissionClient {
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
+                log.info("Handshake okay: {}:{}", host, port);
                 txSubmissionAgent.sendNextMessage();
             }
         });
