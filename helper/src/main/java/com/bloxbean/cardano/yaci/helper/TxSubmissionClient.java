@@ -1,15 +1,14 @@
 package com.bloxbean.cardano.yaci.helper;
 
+import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionAgent;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener;
-import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionState;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxIds;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxs;
-import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.TxUtil;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
@@ -97,8 +96,10 @@ public class TxSubmissionClient implements Fetcher<byte[]> {
     }
 
     public void submitTxBytes(byte[] txBytes) {
-        var txHash = TxUtil.calculateTxHash(txBytes);
-        this.submitTxBytes(txHash, txBytes);
+        var txHash1 = TxUtil.calculateTxHash(txBytes);
+        var txHash2 = TransactionUtil.getTxHash(txBytes);
+        log.info("txHash1: {}, txHash2: {}", txHash1, txHash2);
+        this.submitTxBytes(txHash2, txBytes);
     }
 
     public void submitTxBytes(String txHash, byte[] txBytes) {

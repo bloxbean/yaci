@@ -156,13 +156,23 @@ public class TxSubmissionMessagesSerializers {
             array.add(new UnsignedInteger(3));
 
             Array txArray = new Array();
-//            txArray.setChunked(true);
+            txArray.setChunked(true);
 
             if (replyTxs.getTxns() != null) {
-                replyTxs.getTxns().forEach(tx -> txArray.add(new ByteString(tx)));
+                replyTxs.getTxns().forEach(tx -> {
+
+                    var transactions = new Array();
+                    var txBody = new ByteString(tx);
+                    txBody.setTag(24L);
+
+                    transactions.add(new UnsignedInteger(5)); // Era
+                    transactions.add(txBody);
+
+                    txArray.add(transactions);
+                });
             }
 
-//            txArray.add(SimpleValue.BREAK);
+            txArray.add(SimpleValue.BREAK);
             array.add(txArray);
 
             return CborSerializationUtil.serialize(array);
