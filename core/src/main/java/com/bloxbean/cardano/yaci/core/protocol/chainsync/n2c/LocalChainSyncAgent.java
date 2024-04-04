@@ -20,7 +20,13 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     private int agentNo;
     private int counter = 0;
 
+
     public LocalChainSyncAgent(Point[] knownPoints) {
+        this(knownPoints, true);
+    }
+
+    public LocalChainSyncAgent(Point[] knownPoints, boolean isClient) {
+        super(isClient);
         this.currenState = Idle;
         this.knownPoints = knownPoints;
 
@@ -29,12 +35,17 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     }
 
     public LocalChainSyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo) {
+        this(knownPoints, stopSlotNo, agentNo, true);
+    }
+
+    public LocalChainSyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo, boolean isClient) {
+        super(isClient);
         this.currenState = Idle;
         this.knownPoints = knownPoints;
         this.stopAt = stopSlotNo;
         this.agentNo = agentNo;
 
-        log.debug("Starting at slot > " + knownPoints[0].getSlot() +" --- To >> " + stopSlotNo +"  -- agent >> " + agentNo);
+        log.debug("Starting at slot > " + knownPoints[0].getSlot() + " --- To >> " + stopSlotNo + "  -- agent >> " + agentNo);
     }
 
     @Override
@@ -74,7 +85,7 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
         } else if (message instanceof IntersectNotFound) {
             if (log.isDebugEnabled())
                 log.debug("IntersectNotFound - {}", message);
-            onIntersactNotFound((IntersectNotFound)message);
+            onIntersactNotFound((IntersectNotFound) message);
         } else if (message instanceof LocalRollForward) {
             if (log.isDebugEnabled()) {
                 log.debug("LocalRollForward !!!");
@@ -168,7 +179,7 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
                         chainSyncAgentListener.rollforward(rollForward.getTip(), rollForward.getBlock());
                     }
             );
-        } else if(rollForward.getByronBlock() != null) { //For Byron
+        } else if (rollForward.getByronBlock() != null) { //For Byron
             if (log.isTraceEnabled())
                 log.trace("Byron Block: " + rollForward.getByronBlock().getHeader().getConsensusData());
             getAgentListeners().stream().forEach(
@@ -176,7 +187,7 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
                         chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronBlock());
                     }
             );
-        } else if(rollForward.getByronEbBlock() != null) { //For Byron EbBlock
+        } else if (rollForward.getByronEbBlock() != null) { //For Byron EbBlock
             if (log.isTraceEnabled())
                 log.trace("Byron Eb Block: " + rollForward.getByronEbBlock().getHeader().getConsensusData());
             getAgentListeners().stream().forEach(
@@ -200,6 +211,6 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     public void reset(Point point) {
         this.currentPoint = null;
         this.intersact = null;
-        this.knownPoints = new Point[] {point};
+        this.knownPoints = new Point[]{point};
     }
 }

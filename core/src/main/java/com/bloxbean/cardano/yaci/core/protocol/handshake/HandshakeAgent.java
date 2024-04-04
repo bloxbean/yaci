@@ -14,6 +14,10 @@ import static com.bloxbean.cardano.yaci.core.protocol.handshake.HandshkeState.Pr
 public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     private final VersionTable versionTable;
 
+    public HandshakeAgent(VersionTable versionTable) {
+        this(versionTable, true);
+    }
+
     public HandshakeAgent(VersionTable versionTable, boolean isClient) {
         super(isClient);
         this.versionTable = versionTable;
@@ -27,7 +31,7 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
 
     @Override
     public Message buildNextMessage() {
-        switch ((HandshkeState)currenState) {
+        switch ((HandshkeState) currenState) {
             case Propose:
                 return new ProposedVersions(versionTable); //TODO
             default:
@@ -40,7 +44,7 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
         if (message == null) return;
         if (message instanceof AcceptVersion) {
             log.info("Handshake Ok!!! {}", message);
-            setProtocolVersion((AcceptVersion)message);
+            setProtocolVersion((AcceptVersion) message);
             handshakeOk();
         } else if (message instanceof VersionTable) {
             log.info("VersionTable received!!! {}", message);
@@ -58,7 +62,7 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     }
 
     private void handshakeError(Message message) {
-        getAgentListeners().forEach(handshakeAgentListener -> handshakeAgentListener.handshakeError((Reason)message));
+        getAgentListeners().forEach(handshakeAgentListener -> handshakeAgentListener.handshakeError((Reason) message));
     }
 
     @Override

@@ -23,6 +23,12 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     private long startTime;
 
     public ChainsyncAgent(Point[] knownPoints) {
+        this(knownPoints, true);
+
+    }
+
+    public ChainsyncAgent(Point[] knownPoints, boolean isClient) {
+        super(isClient);
         this.currenState = Idle;
         this.knownPoints = knownPoints;
 
@@ -31,12 +37,17 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     public ChainsyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo) {
+        this(knownPoints, stopSlotNo, agentNo, true);
+    }
+
+    public ChainsyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo, boolean isClient) {
+        super(isClient);
         this.currenState = Idle;
         this.knownPoints = knownPoints;
         this.stopAt = stopSlotNo;
         this.agentNo = agentNo;
 
-        log.debug("Starting at slot > " + knownPoints[0].getSlot() +" --- To >> " + stopSlotNo +"  -- agent >> " + agentNo);
+        log.debug("Starting at slot > " + knownPoints[0].getSlot() + " --- To >> " + stopSlotNo + "  -- agent >> " + agentNo);
     }
 
     @Override
@@ -76,7 +87,7 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
         } else if (message instanceof IntersectNotFound) {
             if (log.isDebugEnabled())
                 log.debug("IntersectNotFound - {}", message);
-            onIntersactNotFound((IntersectNotFound)message);
+            onIntersactNotFound((IntersectNotFound) message);
         } else if (message instanceof RollForward) {
             if (log.isDebugEnabled())
                 log.debug("RollForward - {}", message);
@@ -162,13 +173,13 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
             }
         }
 
-       if (rollForward.getBlockHeader() != null) { //For Shelley and later eras
+        if (rollForward.getBlockHeader() != null) { //For Shelley and later eras
             getAgentListeners().stream().forEach(
                     chainSyncAgentListener -> {
                         chainSyncAgentListener.rollforward(rollForward.getTip(), rollForward.getBlockHeader());
                     }
             );
-        } else if(rollForward.getByronBlockHead() != null) { //For Byron main block
+        } else if (rollForward.getByronBlockHead() != null) { //For Byron main block
             if (log.isTraceEnabled())
                 log.trace("Byron Block: " + rollForward.getByronBlockHead().getConsensusData().getSlotId());
             getAgentListeners().stream().forEach(
@@ -177,14 +188,14 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
                     }
             );
         } else if (rollForward.getByronEbHead() != null) { //For Byron Eb block
-           if (log.isTraceEnabled())
-               log.trace("Byron Eb Block: " + rollForward.getByronEbHead().getConsensusData());
-           getAgentListeners().stream().forEach(
-                   chainSyncAgentListener -> {
-                       chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronEbHead());
-                   }
-           );
-       }
+            if (log.isTraceEnabled())
+                log.trace("Byron Eb Block: " + rollForward.getByronEbHead().getConsensusData());
+            getAgentListeners().stream().forEach(
+                    chainSyncAgentListener -> {
+                        chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronEbHead());
+                    }
+            );
+        }
     }
 
     @Override
@@ -200,6 +211,6 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     public void reset(Point point) {
         this.currentPoint = null;
         this.intersact = null;
-        this.knownPoints = new Point[] {point};
+        this.knownPoints = new Point[]{point};
     }
 }
