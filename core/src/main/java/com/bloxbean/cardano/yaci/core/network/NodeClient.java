@@ -41,14 +41,14 @@ public abstract class NodeClient {
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
-                for (Agent agent : agents) {
+                for (Agent agent: agents) {
                     agent.setProtocolVersion(handshakeAgent.getProtocolVersion());
                 }
             }
 
             @Override
             public void handshakeError(Reason reason) {
-                for (Agent agent : agents) {
+                for (Agent agent: agents) {
                     agent.setProtocolVersion(handshakeAgent.getProtocolVersion());
                 }
             }
@@ -78,8 +78,7 @@ public abstract class NodeClient {
                 }
             });
 
-            SocketAddress socketAddress = null;
-            socketAddress = createSocketAddress();
+            SocketAddress socketAddress = createSocketAddress();
 
             session = new Session(socketAddress, b, handshakeAgent, agents);
             session.setSessionListener(sessionListener);
@@ -121,7 +120,7 @@ public abstract class NodeClient {
             throw new RuntimeException(e);
         }
 
-        for (var agent : agents) {
+        for (var agent: agents) {
             agent.reset();
         }
 
@@ -168,7 +167,7 @@ public abstract class NodeClient {
                 session.dispose();
             }
 
-            for (Agent agent : agents) {
+            for (Agent agent: agents) {
                 agent.disconnected();
             }
 
