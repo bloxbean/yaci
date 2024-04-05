@@ -20,8 +20,8 @@ public enum LocalStateQueryState implements LocalStateQueryStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return true;
+        public boolean hasAgency(boolean isClient) {
+            return isClient;
         }
 
         List<Class> allowedMsgTypes = List.of(MsgAcquire.class, MsgDone.class);
@@ -44,8 +44,8 @@ public enum LocalStateQueryState implements LocalStateQueryStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return false;
+        public boolean hasAgency(boolean isClient) {
+            return !isClient;
         }
 
         List<Class> allowedMsgTypes = List.of(MsgAcquired.class, MsgFailure.class);
@@ -70,8 +70,8 @@ public enum LocalStateQueryState implements LocalStateQueryStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return true;
+        public boolean hasAgency(boolean isClient) {
+            return isClient;
         }
 
         List<Class> allowedMsgTypes = List.of(MsgQuery.class, MsgReAcquire.class, MsgRelease.class);
@@ -92,8 +92,8 @@ public enum LocalStateQueryState implements LocalStateQueryStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return false;
+        public boolean hasAgency(boolean isClient) {
+            return !isClient;
         }
 
         List<Class> allowedMsgTypes = List.of(MsgResult.class);
@@ -111,7 +111,7 @@ public enum LocalStateQueryState implements LocalStateQueryStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
+        public boolean hasAgency(boolean isClient) {
             return false;
         }
     }
