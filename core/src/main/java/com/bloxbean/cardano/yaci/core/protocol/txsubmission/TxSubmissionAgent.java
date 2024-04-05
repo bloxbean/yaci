@@ -3,15 +3,17 @@ package com.bloxbean.cardano.yaci.core.protocol.txsubmission;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
+import com.bloxbean.cardano.yaci.core.util.Tuple;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.Optional;
+import java.util.Vector;
 
 @Slf4j
 public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
-    private final Map<String, byte[]> txs;
+    // txs should be stored in a thread-safe, ordered (tx dependency/chaining) data structure.
+    private final Vector<Tuple<String, byte[]>> txs;
     /**
      * Is the queue of TX received from client
      */
@@ -23,9 +25,9 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
     public TxSubmissionAgent() {
         this.currenState = TxSubmissionState.Init;
-        txs = new ConcurrentHashMap<>();
-        pendingTxIds = new Vector<>();
-        requestedTxIds = new Vector<>();
+        this.txs = new Vector<>();
+        this.pendingTxIds = new Vector<>();
+        this.requestedTxIds = new Vector<>();
     }
 
     @Override
@@ -36,7 +38,6 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     public void sendNextMessage() {
         super.sendNextMessage();
     }
-
 
     @Override
     public Message buildNextMessage() {
@@ -53,14 +54,32 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         }
     }
 
+    private Optional<Tuple<String, byte[]>> findTxIdAndHash(String id) {
+        return txs.stream().filter(txIdAndHash -> txIdAndHash._1.equals(id)).findAny();
+    }
+
+    private Optional<byte[]> removeTxIdAndHash(String id) {
+        var txIdAndHashOpt = txs.stream().filter(txIdAndHash -> txIdAndHash._1.equals(id)).findAny();
+        txIdAndHashOpt.ifPresent(txs::remove);
+        return txIdAndHashOpt.map(txIdAndHash -> txIdAndHash._2);
+    }
+
     private ReplyTxIds getReplyTxIds() {
         if (!pendingTxIds.isEmpty()) {
             ReplyTxIds replyTxIds = new ReplyTxIds();
-            pendingTxIds.forEach(id -> Optional.ofNullable(txs.get(id))
-                    .ifPresent(txBytes -> replyTxIds.addTxId(id, txBytes.length)));
+            // Not limiting how many txs to add, as pendingTxIds should be already capped to num of req txs
+            pendingTxIds
+                    .stream()
+                    .flatMap(id -> findTxIdAndHash(id).stream())
+                    .forEach(idAndBytes -> replyTxIds.addTxId(idAndBytes._1, idAndBytes._2.length));
+            if (log.isDebugEnabled())
+                log.debug("TxIds: {}", replyTxIds.getTxIdAndSizeMap().size());
             return replyTxIds;
-        } else
-            return new ReplyTxIds();
+        } else {
+            if (log.isDebugEnabled())
+                log.debug("TxIds: 0");
+        }
+        return new ReplyTxIds();
     }
 
     private ReplyTxs getReplyTxs() {
@@ -69,13 +88,14 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
         ReplyTxs replyTxs = new ReplyTxs();
         for (String txId : requestedTxIds) {
-            byte[] tx = txs.remove(txId);
-            replyTxs.addTx(tx);
+            removeTxIdAndHash(txId)
+                    .ifPresent(replyTxs::addTx);
         }
         // Ids of requested TXs don't seem to be acked from server.
         // Removing them right away now.
         requestedTxIds.forEach(pendingTxIds::remove);
-
+        if (log.isDebugEnabled())
+            log.debug("Txs: {}", replyTxs.getTxns().size());
         return replyTxs;
     }
 
@@ -86,10 +106,15 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         if (message instanceof Init) {
             log.warn("init");
         } else if (message instanceof RequestTxIds) {
-            if (((RequestTxIds) message).isBlocking()) {
-                handleRequestTxIdsBlocking((RequestTxIds) message);
+            var requestTxIds = (RequestTxIds) message;
+            if (requestTxIds.isBlocking()) {
+                if (log.isDebugEnabled())
+                    log.debug("RequestTxIds - Blocking, ack: {}, req: {}", requestTxIds.getAckTxIds(), requestTxIds.getReqTxIds());
+                handleRequestTxIdsBlocking(requestTxIds);
             } else {
-                handleRequestTxIdsNonBlocking((RequestTxIds) message);
+                if (log.isDebugEnabled())
+                    log.debug("RequestTxIds - NonBlocking, ack: {}, req: {}", requestTxIds.getAckTxIds(), requestTxIds.getReqTxIds());
+                handleRequestTxIdsNonBlocking(requestTxIds);
             }
         } else if (message instanceof RequestTxs) {
             handleRequestTxs((RequestTxs) message);
@@ -117,14 +142,17 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     private void addTxToQueue(int numTxToAdd) {
+        // pendingTxIds size can't exceed numTxToAdd
+        var txToAdd = numTxToAdd - pendingTxIds.size();
         if (!txs.isEmpty()) {
-            txs.keySet()
-                    .stream()
+            txs.stream()
+                    .map(txIdAndHash -> txIdAndHash._1)
                     .filter(txHash -> !pendingTxIds.contains(txHash))
-                    .limit(numTxToAdd)
+                    .limit(txToAdd)
                     .forEach(pendingTxIds::add);
         } else {
-            log.debug("Nothing to do, txs is empty");
+            if (log.isDebugEnabled())
+                log.debug("Nothing to do, txs is empty");
         }
     }
 
@@ -138,9 +166,11 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         if (numAcknowledgedTransactions > 0) {
             var numTxToRemove = Math.min(numAcknowledgedTransactions, pendingTxIds.size());
             var ackedTxIds = new ArrayList<>(pendingTxIds.subList(0, numTxToRemove));
+            if (log.isDebugEnabled())
+                log.debug("removeAcknowledgedTxs: {}, ackedTxIds: {}", numAcknowledgedTransactions, ackedTxIds);
             ackedTxIds.forEach(txHash -> {
                 // remove from map
-                txs.remove(txHash);
+                removeTxIdAndHash(txHash);
                 // removed from queue
                 pendingTxIds.remove(txHash);
             });
@@ -149,10 +179,10 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     public void enqueueTransaction(String txHash, byte[] txBytes) {
-        if (txs.containsKey(txHash)) {
+        if (txs.stream().map(txIdAndHash -> txIdAndHash._1).anyMatch(previousHash -> previousHash.equals(txHash))) {
             return;
         }
-        txs.put(txHash, txBytes);
+        txs.add(new Tuple<>(txHash, txBytes));
         if (TxSubmissionState.TxIdsBlocking.equals(currenState)) {
             addTxToQueue(txHash);
             this.sendNextMessage();
