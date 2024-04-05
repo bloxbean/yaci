@@ -35,10 +35,6 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         return 4;
     }
 
-    public void sendNextMessage() {
-        super.sendNextMessage();
-    }
-
     @Override
     public Message buildNextMessage() {
         switch ((TxSubmissionState) currenState) {
@@ -75,9 +71,6 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
             if (log.isDebugEnabled())
                 log.debug("TxIds: {}", replyTxIds.getTxIdAndSizeMap().size());
             return replyTxIds;
-        } else {
-            if (log.isDebugEnabled())
-                log.debug("TxIds: 0");
         }
         return new ReplyTxIds();
     }
@@ -87,10 +80,8 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
             return new ReplyTxs();
 
         ReplyTxs replyTxs = new ReplyTxs();
-        for (String txId : requestedTxIds) {
-            removeTxIdAndHash(txId)
-                    .ifPresent(replyTxs::addTx);
-        }
+        requestedTxIds.forEach(txId -> removeTxIdAndHash(txId).ifPresent(replyTxs::addTx));
+
         // Ids of requested TXs don't seem to be acked from server.
         // Removing them right away now.
         requestedTxIds.forEach(pendingTxIds::remove);
