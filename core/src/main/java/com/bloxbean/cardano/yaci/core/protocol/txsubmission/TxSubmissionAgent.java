@@ -6,28 +6,27 @@ import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
 import java.util.Optional;
-import java.util.Vector;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 @Slf4j
 public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     // txs should be stored in a thread-safe, ordered (tx dependency/chaining) data structure.
-    private final Vector<Tuple<String, byte[]>> txs;
+    private final ConcurrentLinkedQueue<Tuple<String, byte[]>> txs;
     /**
      * Is the queue of TX received from client
      */
-    private final Vector<String> pendingTxIds;
+    private final ConcurrentLinkedQueue<String> pendingTxIds;
     /**
      * It's the temporary list of TX ids requested from Server
      */
-    private final Vector<String> requestedTxIds;
+    private final ConcurrentLinkedQueue<String> requestedTxIds;
 
     public TxSubmissionAgent() {
         this.currenState = TxSubmissionState.Init;
-        this.txs = new Vector<>();
-        this.pendingTxIds = new Vector<>();
-        this.requestedTxIds = new Vector<>();
+        this.txs = new ConcurrentLinkedQueue<>();
+        this.pendingTxIds = new ConcurrentLinkedQueue<>();
+        this.requestedTxIds = new ConcurrentLinkedQueue<>();
     }
 
     @Override
@@ -156,15 +155,16 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     private void removeAcknowledgedTxs(int numAcknowledgedTransactions) {
         if (numAcknowledgedTransactions > 0) {
             var numTxToRemove = Math.min(numAcknowledgedTransactions, pendingTxIds.size());
-            var ackedTxIds = new ArrayList<>(pendingTxIds.subList(0, numTxToRemove));
-            if (log.isDebugEnabled())
-                log.debug("removeAcknowledgedTxs: {}, ackedTxIds: {}", numAcknowledgedTransactions, ackedTxIds);
-            ackedTxIds.forEach(txHash -> {
-                // remove from map
-                removeTxIdAndHash(txHash);
-                // removed from queue
-                pendingTxIds.remove(txHash);
-            });
+            for (int i = 0; i < numTxToRemove; i++) {
+                var txHash = pendingTxIds.poll();
+                if (txHash != null) {
+                    // remove from map
+                    removeTxIdAndHash(txHash);
+                    // removed from queue
+                    pendingTxIds.remove(txHash);
+                }
+            }
+
         }
 
     }
