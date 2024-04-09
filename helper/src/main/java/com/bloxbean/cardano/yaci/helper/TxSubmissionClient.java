@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.helper;
 
+import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
@@ -11,6 +12,8 @@ import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxIds
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxs;
 import com.bloxbean.cardano.yaci.core.util.TxUtil;
 import lombok.extern.slf4j.Slf4j;
+
+import static com.bloxbean.cardano.yaci.core.common.TxBodyType.BABBAGE;
 
 /**
  * This helper is still under development.
@@ -94,11 +97,11 @@ public class TxSubmissionClient {
 
     public void submitTxBytes(byte[] txBytes) {
         var txHash = TxUtil.calculateTxHash(txBytes);
-        this.submitTxBytes(txHash, txBytes);
+        this.submitTxBytes(txHash, txBytes, BABBAGE);
     }
 
-    public void submitTxBytes(String txHash, byte[] txBytes) {
-        txSubmissionAgent.enqueueTransaction(txHash, txBytes);
+    public void submitTxBytes(String txHash, byte[] txBytes, TxBodyType txBodyType) {
+        txSubmissionAgent.enqueueTransaction(txHash, txBytes, txBodyType);
     }
 
     public void sendKeepAlive() {

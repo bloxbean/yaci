@@ -1,21 +1,25 @@
 package com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges;
 
 import com.bloxbean.cardano.yaci.core.protocol.Message;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.serializers.TxSubmissionMessagesSerializers;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
 
 import java.util.ArrayList;
 import java.util.List;
 
 @Getter
-@AllArgsConstructor
-@NoArgsConstructor
-@Builder
+@RequiredArgsConstructor
 public class ReplyTxs implements Message {
+
+    private final Era era;
+
     private List<byte[]> txns;
+
+    public ReplyTxs() {
+        this(Era.Babbage);
+    }
 
     public void addTx(byte[] tx) {
         if (txns == null)

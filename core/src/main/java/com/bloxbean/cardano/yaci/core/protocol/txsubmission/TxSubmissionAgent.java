@@ -1,9 +1,10 @@
 package com.bloxbean.cardano.yaci.core.protocol.txsubmission;
 
+import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
-import com.bloxbean.cardano.yaci.core.util.Tuple;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.model.TxSubmissionRequest;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Optional;
@@ -12,7 +13,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 @Slf4j
 public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     // txs should be stored in a thread-safe, ordered (tx dependency/chaining) data structure.
-    private final ConcurrentLinkedQueue<Tuple<String, byte[]>> txs;
+    private final ConcurrentLinkedQueue<TxSubmissionRequest> txs;
     /**
      * Is the queue of TX received from client
      */
@@ -49,14 +50,14 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         }
     }
 
-    private Optional<Tuple<String, byte[]>> findTxIdAndHash(String id) {
-        return txs.stream().filter(txIdAndHash -> txIdAndHash._1.equals(id)).findAny();
+    private Optional<TxSubmissionRequest> findTxIdAndHash(String id) {
+        return txs.stream().filter(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(id)).findAny();
     }
 
-    private Optional<byte[]> removeTxIdAndHash(String id) {
-        var txIdAndHashOpt = txs.stream().filter(txIdAndHash -> txIdAndHash._1.equals(id)).findAny();
+    private Optional<TxSubmissionRequest> removeTxIdAndHash(String id) {
+        var txIdAndHashOpt = txs.stream().filter(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(id)).findAny();
         txIdAndHashOpt.ifPresent(txs::remove);
-        return txIdAndHashOpt.map(txIdAndHash -> txIdAndHash._2);
+        return txIdAndHashOpt;
     }
 
     private ReplyTxIds getReplyTxIds() {
@@ -66,7 +67,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
             pendingTxIds
                     .stream()
                     .flatMap(id -> findTxIdAndHash(id).stream())
-                    .forEach(idAndBytes -> replyTxIds.addTxId(idAndBytes._1, idAndBytes._2.length));
+                    .forEach(txSubmissionRequest -> replyTxIds.addTxId(txSubmissionRequest.getTxHash(), txSubmissionRequest.getTxnBytes().length));
             if (log.isDebugEnabled())
                 log.debug("TxIds: {}", replyTxIds.getTxIdAndSizeMap().size());
             return replyTxIds;
@@ -79,7 +80,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
             return new ReplyTxs();
 
         ReplyTxs replyTxs = new ReplyTxs();
-        requestedTxIds.forEach(txId -> removeTxIdAndHash(txId).ifPresent(replyTxs::addTx));
+        requestedTxIds.forEach(txId -> removeTxIdAndHash(txId).ifPresent(txSubmissionRequest -> replyTxs.addTx(txSubmissionRequest.getTxnBytes())));
 
         // Ids of requested TXs don't seem to be acked from server.
         // Removing them right away now.
@@ -136,7 +137,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         var txToAdd = numTxToAdd - pendingTxIds.size();
         if (!txs.isEmpty()) {
             txs.stream()
-                    .map(txIdAndHash -> txIdAndHash._1)
+                    .map(TxSubmissionRequest::getTxHash)
                     .filter(txHash -> !pendingTxIds.contains(txHash))
                     .limit(txToAdd)
                     .forEach(pendingTxIds::add);
@@ -169,11 +170,11 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
     }
 
-    public void enqueueTransaction(String txHash, byte[] txBytes) {
-        if (txs.stream().map(txIdAndHash -> txIdAndHash._1).anyMatch(previousHash -> previousHash.equals(txHash))) {
+    public void enqueueTransaction(String txHash, byte[] txBytes, TxBodyType txBodyType) {
+        if (txs.stream().anyMatch(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(txHash))) {
             return;
         }
-        txs.add(new Tuple<>(txHash, txBytes));
+        txs.add(TxSubmissionRequest.builder().txHash(txHash).txnBytes(txBytes).txBodyType(txBodyType).build());
         if (TxSubmissionState.TxIdsBlocking.equals(currenState)) {
             addTxToQueue(txHash);
             this.sendNextMessage();

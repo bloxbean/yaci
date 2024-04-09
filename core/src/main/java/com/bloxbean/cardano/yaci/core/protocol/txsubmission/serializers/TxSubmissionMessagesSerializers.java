@@ -83,7 +83,7 @@ public class TxSubmissionMessagesSerializers {
                 replyTxIds.getTxIdAndSizeMap().forEach((id, size) -> {
                     var pair = new Array();
                     var era = new Array();
-                    era.add(new UnsignedInteger(5));
+                    era.add(new UnsignedInteger(replyTxIds.getEra().getValue()));
                     era.add(new ByteString(HexUtil.decodeHexString(id)));
                     pair.add(era);
                     pair.add(new UnsignedInteger(size));
@@ -164,7 +164,7 @@ public class TxSubmissionMessagesSerializers {
                     var txBody = new ByteString(tx);
                     txBody.setTag(24L);
 
-                    transactions.add(new UnsignedInteger(5)); // Era
+                    transactions.add(new UnsignedInteger(replyTxs.getEra().getValue())); // Era
                     transactions.add(txBody);
 
                     txArray.add(transactions);
@@ -193,7 +193,9 @@ public class TxSubmissionMessagesSerializers {
                 txs.add(tx);
             }
 
-            return new ReplyTxs(txs);
+            var replyTxs = new ReplyTxs();
+            txs.forEach(replyTxs::addTx);
+            return replyTxs;
         }
     }
 
