@@ -83,6 +83,14 @@ public class TxSubmissionClient {
 
     }
 
+    public void addListener(TxSubmissionListener txSubmissionListener) {
+        if (this.isRunning())
+            throw new IllegalStateException("Listener can be added only before start() call");
+
+        if (txSubmissionListener != null)
+            txSubmissionAgent.addListener(txSubmissionListener);
+    }
+
     public void start() {
         n2nClient.start();
     }
@@ -107,7 +115,7 @@ public class TxSubmissionClient {
     public void sendKeepAlive() {
         int min = 1;
         int max = 65000;
-        int randomNum = (int)(Math.random() * (max - min + 1)) + min;
+        int randomNum = (int) (Math.random() * (max - min + 1)) + min;
         keepAliveAgent.sendKeepAlive(randomNum);
     }
 
