@@ -3,11 +3,9 @@ package com.bloxbean.cardano.yaci.helper;
 import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.address.Address;
 import com.bloxbean.cardano.client.common.model.Networks;
-import com.bloxbean.cardano.client.exception.CborSerializationException;
 import com.bloxbean.cardano.client.transaction.spec.*;
 import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
 import com.bloxbean.cardano.yaci.core.common.Constants;
-import com.bloxbean.cardano.yaci.core.common.NetworkType;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
@@ -132,41 +130,6 @@ class TxSubmissionClientIT extends BaseTest {
         countDownLatch.await(10000, TimeUnit.SECONDS);
         localClientProvider.shutdown();
         txSubmissionClient.shutdown();
-
-    }
-
-    @Test
-    public void test2() throws CborSerializationException, InterruptedException {
-
-        CountDownLatch countDownLatch = new CountDownLatch(100);
-
-        TxSubmissionClient txSubmissionClient = new TxSubmissionClient("ryzen", 30010, NetworkType.PREPROD.getN2NVersionTable());
-        txSubmissionClient.addListener(new TxSubmissionListener() {
-            @Override
-            public void handleRequestTxs(RequestTxs requestTxs) {
-                log.info("handleRequestTxs, txIds: {}", String.join(",", requestTxs.getTxIds()));
-                countDownLatch.countDown();
-            }
-
-            @Override
-            public void handleRequestTxIdsNonBlocking(RequestTxIds requestTxIds) {
-                log.info("handleRequestTxIdsNonBlocking, blocking: {}, ack: {}, req: {}", requestTxIds.isBlocking(), requestTxIds.getAckTxIds(), requestTxIds.getReqTxIds());
-            }
-
-            @Override
-            public void handleRequestTxIdsBlocking(RequestTxIds requestTxIds) {
-                log.info("handleRequestTxIdsBlocking, blocking: {}, ack: {}, req: {}", requestTxIds.isBlocking(), requestTxIds.getAckTxIds(), requestTxIds.getReqTxIds());
-            }
-        });
-        txSubmissionClient.start();
-
-        var transaction = getTestTransaction();
-
-        var bytes = transaction.serialize();
-        var txHash = TransactionUtil.getTxHash(bytes);
-        txSubmissionClient.submitTxBytes(txHash, bytes, TxBodyType.BABBAGE);
-
-        countDownLatch.await(30000, TimeUnit.SECONDS);
 
     }
 

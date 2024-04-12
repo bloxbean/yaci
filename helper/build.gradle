@@ -2,7 +2,7 @@ dependencies {
     api project(':core')
     api libs.project.reactor.core
 
-    testCompileClasspath libs.cardano.client.core
+    implementation libs.cardano.client.core
     testImplementation libs.project.reactor.test
 
 }

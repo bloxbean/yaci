@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.helper;
 
+import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
@@ -10,7 +11,6 @@ import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionAgent;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxIds;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxs;
-import com.bloxbean.cardano.yaci.core.util.TxUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import static com.bloxbean.cardano.yaci.core.common.TxBodyType.BABBAGE;
@@ -104,7 +104,7 @@ public class TxSubmissionClient {
     }
 
     public void submitTxBytes(byte[] txBytes) {
-        var txHash = TxUtil.calculateTxHash(txBytes);
+        var txHash = TransactionUtil.getTxHash(txBytes);
         this.submitTxBytes(txHash, txBytes, BABBAGE);
     }
 
