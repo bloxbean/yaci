@@ -33,7 +33,7 @@ import reactor.core.publisher.Mono;
  */
 @Slf4j
 public class LocalTxSubmissionClient extends QueryClient {
-    private LocalTxSubmissionAgent localTxSubmissionAgent;
+    private final LocalTxSubmissionAgent localTxSubmissionAgent;
 
     public LocalTxSubmissionClient(LocalTxSubmissionAgent localTxSubmissionAgent) {
         this.localTxSubmissionAgent = localTxSubmissionAgent;

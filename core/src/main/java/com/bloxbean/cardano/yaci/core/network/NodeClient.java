@@ -14,9 +14,6 @@ import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.SocketAddress;
-import java.util.Arrays;
-import java.util.List;
-import java.util.stream.Collectors;
 
 @Slf4j
 public abstract class NodeClient {
@@ -69,10 +66,7 @@ public abstract class NodeClient {
 
             configureChannel(b);
 
-            List<Agent> allAgents = Arrays.stream(agents).collect(Collectors.toList());
-            allAgents.add(0, handshakeAgent);
-
-            b.handler(new ChannelInitializer<Channel>() {
+            b.handler(new ChannelInitializer<>() {
 
                 @Override
                 public void initChannel(Channel ch)
@@ -84,8 +78,7 @@ public abstract class NodeClient {
                 }
             });
 
-            SocketAddress socketAddress = null;
-            socketAddress = createSocketAddress();
+            SocketAddress socketAddress = createSocketAddress();
 
             session = new Session(socketAddress, b, handshakeAgent, agents);
             session.setSessionListener(sessionListener);
