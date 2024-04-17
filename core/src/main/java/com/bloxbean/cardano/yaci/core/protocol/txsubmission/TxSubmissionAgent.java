@@ -80,11 +80,8 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
             return new ReplyTxs();
 
         ReplyTxs replyTxs = new ReplyTxs();
-        requestedTxIds.forEach(txId -> removeTxIdAndHash(txId).ifPresent(txSubmissionRequest -> replyTxs.addTx(txSubmissionRequest.getTxnBytes())));
+        requestedTxIds.forEach(txId -> findTxIdAndHash(txId).ifPresent(txSubmissionRequest -> replyTxs.addTx(txSubmissionRequest.getTxnBytes())));
 
-        // Ids of requested TXs don't seem to be acked from server.
-        // Removing them right away now.
-        requestedTxIds.forEach(pendingTxIds::remove);
         if (log.isDebugEnabled())
             log.debug("Txs: {}", replyTxs.getTxns().size());
         return replyTxs;
@@ -161,8 +158,6 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
                 if (txHash != null) {
                     // remove from map
                     removeTxIdAndHash(txHash);
-                    // removed from queue
-                    pendingTxIds.remove(txHash);
                 }
             }
 
