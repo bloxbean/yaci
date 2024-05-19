@@ -74,5 +74,5 @@ public class ProtocolParamUpdate {
     private BigInteger govActionDeposit; //30
     private BigInteger drepDeposit; //31
     private Integer drepActivity; //32
-    private Integer minFeeRefScriptCostPerByte; //33
+    private BigDecimal minFeeRefScriptCostPerByte; //33
 }

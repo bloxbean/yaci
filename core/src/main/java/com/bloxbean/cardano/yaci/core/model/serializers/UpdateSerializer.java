@@ -208,7 +208,7 @@ public enum UpdateSerializer implements Serializer<Update> {
         Integer drepInactivityPeriod = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(33));
-        Integer minFeeRefScriptCostPerByte = itemDI != null ? toInt(itemDI) : null;
+        BigDecimal minFeeRefScriptCostPerByte = itemDI != null ? toRationalNumber(itemDI) : null;
 
         ProtocolParamUpdate protocolParamUpdate = ProtocolParamUpdate.builder()
                 .minFeeA(minFeeA)
