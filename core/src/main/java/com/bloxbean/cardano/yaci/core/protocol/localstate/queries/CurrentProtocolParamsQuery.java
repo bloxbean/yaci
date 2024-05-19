@@ -422,10 +422,10 @@ public class CurrentProtocolParamsQuery implements EraQuery<CurrentProtocolParam
         itemDI = paramsDIList.get(29);
         Integer drepInactivityPeriod = itemDI != null ? toInt(itemDI) : null;
 
-        Integer minFeeRefScriptCostPerByte = null; //TODO -- Remove if condition once this is available in the node release
+        BigDecimal minFeeRefScriptCostPerByte = null; //TODO -- Remove if condition once this is available in the node release
         if (paramsDIList.size() > 30) {
             itemDI = paramsDIList.get(30);
-            minFeeRefScriptCostPerByte = itemDI != null ? toInt(itemDI) : null;
+            minFeeRefScriptCostPerByte = itemDI != null ? toRationalNumber(itemDI) : null;
         }
 
         ProtocolParamUpdate protocolParams = ProtocolParamUpdate.builder()
