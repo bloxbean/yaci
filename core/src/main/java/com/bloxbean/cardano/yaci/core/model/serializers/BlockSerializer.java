@@ -1,11 +1,11 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
+import com.bloxbean.cardano.client.util.Triple;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
-import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionSizeExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
@@ -61,10 +61,14 @@ public enum BlockSerializer implements Serializer<Block> {
         **/
 
         //Extract transaction bodies from block bytes directly to keep the tx hash same
-        List<Tuple<DataItem, byte[]>> txBodyTuples = TransactionBodyExtractor.getTxBodiesFromBlock(blockBody);
+        List<Triple<DataItem, byte[], Integer>> txBodyTriples = TransactionBodyExtractor.getTxBodiesFromBlock(blockBody);
         List<TransactionBody> txnBodies = new ArrayList<>();
-        for (var tuple: txBodyTuples) {
-            TransactionBody txBody = TransactionBodySerializer.INSTANCE.deserializeDI(tuple._1, tuple._2);
+        List<Integer> transactionSizes = new ArrayList<>();
+        List<Integer> scriptSizes = new ArrayList<>();
+
+        for (var triple: txBodyTriples) {
+            TransactionBody txBody = TransactionBodySerializer.INSTANCE.deserializeDI(triple._1, triple._2);
+            transactionSizes.add(triple._3);
             txnBodies.add(txBody);
         }
         blockBuilder.transactionBodies(txnBodies);
@@ -72,10 +76,17 @@ public enum BlockSerializer implements Serializer<Block> {
         //witnesses
         List<Witnesses> witnessesSet = new ArrayList<>();
         Array witnessesListArr = (Array) blockArray.getDataItems().get(2);
-        for (DataItem witnessesDI: witnessesListArr.getDataItems()) {
+        for (int i = 0; i < witnessesListArr.getDataItems().size(); i++) {
+            DataItem witnessesDI = witnessesListArr.getDataItems().get(i);
             if (witnessesDI == SimpleValue.BREAK)
                 continue;
             Witnesses witnesses = WitnessesSerializer.INSTANCE.deserializeDI(witnessesDI);
+
+            // serializing only the witness we need to add it to transaction size
+            int witnessByteSize = CborSerializationUtil.serialize(witnessesDI).length;
+            transactionSizes.add(i, transactionSizes.get(i) + witnessByteSize);
+            scriptSizes.add(WitnessUtil.getScriptSizes(witnessesDI));
+
             witnessesSet.add(witnesses);
         }
 
@@ -91,7 +102,12 @@ public enum BlockSerializer implements Serializer<Block> {
             if (txIdDI == SimpleValue.BREAK)
                 continue;
             AuxData auxData = AuxDataSerializer.INSTANCE.deserializeDI(auxDataMapDI.get(txIdDI));
-            auxDataMap.put(toInt(txIdDI), auxData);
+            int auxDataIndex = toInt(txIdDI);
+            auxDataMap.put(auxDataIndex, auxData);
+
+            // Getting the Size and adding it to the respective transaction size
+            int auxDataSize = CborSerializationUtil.serialize(auxDataMapDI.get(txIdDI)).length;
+            transactionSizes.add(auxDataIndex, transactionSizes.get(auxDataIndex) + auxDataSize);
         }
         blockBuilder.auxiliaryDataMap(auxDataMap);
 
@@ -116,11 +132,8 @@ public enum BlockSerializer implements Serializer<Block> {
             blockBuilder.cbor(HexUtil.encodeHexString(blockBody));
         }
 
-        if(YaciConfig.INSTANCE.isReturnTxSize()) {
-            Tuple<List<Integer>, List<Integer>> txSizes = TransactionSizeExtractor.getSizesForTransactions(blockBody);
-            blockBuilder.txSizes(txSizes._1);
-            blockBuilder.txScriptSizes(txSizes._2);
-        }
+        blockBuilder.txSizes(transactionSizes);
+        blockBuilder.txScriptSizes(scriptSizes);
 
         return blockBuilder.build();
     }
