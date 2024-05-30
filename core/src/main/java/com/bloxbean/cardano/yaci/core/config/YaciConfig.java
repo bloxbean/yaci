@@ -8,10 +8,12 @@ public enum YaciConfig {
 
     private boolean returnBlockCbor;
     private boolean returnTxBodyCbor;
+    private boolean returnTxSize;
 
     YaciConfig() {
         returnBlockCbor = false;
         returnTxBodyCbor = false;
+        returnTxSize = false;
     }
 
     /**
@@ -44,5 +46,21 @@ public enum YaciConfig {
      */
     public void setReturnTxBodyCbor(boolean returnTxBodyCbor) {
         this.returnTxBodyCbor = returnTxBodyCbor;
+    }
+
+    /**
+     * Returns true if the transaction size and scriptSize is returned
+     * @return
+     */
+    public boolean isReturnTxSize() {
+        return returnTxSize;
+    }
+
+    /**
+     *
+     * @param returnTxSize
+     */
+    public void setReturnTxSize(boolean returnTxSize) {
+        this.returnTxSize = returnTxSize;
     }
 }

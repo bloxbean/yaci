@@ -24,4 +24,6 @@ public class Transaction {
     private Witnesses witnesses;
     private AuxData auxData;
     private boolean invalid;
+    private int txSize;
+    private int txScriptSize;
 }

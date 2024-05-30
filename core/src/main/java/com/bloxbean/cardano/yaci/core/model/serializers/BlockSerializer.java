@@ -5,6 +5,7 @@ import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
+import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionSizeExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
@@ -113,6 +114,12 @@ public enum BlockSerializer implements Serializer<Block> {
 
         if (YaciConfig.INSTANCE.isReturnBlockCbor()) {
             blockBuilder.cbor(HexUtil.encodeHexString(blockBody));
+        }
+
+        if(YaciConfig.INSTANCE.isReturnTxSize()) {
+            Tuple<List<Integer>, List<Integer>> txSizes = TransactionSizeExtractor.getSizesForTransactions(blockBody);
+            blockBuilder.txSizes(txSizes._1);
+            blockBuilder.txScriptSizes(txSizes._2);
         }
 
         return blockBuilder.build();
