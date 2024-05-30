@@ -5,6 +5,7 @@ import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.AdditionalInformation;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.Special;
+import com.bloxbean.cardano.client.util.Triple;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
 import lombok.SneakyThrows;
 
@@ -17,9 +18,14 @@ public class TransactionBodyExtractor {
 
     public static final int INFINITY = -1;
 
+    /**
+     * Extracting TxBodies from raw block body.
+     * @param blockBody raw block body
+     * @return Triple: Deserialized Dataitem, Raw Bytes and Size
+     */
     @SneakyThrows
-    public static List<Tuple<DataItem, byte[]>> getTxBodiesFromBlock(byte[] blockBody) {
-        List<Tuple<DataItem, byte[]>> txBodyTuples = new ArrayList<>();
+    public static List<Triple<DataItem, byte[], Integer>> getTxBodiesFromBlock(byte[] blockBody) {
+        List<Triple<DataItem, byte[], Integer>> txBodyTuples = new ArrayList<>();
         ByteArrayInputStream bais = new ByteArrayInputStream(blockBody);
         CborDecoder decoder = new CborDecoder(bais);
 
@@ -35,14 +41,6 @@ public class TransactionBodyExtractor {
 
         long length = getLength(arrTxBodySize,getSymbolBytes(blockBody.length - bais.available(),blockBody));
         int start = blockBody.length - bais.available();
-        for(int i = 0 ; i < length; i++){
-            int previous = bais.available();
-            DataItem dataItem = decoder.decodeNext();
-            byte[] txBodyRaw = new byte[previous - bais.available()];
-            System.arraycopy(blockBody,start,txBodyRaw,0,txBodyRaw.length);
-            txBodyTuples.add(new Tuple<>(dataItem, txBodyRaw));
-            start = blockBody.length - bais.available();
-        }
         if(AdditionalInformation.INDEFINITE.equals(AdditionalInformation.ofByte(arrTxBodySize))) {
             for (;;) {
                 int previous = bais.available();
@@ -53,12 +51,24 @@ public class TransactionBodyExtractor {
                 if (Special.BREAK.equals(dataItem)) {
                     break;
                 }
+                int txSize = previous - bais.available();
                 byte[] txBodyRaw = new byte[previous - bais.available()];
                 System.arraycopy(blockBody, start, txBodyRaw, 0, txBodyRaw.length);
-               txBodyTuples.add(new Tuple<>(dataItem, txBodyRaw));
+                txBodyTuples.add(new Triple<>(dataItem, txBodyRaw, txSize));
+                start = blockBody.length - bais.available();
+            }
+        } else {
+            for (int i = 0; i < length; i++) {
+                int previous = bais.available();
+                DataItem dataItem = decoder.decodeNext();
+                int txSize = previous - bais.available();
+                byte[] txBodyRaw = new byte[txSize];
+                System.arraycopy(blockBody, start, txBodyRaw, 0, txBodyRaw.length);
+                txBodyTuples.add(new Triple<>(dataItem, txBodyRaw, txSize));
                 start = blockBody.length - bais.available();
             }
         }
+
         return txBodyTuples;
     }
 

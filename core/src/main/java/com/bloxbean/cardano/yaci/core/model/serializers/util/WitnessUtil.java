@@ -3,13 +3,17 @@ package com.bloxbean.cardano.yaci.core.model.serializers.util;
 import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.AdditionalInformation;
+import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.Special;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
 
 import java.io.ByteArrayInputStream;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
@@ -210,5 +214,23 @@ public final class WitnessUtil {
         }
 
         return insideRedeemer;
+    }
+
+    public static int getScriptSize(Map witnessMap, int index) {
+        Collection<DataItem> keys = witnessMap.getKeys();
+        UnsignedInteger unsignedInteger = new UnsignedInteger(BigInteger.valueOf(index));
+        if(keys.contains(unsignedInteger)) {
+            return CborSerializationUtil.serialize(witnessMap.get(unsignedInteger)).length;
+        } else {
+            return 0;
+        }
+    }
+
+    public static int getScriptSizes(DataItem witnessesDI) {
+        Map witnessMap = (Map) witnessesDI;
+        int scriptSize = getScriptSize(witnessMap, 3);
+        scriptSize += getScriptSize(witnessMap, 6);
+        scriptSize += getScriptSize(witnessMap, 7);
+        return scriptSize;
     }
 }

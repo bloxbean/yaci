@@ -52,6 +52,8 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
                     .witnesses(witnesses)
                     .auxData(auxData)
                     .invalid(invalidTxn)
+                    .txSize(block.getTxSizes() != null ? block.getTxSizes().get(i) : 0)
+                    .txScriptSize(block.getTxScriptSizes() != null ? block.getTxScriptSizes().get(i) : 0)
                     .build();
 
             transactionEvents.add(transactionEvent);
