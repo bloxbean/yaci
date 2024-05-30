@@ -24,6 +24,10 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
     private Queue<Query> pendingQueryCommands;
 
     public LocalStateQueryAgent() {
+        this(true);
+    }
+    public LocalStateQueryAgent(boolean isClient) {
+        super(isClient);
         this.currenState = Idle;
 
         acquiredCommands = new ConcurrentLinkedQueue<>();
