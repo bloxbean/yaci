@@ -2,16 +2,22 @@ package com.bloxbean.cardano.yaci.core.protocol.localstate.queries;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.util.Tuple;
+import com.bloxbean.cardano.yaci.core.model.Credential;
 import com.bloxbean.cardano.yaci.core.model.DrepVoteThresholds;
 import com.bloxbean.cardano.yaci.core.model.PoolVotingThresholds;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
+import com.bloxbean.cardano.yaci.core.model.certs.StakeCredType;
 import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
 import com.bloxbean.cardano.yaci.core.model.governance.Committee;
 import com.bloxbean.cardano.yaci.core.model.governance.Constitution;
+import com.bloxbean.cardano.yaci.core.model.governance.GovActionId;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.AnchorSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.EnactState;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.ProposalType;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.RatifyState;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.AllArgsConstructor;
@@ -20,14 +26,12 @@ import lombok.ToString;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-import static com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant.PROTOCOL_V14;
-import static com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant.PROTOCOL_V15;
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toRationalNumber;
 
 @Getter
 @AllArgsConstructor
@@ -55,22 +59,15 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
 
         // committee
         Array committeeResult =  (Array) resultArray.getDataItems().get(1);
-        Array committeeArr =  (Array) committeeResult.getDataItems().get(0);
-        var committeeThresholdDI = (RationalNumber) committeeArr.getDataItems().get(1);
-        BigDecimal committeeThreshold = toRationalNumber(committeeThresholdDI);
-        // TODO: committee list
-        Committee committee = Committee.builder()
-                .committeeColdCredentialEpoch(new HashMap<>())
-                .threshold(committeeThreshold)
-                .build();
+        Array committeeDI =  (Array) committeeResult.getDataItems().get(0);
+        Committee committee = deserializeCommitteeResult(committeeDI.getDataItems());
         govStateResult.setCommittee(committee);
 
         // constitution
         Array constitutionArr = (Array) resultArray.getDataItems().get(2);
         var constitutionDI = constitutionArr.getDataItems().get(0);
 
-        Anchor anchor = AnchorSerializer.INSTANCE.deserializeDI(constitutionDI);
-        Constitution constitution = Constitution.builder().anchor(anchor).build();
+        Constitution constitution = deserializeConstitutionResult(constitutionDI);
         govStateResult.setConstitution(constitution);
 
         // current protocol params
@@ -82,7 +79,82 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
         govStateResult.setCurrentPParams(currentProtocolParam);
 
         // TODO: future protocol params
-        // TODO: next ratify state
+
+        // next ratify state
+        Array nextRatifyStateDI =  (Array) ((Array)resultArray.getDataItems().get(6)).getDataItems().get(1);
+
+        // next ratify state - enacted gov actions
+        List<GovActionId> enactedGovActions = deserializeGovActionIdListResult(nextRatifyStateDI.getDataItems().get(1));
+
+        // next ratify state - expired gov actions
+        List<GovActionId> expiredGovActions = deserializeGovActionIdListResult(nextRatifyStateDI.getDataItems().get(2));
+
+        // next ratify state - next enact state
+        var nextEnactStateDI = (Array)nextRatifyStateDI.getDataItems().get(0);
+
+            // next enact state - committee
+        var nextEnactStateCommitteeArr = (Array) nextEnactStateDI.getDataItems().get(0);
+        Committee nextEnactStateCommittee = deserializeCommitteeResult(
+                ((Array)nextEnactStateCommitteeArr.getDataItems().get(0)).getDataItems());
+
+            // next enact state - constitution
+        var nextEnactStateConstitutionArr = (Array)nextEnactStateDI.getDataItems().get(1);
+        Constitution nextEnactStateConstitution = deserializeConstitutionResult(nextEnactStateConstitutionArr.getDataItems().get(0));
+
+            // next enact state - current protocol params
+        ProtocolParamUpdate nextEnactStateCurrentPParams = deserializePPResult(
+                ((Array)nextEnactStateDI.getDataItems().get(2)).getDataItems());
+            // next enact state - prev protocol params
+        ProtocolParamUpdate nextEnactStatePrevPParams = deserializePPResult(
+                ((Array)nextEnactStateDI.getDataItems().get(3)).getDataItems());
+            // next enact state - Prev govActionIds
+        java.util.Map<ProposalType, GovActionId> prevGovActionIds = new HashMap<>();
+        Array nextEnactStatePrevGovActionIds = (Array) nextEnactStateDI.getDataItems().get(6);
+
+        prevGovActionIds.put(ProposalType.COMMITTEE,
+                deserializeGovActionIdListResult(nextEnactStatePrevGovActionIds.getDataItems().get(0))
+                        .stream()
+                        .findFirst()
+                        .orElse(null));
+
+        prevGovActionIds.put(ProposalType.HARD_FORK,
+                deserializeGovActionIdListResult(nextEnactStatePrevGovActionIds.getDataItems().get(1))
+                        .stream()
+                        .findFirst()
+                        .orElse(null));
+
+        prevGovActionIds.put(ProposalType.CONSTITUTION,
+                deserializeGovActionIdListResult(nextEnactStatePrevGovActionIds.getDataItems().get(1))
+                        .stream()
+                        .findFirst()
+                        .orElse(null));
+
+        prevGovActionIds.put(ProposalType.P_PARAM_UPDATE,
+                deserializeGovActionIdListResult(nextEnactStatePrevGovActionIds.getDataItems().get(1))
+                        .stream()
+                        .findFirst()
+                        .orElse(null));
+
+        // next ratify state - ratificationDelayed
+        var ratificationDelayedDI = nextRatifyStateDI.getDataItems().get(3);
+        Boolean ratificationDelayed = ratificationDelayedDI != null ?
+                (((SimpleValue) ratificationDelayedDI).getValue() == SimpleValueType.FALSE.getValue() ? Boolean.FALSE : Boolean.TRUE)
+                : null;
+
+        RatifyState nextRatifyState = RatifyState.builder()
+                .ratificationDelayed(ratificationDelayed)
+                .nextEnactState(EnactState.builder()
+                        .committee(nextEnactStateCommittee)
+                        .constitution(nextEnactStateConstitution)
+                        .currentPParams(nextEnactStateCurrentPParams)
+                        .prevGovActionIds(prevGovActionIds)
+                        .prevPParams(nextEnactStatePrevPParams)
+                        .build())
+                .enactedGovActions(enactedGovActions)
+                .expiredGovActions(expiredGovActions)
+                .build();
+
+        govStateResult.setNextRatifyState(nextRatifyState);
 
         // previous protocol params
         Array prevPParams = (Array) resultArray.getDataItems().get(4);
@@ -90,8 +162,8 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
         ProtocolParamUpdate prevProtocolParam = deserializePPResult(paramsDIList);
 
         govStateResult.setPreviousPParams(prevProtocolParam);
-
         // TODO: proposals
+
         return govStateResult;
     }
 
@@ -368,4 +440,58 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
 
         return new Tuple<>(memPrice, stepPrice);
     }
+
+    public Committee deserializeCommitteeResult(List<DataItem> committeeDIList) {
+        var committeeMapDI = (Map) committeeDIList.get(0);
+        java.util.Map<Credential, Long> committeeColdCredentialEpoch = new LinkedHashMap<>();
+
+        for (DataItem di :  committeeMapDI.getKeys()) {
+            var key = (Array) di;
+            String credentialHash = HexUtil.encodeHexString(((ByteString)key.getDataItems().get(1)).getBytes());
+            Credential credential = Credential.builder()
+                    .type(StakeCredType.SCRIPTHASH) // todo: check type
+                    .hash(credentialHash)
+                    .build();
+            var expiredEpochDI = committeeMapDI.get(key);
+            committeeColdCredentialEpoch.put(credential, toLong(expiredEpochDI));
+        }
+
+        var committeeThresholdDI = (RationalNumber) committeeDIList.get(1);
+        BigDecimal committeeThreshold = toRationalNumber(committeeThresholdDI);
+
+        return Committee.builder()
+                .committeeColdCredentialEpoch(committeeColdCredentialEpoch)
+                .threshold(committeeThreshold)
+                .build();
+    }
+
+    public List<GovActionId> deserializeGovActionIdListResult(DataItem govActionsDI) {
+        List<GovActionId> govActionIds = new ArrayList<>();
+
+        Array govActionsArray = (Array) govActionsDI;
+        for (DataItem item : govActionsArray.getDataItems()) {
+            govActionIds.add(deserializeGovActionIdResult(item));
+        }
+
+        return govActionIds;
+    }
+
+    public GovActionId deserializeGovActionIdResult(DataItem govActionId) {
+        Array govActionIdDI = (Array) govActionId;
+
+        if (govActionIdDI.getDataItems().isEmpty()) {
+            return null;
+        }
+
+        return GovActionId.builder()
+                .transactionId(HexUtil.encodeHexString(((ByteString) govActionIdDI.getDataItems().get(0)).getBytes()))
+                .gov_action_index(toInt(govActionIdDI.getDataItems().get(1)))
+                .build();
+    }
+
+    public Constitution deserializeConstitutionResult(DataItem constitutionDI) {
+        Anchor anchor = AnchorSerializer.INSTANCE.deserializeDI(constitutionDI);
+        return Constitution.builder().anchor(anchor).build();
+    }
+
 }
