@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model;
 
+import com.bloxbean.cardano.yaci.core.model.certs.StakePoolId;
 import com.bloxbean.cardano.yaci.core.model.governance.Drep;
 import com.bloxbean.cardano.yaci.core.model.governance.GovActionId;
 import com.bloxbean.cardano.yaci.core.model.governance.ProposalProcedure;
@@ -16,8 +17,8 @@ import java.util.Map;
 public class Proposal {
     private GovActionId govActionId;
     // TODO: committees votes;
-    // TODO: stake pools votes
     private Map<Drep, Vote> dRepVotes;
+    private Map<StakePoolId, Vote> stakePoolVotes;
     private ProposalProcedure proposalProcedure;
     private Integer expiredAfter;
     private Integer proposedIn;

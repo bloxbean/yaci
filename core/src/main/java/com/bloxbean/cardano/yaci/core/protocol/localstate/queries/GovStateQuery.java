@@ -7,6 +7,7 @@ import com.bloxbean.cardano.yaci.core.model.DrepVoteThresholds;
 import com.bloxbean.cardano.yaci.core.model.PoolVotingThresholds;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.core.model.certs.StakeCredType;
+import com.bloxbean.cardano.yaci.core.model.certs.StakePoolId;
 import com.bloxbean.cardano.yaci.core.model.governance.*;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.AnchorSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
@@ -195,6 +196,16 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
                 dRepVotes.put(credType == 0 ? Drep.addrKeyHash(credHash) : Drep.scriptHash(credHash), vote);
             }
 
+            // stake pool votes
+            java.util.Map<StakePoolId, Vote> stakePoolVotes = new HashMap<>();
+            var stakePoolVotesDI = (Map) proposalDI.getDataItems().get(3);
+            for (DataItem key : stakePoolVotesDI.getKeys()) {
+                String poolHash = HexUtil.encodeHexString(((ByteString)key).getBytes());
+                var voteDI = stakePoolVotesDI.get(key);
+                Vote vote = Vote.values()[toInt(voteDI)];
+                stakePoolVotes.put(StakePoolId.builder().poolKeyHash(poolHash).build(), vote);
+            }
+
             // expiredAfter
             Integer expiredAfter = toInt(proposalDI.getDataItems().get(6));
             // proposedIn
@@ -202,6 +213,7 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
             proposals.add(
                     Proposal.builder()
                             .dRepVotes(dRepVotes)
+                            .stakePoolVotes(stakePoolVotes)
                             .proposalProcedure(proposalProcedure)
                             .govActionId(govActionId)
                             .expiredAfter(expiredAfter)
