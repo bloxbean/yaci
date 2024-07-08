@@ -7,15 +7,13 @@ import com.bloxbean.cardano.yaci.core.model.DrepVoteThresholds;
 import com.bloxbean.cardano.yaci.core.model.PoolVotingThresholds;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.core.model.certs.StakeCredType;
-import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
-import com.bloxbean.cardano.yaci.core.model.governance.Committee;
-import com.bloxbean.cardano.yaci.core.model.governance.Constitution;
-import com.bloxbean.cardano.yaci.core.model.governance.GovActionId;
+import com.bloxbean.cardano.yaci.core.model.governance.*;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.AnchorSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.EnactState;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.Proposal;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.ProposalType;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.RatifyState;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
@@ -162,7 +160,56 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
         ProtocolParamUpdate prevProtocolParam = deserializePPResult(paramsDIList);
 
         govStateResult.setPreviousPParams(prevProtocolParam);
-        // TODO: proposals
+
+        // proposals
+        Array proposalArr = (Array)((Array) resultArray.getDataItems().get(0)).getDataItems().get(1);
+
+        List<Proposal> proposals = new ArrayList<>();
+        for (DataItem item : proposalArr.getDataItems()) {
+            if (item == SimpleValue.BREAK) {
+                continue;
+            }
+            var proposalDI = (Array) item;
+            // govActionId
+            GovActionId govActionId = deserializeGovActionIdResult(proposalDI.getDataItems().get(0));
+            // proposalProcedure
+            var proposalProcedureDI = (Array) proposalDI.getDataItems().get(4);
+
+            ProposalProcedure proposalProcedure = ProposalProcedure.builder()
+                    .anchor(AnchorSerializer.INSTANCE.deserializeDI(proposalProcedureDI.getDataItems().get(3)))
+                    .rewardAccount(HexUtil.encodeHexString(((ByteString) proposalProcedureDI.getDataItems().get(1)).getBytes()))
+                    // TODO: 'govAction' field
+                    .deposit(toBigInteger(proposalProcedureDI.getDataItems().get(0)))
+                    .build();
+
+            // dRep votes
+            java.util.Map<Drep, Vote> dRepVotes = new HashMap<>();
+            var dRepVotesDI = (Map) proposalDI.getDataItems().get(2);
+
+            for (DataItem key : dRepVotesDI.getKeys()) {
+                var credentialDI = (Array) key;
+                int credType = toInt(credentialDI.getDataItems().get(0));
+                String credHash = HexUtil.encodeHexString(((ByteString)credentialDI.getDataItems().get(1)).getBytes());
+                var voteDI = dRepVotesDI.get(credentialDI);
+                Vote vote = Vote.values()[toInt(voteDI)];
+                dRepVotes.put(credType == 0 ? Drep.addrKeyHash(credHash) : Drep.scriptHash(credHash), vote);
+            }
+
+            // expiredAfter
+            Integer expiredAfter = toInt(proposalDI.getDataItems().get(6));
+            // proposedIn
+            Integer proposedIn = toInt(proposalDI.getDataItems().get(5));
+            proposals.add(
+                    Proposal.builder()
+                            .dRepVotes(dRepVotes)
+                            .proposalProcedure(proposalProcedure)
+                            .govActionId(govActionId)
+                            .expiredAfter(expiredAfter)
+                            .proposedIn(proposedIn)
+                            .build());
+        }
+
+        govStateResult.setProposals(proposals);
 
         return govStateResult;
     }
@@ -447,9 +494,10 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
 
         for (DataItem di :  committeeMapDI.getKeys()) {
             var key = (Array) di;
+            int credType = toInt(key.getDataItems().get(0));
             String credentialHash = HexUtil.encodeHexString(((ByteString)key.getDataItems().get(1)).getBytes());
             Credential credential = Credential.builder()
-                    .type(StakeCredType.SCRIPTHASH) // todo: check type
+                    .type(credType == 1 ? StakeCredType.SCRIPTHASH: StakeCredType.ADDR_KEYHASH)
                     .hash(credentialHash)
                     .build();
             var expiredEpochDI = committeeMapDI.get(key);

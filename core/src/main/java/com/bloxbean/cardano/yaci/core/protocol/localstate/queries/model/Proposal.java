@@ -16,6 +16,7 @@ import java.util.Map;
 public class Proposal {
     private GovActionId govActionId;
     // TODO: committees votes;
+    // TODO: stake pools votes
     private Map<Drep, Vote> dRepVotes;
     private ProposalProcedure proposalProcedure;
     private Integer expiredAfter;
