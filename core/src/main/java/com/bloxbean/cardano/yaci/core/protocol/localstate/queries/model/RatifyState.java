@@ -11,7 +11,7 @@ import java.util.List;
 @Setter
 @Builder
 public class RatifyState {
-    private List<GovActionId> enactedGovActions;
+    private List<Proposal> enactedGovActions;
     private List<GovActionId> expiredGovActions;
     private EnactState nextEnactState;
     private Boolean ratificationDelayed;

@@ -78,12 +78,23 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
         govStateResult.setCurrentPParams(currentProtocolParam);
 
         // TODO: future protocol params
+        Array futurePParams = (Array) resultArray.getDataItems().get(5);
+        if (!futurePParams.getDataItems().isEmpty() && futurePParams.getDataItems().size() > 1) {
+            List<DataItem> futureParamsDIList = ((Array)futurePParams.getDataItems().get(1)).getDataItems();
+            ProtocolParamUpdate futureProtocolParam = deserializePPResult(futureParamsDIList);
+            govStateResult.setFuturePParams(futureProtocolParam);
+        }
 
         // next ratify state
         Array nextRatifyStateDI =  (Array) ((Array)resultArray.getDataItems().get(6)).getDataItems().get(1);
 
         // next ratify state - enacted gov actions
-        List<GovActionId> enactedGovActions = deserializeGovActionIdListResult(nextRatifyStateDI.getDataItems().get(1));
+        List<Proposal> enactedProposals = new ArrayList<>();
+        Array enactedProposalArr = (Array) nextRatifyStateDI.getDataItems().get(1);
+        for (var proposalDI : enactedProposalArr.getDataItems()) {
+            Proposal enactedProposal = deserializeProposalResult(proposalDI);
+            enactedProposals.add(enactedProposal);
+        }
 
         // next ratify state - expired gov actions
         List<GovActionId> expiredGovActions = deserializeGovActionIdListResult(nextRatifyStateDI.getDataItems().get(2));
@@ -149,7 +160,7 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
                         .prevGovActionIds(prevGovActionIds)
                         .prevPParams(nextEnactStatePrevPParams)
                         .build())
-                .enactedGovActions(enactedGovActions)
+                .enactedGovActions(enactedProposals)
                 .expiredGovActions(expiredGovActions)
                 .build();
 
@@ -170,55 +181,8 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
             if (item == SimpleValue.BREAK) {
                 continue;
             }
-            var proposalDI = (Array) item;
-            // govActionId
-            GovActionId govActionId = deserializeGovActionIdResult(proposalDI.getDataItems().get(0));
-            // proposalProcedure
-            var proposalProcedureDI = (Array) proposalDI.getDataItems().get(4);
-
-            ProposalProcedure proposalProcedure = ProposalProcedure.builder()
-                    .anchor(AnchorSerializer.INSTANCE.deserializeDI(proposalProcedureDI.getDataItems().get(3)))
-                    .rewardAccount(HexUtil.encodeHexString(((ByteString) proposalProcedureDI.getDataItems().get(1)).getBytes()))
-                    // TODO: 'govAction' field
-                    .deposit(toBigInteger(proposalProcedureDI.getDataItems().get(0)))
-                    .build();
-
-            // dRep votes
-            java.util.Map<Drep, Vote> dRepVotes = new HashMap<>();
-            var dRepVotesDI = (Map) proposalDI.getDataItems().get(2);
-
-            for (DataItem key : dRepVotesDI.getKeys()) {
-                var credentialDI = (Array) key;
-                int credType = toInt(credentialDI.getDataItems().get(0));
-                String credHash = HexUtil.encodeHexString(((ByteString)credentialDI.getDataItems().get(1)).getBytes());
-                var voteDI = dRepVotesDI.get(credentialDI);
-                Vote vote = Vote.values()[toInt(voteDI)];
-                dRepVotes.put(credType == 0 ? Drep.addrKeyHash(credHash) : Drep.scriptHash(credHash), vote);
-            }
-
-            // stake pool votes
-            java.util.Map<StakePoolId, Vote> stakePoolVotes = new HashMap<>();
-            var stakePoolVotesDI = (Map) proposalDI.getDataItems().get(3);
-            for (DataItem key : stakePoolVotesDI.getKeys()) {
-                String poolHash = HexUtil.encodeHexString(((ByteString)key).getBytes());
-                var voteDI = stakePoolVotesDI.get(key);
-                Vote vote = Vote.values()[toInt(voteDI)];
-                stakePoolVotes.put(StakePoolId.builder().poolKeyHash(poolHash).build(), vote);
-            }
-
-            // expiredAfter
-            Integer expiredAfter = toInt(proposalDI.getDataItems().get(6));
-            // proposedIn
-            Integer proposedIn = toInt(proposalDI.getDataItems().get(5));
-            proposals.add(
-                    Proposal.builder()
-                            .dRepVotes(dRepVotes)
-                            .stakePoolVotes(stakePoolVotes)
-                            .proposalProcedure(proposalProcedure)
-                            .govActionId(govActionId)
-                            .expiredAfter(expiredAfter)
-                            .proposedIn(proposedIn)
-                            .build());
+            Proposal proposal = deserializeProposalResult(item);
+            proposals.add(proposal);
         }
 
         govStateResult.setProposals(proposals);
@@ -552,6 +516,57 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
     public Constitution deserializeConstitutionResult(DataItem constitutionDI) {
         Anchor anchor = AnchorSerializer.INSTANCE.deserializeDI(constitutionDI);
         return Constitution.builder().anchor(anchor).build();
+    }
+
+    public Proposal deserializeProposalResult(DataItem proposalDI) {
+        Array proposalArray = (Array) proposalDI;
+        GovActionId govActionId = deserializeGovActionIdResult(proposalArray.getDataItems().get(0));
+
+        var proposalProcedureDI = (Array) proposalArray.getDataItems().get(4);
+
+        ProposalProcedure proposalProcedure = ProposalProcedure.builder()
+                .anchor(AnchorSerializer.INSTANCE.deserializeDI(proposalProcedureDI.getDataItems().get(3)))
+                .rewardAccount(HexUtil.encodeHexString(((ByteString) proposalProcedureDI.getDataItems().get(1)).getBytes()))
+                // TODO: 'govAction' field
+                .deposit(toBigInteger(proposalProcedureDI.getDataItems().get(0)))
+                .build();
+
+        // dRep votes
+        java.util.Map<Drep, Vote> dRepVotes = new HashMap<>();
+        var dRepVotesDI = (Map) proposalArray.getDataItems().get(2);
+
+        for (DataItem key : dRepVotesDI.getKeys()) {
+            var credentialDI = (Array) key;
+            int credType = toInt(credentialDI.getDataItems().get(0));
+            String credHash = HexUtil.encodeHexString(((ByteString)credentialDI.getDataItems().get(1)).getBytes());
+            var voteDI = dRepVotesDI.get(credentialDI);
+            Vote vote = Vote.values()[toInt(voteDI)];
+            dRepVotes.put(credType == 0 ? Drep.addrKeyHash(credHash) : Drep.scriptHash(credHash), vote);
+        }
+
+        // stake pool votes
+        java.util.Map<StakePoolId, Vote> stakePoolVotes = new HashMap<>();
+        var stakePoolVotesDI = (Map) proposalArray.getDataItems().get(3);
+        for (DataItem key : stakePoolVotesDI.getKeys()) {
+            String poolHash = HexUtil.encodeHexString(((ByteString)key).getBytes());
+            var voteDI = stakePoolVotesDI.get(key);
+            Vote vote = Vote.values()[toInt(voteDI)];
+            stakePoolVotes.put(StakePoolId.builder().poolKeyHash(poolHash).build(), vote);
+        }
+
+        // expiredAfter
+        Integer expiredAfter = toInt(proposalArray.getDataItems().get(6));
+        // proposedIn
+        Integer proposedIn = toInt(proposalArray.getDataItems().get(5));
+
+        return Proposal.builder()
+                .govActionId(govActionId)
+                .dRepVotes(dRepVotes)
+                .stakePoolVotes(stakePoolVotes)
+                .proposalProcedure(proposalProcedure)
+                .expiredAfter(expiredAfter)
+                .proposedIn(proposedIn)
+                .build();
     }
 
 }
