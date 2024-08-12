@@ -190,6 +190,10 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
     }
 
     public ProtocolParamUpdate deserializePPResult(List<DataItem> paramsDIList) {
+        if (paramsDIList.isEmpty()) {
+            return null;
+        }
+
         DataItem itemDI = paramsDIList.get(0);
         Integer minFeeA = itemDI != null ? toInt(itemDI) : null;
 
