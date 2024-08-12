@@ -77,7 +77,6 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
 
         govStateResult.setCurrentPParams(currentProtocolParam);
 
-        // TODO: future protocol params
         Array futurePParams = (Array) resultArray.getDataItems().get(5);
         if (!futurePParams.getDataItems().isEmpty() && futurePParams.getDataItems().size() > 1) {
             List<DataItem> futureParamsDIList = ((Array)futurePParams.getDataItems().get(1)).getDataItems();
