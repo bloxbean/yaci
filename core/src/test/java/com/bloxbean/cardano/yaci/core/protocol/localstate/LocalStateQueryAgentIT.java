@@ -494,4 +494,55 @@ class LocalStateQueryAgentIT extends BaseTest {
         n2CClient.shutdown();
     }
 
+
+    @Test
+    void govStateQuery_shouldReturn_govState() throws InterruptedException {
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(sanchoProtocolMagic));
+        LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent();
+
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(sanchoNodeSocketFile, handshakeAgent, localStateQueryAgent);
+
+        CountDownLatch countDownLatch = new CountDownLatch(2);
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                log.info("HANDSHAKE Successful");
+                localStateQueryAgent.acquire();
+                localStateQueryAgent.sendNextMessage();
+            }
+
+            @Override
+            public void handshakeError(Reason reason) {
+                log.info("ERROR {}", reason);
+            }
+        });
+
+        AtomicBoolean failed = new AtomicBoolean(false);
+        localStateQueryAgent.addListener(new LocalStateQueryListener() {
+            @Override
+            public void acquireFailed(MsgFailure.Reason reason) {
+                countDownLatch.countDown();
+                failed.set(true);
+            }
+
+            @Override
+            public void acquired(Point point) {
+                countDownLatch.countDown();
+                localStateQueryAgent.query(new GovStateQuery(Era.Conway));
+                localStateQueryAgent.sendNextMessage();
+            }
+
+            @Override
+            public void resultReceived(Query query, QueryResult result) {
+                System.out.println("Query >> " + query);
+                System.out.println("Result >> " + result);
+                countDownLatch.countDown();
+            }
+        });
+
+        n2CClient.start();
+        countDownLatch.await(20, TimeUnit.SECONDS);
+        n2CClient.shutdown();
+    }
+
 }
