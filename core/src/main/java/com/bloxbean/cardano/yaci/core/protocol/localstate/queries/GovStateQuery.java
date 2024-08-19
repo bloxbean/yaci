@@ -534,6 +534,22 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
                 .deposit(toBigInteger(proposalProcedureDI.getDataItems().get(0)))
                 .build();
 
+        // committee votes
+        java.util.Map<Credential, Vote> committeeVotes = new HashMap<>();
+        var committeeVotesDI = (Map) proposalArray.getDataItems().get(1);
+
+        for (DataItem key : committeeVotesDI.getKeys()) {
+            var credentialDI = (Array) key;
+            int credType = toInt(credentialDI.getDataItems().get(0));
+            String credHash = HexUtil.encodeHexString(((ByteString) credentialDI.getDataItems().get(1)).getBytes());
+            var voteDI = committeeVotesDI.get(credentialDI);
+            Vote vote = Vote.values()[toInt(voteDI)];
+            committeeVotes.put(Credential.builder()
+                    .type(credType == 0 ? StakeCredType.ADDR_KEYHASH : StakeCredType.SCRIPTHASH)
+                    .hash(credHash)
+                    .build(), vote);
+        }
+
         // dRep votes
         java.util.Map<Drep, Vote> dRepVotes = new HashMap<>();
         var dRepVotesDI = (Map) proposalArray.getDataItems().get(2);
