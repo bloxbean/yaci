@@ -466,10 +466,18 @@ class LocalStateQueryAgentIT extends BaseTest {
             @Override
             public void acquired(Point point) {
                 countDownLatch.countDown();
-                localStateQueryAgent.query(new DRepStateQuery(List.of(Credential
-                        .builder()
-                        .type(StakeCredType.ADDR_KEYHASH)
-                        .hash("11b2324445c59782060c4201838c6390bb9d8220cf46538e4f2a73ea").build())));
+                localStateQueryAgent.query(new DRepStateQuery(List.of(
+                        Credential
+                                .builder()
+                                .type(StakeCredType.ADDR_KEYHASH)
+                                .hash("5e80b2b80990a738aece6d6068b2991eaea21c52e79c7974719ac275")
+                                .build(),
+                        Credential
+                                .builder()
+                                .type(StakeCredType.ADDR_KEYHASH)
+                                .hash("6e066d1a8bce348956b34438556abb43d597d075f9fdab03bb6f4d39")
+                                .build()
+                        )));
                 localStateQueryAgent.sendNextMessage();
             }
 

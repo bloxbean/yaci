@@ -6,6 +6,8 @@ import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.model.Credential;
+import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
+import com.bloxbean.cardano.yaci.core.model.serializers.governance.AnchorSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
@@ -50,23 +52,36 @@ public class DRepStateQuery implements EraQuery<DRepStateQueryResult> {
         var array = (Array) di[0];
         var drepStateArray = (Array) array.getDataItems().get(1);
 
-        drepStateArray.getDataItems().forEach(dataItem -> {
+        for (var dataItem : drepStateArray.getDataItems()) {
             var map = (Map)dataItem;
-            var key = (List<DataItem>)map.getKeys();
-            var itemDI = (Array)key.get(0);
-            String dRepHash = CborSerializationUtil.toHex(itemDI.getDataItems().get(1));
-            var value = (Array) map.get(itemDI);
-            Integer expiry = CborSerializationUtil.toInt(value.getDataItems().get(0));
-            // TODO: anchor
-            BigInteger deposit = CborSerializationUtil.toBigInteger(value.getDataItems().get(2));
-            var dRepState = DRepState.builder()
-                    .dRepHash(dRepHash)
-                    .deposit(deposit)
-                    .expiry(expiry)
-                    .build();
+            var keys = (List<DataItem>)map.getKeys();
 
-            result.addDRepState(dRepState);
-        });
+            if (keys.isEmpty()) {
+                continue;
+            }
+            for (var key : keys) {
+                var itemDI = (Array)key;
+                String dRepHash = CborSerializationUtil.toHex(itemDI.getDataItems().get(1));
+                var value = (Array) map.get(itemDI);
+                Integer expiry = CborSerializationUtil.toInt(value.getDataItems().get(0));
+
+                Anchor anchor = null;
+                if (((Array) value.getDataItems().get(1)).getDataItems().size() > 0) {
+                    anchor = AnchorSerializer.INSTANCE.deserializeDI(((Array)value.getDataItems().get(1)).getDataItems().get(0));
+                }
+
+                BigInteger deposit = CborSerializationUtil.toBigInteger(value.getDataItems().get(2));
+
+                var dRepState = DRepState.builder()
+                        .dRepHash(dRepHash)
+                        .anchor(anchor)
+                        .deposit(deposit)
+                        .expiry(expiry)
+                        .build();
+
+                result.addDRepState(dRepState);
+            }
+        }
 
         return result;
     }
