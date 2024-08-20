@@ -1,24 +1,25 @@
 package com.bloxbean.cardano.yaci.core.protocol.localstate;
 
 import com.bloxbean.cardano.yaci.core.BaseTest;
+import com.bloxbean.cardano.yaci.core.model.Credential;
+import com.bloxbean.cardano.yaci.core.model.certs.StakeCredType;
 import com.bloxbean.cardano.yaci.core.network.UnixSocketNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Query;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.QueryResult;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.messages.MsgFailure;
-import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.BlockHeightQuery;
-import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.ChainPointQuery;
-import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.SystemStartQuery;
-import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.SystemStartResult;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.*;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -380,4 +381,168 @@ class LocalStateQueryAgentIT extends BaseTest {
 
         n2CClient.shutdown();
     }
+
+    @Test
+    void constitutionQuery_shouldReturn_Constitution() throws InterruptedException {
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(sanchoProtocolMagic));
+        LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent();
+
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(sanchoNodeSocketFile, handshakeAgent, localStateQueryAgent);
+
+        CountDownLatch countDownLatch = new CountDownLatch(2);
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                log.info("HANDSHAKE Successful");
+                localStateQueryAgent.acquire();
+                localStateQueryAgent.sendNextMessage();
+            }
+
+            @Override
+            public void handshakeError(Reason reason) {
+                log.info("ERROR {}", reason);
+            }
+        });
+
+        AtomicBoolean failed = new AtomicBoolean(false);
+        localStateQueryAgent.addListener(new LocalStateQueryListener() {
+            @Override
+            public void acquireFailed(MsgFailure.Reason reason) {
+                countDownLatch.countDown();
+                failed.set(true);
+            }
+
+            @Override
+            public void acquired(Point point) {
+                countDownLatch.countDown();
+                localStateQueryAgent.query(new ConstitutionQuery(Era.Conway));
+                localStateQueryAgent.sendNextMessage();
+            }
+
+            @Override
+            public void resultReceived(Query query, QueryResult result) {
+                System.out.println("Query >> " + query);
+                System.out.println("Result >> " + result);
+                System.out.println("Result : " + result);
+                countDownLatch.countDown();
+            }
+        });
+
+        n2CClient.start();
+        countDownLatch.await(20, TimeUnit.SECONDS);
+        n2CClient.shutdown();
+    }
+
+    @Test
+    void dRepStateQuery_shouldReturn_dRepStateList() throws InterruptedException {
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(sanchoProtocolMagic));
+        LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent();
+
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(sanchoNodeSocketFile, handshakeAgent, localStateQueryAgent);
+
+        CountDownLatch countDownLatch = new CountDownLatch(2);
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                log.info("HANDSHAKE Successful");
+                localStateQueryAgent.acquire();
+                localStateQueryAgent.sendNextMessage();
+            }
+
+            @Override
+            public void handshakeError(Reason reason) {
+                log.info("ERROR {}", reason);
+            }
+        });
+
+        AtomicBoolean failed = new AtomicBoolean(false);
+        localStateQueryAgent.addListener(new LocalStateQueryListener() {
+            @Override
+            public void acquireFailed(MsgFailure.Reason reason) {
+                countDownLatch.countDown();
+                failed.set(true);
+            }
+
+            @Override
+            public void acquired(Point point) {
+                countDownLatch.countDown();
+                localStateQueryAgent.query(new DRepStateQuery(List.of(
+                        Credential
+                                .builder()
+                                .type(StakeCredType.ADDR_KEYHASH)
+                                .hash("5e80b2b80990a738aece6d6068b2991eaea21c52e79c7974719ac275")
+                                .build(),
+                        Credential
+                                .builder()
+                                .type(StakeCredType.ADDR_KEYHASH)
+                                .hash("6e066d1a8bce348956b34438556abb43d597d075f9fdab03bb6f4d39")
+                                .build()
+                        )));
+                localStateQueryAgent.sendNextMessage();
+            }
+
+            @Override
+            public void resultReceived(Query query, QueryResult result) {
+                System.out.println("Query >> " + query);
+                System.out.println("Result >> " + result);
+                countDownLatch.countDown();
+            }
+        });
+
+        n2CClient.start();
+        countDownLatch.await(20, TimeUnit.SECONDS);
+        n2CClient.shutdown();
+    }
+
+
+    @Test
+    void govStateQuery_shouldReturn_govState() throws InterruptedException {
+        HandshakeAgent handshakeAgent = new HandshakeAgent(N2CVersionTableConstant.v1AndAbove(sanchoProtocolMagic));
+        LocalStateQueryAgent localStateQueryAgent = new LocalStateQueryAgent();
+
+        UnixSocketNodeClient n2CClient = new UnixSocketNodeClient(sanchoNodeSocketFile, handshakeAgent, localStateQueryAgent);
+
+        CountDownLatch countDownLatch = new CountDownLatch(2);
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                log.info("HANDSHAKE Successful");
+                localStateQueryAgent.acquire();
+                localStateQueryAgent.sendNextMessage();
+            }
+
+            @Override
+            public void handshakeError(Reason reason) {
+                log.info("ERROR {}", reason);
+            }
+        });
+
+        AtomicBoolean failed = new AtomicBoolean(false);
+        localStateQueryAgent.addListener(new LocalStateQueryListener() {
+            @Override
+            public void acquireFailed(MsgFailure.Reason reason) {
+                countDownLatch.countDown();
+                failed.set(true);
+            }
+
+            @Override
+            public void acquired(Point point) {
+                countDownLatch.countDown();
+                localStateQueryAgent.query(new GovStateQuery(Era.Conway));
+                localStateQueryAgent.sendNextMessage();
+            }
+
+            @Override
+            public void resultReceived(Query query, QueryResult result) {
+                System.out.println("Query >> " + query);
+                System.out.println("Result >> " + result);
+                countDownLatch.countDown();
+            }
+        });
+
+        n2CClient.start();
+        countDownLatch.await(20, TimeUnit.SECONDS);
+        n2CClient.shutdown();
+    }
+
 }
