@@ -8,11 +8,13 @@ import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.Proposal
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.RatifyState;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.ToString;
 
 import java.util.List;
 
 @Getter
 @Setter
+@ToString
 public class GovStateResult implements QueryResult {
     private Committee committee;
     private Constitution constitution;

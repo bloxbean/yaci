@@ -7,12 +7,14 @@ import com.bloxbean.cardano.yaci.core.model.governance.GovActionId;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.ToString;
 
 import java.util.Map;
 
 @Getter
 @Setter
 @Builder
+@ToString
 public class EnactState {
     private Committee committee;
     private Constitution constitution;
