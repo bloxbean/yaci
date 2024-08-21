@@ -1,7 +1,11 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.client.address.Address;
+import com.bloxbean.cardano.client.transaction.spec.governance.Constitution;
+import com.bloxbean.cardano.client.transaction.spec.governance.DRep;
 import com.bloxbean.cardano.yaci.core.common.Constants;
+import com.bloxbean.cardano.yaci.core.model.Credential;
+import com.bloxbean.cardano.yaci.core.model.certs.StakeCredType;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.*;
@@ -12,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
-
 import java.math.BigInteger;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -297,4 +300,68 @@ class LocalStateQueryClientIT extends BaseTest {
         assertThat(rewards).hasSizeGreaterThanOrEqualTo(5); //only 5 regular staking keys has rewards
     }
 
+    @Test
+    void accountStateQuery() {
+        Mono<AccountStateQueryResult> mono = localStateQueryClient.executeQuery(new AccountStateQuery());
+        mono = mono.log();
+
+        AccountStateQueryResult result = mono.block(Duration.ofSeconds(5));
+        System.out.println(result);
+    }
+
+    @Test
+    void dRepStakeDistributionQuery() {
+        Mono<DRepStakeDistributionQueryResult> mono = localStateQueryClient.executeQuery(
+                new DRepStakeDistributionQuery(
+                        List.of(
+                                DRep.addrKeyHash("001021a9b538f693f5293b9ad77e9fd2febe5ecd66cf8bb2844b4a8d")
+                               , DRep.scriptHash("1ffa2ae5f54e88a2e6a29642936aceebdd3aea948d70ace645912440")
+                        ))
+        );
+
+        mono = mono.log();
+
+        DRepStakeDistributionQueryResult result = mono.block(Duration.ofSeconds(5));
+        System.out.println( result);
+    }
+
+    @Test
+    void govStateQuery() {
+        Mono<GovStateResult> mono = localStateQueryClient.executeQuery(new GovStateQuery());
+        mono = mono.log();
+
+        GovStateResult result = mono.block(Duration.ofSeconds(10));
+        System.out.println(result);
+    }
+
+    @Test
+    void constitutionQuery() {
+        Mono<ConstitutionResult> mono = localStateQueryClient.executeQuery(new ConstitutionQuery());
+        mono = mono.log();
+
+        ConstitutionResult result = mono.block(Duration.ofSeconds(5));
+        System.out.println(result);
+    }
+
+    @Test
+    void dRepStateQuery() {
+        Mono<DRepStateQueryResult> mono = localStateQueryClient.executeQuery(new DRepStateQuery(
+                List.of(
+                        Credential
+                                .builder()
+                                .type(StakeCredType.ADDR_KEYHASH)
+                                .hash("5e80b2b80990a738aece6d6068b2991eaea21c52e79c7974719ac275")
+                                .build(),
+                        Credential
+                                .builder()
+                                .type(StakeCredType.ADDR_KEYHASH)
+                                .hash("6e066d1a8bce348956b34438556abb43d597d075f9fdab03bb6f4d39")
+                                .build()
+                ))
+        );
+        mono = mono.log();
+
+        DRepStateQueryResult result = mono.block(Duration.ofSeconds(5));
+        System.out.println(result);
+    }
 }
