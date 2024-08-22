@@ -93,7 +93,8 @@ public abstract class NodeClient {
     }
 
     public void shutdown() {
-        log.info("Shutdown connection !!!");
+        if (showConnectionLog())
+            log.info("Shutdown connection !!!");
 
         if (session != null) {
             session.disableReconnection();
@@ -162,7 +163,8 @@ public abstract class NodeClient {
 
         @Override
         public void disconnected() {
-            log.info("Connection closed !!!");
+            if (showConnectionLog())
+                log.info("Connection closed !!!");
             if (session != null) {
                 session.dispose();
             }
@@ -182,7 +184,12 @@ public abstract class NodeClient {
 
         @Override
         public void connected() {
-            log.info("Connected !!!");
+            if (showConnectionLog())
+                log.info("Connected !!!");
         }
+    }
+
+    private boolean showConnectionLog() {
+        return log.isDebugEnabled() || (handshakeAgent != null && !handshakeAgent.isSuppressConnectionInfoLog());
     }
 }

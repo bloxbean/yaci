@@ -13,6 +13,7 @@ import static com.bloxbean.cardano.yaci.core.protocol.handshake.HandshkeState.Pr
 @Slf4j
 public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     private final VersionTable versionTable;
+    private boolean suppressConnectionInfoLog = false;
 
     public HandshakeAgent(VersionTable versionTable) {
         this.versionTable = versionTable;
@@ -38,7 +39,8 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     public void processResponse(Message message) {
         if (message == null) return;
         if (message instanceof AcceptVersion) {
-            log.info("Handshake Ok!!! {}", message);
+            if (log.isDebugEnabled() || !suppressConnectionInfoLog)
+                log.info("Handshake Ok!!! {}", message);
             setProtocolVersion((AcceptVersion)message);
             handshakeOk();
         } else if (message instanceof VersionTable) {
@@ -67,5 +69,13 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
 
     public void reset() {
         this.currenState = Propose;
+    }
+
+    public void setSuppressConnectionInfoLog(boolean suppressConnectionInfoLog) {
+        this.suppressConnectionInfoLog = suppressConnectionInfoLog;
+    }
+
+    public boolean isSuppressConnectionInfoLog() {
+        return suppressConnectionInfoLog;
     }
 }

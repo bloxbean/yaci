@@ -225,6 +225,15 @@ public class LocalClientProvider implements AutoCloseable {
         this.localClientProviderListener = listener;
     }
 
+    /**
+     * Suppress connection info log. Default is false
+     *
+     * @param flag
+     */
+    public void suppressConnectionInfoLog(boolean flag) {
+        handshakeAgent.setSuppressConnectionInfoLog(flag);
+    }
+
     @Override
     public void close() throws Exception {
         shutdown();
