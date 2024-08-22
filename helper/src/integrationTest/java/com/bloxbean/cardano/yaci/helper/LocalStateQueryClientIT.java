@@ -302,17 +302,22 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @Test
     void accountStateQuery() {
-        Mono<AccountStateQueryResult> mono = localStateQueryClient.executeQuery(new AccountStateQuery());
+        Mono<AccountStateQueryResult> mono = localStateQueryClient.executeQuery(new AccountStateQuery(Era.Babbage));
+
         mono = mono.log();
 
-        AccountStateQueryResult result = mono.block(Duration.ofSeconds(5));
-        System.out.println(result);
+        StepVerifier
+                .create(mono)
+                .expectNextMatches(accountState -> accountState.getTreasury() != null && accountState.getReserves() != null)
+                .expectComplete()
+                .verify();
     }
 
     @Test
     void dRepStakeDistributionQuery() {
         Mono<DRepStakeDistributionQueryResult> mono = localStateQueryClient.executeQuery(
                 new DRepStakeDistributionQuery(
+                        Era.Conway,
                         List.of(
                                 DRep.addrKeyHash("001021a9b538f693f5293b9ad77e9fd2febe5ecd66cf8bb2844b4a8d")
                                , DRep.scriptHash("1ffa2ae5f54e88a2e6a29642936aceebdd3aea948d70ace645912440")
@@ -322,30 +327,32 @@ class LocalStateQueryClientIT extends BaseTest {
         mono = mono.log();
 
         DRepStakeDistributionQueryResult result = mono.block(Duration.ofSeconds(5));
-        System.out.println( result);
+        assertThat(result.getDRepStakes()).isNotNull();
     }
 
     @Test
     void govStateQuery() {
-        Mono<GovStateResult> mono = localStateQueryClient.executeQuery(new GovStateQuery());
+        Mono<GovStateResult> mono = localStateQueryClient.executeQuery(new GovStateQuery(Era.Conway));
         mono = mono.log();
 
         GovStateResult result = mono.block(Duration.ofSeconds(10));
-        System.out.println(result);
+        assertThat(result.getCommittee()).isNotNull();
+        assertThat(result.getCurrentPParams()).isNotNull();
     }
 
     @Test
     void constitutionQuery() {
-        Mono<ConstitutionResult> mono = localStateQueryClient.executeQuery(new ConstitutionQuery());
+        Mono<ConstitutionResult> mono = localStateQueryClient.executeQuery(new ConstitutionQuery(Era.Conway));
         mono = mono.log();
 
         ConstitutionResult result = mono.block(Duration.ofSeconds(5));
-        System.out.println(result);
+        assertThat(result).isNotNull();
     }
 
     @Test
     void dRepStateQuery() {
         Mono<DRepStateQueryResult> mono = localStateQueryClient.executeQuery(new DRepStateQuery(
+                Era.Conway,
                 List.of(
                         Credential
                                 .builder()
@@ -362,6 +369,6 @@ class LocalStateQueryClientIT extends BaseTest {
         mono = mono.log();
 
         DRepStateQueryResult result = mono.block(Duration.ofSeconds(5));
-        System.out.println(result);
+        assertThat(result.getDRepStates()).isNotNull();
     }
 }
