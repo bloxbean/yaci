@@ -9,12 +9,14 @@ import com.bloxbean.cardano.yaci.core.model.governance.Vote;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.ToString;
 
 import java.util.Map;
 
 @Getter
 @Setter
 @Builder
+@ToString
 public class Proposal {
     private GovActionId govActionId;
     private Map<Credential, Vote> committeeVotes;

@@ -1,6 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model;
 
-import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
+import com.bloxbean.cardano.yaci.core.model.governance.Drep;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
@@ -12,9 +12,7 @@ import java.math.BigInteger;
 @Setter
 @Builder
 @ToString
-public class DRepState {
-    private String dRepHash;
-    private Anchor anchor;
-    private BigInteger deposit;
-    private Integer expiry;
+public class DRepStake {
+    private Drep dRep;
+    private BigInteger amount;
 }
