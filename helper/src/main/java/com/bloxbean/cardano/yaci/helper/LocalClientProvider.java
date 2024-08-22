@@ -41,7 +41,7 @@ import lombok.extern.slf4j.Slf4j;
  * </pre>
  */
 @Slf4j
-public class LocalClientProvider {
+public class LocalClientProvider implements AutoCloseable {
     private String nodeSocketFile;
     private String host;
     private int port;
@@ -223,5 +223,10 @@ public class LocalClientProvider {
      */
     public void setLocalClientProviderListener(LocalClientProviderListener listener) {
         this.localClientProviderListener = listener;
+    }
+
+    @Override
+    public void close() throws Exception {
+        shutdown();
     }
 }
