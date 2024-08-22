@@ -224,4 +224,13 @@ public class LocalClientProvider {
     public void setLocalClientProviderListener(LocalClientProviderListener listener) {
         this.localClientProviderListener = listener;
     }
+
+    /**
+     * Suppress connection info log. Default is false
+     *
+     * @param flag
+     */
+    public void suppressConnectionInfoLog(boolean flag) {
+        handshakeAgent.setSuppressConnectionInfoLog(flag);
+    }
 }

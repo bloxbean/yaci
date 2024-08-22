@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.network;
 
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -18,12 +19,12 @@ class Session implements Disposable {
     private final Bootstrap clientBootstrap;
     private Channel activeChannel;
     private final AtomicBoolean shouldReconnect; //Not used currently
-    private final Agent handshakeAgent;
+    private final HandshakeAgent handshakeAgent;
     private final Agent[] agents;
 
     private SessionListener sessionListener;
 
-    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, Agent handshakeAgent, Agent[] agents) {
+    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, HandshakeAgent handshakeAgent, Agent[] agents) {
         this.socketAddress = socketAddress;
         this.clientBootstrap = clientBootstrap;
         this.shouldReconnect = new AtomicBoolean(true);
@@ -67,7 +68,8 @@ class Session implements Disposable {
 
         connectFuture.addListeners((ChannelFuture cf) -> {
             if (cf.isSuccess()) {
-                log.info("Connection established");
+                if (showConnectionLog())
+                    log.info("Connection established");
                 if (sessionListener != null)
                     sessionListener.connected();
                 //Listen to the channel closing
@@ -96,7 +98,8 @@ class Session implements Disposable {
      */
     @Override
     public void dispose() {
-        log.info("Disposing the session !!!");
+        if (showConnectionLog())
+            log.info("Disposing the session !!!");
       //  try {
             if (activeChannel != null) {
                 activeChannel.close();
@@ -128,5 +131,9 @@ class Session implements Disposable {
 
         if (log.isDebugEnabled())
             log.debug("Handshake successful");
+    }
+
+    private boolean showConnectionLog() {
+        return log.isDebugEnabled() || (handshakeAgent != null && !handshakeAgent.isSuppressConnectionInfoLog());
     }
 }
