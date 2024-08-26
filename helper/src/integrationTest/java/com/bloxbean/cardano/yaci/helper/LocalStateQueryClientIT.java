@@ -328,7 +328,7 @@ class LocalStateQueryClientIT extends BaseTest {
         mono = mono.log();
 
         DRepStakeDistributionQueryResult result = mono.block(Duration.ofSeconds(5));
-        assertThat(result.getDRepStakes()).isNotNull();
+        assertThat(result.getDRepStakeMap()).isNotNull();
     }
 
     @Test
