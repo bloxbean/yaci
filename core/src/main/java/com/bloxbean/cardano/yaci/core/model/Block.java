@@ -20,6 +20,8 @@ public class Block {
     private List<Witnesses> transactionWitness = new ArrayList<>();
     private Map<Integer, AuxData> auxiliaryDataMap = new LinkedHashMap();
     private List<Integer> invalidTransactions = new ArrayList<>();
+    private List<Integer> txSizes = new ArrayList<>();
+    private List<Integer> txScriptSizes = new ArrayList<>();
 
     private String cbor;
 }
