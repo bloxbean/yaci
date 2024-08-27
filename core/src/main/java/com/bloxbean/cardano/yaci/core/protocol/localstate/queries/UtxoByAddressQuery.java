@@ -27,7 +27,7 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
     private Address address;
 
     public UtxoByAddressQuery(Address address) {
-        this(Era.Babbage, address);
+        this(Era.Conway, address);
     }
 
     @Override

@@ -21,7 +21,7 @@ public class PoolDistrQuery implements EraQuery<PoolDistrQueryResult> {
     private List<String> poolIds;
 
     public PoolDistrQuery(List<String> poolIds) {
-        this(Era.Babbage, poolIds);
+        this(Era.Conway, poolIds);
     }
 
     @Override

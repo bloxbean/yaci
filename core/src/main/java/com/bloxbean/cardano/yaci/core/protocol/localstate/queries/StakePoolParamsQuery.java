@@ -22,7 +22,7 @@ public class StakePoolParamsQuery implements EraQuery<StakePoolParamQueryResult>
     private List<String> poolIds;
 
     public StakePoolParamsQuery(@NonNull List<String> poolIds) {
-        this(Era.Babbage, poolIds);
+        this(Era.Conway, poolIds);
     }
 
     @Override

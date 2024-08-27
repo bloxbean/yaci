@@ -23,7 +23,7 @@ public class StakeDistributionQuery implements EraQuery<StakeDistributionQueryRe
     private Era era;
 
     public StakeDistributionQuery() {
-        this(Era.Babbage);
+        this(Era.Conway);
     }
 
     @Override

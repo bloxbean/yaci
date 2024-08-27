@@ -19,7 +19,7 @@ public class StakeSnapshotQuery implements EraQuery<StakeSnapshotQueryResult> {
     private String poolId;
 
     public StakeSnapshotQuery(String poolId) {
-        this(Era.Babbage, poolId);
+        this(Era.Conway, poolId);
     }
 
     @Override
