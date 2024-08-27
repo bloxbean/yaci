@@ -23,6 +23,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.*;
 
+import static com.bloxbean.cardano.yaci.core.common.Constants.SANCHONET_PROTOCOL_MAGIC;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
@@ -327,7 +328,7 @@ class LocalStateQueryClientIT extends BaseTest {
         mono = mono.log();
 
         DRepStakeDistributionQueryResult result = mono.block(Duration.ofSeconds(5));
-        assertThat(result.getDRepStakes()).isNotNull();
+        assertThat(result.getDRepStakeMap()).isNotNull();
     }
 
     @Test
@@ -370,5 +371,16 @@ class LocalStateQueryClientIT extends BaseTest {
 
         DRepStateQueryResult result = mono.block(Duration.ofSeconds(5));
         assertThat(result.getDRepStates()).isNotNull();
+    }
+
+    @Test
+    void SPOStakeDistrQuery() {
+        Mono<SPOStakeDistributionQueryResult> mono = localStateQueryClient.executeQuery(new SPOStakeDistributionQuery(
+                List.of("3c4fb94e1a2c5649a870aee5a70f21cd64807c7dc38632efcaf3d921")
+                )
+        );
+
+        SPOStakeDistributionQueryResult result = mono.block();
+        assertThat(result.getSpoStakeMap()).isNotNull();
     }
 }

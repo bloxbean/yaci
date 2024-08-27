@@ -53,7 +53,7 @@ public class DRepStakeDistributionQuery implements EraQuery<DRepStakeDistributio
             var dRepDI = (Array) key;
             int dRepType = toInt(dRepDI.getDataItems().get(0));
 
-            var votingPower = ((UnsignedInteger) dRepStakeMap.get(key)).getValue();
+            var stakeAmount = ((UnsignedInteger) dRepStakeMap.get(key)).getValue();
             Drep dRep = null;
             if (dRepType == 0 || dRepType == 1) {
                 String hash = HexUtil.encodeHexString(((ByteString) dRepDI.getDataItems().get(1)).getBytes());
@@ -64,12 +64,7 @@ public class DRepStakeDistributionQuery implements EraQuery<DRepStakeDistributio
                 dRep = Drep.noConfidence();
             }
 
-            DRepStake dRepStake = DRepStake.builder()
-                    .dRep(dRep)
-                    .amount(votingPower)
-                    .build();
-
-            result.addDRepStake(dRepStake);
+            result.addDRepStake(dRep, stakeAmount);
         }
 
         return result;

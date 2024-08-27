@@ -1,25 +1,26 @@
 package com.bloxbean.cardano.yaci.core.protocol.localstate.queries;
 
+import com.bloxbean.cardano.yaci.core.model.governance.Drep;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.QueryResult;
-import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.DRepStake;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.ToString;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.math.BigInteger;
+import java.util.HashMap;
+import java.util.Map;
 
 @Getter
 @ToString
 @AllArgsConstructor
 public class DRepStakeDistributionQueryResult implements QueryResult {
-    List<DRepStake> dRepStakes;
+    Map<Drep, BigInteger> dRepStakeMap;
 
     public DRepStakeDistributionQueryResult() {
-        this.dRepStakes = new ArrayList<>();
+        this.dRepStakeMap = new HashMap<>();
     }
 
-    public void addDRepStake(DRepStake dRepState) {
-        dRepStakes.add(dRepState);
+    public void addDRepStake(Drep dRep, BigInteger amount) {
+        dRepStakeMap.put(dRep, amount);
     }
 }
