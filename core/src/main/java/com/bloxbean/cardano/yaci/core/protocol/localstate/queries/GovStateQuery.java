@@ -35,7 +35,7 @@ import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
 @Getter
 @AllArgsConstructor
 @ToString
-public class GovStateQuery implements EraQuery<GovStateResult> {
+public class GovStateQuery implements EraQuery<GovStateQueryResult> {
     private Era era;
 
     public GovStateQuery() {
@@ -51,8 +51,8 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
     }
 
     @Override
-    public GovStateResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
-        GovStateResult govStateResult = new GovStateResult();
+    public GovStateQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
+        GovStateQueryResult govStateQueryResult = new GovStateQueryResult();
         Array array = (Array) di[0];
         Array resultArray = (Array) ((Array) array.getDataItems().get(1)).getDataItems().get(0);
 
@@ -60,14 +60,14 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
         Array committeeResult =  (Array) resultArray.getDataItems().get(1);
         Array committeeDI =  (Array) committeeResult.getDataItems().get(0);
         Committee committee = deserializeCommitteeResult(committeeDI.getDataItems());
-        govStateResult.setCommittee(committee);
+        govStateQueryResult.setCommittee(committee);
 
         // constitution
         Array constitutionArr = (Array) resultArray.getDataItems().get(2);
         var constitutionDI = constitutionArr.getDataItems().get(0);
 
         Constitution constitution = deserializeConstitutionResult(constitutionDI);
-        govStateResult.setConstitution(constitution);
+        govStateQueryResult.setConstitution(constitution);
 
         // current protocol params
         Array currentPParams = (Array) resultArray.getDataItems().get(3);
@@ -75,13 +75,13 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
 
         ProtocolParamUpdate currentProtocolParam = deserializePPResult(paramsDIList);
 
-        govStateResult.setCurrentPParams(currentProtocolParam);
+        govStateQueryResult.setCurrentPParams(currentProtocolParam);
 
         Array futurePParams = (Array) resultArray.getDataItems().get(5);
         if (!futurePParams.getDataItems().isEmpty() && futurePParams.getDataItems().size() > 1) {
             List<DataItem> futureParamsDIList = ((Array)futurePParams.getDataItems().get(1)).getDataItems();
             ProtocolParamUpdate futureProtocolParam = deserializePPResult(futureParamsDIList);
-            govStateResult.setFuturePParams(futureProtocolParam);
+            govStateQueryResult.setFuturePParams(futureProtocolParam);
         }
 
         // next ratify state
@@ -163,14 +163,14 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
                 .expiredGovActions(expiredGovActions)
                 .build();
 
-        govStateResult.setNextRatifyState(nextRatifyState);
+        govStateQueryResult.setNextRatifyState(nextRatifyState);
 
         // previous protocol params
         Array prevPParams = (Array) resultArray.getDataItems().get(4);
         paramsDIList = prevPParams.getDataItems();
         ProtocolParamUpdate prevProtocolParam = deserializePPResult(paramsDIList);
 
-        govStateResult.setPreviousPParams(prevProtocolParam);
+        govStateQueryResult.setPreviousPParams(prevProtocolParam);
 
         // proposals
         Array proposalArr = (Array)((Array) resultArray.getDataItems().get(0)).getDataItems().get(1);
@@ -184,9 +184,9 @@ public class GovStateQuery implements EraQuery<GovStateResult> {
             proposals.add(proposal);
         }
 
-        govStateResult.setProposals(proposals);
+        govStateQueryResult.setProposals(proposals);
 
-        return govStateResult;
+        return govStateQueryResult;
     }
 
     public ProtocolParamUpdate deserializePPResult(List<DataItem> paramsDIList) {

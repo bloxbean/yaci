@@ -326,20 +326,20 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @Test
     void govStateQuery() {
-        Mono<GovStateResult> mono = localStateQueryClient.executeQuery(new GovStateQuery(Era.Conway));
+        Mono<GovStateQueryResult> mono = localStateQueryClient.executeQuery(new GovStateQuery(Era.Conway));
         mono = mono.log();
 
-        GovStateResult result = mono.block(Duration.ofSeconds(10));
+        GovStateQueryResult result = mono.block(Duration.ofSeconds(10));
         assertThat(result.getCommittee()).isNotNull();
         assertThat(result.getCurrentPParams()).isNotNull();
     }
 
     @Test
     void constitutionQuery() {
-        Mono<ConstitutionResult> mono = localStateQueryClient.executeQuery(new ConstitutionQuery(Era.Conway));
+        Mono<ConstitutionQueryResult> mono = localStateQueryClient.executeQuery(new ConstitutionQuery(Era.Conway));
         mono = mono.log();
 
-        ConstitutionResult result = mono.block(Duration.ofSeconds(5));
+        ConstitutionQueryResult result = mono.block(Duration.ofSeconds(5));
         assertThat(result).isNotNull();
     }
 

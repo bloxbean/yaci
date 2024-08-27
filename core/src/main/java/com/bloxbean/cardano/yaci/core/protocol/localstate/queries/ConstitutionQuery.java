@@ -19,7 +19,7 @@ import java.util.List;
 @AllArgsConstructor
 @ToString
 // ouroboros-consensus-cardano/src/shelley/Ouroboros/Consensus/Shelley/Ledger/Query.hs
-public class ConstitutionQuery implements EraQuery<ConstitutionResult> {
+public class ConstitutionQuery implements EraQuery<ConstitutionQueryResult> {
     @NonNull
     private Era era;
 
@@ -36,7 +36,7 @@ public class ConstitutionQuery implements EraQuery<ConstitutionResult> {
     }
 
     @Override
-    public ConstitutionResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
+    public ConstitutionQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
         List<DataItem> dataItemList = ((Array)di[0]).getDataItems();
 
         int type = ((UnsignedInteger)dataItemList.get(0)).getValue().intValue(); //4
@@ -45,6 +45,6 @@ public class ConstitutionQuery implements EraQuery<ConstitutionResult> {
         var items = (Array)resultDIList.get(0);
 
         Anchor anchor = AnchorSerializer.INSTANCE.deserializeDI(items.getDataItems().get(0));
-        return new ConstitutionResult(anchor);
+        return new ConstitutionQueryResult(anchor);
     }
 }

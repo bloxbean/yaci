@@ -9,6 +9,6 @@ import lombok.ToString;
 @Getter
 @AllArgsConstructor
 @ToString
-public class ConstitutionResult implements QueryResult {
+public class ConstitutionQueryResult implements QueryResult {
     private Anchor anchor;
 }
