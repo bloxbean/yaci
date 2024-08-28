@@ -15,7 +15,7 @@ import java.util.List;
 @Getter
 @Setter
 @ToString
-public class GovStateResult implements QueryResult {
+public class GovStateQueryResult implements QueryResult {
     private Committee committee;
     private Constitution constitution;
     private ProtocolParamUpdate currentPParams;

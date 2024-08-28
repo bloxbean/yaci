@@ -55,7 +55,7 @@ public class DelegationsAndRewardAccountsQuery implements EraQuery<DelegationsAn
      * @param stakeAddresses
      */
     public DelegationsAndRewardAccountsQuery(Set<Address> stakeAddresses) {
-        this(Era.Babbage, stakeAddresses);
+        this(Era.Conway, stakeAddresses);
     }
 
     /**

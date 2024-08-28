@@ -1,9 +1,7 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.client.address.Address;
-import com.bloxbean.cardano.client.transaction.spec.governance.Constitution;
 import com.bloxbean.cardano.client.transaction.spec.governance.DRep;
-import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.model.Credential;
 import com.bloxbean.cardano.yaci.core.model.certs.StakeCredType;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -16,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
+
 import java.math.BigInteger;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -23,7 +22,6 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.*;
 
-import static com.bloxbean.cardano.yaci.core.common.Constants.SANCHONET_PROTOCOL_MAGIC;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
@@ -35,7 +33,7 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @BeforeEach
     public void setup() {
-        this.era = Era.Babbage;
+        this.era = Era.Conway;
         this.localQueryProvider = new LocalClientProvider(nodeSocketFile, protocolMagic);
         this.localStateQueryClient = localQueryProvider.getLocalStateQueryClient();
         localQueryProvider.start();
@@ -111,12 +109,7 @@ class LocalStateQueryClientIT extends BaseTest {
     @Test
     void protocolParameters() {
         Mono<CurrentProtocolParamQueryResult> mono = null;
-
-        if (protocolMagic == Constants.SANCHONET_PROTOCOL_MAGIC) {
-            mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Conway));
-        } else {
-            mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Babbage));
-        }
+        mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Conway));
 
         mono = mono.log();
 
@@ -157,7 +150,7 @@ class LocalStateQueryClientIT extends BaseTest {
     @Test
     void acquireReacquireAndQuery() {
         localStateQueryClient.acquire().block(Duration.ofSeconds(15));
-        Mono<CurrentProtocolParamQueryResult> mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Babbage));
+        Mono<CurrentProtocolParamQueryResult> mono = localStateQueryClient.executeQuery(new CurrentProtocolParamsQuery(Era.Conway));
         CurrentProtocolParamQueryResult protocolParams = mono.block(Duration.ofSeconds(8));
         log.info("Protocol Params >> " + protocolParams);
 
@@ -216,7 +209,7 @@ class LocalStateQueryClientIT extends BaseTest {
     @Test
     void stakeSnapshotsQuery() {
         Mono<StakeSnapshotQueryResult> mono = localStateQueryClient.executeQuery(new StakeSnapshotQuery("032a04334a846fdf542fd5633c9b3928998691b8276e004facbc8af1"));
-        StakeSnapshotQueryResult result = mono.block();
+        StakeSnapshotQueryResult result = mono.block(Duration.ofSeconds(5));
 
         System.out.println(result);
     }
@@ -248,7 +241,7 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @Test
     void genesisConfigQuery() {
-        Mono<GenesisConfigQueryResult> mono = localStateQueryClient.executeQuery(new GenesisConfigQuery(Era.Babbage));
+        Mono<GenesisConfigQueryResult> mono = localStateQueryClient.executeQuery(new GenesisConfigQuery(Era.Conway));
         GenesisConfigQueryResult result = mono.block(Duration.ofSeconds(5));
 
         LocalDate localDate = LocalDate.ofYearDay(2017, 30);
@@ -303,7 +296,7 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @Test
     void accountStateQuery() {
-        Mono<AccountStateQueryResult> mono = localStateQueryClient.executeQuery(new AccountStateQuery(Era.Babbage));
+        Mono<AccountStateQueryResult> mono = localStateQueryClient.executeQuery(new AccountStateQuery(Era.Conway));
 
         mono = mono.log();
 
@@ -320,8 +313,8 @@ class LocalStateQueryClientIT extends BaseTest {
                 new DRepStakeDistributionQuery(
                         Era.Conway,
                         List.of(
-                                DRep.addrKeyHash("001021a9b538f693f5293b9ad77e9fd2febe5ecd66cf8bb2844b4a8d")
-                               , DRep.scriptHash("1ffa2ae5f54e88a2e6a29642936aceebdd3aea948d70ace645912440")
+                                DRep.addrKeyHash("23bc63ced4e40b22dd4e6051c258ba38d5679d81e33f34fe5e5cdb4d")
+                               , DRep.addrKeyHash("fa6a8dc2635dddcf9af495cb144f7eb4ff845866fe48695ad7cb65d3")
                         ))
         );
 
@@ -333,20 +326,20 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @Test
     void govStateQuery() {
-        Mono<GovStateResult> mono = localStateQueryClient.executeQuery(new GovStateQuery(Era.Conway));
+        Mono<GovStateQueryResult> mono = localStateQueryClient.executeQuery(new GovStateQuery(Era.Conway));
         mono = mono.log();
 
-        GovStateResult result = mono.block(Duration.ofSeconds(10));
+        GovStateQueryResult result = mono.block(Duration.ofSeconds(10));
         assertThat(result.getCommittee()).isNotNull();
         assertThat(result.getCurrentPParams()).isNotNull();
     }
 
     @Test
     void constitutionQuery() {
-        Mono<ConstitutionResult> mono = localStateQueryClient.executeQuery(new ConstitutionQuery(Era.Conway));
+        Mono<ConstitutionQueryResult> mono = localStateQueryClient.executeQuery(new ConstitutionQuery(Era.Conway));
         mono = mono.log();
 
-        ConstitutionResult result = mono.block(Duration.ofSeconds(5));
+        ConstitutionQueryResult result = mono.block(Duration.ofSeconds(5));
         assertThat(result).isNotNull();
     }
 
@@ -358,29 +351,29 @@ class LocalStateQueryClientIT extends BaseTest {
                         Credential
                                 .builder()
                                 .type(StakeCredType.ADDR_KEYHASH)
-                                .hash("5e80b2b80990a738aece6d6068b2991eaea21c52e79c7974719ac275")
+                                .hash("23bc63ced4e40b22dd4e6051c258ba38d5679d81e33f34fe5e5cdb4d")
                                 .build(),
                         Credential
                                 .builder()
                                 .type(StakeCredType.ADDR_KEYHASH)
-                                .hash("6e066d1a8bce348956b34438556abb43d597d075f9fdab03bb6f4d39")
+                                .hash("fa6a8dc2635dddcf9af495cb144f7eb4ff845866fe48695ad7cb65d3")
                                 .build()
                 ))
         );
         mono = mono.log();
 
         DRepStateQueryResult result = mono.block(Duration.ofSeconds(5));
-        assertThat(result.getDRepStates()).isNotNull();
+        assertThat(result.getDRepStates()).hasSizeGreaterThan(0);
     }
 
     @Test
     void SPOStakeDistrQuery() {
         Mono<SPOStakeDistributionQueryResult> mono = localStateQueryClient.executeQuery(new SPOStakeDistributionQuery(
-                List.of("3c4fb94e1a2c5649a870aee5a70f21cd64807c7dc38632efcaf3d921")
+                List.of("032a04334a846fdf542fd5633c9b3928998691b8276e004facbc8af1")
                 )
         );
 
         SPOStakeDistributionQueryResult result = mono.block();
-        assertThat(result.getSpoStakeMap()).isNotNull();
+        assertThat(result.getSpoStakeMap()).hasSize(1);
     }
 }
