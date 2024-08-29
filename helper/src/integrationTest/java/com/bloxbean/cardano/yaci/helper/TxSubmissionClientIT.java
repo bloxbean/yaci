@@ -140,12 +140,7 @@ class TxSubmissionClientIT extends BaseTest {
         String senderAddr = "addr_test1qp8mg8c5950hhrj3mkfr9ggseae2aj24ya2rndegwzuuyr202959apwtpv7sp0t6vfjnzyr0232uent4urdx7snr23yqa533ha";
         String mnemonic = "wrist approve ethics forest knife treat noise great three simple prize happy toe dynamic number hunt trigger install wrong change decorate vendor glow erosion";
 
-        Era era = null;
-        if (protocolMagic == Constants.SANCHONET_PROTOCOL_MAGIC) {
-            era = Era.Conway;
-        } else {
-            era = Era.Babbage;
-        }
+        Era era = Era.Conway;
 
         Mono<UtxoByAddressQueryResult> mono = localClientProvider.getLocalStateQueryClient()
                 .executeQuery(new UtxoByAddressQuery(era, new Address(senderAddr)));
