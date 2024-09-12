@@ -2,10 +2,7 @@ package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.client.util.JsonUtil;
 import com.bloxbean.cardano.yaci.core.common.Constants;
-import com.bloxbean.cardano.yaci.core.model.Amount;
-import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.model.PlutusScript;
-import com.bloxbean.cardano.yaci.core.model.Redeemer;
+import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -257,6 +254,32 @@ class BlockFetcherIT extends BaseTest {
         blockFetcher.shutdown();
 
         assertThat(sb.toString()).isNotEqualTo("null");
+    }
+
+    @Test
+    public void fetchBlock_datumArrayWith258Tag() throws InterruptedException {
+        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(protocolMagic);
+        BlockFetcher blockFetcher = new BlockFetcher(node, nodePort, versionTable);
+
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+        List<Datum> datums = new ArrayList();
+
+        blockFetcher.start(block -> {
+            var witnessDatums = block.getTransactionWitness().get(1)
+                            .getDatums();
+            datums.addAll(witnessDatums);
+            countDownLatch.countDown();
+        });
+
+        Point from = new Point(70336717, "027f4280f95473dc6dd0e79317ae9b259fcf00befd9a60544264bccc1cf0da4e");
+        Point to = new Point(70336717, "027f4280f95473dc6dd0e79317ae9b259fcf00befd9a60544264bccc1cf0da4e");
+        blockFetcher.fetch(from, to);
+
+        countDownLatch.await(10, TimeUnit.SECONDS);
+        blockFetcher.shutdown();
+
+        assertThat(datums).hasSize(12);
+        assertThat(datums.get(0).getHash()).isEqualTo("0956d8af620f0b1b0b8cc6fb7860f22251a99cfb919e2f17f38d1878e7a992c4");
     }
 
         /** Not able to fetch block 0
