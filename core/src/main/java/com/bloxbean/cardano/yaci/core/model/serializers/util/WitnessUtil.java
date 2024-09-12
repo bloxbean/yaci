@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.model.serializers.util;
 import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.AdditionalInformation;
+import co.nstant.in.cbor.model.MajorType;
 import co.nstant.in.cbor.model.Special;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
@@ -129,10 +130,27 @@ public final class WitnessUtil {
         ByteArrayInputStream stream = new ByteArrayInputStream(bytes);
         final List<byte[]> dataItemBytes = new ArrayList<>();
         CborDecoder decoder = new CborDecoder(stream);
-        final var arraySymbol = stream.read();
+
+        var arraySymbol = stream.read();
+
+        //Check if it's a tag, then read the next byte
+        int tagSkipBytes = 0;
+        var type = MajorType.ofByte(arraySymbol);
+        if (type == MajorType.TAG) {
+            tagSkipBytes = skipBytes(arraySymbol);
+
+            while (tagSkipBytes-- > 0) {
+                stream.read();
+            }
+
+            arraySymbol = stream.read();
+        }
+
+        //final var arraySymbol = stream.read();
         final var dataLength = getLength(arraySymbol,
                 getSymbolBytes(bytes.length - stream.available(), bytes));
-        int skipBytes = skipBytes(arraySymbol);
+        int skipBytes = tagSkipBytes + skipBytes(arraySymbol);
+
 
         if (dataLength != TransactionBodyExtractor.INFINITY) {
             if (dataLength == BigInteger.ONE.intValue()) {
@@ -162,6 +180,11 @@ public final class WitnessUtil {
         }
 
         return dataItemBytes;
+    }
+
+    private static boolean isTag(int code) {
+        // Major types 6 in CBOR is reserved for tags
+        return (code & 0b111_00000) == 0b110_00000;
     }
 
     private static int skipBytes(int initialByte) throws CborException {
