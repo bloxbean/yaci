@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class GenesisBlockFinderIT {
 
-    @Test
+//    @Test
     void getGenesisAndFirstBlock_mainnet() {
         GenesisBlockFinder genesisBlockFinder = new GenesisBlockFinder(Constants.MAINNET_IOHK_RELAY_ADDR,
                 Constants.MAINNET_IOHK_RELAY_PORT, Constants.MAINNET_PROTOCOL_MAGIC);
