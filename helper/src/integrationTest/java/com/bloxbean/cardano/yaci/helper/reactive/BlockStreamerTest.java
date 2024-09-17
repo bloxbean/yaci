@@ -27,10 +27,10 @@ class BlockStreamerTest {
 
     @Test
     void of() throws InterruptedException {
-        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.mainnet().getProtocolMagic());
-        Point wellKnownPoint = new Point(17625824, "765359c702103513dcb8ff4fe86c1a1522c07535733f31ff23231ccd9a3e0247");
+        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(Networks.preprod().getProtocolMagic());
+        Point wellKnownPoint = new Point(46770229, "580c39df75eaf0b69e30dec115ba57e7062a006c4071dc47542ea8f2c8405c53");
 
-        Flux<Block> flux = BlockStreamer.fromLatest(Constants.MAINNET_IOHK_RELAY_ADDR, Constants.MAINNET_IOHK_RELAY_PORT, wellKnownPoint, versionTable).stream();
+        Flux<Block> flux = BlockStreamer.fromLatest(Constants.PREPROD_IOHK_RELAY_ADDR, Constants.PREPROD_IOHK_RELAY_PORT, wellKnownPoint, versionTable).stream();
 
         CountDownLatch countDownLatch = new CountDownLatch(1);
         List<Block> blocks = new ArrayList<>();
@@ -44,14 +44,14 @@ class BlockStreamerTest {
         disposable.dispose();
 
         assertThat(blocks).hasSize(1);
-        assertThat(blocks.get(0).getHeader().getHeaderBody().getBlockNumber()).isGreaterThan(8025579);
+        assertThat(blocks.get(0).getHeader().getHeaderBody().getBlockNumber()).isGreaterThan(2696981);
     }
 
     @Test
-    void streamLatestFromMainnet() throws InterruptedException {
+    void streamLatestFromPreprod() throws InterruptedException {
         CountDownLatch countDownLatch = new CountDownLatch(2);
-        Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.MAINNET,
-                        Constants.WELL_KNOWN_MAINNET_POINT)
+        Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.PREPROD,
+                        Constants.WELL_KNOWN_PREPROD_POINT)
                 .stream()
                 .map(block -> {
                     System.out.println("\n-----------------------------------------------------------");
@@ -103,9 +103,9 @@ class BlockStreamerTest {
 
     @Test
     @Timeout(value = 40000, unit = TimeUnit.MILLISECONDS)
-    void streamFromPointFromMainnet() throws InterruptedException {
+    void streamFromPointFromPreprod() throws InterruptedException {
         CountDownLatch countDownLatch = new CountDownLatch(2);
-        Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.MAINNET, new Point(39916796, "e72579ff89dc9ed325b723a33624b596c08141c7bd573ecfff56a1f7229e4d09"))
+        Flux<Amount> flux = BlockStreamer.fromPoint(NetworkType.PREPROD, new Point(46770233, "2c0dfd9fef43d5dcf80d4614a2bc891f9dd5c04b757ab0221165642b17f13885"))
                 .stream()
                 .map(block -> {
                     System.out.println("\n-----------------------------------------------------------");
@@ -129,12 +129,12 @@ class BlockStreamerTest {
     }
 
     @Test
-    void streamForRangeFromMainnet() throws InterruptedException {
+    void streamForRangeFromPreprod() throws InterruptedException {
         CountDownLatch countDownLatch = new CountDownLatch(2);
-        Point from = new Point(43847831, "15b9eeee849dd6386d3770b0745e0450190f7560e5159b1b3ab13b14b2684a45");
-        Point to = new Point(43847844, "ff8d558a3d5a0e058beb3d94d26a567f75cd7d09ff5485aa0d0ebc38b61378d4");
+        Point from = new Point(53779466, "6fbe92b70705384ad9d79c0fa4d7dcbda4d57b9452402429b7e102d51ba3fdbd");
+        Point to = new Point(53779632, "b42ef491d7e64304310eab9feff12d3ecabe4208df03bb32f56625dff45ae28f");
 
-        Flux<Amount> flux = BlockStreamer.forRange(NetworkType.MAINNET, from, to)
+        Flux<Amount> flux = BlockStreamer.forRange(NetworkType.PREPROD, from, to)
                 .stream()
                 .map(block -> {
                     System.out.println("\n-----------------------------------------------------------");
