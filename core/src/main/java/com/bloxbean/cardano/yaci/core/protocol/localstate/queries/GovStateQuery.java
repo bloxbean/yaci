@@ -497,6 +497,9 @@ public class GovStateQuery implements EraQuery<GovStateQueryResult> {
 
         Array govActionsArray = (Array) govActionsDI;
         for (DataItem item : govActionsArray.getDataItems()) {
+            if (item == SimpleValue.BREAK) {
+                continue;
+            }
             govActionIds.add(deserializeGovActionIdResult(item));
         }
 
