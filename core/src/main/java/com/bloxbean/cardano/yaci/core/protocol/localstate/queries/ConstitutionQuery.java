@@ -1,13 +1,12 @@
 package com.bloxbean.cardano.yaci.core.protocol.localstate.queries;
 
-import co.nstant.in.cbor.model.Array;
-import co.nstant.in.cbor.model.DataItem;
-import co.nstant.in.cbor.model.UnsignedInteger;
+import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.AnchorSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
@@ -37,14 +36,20 @@ public class ConstitutionQuery implements EraQuery<ConstitutionQueryResult> {
 
     @Override
     public ConstitutionQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
-        List<DataItem> dataItemList = ((Array)di[0]).getDataItems();
+        List<DataItem> dataItemList = ((Array) di[0]).getDataItems();
 
-        int type = ((UnsignedInteger)dataItemList.get(0)).getValue().intValue(); //4
+        int type = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue(); //4
 
-        List<DataItem> resultDIList = ((Array)dataItemList.get(1)).getDataItems();
-        var items = (Array)resultDIList.get(0);
+        List<DataItem> resultDIList = ((Array) dataItemList.get(1)).getDataItems();
+        var items = (Array) resultDIList.get(0);
 
         Anchor anchor = AnchorSerializer.INSTANCE.deserializeDI(items.getDataItems().get(0));
-        return new ConstitutionQueryResult(anchor);
+        String script = null;
+
+        if (items.getDataItems().get(1).getMajorType() == MajorType.BYTE_STRING) {
+            script = HexUtil.encodeHexString(((ByteString) items.getDataItems().get(1)).getBytes());
+        }
+
+        return new ConstitutionQueryResult(anchor, script);
     }
 }
