@@ -11,4 +11,5 @@ import lombok.ToString;
 @ToString
 public class ConstitutionQueryResult implements QueryResult {
     private Anchor anchor;
+    private String script;
 }
