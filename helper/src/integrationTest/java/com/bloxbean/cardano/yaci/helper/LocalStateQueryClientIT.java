@@ -4,6 +4,7 @@ import com.bloxbean.cardano.client.address.Address;
 import com.bloxbean.cardano.client.transaction.spec.governance.DRep;
 import com.bloxbean.cardano.yaci.core.model.Credential;
 import com.bloxbean.cardano.yaci.core.model.certs.StakeCredType;
+import com.bloxbean.cardano.yaci.core.model.governance.GovActionId;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.*;
@@ -376,4 +377,26 @@ class LocalStateQueryClientIT extends BaseTest {
         SPOStakeDistributionQueryResult result = mono.block();
         assertThat(result.getSpoStakeMap()).hasSize(1);
     }
+
+    @Test
+    void getProposal() {
+        Mono<GetProposalQueryResult> mono = localStateQueryClient.executeQuery(new GetProposalsQuery(List.of(
+                GovActionId.builder().transactionId("0ecc74fe26532cec1ab9a299f082afc436afc888ca2dc0fc6acda431c52dc60d")
+                        .gov_action_index(0).build()
+        )));
+
+        GetProposalQueryResult result = mono.block();
+
+        assertThat(result.getProposals()).isNotNull();
+    }
+
+    @Test
+    void getRatifyState() {
+        Mono<GetRatifyStateQueryResult> mono = localStateQueryClient.executeQuery(new GetRatifyStateQuery());
+
+        GetRatifyStateQueryResult result = mono.block();
+
+        assertThat(result.getRatifyState()).isNotNull();
+    }
+
 }
