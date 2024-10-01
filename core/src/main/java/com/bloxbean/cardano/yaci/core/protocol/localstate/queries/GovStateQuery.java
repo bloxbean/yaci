@@ -584,6 +584,7 @@ public class GovStateQuery implements EraQuery<GovStateQueryResult> {
         return Proposal.builder()
                 .govActionId(govActionId)
                 .dRepVotes(dRepVotes)
+                .committeeVotes(committeeVotes)
                 .stakePoolVotes(stakePoolVotes)
                 .proposalProcedure(proposalProcedure)
                 .expiredAfter(expiredAfter)
