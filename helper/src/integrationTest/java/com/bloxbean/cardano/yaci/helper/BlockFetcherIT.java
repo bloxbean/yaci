@@ -282,6 +282,42 @@ class BlockFetcherIT extends BaseTest {
         assertThat(datums.get(0).getHash()).isEqualTo("0956d8af620f0b1b0b8cc6fb7860f22251a99cfb919e2f17f38d1878e7a992c4");
     }
 
+    @Test
+    public void fetchBlock_checkConwayRedeemerData() throws InterruptedException {
+        VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(protocolMagic);
+        BlockFetcher blockFetcher = new BlockFetcher(node, nodePort, versionTable);
+
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+
+        List<Redeemer> redeemers = new ArrayList<>();
+        blockFetcher.start(block -> {
+            var redeemerList = block.getTransactionWitness()
+                    .stream()
+                    .flatMap(witness -> witness.getRedeemers().stream())
+                    .collect(Collectors.toList());
+            redeemers.addAll(redeemerList);
+            countDownLatch.countDown();
+        });
+
+        Point from = new Point(72509807, "8ad295a3703e6d301390e645f869e2d944bc8f93760b1d526837ec9aec843175");
+        Point to = new Point(72509807, "8ad295a3703e6d301390e645f869e2d944bc8f93760b1d526837ec9aec843175");
+        blockFetcher.fetch(from, to);
+
+        countDownLatch.await(10, TimeUnit.SECONDS);
+        blockFetcher.shutdown();
+
+        assertThat(redeemers).hasSize(2);
+        assertThat(redeemers.get(0).getTag()).isEqualTo(RedeemerTag.Spend);
+        assertThat(redeemers.get(0).getData().getCbor()).isEqualTo("d87980");
+        assertThat(redeemers.get(0).getExUnits().getMem()).isEqualTo(1173861);
+        assertThat(redeemers.get(0).getExUnits().getSteps()).isEqualTo(265506430);
+
+        assertThat(redeemers.get(1).getTag()).isEqualTo(RedeemerTag.Spend);
+        assertThat(redeemers.get(1).getData().getCbor()).isEqualTo("d8799f4d48656c6c6f2c20576f726c6421d8799fd8799f581cfaef5b76acec064fa5f4855885158fb89f89490f4289d17558d3f188ffd87a80ffff");
+        assertThat(redeemers.get(1).getExUnits().getMem()).isEqualTo(44519);
+        assertThat(redeemers.get(1).getExUnits().getSteps()).isEqualTo(13997977);
+    }
+
         /** Not able to fetch block 0
          @Test
          public void fetchGenesisBlockByron() throws InterruptedException {
