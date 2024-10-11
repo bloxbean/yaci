@@ -230,7 +230,7 @@ public enum BlockSerializer implements Serializer<Block> {
                                     continue;
                                 }
 
-                                var actualRedeemerData = redeemerFields.get(1);
+                                var actualRedeemerData = redeemerFields.get(0);
                                 var redeemerData = redeemer.getData();
                                 final var cbor = HexUtil.encodeHexString(actualRedeemerData);
                                 final var hash = Datum.cborToHash(actualRedeemerData);
