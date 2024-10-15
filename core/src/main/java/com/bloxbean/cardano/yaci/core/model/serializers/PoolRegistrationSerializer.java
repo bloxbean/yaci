@@ -91,7 +91,7 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
         return new PoolRegistration(poolParams);
     }
 
-    private Relay deserializeRelay(DataItem relayDI) {
+    public static Relay deserializeRelay(DataItem relayDI) {
         List<DataItem> relayItems = ((Array) relayDI).getDataItems();
         int type = toInt(relayItems.get(0));
 

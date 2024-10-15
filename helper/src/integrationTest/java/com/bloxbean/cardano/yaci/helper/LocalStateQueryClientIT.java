@@ -217,11 +217,21 @@ class LocalStateQueryClientIT extends BaseTest {
 
     @Test
     void stakePoolParamQuery() {
-        Mono<StakePoolParamQueryResult> mono = localStateQueryClient.executeQuery(new StakePoolParamsQuery(List.of("032a04334a846fdf542fd5633c9b3928998691b8276e004facbc8af1",
-                "0a4ed3c5cc11a044cff16f7045588c9b6f6c98f7154026a3a3f55f24")));
+        String poolId1 = "27aa9ad499cb47f856727913abd02dfd08bbb69dbefd1b4c098c6e96";
+        //String poolId2 = "1c07dbd3648fe70545170b6f6d390136c1cc66ec83326f5d94a0fd3e";
+        Mono<StakePoolParamQueryResult> mono = localStateQueryClient.executeQuery(new StakePoolParamsQuery(List.of(poolId1)));
 
         StakePoolParamQueryResult result = mono.block(Duration.ofSeconds(5));
         System.out.println(result);
+        assertThat(result.getPoolParams().get(poolId1)).isNotNull();
+        assertThat(result.getPoolParams().get(poolId1).getOperator()).isEqualTo(poolId1);
+        assertThat(result.getPoolParams().get(poolId1).getVrfKeyHash()).isEqualTo("5f97dc97196c55b7eca60909b68de9db9bedee4f04a000b27c2df4b95911c5af");
+        assertThat(result.getPoolParams().get(poolId1).getCost()).isNotNull();
+
+//        assertThat(result.getPoolParams().get(poolId2)).isNotNull();
+//        assertThat(result.getPoolParams().get(poolId2).getOperator()).isEqualTo(poolId2);
+//        assertThat(result.getPoolParams().get(poolId2).getVrfKeyHash()).isEqualTo("322828d4f7cfe86db0f8c3fb385e317b5415a8287963aa58c967eb3643c5ee25");
+//        assertThat(result.getPoolParams().get(poolId2).getCost()).isNotNull();
     }
 
     @Test
