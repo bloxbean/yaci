@@ -9,6 +9,9 @@ plugins {
 repositories {
     mavenCentral()
     mavenLocal()
+    maven {
+        url "https://oss.sonatype.org/content/repositories/snapshots"
+    }
 }
 
 compileJava {
@@ -105,6 +108,9 @@ subprojects {
     repositories {
         mavenLocal()
         mavenCentral()
+        maven {
+            url "https://oss.sonatype.org/content/repositories/snapshots"
+        }
     }
 
     //Jars are with yaci prefix
