@@ -17,6 +17,12 @@ public abstract class Agent<T extends AgentListener> {
     private final List<T> agentListeners = new ArrayList<>();
     private AcceptVersion acceptVersion;
 
+    private final boolean isClient;
+
+    public Agent(boolean isClient) {
+        this.isClient = isClient;
+    }
+
     public void setChannel(Channel channel) {
         if (this.channel != null && this.channel.isActive())
             log.warn("An active channel is already attached to this agent");
@@ -25,7 +31,7 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     public void sendRequest(Message message) {
-        if (currenState.hasAgency()) {
+        if (currenState.hasAgency(isClient)) {
             currenState = currenState.nextState(message);
         } else {
             //TODO
@@ -69,7 +75,7 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     public final boolean hasAgency() {
-        return currenState.hasAgency();
+        return currenState.hasAgency(isClient);
     }
 
     public final synchronized void addListener(T agentListener) {

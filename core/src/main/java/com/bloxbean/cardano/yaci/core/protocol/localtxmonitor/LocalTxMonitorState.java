@@ -19,8 +19,8 @@ public enum LocalTxMonitorState implements LocalTxMonitorStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return true;
+        public boolean hasAgency(boolean isClient) {
+            return isClient;
         }
 
         List<Class> allowedMsgTypes = List.of(MsgAwaitAcquire.class, MsgAcquire.class, MsgDone.class);
@@ -40,8 +40,8 @@ public enum LocalTxMonitorState implements LocalTxMonitorStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return false;
+        public boolean hasAgency(boolean isClient) {
+            return !isClient;
         }
 
         List<Class> allowedMsgTypes = List.of(MsgAcquired.class);
@@ -65,8 +65,8 @@ public enum LocalTxMonitorState implements LocalTxMonitorStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return true;
+        public boolean hasAgency(boolean isClient) {
+            return isClient;
         }
 
         List<Class> allowedMsgTypes = List.of(MsgAwaitAcquire.class, MsgRelease.class, MsgHasTx.class, MsgNextTx.class, MsgGetSizes.class);
@@ -86,8 +86,8 @@ public enum LocalTxMonitorState implements LocalTxMonitorStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return false;
+        public boolean hasAgency(boolean isClient) {
+            return !isClient;
         }
 
         List<Class> allowedMsgTypes = List.of(MsgReplyHasTx.class, MsgReplyNextTx.class, MsgReplyGetSizes.class);
@@ -104,7 +104,7 @@ public enum LocalTxMonitorState implements LocalTxMonitorStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
+        public boolean hasAgency(boolean isClient) {
             return false;
         }
     }
