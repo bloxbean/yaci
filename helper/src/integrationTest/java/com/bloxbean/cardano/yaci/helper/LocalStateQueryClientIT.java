@@ -409,4 +409,12 @@ class LocalStateQueryClientIT extends BaseTest {
         assertThat(result.getRatifyState()).isNotNull();
     }
 
+    @Test
+    void getFuturePParams() {
+        Mono<GetFuturePParamsQueryResult> mono = localStateQueryClient.executeQuery(new GetFuturePParamsQuery());
+
+        GetFuturePParamsQueryResult result = mono.block();
+
+        assertThat(result).isNotNull();
+    }
 }
