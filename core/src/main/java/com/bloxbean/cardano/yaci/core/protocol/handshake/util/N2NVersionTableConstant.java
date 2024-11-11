@@ -18,6 +18,7 @@ public class N2NVersionTableConstant {
     public final static long PROTOCOL_V11 = 11;
     public final static long PROTOCOL_V12 = 12;
     public final static long PROTOCOL_V13 = 13;
+    public final static long PROTOCOL_V14 = 14;
 
     public static VersionTable v4AndAbove(long networkMagic) {
         N2NVersionData versionData = new N2NVersionData(networkMagic, true);
@@ -33,6 +34,7 @@ public class N2NVersionTableConstant {
         versionTableMap.put(PROTOCOL_V11, versionData);
         versionTableMap.put(PROTOCOL_V12, versionData);
         versionTableMap.put(PROTOCOL_V13, versionData);
+        versionTableMap.put(PROTOCOL_V14, versionData);
 
         return new VersionTable(versionTableMap);
     }
@@ -48,6 +50,7 @@ public class N2NVersionTableConstant {
         versionTableMap.put(PROTOCOL_V11, versionData);
         versionTableMap.put(PROTOCOL_V12, versionData);
         versionTableMap.put(PROTOCOL_V13, versionData);
+        versionTableMap.put(PROTOCOL_V14, versionData);
 
         return new VersionTable(versionTableMap);
     }
