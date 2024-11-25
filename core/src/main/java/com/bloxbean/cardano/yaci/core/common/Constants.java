@@ -10,22 +10,33 @@ public class Constants {
     public final static Point WELL_KNOWN_SANCHONET_POINT = new Point(20, "6a7d97aae2a65ca790fd14802808b7fce00a3362bd7b21c4ed4ccb4296783b98");
 
     public final static long MAINNET_PROTOCOL_MAGIC = NetworkType.MAINNET.getProtocolMagic();
-    public final static long LEGACY_TESTNET_PROTOCOL_MAGIC = NetworkType.LEGACY_TESTNET.getProtocolMagic();
     public final static long PREPROD_PROTOCOL_MAGIC = NetworkType.PREPROD.getProtocolMagic();
     public final static long PREVIEW_PROTOCOL_MAGIC = NetworkType.PREVIEW.getProtocolMagic();
     public final static long SANCHONET_PROTOCOL_MAGIC = NetworkType.SANCHONET.getProtocolMagic();
 
-    public final static String TESTNET_IOHK_RELAY_ADDR = "relays-new.cardano-testnet.iohkdev.io";
-    public final static int TESTNET_IOHK_RELAY_PORT = 3001;
-
-    public final static String MAINNET_IOHK_RELAY_ADDR = "relays-new.cardano-mainnet.iohk.io";
+    @Deprecated(since = "0.3.4")
+    public final static String MAINNET_IOHK_RELAY_ADDR = "backbone.cardano.iog.io";
+    @Deprecated(since = "0.3.4")
     public final static int MAINNET_IOHK_RELAY_PORT = 3001;
 
-    public final static String PREPROD_IOHK_RELAY_ADDR = "preprod-node.world.dev.cardano.org";
-    public final static int PREPROD_IOHK_RELAY_PORT = 30000;
+    @Deprecated(since = "0.3.4")
+    public final static String PREPROD_IOHK_RELAY_ADDR = "preprod-node.play.dev.cardano.org";
+    @Deprecated(since = "0.3.4")
+    public final static int PREPROD_IOHK_RELAY_PORT = 3001;
 
+    @Deprecated(since = "0.3.4")
     public final static String PREVIEW_IOHK_RELAY_ADDR = "preview-node.world.dev.cardano.org";
-    public final static int PREVIEW_IOHK_RELAY_PORT = 30002;
+    @Deprecated(since = "0.3.4")
+    public final static int PREVIEW_IOHK_RELAY_PORT = 3001;
+
+    public final static String MAINNET_PUBLIC_RELAY_ADDR = "backbone.cardano.iog.io";
+    public final static int MAINNET_PUBLIC_RELAY_PORT = 3001;
+
+    public final static String PREPROD_PUBLIC_RELAY_ADDR = "preprod-node.play.dev.cardano.org";
+    public final static int PREPROD_PUBLIC_RELAY_PORT = 3001;
+
+    public final static String PREVIEW_PUBLIC_RELAY_ADDR = "preview-node.play.dev.cardano.org";
+    public final static int PREVIEW_PUBLIC_RELAY_PORT = 3001;
 
     public final static String SANCHONET_PUBLIC_RELAY_ADDR = "sanchonet-node.play.dev.cardano.org";
     public final static int SANCHONET_PUBLIC_RELAY_PORT = 3001;
