@@ -51,8 +51,6 @@ public class BlockStreamer {
         switch (networkType) {
             case MAINNET:
                 return fromLatest(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT, WELL_KNOWN_MAINNET_POINT, networkType.getN2NVersionTable());
-            case LEGACY_TESTNET:
-                return fromLatest(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, WELL_KNOWN_TESTNET_POINT, networkType.getN2NVersionTable());
             case PREPROD:
                 return fromLatest(PREPROD_IOHK_RELAY_ADDR, PREPROD_IOHK_RELAY_PORT, WELL_KNOWN_PREPROD_POINT, networkType.getN2NVersionTable());
             case PREVIEW:
@@ -73,8 +71,6 @@ public class BlockStreamer {
         switch (networkType) {
             case MAINNET:
                 return fromPoint(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
-            case LEGACY_TESTNET:
-                return fromPoint(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
             case PREPROD:
                 return fromPoint(PREPROD_IOHK_RELAY_ADDR, PREPROD_IOHK_RELAY_PORT, point, networkType.getN2NVersionTable());
             case PREVIEW:
@@ -242,8 +238,6 @@ public class BlockStreamer {
         switch (networkType) {
             case MAINNET:
                 return forRange(MAINNET_IOHK_RELAY_ADDR, MAINNET_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
-            case LEGACY_TESTNET:
-                return forRange(TESTNET_IOHK_RELAY_ADDR, TESTNET_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
             case PREPROD:
                 return forRange(PREPROD_IOHK_RELAY_ADDR, PREPROD_IOHK_RELAY_PORT, fromPoint, toPoint, networkType.getN2NVersionTable());
             case PREVIEW:
