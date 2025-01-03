@@ -214,7 +214,13 @@ public enum BlockSerializer implements Serializer<Block> {
                             }
                         }
                     } else if (majorType == MajorType.MAP) {
-                        List<Tuple<byte[], byte[]>> redeemerMapEntriesBytes = getRedeemerMapBytes(redeemersBytes);
+                         List<Tuple<byte[], byte[]>> redeemerMapEntriesBytes = null;
+                         try {
+                            redeemerMapEntriesBytes = getRedeemerMapBytes(redeemersBytes);
+                        } catch (Exception e) {
+                            log.error("Error parsing redeemer map bytes", e);
+                            redeemerMapEntriesBytes = new ArrayList<>();
+                        }
                         if (redeemerMapEntriesBytes.size() != redeemers.size()) {
                             log.error("block: {} redeemer does not have the same size", block);
                         } else {
