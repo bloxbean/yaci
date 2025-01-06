@@ -16,7 +16,7 @@ previous blocks, query information from a local node, monitor the local mempool,
 - [0.2.5](https://github.com/bloxbean/yaci/releases/tag/v0.2.5) (Compatible with Cardano Client Lib 0.5.0)
 
 **Latest Release :**
-- [0.3.3](https://github.com/bloxbean/yaci/releases/tag/v0.3.3) (Supports Conway era) 
+- [0.3.4.1](https://github.com/bloxbean/yaci/releases/tag/v0.3.4.1) (Supports Conway era) 
 
   **Development Branch:** main
 
