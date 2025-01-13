@@ -80,7 +80,13 @@ public enum BlockSerializer implements Serializer<Block> {
 
         //To fix #37 incorrect redeemer & datum hash due to cbor serialization <--> deserialization issue
         //Get redeemer and datum bytes directly without full deserialization
-        handleWitnessDatumRedeemer(blockHeader.getHeaderBody().getBlockNumber(), witnessesSet, blockBody);
+        try {
+            handleWitnessDatumRedeemer(blockHeader.getHeaderBody().getBlockNumber(), witnessesSet, blockBody);
+        } catch (Exception e) {
+            //If extraction fails due to some reason
+            log.error("Extraction of redeemer and datum bytes without serialization/deserialization failed for block : " + blockHeader.getHeaderBody().getBlockNumber());
+        }
+
         blockBuilder.transactionWitness(witnessesSet);
 
         //auxiliary data
@@ -175,7 +181,14 @@ public enum BlockSerializer implements Serializer<Block> {
                     var majorType = MajorType.ofByte(redeemersBytes[0] & 0xe0);
 
                      if (majorType == MajorType.ARRAY) {
-                        var redeemerArrayBytes = getArrayBytes(redeemersBytes);
+                        List<byte[]> redeemerArrayBytes = null;
+                        try {
+                            redeemerArrayBytes = getArrayBytes(redeemersBytes);
+                        } catch (Exception e) {
+                            log.error("Error parsing redeemer array bytes", e);
+                            redeemerArrayBytes = new ArrayList<>();
+                        }
+
                         if (redeemerArrayBytes.size() != redeemers.size()) {
                             log.error("block: {} redeemer does not have the same size", block);
                         } else {

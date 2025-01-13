@@ -97,7 +97,14 @@ public final class WitnessUtil {
         ByteArrayInputStream stream = new ByteArrayInputStream(redeemerBytes);
         CborDecoder decoder = new CborDecoder(stream);
 
+        //Skip the first byte which represents major type
         stream.read();
+
+        //Check the type of second byte. If uint, then skip
+        //The map content should start with an array tag
+        var secondByte = MajorType.ofByte(redeemerBytes[1]);
+        if (secondByte == MajorType.UNSIGNED_INTEGER)
+            stream.read();
 
         while (stream.available() > 0) {
             int keyStartFrom = redeemerBytes.length - stream.available();
