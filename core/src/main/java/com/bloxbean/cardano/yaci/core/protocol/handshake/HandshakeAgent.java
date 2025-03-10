@@ -16,6 +16,10 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     private boolean suppressConnectionInfoLog = false;
 
     public HandshakeAgent(VersionTable versionTable) {
+        this(versionTable,true);
+    }
+    public HandshakeAgent(VersionTable versionTable, boolean isClient) {
+        super(isClient);
         this.versionTable = versionTable;
         this.currenState = Propose;
     }

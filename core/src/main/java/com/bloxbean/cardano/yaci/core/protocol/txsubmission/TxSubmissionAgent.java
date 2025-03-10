@@ -24,6 +24,10 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     private final ConcurrentLinkedQueue<String> requestedTxIds;
 
     public TxSubmissionAgent() {
+        this(true);
+    }
+    public TxSubmissionAgent(boolean isClient) {
+        super(isClient);
         this.currenState = TxSubmissionState.Init;
         this.txs = new ConcurrentLinkedQueue<>();
         this.pendingTxIds = new ConcurrentLinkedQueue<>();
