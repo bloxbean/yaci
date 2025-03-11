@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 
+import java.math.BigInteger;
 import java.util.*;
 import java.util.Map;
 
@@ -28,6 +29,20 @@ public class HandshakeSerializers {
             if (log.isDebugEnabled())
                 log.debug(HexUtil.encodeHexString(CborSerializationUtil.serialize(array)));
             return CborSerializationUtil.serialize(array);
+        }
+
+        @Override
+        public ProposedVersions deserializeDI(DataItem di) {
+            Array array = (Array) di;
+            var dataItems = array.getDataItems();
+            var label = ((UnsignedInteger)dataItems.get(0)).getValue();
+            if (label != BigInteger.ZERO)
+                throw new RuntimeException("Expected label : " + 0 + ", found : " + label); //TODO should we throw here or return null
+
+            var versionTableDI = dataItems.get(1);
+            var versionTable = VersionTableSerializer.INSTANCE.deserializeDI(versionTableDI);
+
+            return new ProposedVersions(versionTable);
         }
     }
 
@@ -141,6 +156,33 @@ public class HandshakeSerializers {
             } else
                 throw new CborRuntimeException("Parsing error. Invalid dataitem type : " + versionDataDI);
         }
+
+        @Override
+        public DataItem serializeDI(AcceptVersion acceptVersion) {
+            Array array = new Array();
+
+            //label
+            array.add(new UnsignedInteger(1));
+
+            //version number
+            array.add(new UnsignedInteger(acceptVersion.getVersionNumber()));
+
+            Array versionData = new Array();
+            versionData.add(new UnsignedInteger(acceptVersion.getVersionData().getNetworkMagic()));
+
+            //N2N version data
+            if (acceptVersion.getVersionData() instanceof N2NVersionData) {
+                var n2nVersionData = (N2NVersionData) acceptVersion.getVersionData();
+                versionData.add(n2nVersionData.getInitiatorOnlyDiffusionMode()? SimpleValue.TRUE: SimpleValue.FALSE);
+                versionData.add(new UnsignedInteger(n2nVersionData.getPeerSharing()));
+                versionData.add(n2nVersionData.getQuery() ? SimpleValue.TRUE: SimpleValue.FALSE);
+            }
+            //TODO N2C
+
+            array.add(versionData);
+
+            return array;
+        }
     }
 
     public enum ReasonVersionMismatchSerializer implements Serializer<ReasonVersionMismatch> {
@@ -165,7 +207,24 @@ public class HandshakeSerializers {
             return new ReasonVersionMismatch(versionNumbers);
         }
 
-        //TODO -- deserialize not used
+        @Override
+        public DataItem serializeDI(ReasonVersionMismatch reasonVersionMismatch) {
+            Array array = new Array();
+            array.add(new UnsignedInteger(0));
+
+            if (reasonVersionMismatch.getVersionNumbers() == null) {
+                array.add(new Array());
+            } else {
+                Array versionArr = new Array();
+                for (Long version: reasonVersionMismatch.getVersionNumbers()) {
+                    versionArr.add(new UnsignedInteger(version));
+                }
+
+                array.add(versionArr);
+            }
+
+            return array;
+        }
     }
 
     public enum ReasonHandshakeDecodeErrorSerializer implements Serializer<ReasonHandshakeDecodeError> {
@@ -186,7 +245,16 @@ public class HandshakeSerializers {
             return new ReasonHandshakeDecodeError(versionNumber, str);
         }
 
-        //TODO -- deserialize not used
+        @Override
+        public DataItem serializeDI(ReasonHandshakeDecodeError reasonHandshakeDecodeError) {
+            Array array = new Array();
+            array.add(new UnsignedInteger(1));
+
+            array.add(new UnsignedInteger(reasonHandshakeDecodeError.getVersionNumber()));
+            array.add(new UnicodeString(reasonHandshakeDecodeError.getStr()));
+
+            return array;
+        }
     }
 
     public enum ReasonRefusedSerializer implements Serializer<ReasonRefused> {
@@ -207,7 +275,16 @@ public class HandshakeSerializers {
             return new ReasonRefused(versionNumber, str);
         }
 
-        //TODO -- deserialize not used
+        @Override
+        public DataItem serializeDI(ReasonRefused reasonRefused) {
+            Array array = new Array();
+            array.add(new UnsignedInteger(2));
+
+            array.add(new UnsignedInteger(reasonRefused.getVersionNumber()));
+            array.add(new UnicodeString(reasonRefused.getStr()));
+
+            return array;
+        }
     }
 
     public enum QueryReplySerializer implements Serializer<VersionTable> {
