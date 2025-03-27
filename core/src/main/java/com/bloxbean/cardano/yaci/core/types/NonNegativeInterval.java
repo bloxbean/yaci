@@ -15,9 +15,9 @@ public class NonNegativeInterval extends UnitInterval {
 
     public NonNegativeInterval(BigInteger numerator, BigInteger denominator) {
         super(numerator, denominator);
-        if(denominator.compareTo(BigInteger.ZERO) < 0) {
+        if(numerator.compareTo(BigInteger.ZERO) < 0 || denominator.compareTo(BigInteger.ZERO) < 0) {
             //Just a warning, don't throw exception
-            log.warn("Denominator should be non-negative. Numerator: {}, Denominator: {}", numerator, denominator);
+            log.warn("Numerator or Denominator should be non-negative. Numerator: {}, Denominator: {}", numerator, denominator);
         }
     }
 }
