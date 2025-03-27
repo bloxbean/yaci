@@ -17,13 +17,14 @@ import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.EnactSta
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.Proposal;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.ProposalType;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.RatifyState;
+import com.bloxbean.cardano.yaci.core.types.NonNegativeInterval;
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.ToString;
 
-import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,7 +32,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toRationalNumber;
 
 @Getter
 @AllArgsConstructor
@@ -246,7 +246,7 @@ public class GetRatifyStateQuery implements EraQuery<GetRatifyStateQueryResult> 
         }
 
         var committeeThresholdDI = (RationalNumber) committeeDIList.get(1);
-        BigDecimal committeeThreshold = toRationalNumber(committeeThresholdDI);
+        UnitInterval committeeThreshold = toUnitInterval(committeeThresholdDI);
 
         return Committee.builder()
                 .committeeColdCredentialEpoch(committeeColdCredentialEpoch)
@@ -292,13 +292,13 @@ public class GetRatifyStateQuery implements EraQuery<GetRatifyStateQueryResult> 
         Integer nOpt = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = paramsDIList.get(9);
-        BigDecimal poolPledgeInfluence = itemDI != null ? toRationalNumber(itemDI) : null;
+        NonNegativeInterval poolPledgeInfluence = itemDI != null ? toNonNegativeInterval(itemDI) : null;
 
         itemDI = paramsDIList.get(10);
-        BigDecimal expansionRate = itemDI != null ? toRationalNumber(itemDI) : null;
+        UnitInterval expansionRate = itemDI != null ? toUnitInterval(itemDI) : null;
 
         itemDI = paramsDIList.get(11);
-        BigDecimal treasuryGrowthRate = itemDI != null ? toRationalNumber(itemDI) : null;
+        UnitInterval treasuryGrowthRate = itemDI != null ? toUnitInterval(itemDI) : null;
 
         Integer protocolMajorVersion = null;
         Integer protocolMinorVersion = null;
@@ -329,12 +329,12 @@ public class GetRatifyStateQuery implements EraQuery<GetRatifyStateQueryResult> 
         }
 
         //exUnits prices
-        BigDecimal priceMem = null;
-        BigDecimal priceSteps = null;
+        NonNegativeInterval priceMem = null;
+        NonNegativeInterval priceSteps = null;
         itemDI = paramsDIList.get(16);
         if (itemDI != null) {
             List<DataItem> exUnitPriceList = ((Array) itemDI).getDataItems();
-            Tuple<BigDecimal, BigDecimal> tuple = getExUnitPrices(exUnitPriceList);
+            Tuple<NonNegativeInterval, NonNegativeInterval> tuple = getExUnitPrices(exUnitPriceList);
             priceMem = tuple._1;
             priceSteps = tuple._2;
         }
@@ -373,11 +373,11 @@ public class GetRatifyStateQuery implements EraQuery<GetRatifyStateQueryResult> 
 
         //Pool Voting Threshold
         itemDI = paramsDIList.get(22);
-        BigDecimal motionNoConfidence = null;
-        BigDecimal committeeNormal = null;
-        BigDecimal committeeNoConfidence = null;
-        BigDecimal hardForkInitiation = null;
-        BigDecimal ppSecurityGroup = null;
+        UnitInterval motionNoConfidence = null;
+        UnitInterval committeeNormal = null;
+        UnitInterval committeeNoConfidence = null;
+        UnitInterval hardForkInitiation = null;
+        UnitInterval ppSecurityGroup = null;
         if (itemDI != null) {
             List<DataItem> poolVotingThresholdList = ((Array) itemDI).getDataItems();
             if (poolVotingThresholdList.size() != 5)
@@ -389,25 +389,25 @@ public class GetRatifyStateQuery implements EraQuery<GetRatifyStateQueryResult> 
             var pvtHardForkInitiationDI = (RationalNumber) poolVotingThresholdList.get(3);
             var pvtPPSecurityGroupDI = (RationalNumber) poolVotingThresholdList.get(4);
 
-            motionNoConfidence = toRationalNumber(pvtMotionNoConfidenceDI);
-            committeeNormal = toRationalNumber(pvtCommitteeNormalDI);
-            committeeNoConfidence = toRationalNumber(pvtCommitteeNoConfidenceDI);
-            hardForkInitiation = toRationalNumber(pvtHardForkInitiationDI);
-            ppSecurityGroup = toRationalNumber(pvtPPSecurityGroupDI);
+            motionNoConfidence = toUnitInterval(pvtMotionNoConfidenceDI);
+            committeeNormal = toUnitInterval(pvtCommitteeNormalDI);
+            committeeNoConfidence = toUnitInterval(pvtCommitteeNoConfidenceDI);
+            hardForkInitiation = toUnitInterval(pvtHardForkInitiationDI);
+            ppSecurityGroup = toUnitInterval(pvtPPSecurityGroupDI);
         }
 
         //DRep voting thresholds
         itemDI = paramsDIList.get(23);
-        BigDecimal dvtMotionNoConfidence = null;
-        BigDecimal dvtCommitteeNormal = null;
-        BigDecimal dvtCommitteeNoConfidence = null;
-        BigDecimal dvtUpdateToConstitution = null;
-        BigDecimal dvtHardForkInitiation = null;
-        BigDecimal dvtPPNetworkGroup = null;
-        BigDecimal dvtPPEconomicGroup = null;
-        BigDecimal dvtPPTechnicalGroup = null;
-        BigDecimal dvtPPGovGroup = null;
-        BigDecimal dvtTreasuryWithdrawal = null;
+        UnitInterval dvtMotionNoConfidence = null;
+        UnitInterval dvtCommitteeNormal = null;
+        UnitInterval dvtCommitteeNoConfidence = null;
+        UnitInterval dvtUpdateToConstitution = null;
+        UnitInterval dvtHardForkInitiation = null;
+        UnitInterval dvtPPNetworkGroup = null;
+        UnitInterval dvtPPEconomicGroup = null;
+        UnitInterval dvtPPTechnicalGroup = null;
+        UnitInterval dvtPPGovGroup = null;
+        UnitInterval dvtTreasuryWithdrawal = null;
 
         if (itemDI != null) {
             List<DataItem> dRepVotingThresholdList = ((Array) itemDI).getDataItems();
@@ -425,16 +425,16 @@ public class GetRatifyStateQuery implements EraQuery<GetRatifyStateQueryResult> 
             var dvtPPGovGroupDI = (RationalNumber) dRepVotingThresholdList.get(8);
             var dvtTreasuryWithdrawalDI = (RationalNumber) dRepVotingThresholdList.get(9);
 
-            dvtMotionNoConfidence = toRationalNumber(dvtMotionNoConfidenceDI);
-            dvtCommitteeNormal = toRationalNumber(dvtCommitteeNormalDI);
-            dvtCommitteeNoConfidence = toRationalNumber(dvtCommitteeNoConfidenceDI);
-            dvtUpdateToConstitution = toRationalNumber(dvtUpdateToConstitutionDI);
-            dvtHardForkInitiation = toRationalNumber(dvtHardForkInitiationDI);
-            dvtPPNetworkGroup = toRationalNumber(dvtPPNetworkGroupDI);
-            dvtPPEconomicGroup = toRationalNumber(dvtPPEconomicGroupDI);
-            dvtPPTechnicalGroup = toRationalNumber(dvtPPTechnicalGroupDI);
-            dvtPPGovGroup = toRationalNumber(dvtPPGovGroupDI);
-            dvtTreasuryWithdrawal = toRationalNumber(dvtTreasuryWithdrawalDI);
+            dvtMotionNoConfidence = toUnitInterval(dvtMotionNoConfidenceDI);
+            dvtCommitteeNormal = toUnitInterval(dvtCommitteeNormalDI);
+            dvtCommitteeNoConfidence = toUnitInterval(dvtCommitteeNoConfidenceDI);
+            dvtUpdateToConstitution = toUnitInterval(dvtUpdateToConstitutionDI);
+            dvtHardForkInitiation = toUnitInterval(dvtHardForkInitiationDI);
+            dvtPPNetworkGroup = toUnitInterval(dvtPPNetworkGroupDI);
+            dvtPPEconomicGroup = toUnitInterval(dvtPPEconomicGroupDI);
+            dvtPPTechnicalGroup = toUnitInterval(dvtPPTechnicalGroupDI);
+            dvtPPGovGroup = toUnitInterval(dvtPPGovGroupDI);
+            dvtTreasuryWithdrawal = toUnitInterval(dvtTreasuryWithdrawalDI);
         }
 
         itemDI = paramsDIList.get(24);
@@ -455,10 +455,10 @@ public class GetRatifyStateQuery implements EraQuery<GetRatifyStateQueryResult> 
         itemDI = paramsDIList.get(29);
         Integer drepInactivityPeriod = itemDI != null ? toInt(itemDI) : null;
 
-        BigDecimal minFeeRefScriptCostPerByte = null; //TODO -- Remove if condition once this is available in the node release
+        NonNegativeInterval minFeeRefScriptCostPerByte = null; //TODO -- Remove if condition once this is available in the node release
         if (paramsDIList.size() > 30) {
             itemDI = paramsDIList.get(30);
-            minFeeRefScriptCostPerByte = itemDI != null ? toRationalNumber(itemDI) : null;
+            minFeeRefScriptCostPerByte = itemDI != null ? toNonNegativeInterval(itemDI) : null;
         }
 
         return ProtocolParamUpdate.builder()
@@ -527,12 +527,12 @@ public class GetRatifyStateQuery implements EraQuery<GetRatifyStateQueryResult> 
         return new Tuple<>(mem, steps);
     }
 
-    private Tuple<BigDecimal, BigDecimal> getExUnitPrices(List<DataItem> exunits) {
+    private Tuple<NonNegativeInterval, NonNegativeInterval> getExUnitPrices(List<DataItem> exunits) {
         RationalNumber memPriceRN = (RationalNumber) exunits.get(0);
         RationalNumber stepPriceRN = (RationalNumber) exunits.get(1);
 
-        BigDecimal memPrice = toRationalNumber(memPriceRN);
-        BigDecimal stepPrice = toRationalNumber(stepPriceRN);
+        NonNegativeInterval memPrice = toNonNegativeInterval(memPriceRN);
+        NonNegativeInterval stepPrice = toNonNegativeInterval(stepPriceRN);
 
         return new Tuple<>(memPrice, stepPrice);
     }

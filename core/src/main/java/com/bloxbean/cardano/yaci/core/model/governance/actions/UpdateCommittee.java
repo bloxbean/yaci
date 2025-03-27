@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.model.governance.actions;
 import com.bloxbean.cardano.yaci.core.model.Credential;
 import com.bloxbean.cardano.yaci.core.model.governance.GovActionId;
 import com.bloxbean.cardano.yaci.core.model.governance.GovActionType;
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -31,6 +32,6 @@ public class UpdateCommittee implements GovAction {
 
     @Builder.Default
     private Map<Credential, Integer> newMembersAndTerms = new LinkedHashMap<>();
-    private BigDecimal quorumThreshold; //TODO?? Check the correct name.
+    private UnitInterval quorumThreshold; //TODO?? Check the correct name.
 
 }
