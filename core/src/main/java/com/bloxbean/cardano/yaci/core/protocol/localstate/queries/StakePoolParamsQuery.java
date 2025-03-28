@@ -7,6 +7,7 @@ import com.bloxbean.cardano.yaci.core.model.Relay;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -58,7 +59,7 @@ public class StakePoolParamsQuery implements EraQuery<StakePoolParamQueryResult>
             String vrfKeyHash = toHex(poolParamDIList.get(1));
             BigInteger pledge = toBigInteger(poolParamDIList.get(2));
             BigInteger cost = toBigInteger(poolParamDIList.get(3));
-            String margin = ((RationalNumber) poolParamDIList.get(4)).getNumerator() + "/" + ((RationalNumber) poolParamDIList.get(4)).getDenominator();
+            UnitInterval margin = toUnitInterval(poolParamDIList.get(4));
             String rewardAccount = toHex(poolParamDIList.get(5));
 
             //Pool Owners0

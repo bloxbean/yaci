@@ -1,8 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model;
 
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import lombok.*;
-
-import java.math.BigDecimal;
 
 /**
  * drep_voting_thresholds =
@@ -24,14 +23,14 @@ import java.math.BigDecimal;
 @Builder
 @ToString
 public class DrepVoteThresholds {
-    private BigDecimal dvtMotionNoConfidence;
-    private BigDecimal dvtCommitteeNormal;
-    private BigDecimal dvtCommitteeNoConfidence;
-    private BigDecimal dvtUpdateToConstitution;
-    private BigDecimal dvtHardForkInitiation;
-    private BigDecimal dvtPPNetworkGroup;
-    private BigDecimal dvtPPEconomicGroup;
-    private BigDecimal dvtPPTechnicalGroup;
-    private BigDecimal dvtPPGovGroup;
-    private BigDecimal dvtTreasuryWithdrawal;
+    private UnitInterval dvtMotionNoConfidence;
+    private UnitInterval dvtCommitteeNormal;
+    private UnitInterval dvtCommitteeNoConfidence;
+    private UnitInterval dvtUpdateToConstitution;
+    private UnitInterval dvtHardForkInitiation;
+    private UnitInterval dvtPPNetworkGroup;
+    private UnitInterval dvtPPEconomicGroup;
+    private UnitInterval dvtPPTechnicalGroup;
+    private UnitInterval dvtPPGovGroup;
+    private UnitInterval dvtTreasuryWithdrawal;
 }

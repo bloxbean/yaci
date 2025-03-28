@@ -1,9 +1,9 @@
 package com.bloxbean.cardano.yaci.core.model.governance;
 
 import com.bloxbean.cardano.yaci.core.model.Credential;
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import lombok.*;
 
-import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -21,5 +21,5 @@ import java.util.Map;
 public class Committee {
     @Builder.Default
     private Map<Credential, Long> committeeColdCredentialEpoch = new LinkedHashMap<>();
-    private BigDecimal threshold; //TODO?? Check the correct name.
+    private UnitInterval threshold; //TODO?? Check the correct name.
 }

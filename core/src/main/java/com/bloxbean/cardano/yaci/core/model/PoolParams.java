@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model;
 
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import lombok.*;
 
 import java.math.BigInteger;
@@ -16,7 +17,7 @@ public class PoolParams {
     private String vrfKeyHash;
     private BigInteger pledge;
     private BigInteger cost;
-    private String margin;
+    private UnitInterval margin;
     private String rewardAccount;
     private Set<String> poolOwners;
     private List<Relay> relays;

@@ -6,6 +6,7 @@ import com.bloxbean.cardano.yaci.core.model.PoolParams;
 import com.bloxbean.cardano.yaci.core.model.Relay;
 import com.bloxbean.cardano.yaci.core.model.certs.PoolRegistration;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -44,7 +45,8 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
         String vrfKeyHash = toHex(dataItemList.get(2));
         BigInteger pledge = toBigInteger(dataItemList.get(3));
         BigInteger cost = toBigInteger(dataItemList.get(4));
-        String margin = ((RationalNumber) dataItemList.get(5)).getNumerator() + "/" + ((RationalNumber) dataItemList.get(5)).getDenominator();
+
+        UnitInterval margin = toUnitInterval(dataItemList.get(5));
         String rewardAccount = toHex(dataItemList.get(6));
 
         //Pool Owners0

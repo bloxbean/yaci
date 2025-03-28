@@ -14,6 +14,7 @@ import com.bloxbean.cardano.yaci.core.model.governance.actions.*;
 import com.bloxbean.cardano.yaci.core.model.serializers.UpdateSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.WithdrawalsSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
 import java.math.BigDecimal;
@@ -151,7 +152,7 @@ public enum GovActionSerializer implements Serializer<GovAction> {
         }
 
         //unit_interval
-        BigDecimal unitInterval = toRationalNumber(govActionArray.get(4));
+        UnitInterval unitInterval = toUnitInterval(govActionArray.get(4));
         return new UpdateCommittee(govActionId, committeeColdCredSet, committeeColdCredEpochMap, unitInterval);
     }
 

@@ -1,8 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model;
 
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import lombok.*;
-
-import java.math.BigDecimal;
 
 /**
  * pool_voting_thresholds =
@@ -18,9 +17,9 @@ import java.math.BigDecimal;
 @Builder
 @ToString
 public class PoolVotingThresholds {
-    private BigDecimal pvtMotionNoConfidence;
-    private BigDecimal pvtCommitteeNormal;
-    private BigDecimal pvtCommitteeNoConfidence;
-    private BigDecimal pvtHardForkInitiation;
-    private BigDecimal pvtPPSecurityGroup;
+    private UnitInterval pvtMotionNoConfidence;
+    private UnitInterval pvtCommitteeNormal;
+    private UnitInterval pvtCommitteeNoConfidence;
+    private UnitInterval pvtHardForkInitiation;
+    private UnitInterval pvtPPSecurityGroup;
 }
