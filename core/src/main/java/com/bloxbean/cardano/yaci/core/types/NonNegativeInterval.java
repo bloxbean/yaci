@@ -7,11 +7,13 @@ import java.math.BigInteger;
 
 @Getter
 @EqualsAndHashCode
-@AllArgsConstructor
-@NoArgsConstructor
 @ToString
 @Slf4j
 public class NonNegativeInterval extends UnitInterval {
+
+    public NonNegativeInterval() {
+        super();
+    }
 
     public NonNegativeInterval(BigInteger numerator, BigInteger denominator) {
         super(numerator, denominator);
