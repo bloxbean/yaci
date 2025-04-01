@@ -1,9 +1,6 @@
 package com.bloxbean.cardano.yaci.core.types;
 
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+import lombok.*;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -11,6 +8,7 @@ import java.math.MathContext;
 
 @Getter
 @AllArgsConstructor
+@NoArgsConstructor
 @EqualsAndHashCode
 @ToString
 public class UnitInterval {
@@ -23,16 +21,24 @@ public class UnitInterval {
         return numerator + "/" + denominator;
     }
 
+    public BigDecimal safeRatio() {
+        return safeRatio(numerator, denominator);
+    }
+
+    public BigDecimal safeRatio(MathContext mathContext) {
+        return safeRatio(numerator, denominator, mathContext);
+    }
+
     public static UnitInterval fromString(String str) {
         String[] parts = str.split("/");
         return new UnitInterval(new BigInteger(parts[0]), new BigInteger(parts[1]));
     }
 
-    public static BigDecimal safeRatio(BigInteger numerator, BigInteger denominator) {
+    private static BigDecimal safeRatio(BigInteger numerator, BigInteger denominator) {
         return safeRatio(numerator, denominator, defaultMathContext);
     }
 
-    public static BigDecimal safeRatio(BigInteger numerator, BigInteger denominator, MathContext mathContext) {
+    private static BigDecimal safeRatio(BigInteger numerator, BigInteger denominator, MathContext mathContext) {
         if (isInvalidUnitInterval(numerator, denominator)) {
             return BigDecimal.ZERO;
         }
