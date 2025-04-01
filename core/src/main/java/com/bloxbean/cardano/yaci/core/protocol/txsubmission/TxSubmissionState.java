@@ -18,8 +18,8 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return true;
+        public boolean hasAgency(boolean isClient) {
+            return isClient;
         }
     },
     Idle {
@@ -35,8 +35,8 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return false;
+        public boolean hasAgency(boolean isClient) {
+            return !isClient;
         }
     },
     TxIdsBlocking {
@@ -49,8 +49,8 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return true;
+        public boolean hasAgency(boolean isClient) {
+            return isClient;
         }
     },
     TxIdsNonBlocking {
@@ -63,8 +63,8 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return true;
+        public boolean hasAgency(boolean isClient) {
+            return isClient;
         }
     },
     Txs {
@@ -77,8 +77,8 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return true;
+        public boolean hasAgency(boolean isClient) {
+            return isClient;
         }
     },
     Done {
@@ -88,7 +88,7 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
+        public boolean hasAgency(boolean isClient) {
             return false;
         }
     }
