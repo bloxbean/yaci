@@ -223,7 +223,7 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
                 return null;
             }
         } catch (Exception e) {
-            throw new CborRuntimeException("Error parsing native script");
+            throw new CborRuntimeException("Error parsing native script", e);
         }
 
         return new NativeScript(type, JsonUtil.getPrettyJson(script));
