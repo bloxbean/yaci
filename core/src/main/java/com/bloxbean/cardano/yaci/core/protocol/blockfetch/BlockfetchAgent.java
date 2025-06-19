@@ -150,8 +150,8 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
                 log.error("Error in parsing block header", e1);
             }
 
-            var blockParseExcpetion = new BlockParseRuntimeException(blockNumber, body, e);
-            getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.onParsingError(blockParseExcpetion));
+            var blockParseException = new BlockParseRuntimeException(blockNumber, body, e);
+            getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.onParsingError(blockParseException));
         }
     }
 
