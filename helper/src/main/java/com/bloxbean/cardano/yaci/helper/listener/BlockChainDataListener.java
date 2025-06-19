@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.helper.listener;
 
+import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
@@ -43,5 +44,5 @@ public interface BlockChainDataListener {
 
     default void onDisconnect() {}
 
-    default void onParsingError(Exception e) {}
+    default void onParsingError(BlockParseRuntimeException e) {}
 }
