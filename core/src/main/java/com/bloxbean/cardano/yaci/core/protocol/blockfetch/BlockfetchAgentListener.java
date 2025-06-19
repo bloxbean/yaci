@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
 
+import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
@@ -35,7 +36,7 @@ public interface BlockfetchAgentListener extends AgentListener {
 
     }
 
-    default void onParsingError(Exception e) {
+    default void onParsingError(BlockParseRuntimeException e) {
 
     }
 
