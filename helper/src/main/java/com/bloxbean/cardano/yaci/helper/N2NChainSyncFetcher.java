@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.common.Constants;
+import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronBlockHead;
@@ -192,6 +193,11 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
 
             @Override
             public void byronEbBlockFound(ByronEbBlock byronEbBlock) {
+                chainSyncAgent.sendNextMessage();
+            }
+
+            @Override
+            public void onParsingError(BlockParseRuntimeException e) {
                 chainSyncAgent.sendNextMessage();
             }
         });
