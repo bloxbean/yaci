@@ -81,4 +81,28 @@ public class N2NChainSyncFetcherIT {
         System.out.println(blocks.get(0));
         assertThat(blocks.get(0).getHeader().getHeaderBody().getBlockNumber()).isGreaterThan(287480);
     }
+
+    @Test
+    void testChainSync_continueOnParseError() throws InterruptedException {
+        N2NChainSyncFetcher chainSyncFetcher = new N2NChainSyncFetcher(Constants.PREVIEW_PUBLIC_RELAY_ADDR,
+                Constants.PREVIEW_PUBLIC_RELAY_PORT,
+                new Point(82394373, "49033a53f777ce932be005539b01ef4d7e3b49ee4ae2f315342a182f3281384a"),
+                Constants.PREVIEW_PROTOCOL_MAGIC, false);
+
+        List<Block> blocks = new ArrayList<>();
+        CountDownLatch countDownLatch = new CountDownLatch(10);
+        chainSyncFetcher.addBlockFetchListener(new BlockfetchAgentListener() {
+            @Override
+            public void blockFound(Block block) {
+                blocks.add(block);
+                countDownLatch.countDown();
+            }
+        });
+        chainSyncFetcher.start();
+        countDownLatch.await(60, TimeUnit.SECONDS);
+        chainSyncFetcher.shutdown();
+
+        System.out.println(blocks.get(0));
+        assertThat(blocks).hasSizeGreaterThan(8);
+    }
 }

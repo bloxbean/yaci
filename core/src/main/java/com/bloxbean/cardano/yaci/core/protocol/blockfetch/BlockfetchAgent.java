@@ -4,6 +4,7 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.common.GenesisConfig;
+import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.Era;
@@ -138,16 +139,19 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
             errorBlks++;
             log.error("Error in parsing", e);
 
+            Long blockNumber = null;
             //Catch exception to avoid exception propagation
             try {
                 Array headerArray = (Array) ((Array) array.getDataItems().get(1)).getDataItems().get(0);
                 BlockHeader blockHeader = BlockHeaderSerializer.INSTANCE.getBlockHeaderFromHeaderArray(headerArray);
                 log.error("BlockHeader >> Block No: " + blockHeader.getHeaderBody().getBlockNumber() + ", Slot: " + blockHeader.getHeaderBody().getSlot());
+                blockNumber = blockHeader.getHeaderBody().getBlockNumber();
             } catch (Exception e1) {
                 log.error("Error in parsing block header", e1);
             }
 
-            getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.onParsingError(e));
+            var blockParseException = new BlockParseRuntimeException(blockNumber, body, e);
+            getAgentListeners().stream().forEach(blockfetchAgentListener -> blockfetchAgentListener.onParsingError(blockParseException));
         }
     }
 
