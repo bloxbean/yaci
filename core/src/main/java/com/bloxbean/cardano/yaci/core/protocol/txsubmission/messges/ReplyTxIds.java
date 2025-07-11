@@ -21,6 +21,11 @@ public class ReplyTxIds implements Message {
         this(Era.Babbage);
     }
 
+    public ReplyTxIds(Era era, Map<String, Integer> txIdAndSizeMap) {
+        this.era = era;
+        this.txIdAndSizeMap = txIdAndSizeMap;
+    }
+
     public void addTxId(String id, int size) {
         if (txIdAndSizeMap == null)
             txIdAndSizeMap = new HashMap<>();

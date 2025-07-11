@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.protocol.txsubmission.serializers;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -99,7 +100,37 @@ public class TxSubmissionMessagesSerializers {
             return CborSerializationUtil.serialize(array);
         }
 
-        //TODO deserializeDI() -- Not used
+        @Override
+        public ReplyTxIds deserializeDI(DataItem di) {
+            Array array = (Array) di;
+            List<DataItem> dataItemList = array.getDataItems();
+
+            int label = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue();
+            if (label != 1)
+                throw new CborRuntimeException("Parsing error. Invalid label: " + di);
+
+            Array pairsArray = (Array) dataItemList.get(1);
+            List<DataItem> pairs = pairsArray.getDataItems();
+            var txIdAndSizeMap = new java.util.HashMap<String, Integer>();
+
+            for (DataItem pairDI : pairs) {
+                if (pairDI instanceof Special) {
+                    break; // Handle the BREAK special case
+                }
+
+                Array pair = (Array) pairDI;
+                Array eraAndIdArray = (Array) pair.getDataItems().get(0);
+
+                int eraValue = ((UnsignedInteger) eraAndIdArray.getDataItems().get(0)).getValue().intValue(); // Era
+                String txId = HexUtil.encodeHexString(((ByteString) eraAndIdArray.getDataItems().get(1)).getBytes());
+                int size = ((UnsignedInteger) pair.getDataItems().get(1)).getValue().intValue();
+
+                txIdAndSizeMap.put(txId, size);
+            }
+
+            //TODO -- Change era
+            return new ReplyTxIds(Era.Conway, txIdAndSizeMap);
+        }
     }
 
     public enum RequestTxsSerializer implements Serializer<RequestTxs> {

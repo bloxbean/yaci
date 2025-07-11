@@ -40,7 +40,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     @Override
-    public Message buildNextMessage() {
+public Message buildNextMessage() {
         switch ((TxSubmissionState) currenState) {
             case Init:
                 return new Init();
