@@ -7,12 +7,12 @@ import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.*;
 import co.nstant.in.cbor.model.Number;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
+import com.bloxbean.cardano.yaci.core.types.NonNegativeInterval;
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import lombok.NonNull;
 
 import java.io.ByteArrayOutputStream;
-import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.math.RoundingMode;
 
 public class CborSerializationUtil {
 
@@ -76,23 +76,14 @@ public class CborSerializationUtil {
         return ((UnicodeString)di).getString();
     }
 
-    //convert [1,50] to "1/50"
-    public static String toRationalNumberStr(DataItem di) {
+    public static UnitInterval toUnitInterval(DataItem di) {
         RationalNumber rdi = (RationalNumber) di;
-        return rdi.getNumerator() + "/" + rdi.getDenominator();
+        return new UnitInterval(rdi.getNumerator().getValue(), rdi.getDenominator().getValue());
     }
 
-    //convert [1, 50] to 0.02
-    public static BigDecimal toRationalNumber(DataItem di) {
+    public static NonNegativeInterval toNonNegativeInterval(DataItem di) {
         RationalNumber rdi = (RationalNumber) di;
-        Number numerator = rdi.getNumerator();
-        Number denominator = rdi.getDenominator();
-
-        try {
-            return new BigDecimal(numerator.getValue()).divide(new BigDecimal(denominator.getValue()));
-        } catch (ArithmeticException e) { //set scale and try again
-            return new BigDecimal(numerator.getValue()).divide(new BigDecimal(denominator.getValue()), 10, RoundingMode.HALF_UP);
-        }
+        return new NonNegativeInterval(rdi.getNumerator().getValue(), rdi.getDenominator().getValue());
     }
 
     /**

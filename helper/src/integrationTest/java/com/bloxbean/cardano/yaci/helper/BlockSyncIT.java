@@ -1,10 +1,12 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.common.Constants;
+import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
 import org.junit.jupiter.api.Disabled;
@@ -135,5 +137,32 @@ public class BlockSyncIT extends BaseTest {
 
         countDownLatch.await(60, TimeUnit.SECONDS);
         assertThat(success.get()).isTrue();
+    }
+
+    @Test
+    void syncFromPoint_continueOnParseError() throws InterruptedException {
+        BlockSync blockSync = new BlockSync(Constants.PREVIEW_PUBLIC_RELAY_ADDR, Constants.PREPROD_PUBLIC_RELAY_PORT,
+                Constants.PREVIEW_PROTOCOL_MAGIC, Constants.WELL_KNOWN_PREVIEW_POINT);
+
+        AtomicLong blockNo = new AtomicLong();
+        CountDownLatch countDownLatch = new CountDownLatch(10);
+        blockSync.startSync(new Point(82394373, "49033a53f777ce932be005539b01ef4d7e3b49ee4ae2f315342a182f3281384a"),
+                new BlockChainDataListener() {
+                    @Override
+                    public void onBlock(Era era, Block block, List<Transaction> transactions) {
+                        System.out.println(block.getHeader().getHeaderBody().getBlockNumber());
+                        blockNo.set(block.getHeader().getHeaderBody().getBlockNumber());
+                        countDownLatch.countDown();
+                    }
+
+                    @Override
+                    public void onParsingError(BlockParseRuntimeException e) {
+                        System.out.println("ERROR BLock: " + e.getBlockNumber());
+                        System.out.println("CBOR: " + HexUtil.encodeHexString(e.getBlockCbor()));
+                    }
+                });
+
+        countDownLatch.await(60, TimeUnit.SECONDS);
+        assertThat(blockNo.get()).isGreaterThan(3300404 + 5);
     }
 }

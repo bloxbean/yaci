@@ -2,9 +2,12 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import com.bloxbean.cardano.yaci.core.model.Relay;
 import com.bloxbean.cardano.yaci.core.model.certs.PoolRegistration;
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import org.junit.jupiter.api.Test;
+
+import java.math.BigInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,7 +23,7 @@ class PoolRegistrationSerializerTest {
         assertThat(poolRegistration.getPoolParams().getVrfKeyHash()).isEqualTo("ca6306b471f5937ac69bda9b04915ff71a450644f36ea6163403dc2666659b8b");
         assertThat(poolRegistration.getPoolParams().getPledge()).isEqualTo(100000000);
         assertThat(poolRegistration.getPoolParams().getCost()).isEqualTo(340000000);
-        assertThat(poolRegistration.getPoolParams().getMargin()).isEqualTo("1/100");
+        assertThat(poolRegistration.getPoolParams().getMargin()).isEqualTo(new UnitInterval(BigInteger.valueOf(1), BigInteger.valueOf(100)));
         assertThat(poolRegistration.getPoolParams().getRewardAccount()).isEqualTo("e1ab737aaf2b421c22a15de788d61d375b135da0cbf1850fbd285d5a74");
         assertThat(poolRegistration.getPoolParams().getPoolOwners()).contains("ab737aaf2b421c22a15de788d61d375b135da0cbf1850fbd285d5a74");
         assertThat(poolRegistration.getPoolParams().getPoolMetadataUrl()).isEqualTo("https://bit.ly/3AfwvRQ");

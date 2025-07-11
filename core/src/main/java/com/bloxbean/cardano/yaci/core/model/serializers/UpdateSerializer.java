@@ -7,11 +7,12 @@ import com.bloxbean.cardano.yaci.core.model.PoolVotingThresholds;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.core.model.Update;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
+import com.bloxbean.cardano.yaci.core.types.NonNegativeInterval;
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
 
-import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Collection;
 import java.util.HashMap;
@@ -81,16 +82,16 @@ public enum UpdateSerializer implements Serializer<Update> {
         Integer nOpt = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(9));
-        BigDecimal poolPledgeInfluence = itemDI != null ? toRationalNumber(itemDI) : null;
+        NonNegativeInterval poolPledgeInfluence = itemDI != null ? toNonNegativeInterval(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(10));
-        BigDecimal expansionRate = itemDI != null ? toRationalNumber(itemDI) : null;
+        UnitInterval expansionRate = itemDI != null ? toUnitInterval(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(11));
-        BigDecimal treasuryGrowthRate = itemDI != null ? toRationalNumber(itemDI) : null;
+        UnitInterval treasuryGrowthRate = itemDI != null ? toUnitInterval(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(12));
-        BigDecimal decentralizationParam = itemDI != null ? toRationalNumber(itemDI) : null;
+        UnitInterval decentralizationParam = itemDI != null ? toUnitInterval(itemDI) : null;
 
         Tuple<Integer, String> extraEntropy = null;
 //                $nonce /= [ 0 // 1, bytes .size 32 ]
@@ -141,12 +142,12 @@ public enum UpdateSerializer implements Serializer<Update> {
         }
 
         //exUnits prices
-        BigDecimal priceMem = null;
-        BigDecimal priceSteps = null;
+        NonNegativeInterval priceMem = null;
+        NonNegativeInterval priceSteps = null;
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(19));
         if (itemDI != null) {
             List<DataItem> exUnitPriceList = ((Array) itemDI).getDataItems();
-            Tuple<BigDecimal, BigDecimal> tuple = getExUnitPrices(exUnitPriceList);
+            Tuple<NonNegativeInterval, NonNegativeInterval> tuple = getExUnitPrices(exUnitPriceList);
             priceMem = tuple._1;
             priceSteps = tuple._2;
         }
@@ -208,7 +209,7 @@ public enum UpdateSerializer implements Serializer<Update> {
         Integer drepInactivityPeriod = itemDI != null ? toInt(itemDI) : null;
 
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(33));
-        BigDecimal minFeeRefScriptCostPerByte = itemDI != null ? toRationalNumber(itemDI) : null;
+        NonNegativeInterval minFeeRefScriptCostPerByte = itemDI != null ? toNonNegativeInterval(itemDI) : null;
 
         ProtocolParamUpdate protocolParamUpdate = ProtocolParamUpdate.builder()
                 .minFeeA(minFeeA)
@@ -264,12 +265,12 @@ public enum UpdateSerializer implements Serializer<Update> {
         return new Tuple<>(mem, steps);
     }
 
-    private Tuple<BigDecimal, BigDecimal> getExUnitPrices(List<DataItem> exunits) {
+    private Tuple<NonNegativeInterval, NonNegativeInterval> getExUnitPrices(List<DataItem> exunits) {
         RationalNumber memPriceRN = (RationalNumber) exunits.get(0);
         RationalNumber stepPriceRN = (RationalNumber) exunits.get(1);
 
-        BigDecimal memPrice = toRationalNumber(memPriceRN);
-        BigDecimal stepPrice = toRationalNumber(stepPriceRN);
+        var memPrice = toNonNegativeInterval(memPriceRN);
+        var stepPrice = toNonNegativeInterval(stepPriceRN);
 
         return new Tuple<>(memPrice, stepPrice);
     }
@@ -289,11 +290,11 @@ public enum UpdateSerializer implements Serializer<Update> {
             return null;
 
         List<DataItem> poolVotingThresholds = ((Array) itemDI).getDataItems();
-        BigDecimal motionNoConfidence = toRationalNumber((RationalNumber) poolVotingThresholds.get(0));
-        BigDecimal committeeNormal = toRationalNumber((RationalNumber) poolVotingThresholds.get(1));
-        BigDecimal committeeNoConfidence = toRationalNumber((RationalNumber) poolVotingThresholds.get(2));
-        BigDecimal hardForkInitiation = toRationalNumber((RationalNumber) poolVotingThresholds.get(3));
-        BigDecimal ppSecurityGroup = toRationalNumber((RationalNumber) poolVotingThresholds.get(4));
+        UnitInterval motionNoConfidence = toUnitInterval(poolVotingThresholds.get(0));
+        UnitInterval committeeNormal = toUnitInterval(poolVotingThresholds.get(1));
+        UnitInterval committeeNoConfidence = toUnitInterval(poolVotingThresholds.get(2));
+        UnitInterval hardForkInitiation = toUnitInterval(poolVotingThresholds.get(3));
+        UnitInterval ppSecurityGroup = toUnitInterval(poolVotingThresholds.get(4));
 
         return PoolVotingThresholds.builder()
                 .pvtMotionNoConfidence(motionNoConfidence)
@@ -326,16 +327,16 @@ public enum UpdateSerializer implements Serializer<Update> {
             return null;
 
         List<DataItem> drepVotingThresholds = ((Array) itemDI).getDataItems();
-        BigDecimal motionNoConfidence = toRationalNumber((RationalNumber) drepVotingThresholds.get(0));
-        BigDecimal committeeNormal = toRationalNumber((RationalNumber) drepVotingThresholds.get(1));
-        BigDecimal committeeNoConfidence = toRationalNumber((RationalNumber) drepVotingThresholds.get(2));
-        BigDecimal updateConstitution = toRationalNumber((RationalNumber) drepVotingThresholds.get(3));
-        BigDecimal hardForkInitiation = toRationalNumber((RationalNumber) drepVotingThresholds.get(4));
-        BigDecimal ppNetworkGroup = toRationalNumber((RationalNumber) drepVotingThresholds.get(5));
-        BigDecimal ppEconomicGroup = toRationalNumber((RationalNumber) drepVotingThresholds.get(6));
-        BigDecimal ppTechnicalGroup = toRationalNumber((RationalNumber) drepVotingThresholds.get(7));
-        BigDecimal ppGovernanceGroup = toRationalNumber((RationalNumber) drepVotingThresholds.get(8));
-        BigDecimal treasuryWithdrawal = toRationalNumber((RationalNumber) drepVotingThresholds.get(9));
+        UnitInterval motionNoConfidence = toUnitInterval(drepVotingThresholds.get(0));
+        UnitInterval committeeNormal = toUnitInterval(drepVotingThresholds.get(1));
+        UnitInterval committeeNoConfidence = toUnitInterval(drepVotingThresholds.get(2));
+        UnitInterval updateConstitution = toUnitInterval(drepVotingThresholds.get(3));
+        UnitInterval hardForkInitiation = toUnitInterval(drepVotingThresholds.get(4));
+        UnitInterval ppNetworkGroup = toUnitInterval(drepVotingThresholds.get(5));
+        UnitInterval ppEconomicGroup = toUnitInterval(drepVotingThresholds.get(6));
+        UnitInterval ppTechnicalGroup = toUnitInterval(drepVotingThresholds.get(7));
+        UnitInterval ppGovernanceGroup = toUnitInterval(drepVotingThresholds.get(8));
+        UnitInterval treasuryWithdrawal = toUnitInterval(drepVotingThresholds.get(9));
 
         return DrepVoteThresholds.builder()
                 .dvtMotionNoConfidence(motionNoConfidence)

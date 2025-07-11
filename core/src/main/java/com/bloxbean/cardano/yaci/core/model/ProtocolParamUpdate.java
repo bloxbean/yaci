@@ -1,5 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model;
 
+import com.bloxbean.cardano.yaci.core.types.NonNegativeInterval;
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
@@ -25,10 +27,10 @@ public class ProtocolParamUpdate {
     private Integer maxEpoch; //7
     @JsonProperty("nopt")
     private Integer nOpt; //8
-    private BigDecimal poolPledgeInfluence; //rational //9
-    private BigDecimal expansionRate; //unit interval //10
-    private BigDecimal treasuryGrowthRate; //11
-    private BigDecimal decentralisationParam; //12
+    private NonNegativeInterval poolPledgeInfluence; //rational //9
+    private UnitInterval expansionRate; //unit interval //10
+    private UnitInterval treasuryGrowthRate; //11
+    private UnitInterval decentralisationParam; //12
     private Tuple<Integer, String> extraEntropy; //13
     private Integer protocolMajorVer; //14
     private Integer protocolMinorVer; //14
@@ -43,8 +45,8 @@ public class ProtocolParamUpdate {
     private String costModelsHash; //derived field
 
     //ex_unit_prices
-    private BigDecimal priceMem; //19
-    private BigDecimal priceStep; //19
+    private NonNegativeInterval priceMem; //19
+    private NonNegativeInterval priceStep; //19
 
     //max tx ex units
     private BigInteger maxTxExMem; //20
@@ -74,5 +76,5 @@ public class ProtocolParamUpdate {
     private BigInteger govActionDeposit; //30
     private BigInteger drepDeposit; //31
     private Integer drepActivity; //32
-    private BigDecimal minFeeRefScriptCostPerByte; //33
+    private NonNegativeInterval minFeeRefScriptCostPerByte; //33
 }

@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.helper.listener;
 
+import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
@@ -133,7 +134,7 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
     }
 
     @Override
-    public void onParsingError(Exception e) {
+    public void onParsingError(BlockParseRuntimeException e) {
         blockChainDataListener.onParsingError(e);
     }
 }
