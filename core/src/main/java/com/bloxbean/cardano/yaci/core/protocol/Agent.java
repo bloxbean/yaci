@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol;
 
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.RollForward;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
@@ -32,10 +33,20 @@ public abstract class Agent<T extends AgentListener> {
 
     public void sendRequest(Message message) {
         if (currenState.hasAgency(isClient)) {
+            if (log.isDebugEnabled())
+                log.debug("Agency = true----------- Move to next state: agent for protocol id : " + this.getProtocolId());
+            State oldState = currenState;
             currenState = currenState.nextState(message);
+            if (log.isDebugEnabled())
+                log.debug("Next state: " + currenState + " for protocol id: " + this.getProtocolId());
+            // Log state transition for ChainSync
+            if (this.getProtocolId() == 3 && log.isDebugEnabled()) {
+                log.debug("Blockfetch state transition after sending {}: {} -> {}",
+                        message.getClass().getSimpleName(), oldState, currenState);
+            }
         } else {
             //TODO
-            log.info("Agency = false-----------");
+//            log.info("Agency = false-----------");
         }
     }
 
@@ -63,19 +74,71 @@ public abstract class Agent<T extends AgentListener> {
 
             int elapseTime = Duration.between(instant, Instant.now()).getNano() / 1000;
             instant = Instant.now();
+
+            // Apply response flag (0x8000) for server agents
+            int protocolWithFlag = this.getProtocolId();
+            if (!isClient) {
+                protocolWithFlag |= 0x8000; // Set response flag for server
+            }
+
             Segment segment = Segment.builder()
                     .timestamp(elapseTime)
-                    .protocol((short) this.getProtocolId())
+                    .protocol((short) protocolWithFlag)
                     .payload(message.serialize())
                     .build();
 
-            channel.writeAndFlush(segment);
-            this.sendRequest(message);
+            log.info("Sending msg : " + message);
+            if (message instanceof RollForward) {
+                log.info("RollForward message: " + ((RollForward)message).getOriginalHeaderBytes());
+            }
+//            try {
+//                if (segment.getPayload().length > 0) {
+//                    log.info("Protocol Id: " + segment.getProtocol() + " Payload : " + CborSerializationUtil.deserializeOne(segment.getPayload()));
+//                } else {
+//                    log.info("Protocol Id: " + segment.getProtocol() + " Payload : <empty>");
+//                }
+//            } catch (Exception e) {
+//                log.warn("Protocol Id: " + segment.getProtocol() + " Payload : <failed to deserialize - " + e.getMessage() + ">");
+//            }
+
+            channel.writeAndFlush(segment).addListener(future -> {;
+                if (future.isSuccess()) {
+//                    log.info("Message sent successfully for protocol id: " + this.getProtocolId());
+                    // Update state only after message is successfully sent
+                    State oldState = currenState;
+                    this.sendRequest(message);
+
+                    // If agent still has agency after state transition, send next message
+                    // This is crucial for BlockFetch Streaming state where server keeps agency
+//                    if (this.hasAgency() && oldState != currenState) {
+//                        if (log.isDebugEnabled()) {
+//                            log.debug("Agent {} still has agency after state transition {} -> {}, sending next message",
+//                                    this.getProtocolId(), oldState, currenState);
+//                        }
+//                        this.sendNextMessage();
+//                    }
+                    // Special case for BlockFetch: continue sending in Streaming state even without state change
+                    if (this.hasAgency() && this.getProtocolId() == 3 && currenState.toString().equals("Streaming")) {
+                        if (log.isDebugEnabled()) {
+                            log.debug("Agent {} (BlockFetch) continuing in Streaming state after {}, sending next message",
+                                    this.getProtocolId(), message.getClass().getSimpleName());
+                        }
+                        this.sendNextMessage();
+                    }
+                } else {
+                    log.info(message.toString());
+                    log.error("Failed to send message for protocol id: " + this.getProtocolId(), future.cause());
+                }
+            });
         }
     }
 
     public final boolean hasAgency() {
         return currenState.hasAgency(isClient);
+    }
+
+    protected final boolean isClient() {
+        return isClient;
     }
 
     public final synchronized void addListener(T agentListener) {

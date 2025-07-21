@@ -36,15 +36,29 @@ public class MiniProtoServerInboundHandler extends SimpleChannelInboundHandler<S
                 if (!session.getHandshakeAgent().isDone() && session.getHandshakeAgent().hasAgency())
                     session.getHandshakeAgent().sendNextMessage();
             } else {
+                log.debug("Routing message for protocol {} to agents", segment.getProtocol());
+                boolean messageHandled = false;
                 for (Agent agent : session.getAgents()) {
+                    log.debug("Checking agent - protocolId: {}, isDone: {}, matches: {}",
+                             agent.getProtocolId(), agent.isDone(), agent.getProtocolId() == segment.getProtocol());
                     if (!agent.isDone() && agent.getProtocolId() == segment.getProtocol()) {
+                        log.debug("Message matched agent with protocol {}", agent.getProtocolId());
                         Message message = agent.deserializeResponse(segment.getPayload());
+                        log.info("Deserialized message: {}", message != null ? message.getClass().getSimpleName() : "null");
                         agent.receiveResponse(message);
 
-                        if (agent.hasAgency())
+                        if (agent.hasAgency()) {
+                            log.info("Agent has agency, sending next message: protocol id: {}", agent.getProtocolId());
                             agent.sendNextMessage();
+                        } else {
+                            log.info("Agent does not have agency for protocol {}", agent.getProtocolId());
+                        }
+                        messageHandled = true;
                         break;
                     }
+                }
+                if (!messageHandled) {
+                    log.warn("No agent found to handle protocol {}", segment.getProtocol());
                 }
             }
 

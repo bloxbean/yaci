@@ -62,7 +62,10 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
             supportedProtocolVersions.sort(Long::compareTo);
             long highestVersion = supportedProtocolVersions.get(supportedProtocolVersions.size() - 1);
 
-            var acceptedVersionData = versionDataMap.get(highestVersion);
+            N2NVersionData requestedVersionData = (N2NVersionData) versionDataMap.get(highestVersion);
+
+            var acceptedVersionData = new N2NVersionData(requestedVersionData.getNetworkMagic(), requestedVersionData.getInitiatorOnlyDiffusionMode(), 0, requestedVersionData.getQuery());
+
             // Accept the highest version
             var acceptVersion = new AcceptVersion(highestVersion, acceptedVersionData);
             System.out.println("Accept Version constructed !!!");

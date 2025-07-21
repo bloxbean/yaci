@@ -269,10 +269,11 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
                         // Since we now store complete wrapped headers, create a mock RollForward message
                         // and let RollForwardSerializer handle the reconstruction during serialization
-//                        byte[] rollForwardBytes = createRollForwardMessage(blockHeaderBytes, tip);
-                        //RollForward rollForward = RollForwardSerializer.INSTANCE.deserialize(rollForwardBytes);
+                        //TODO : THis deserialization is not needed anymore, we can directly use the bytes. But it's here for debugging purposes
+                        byte[] reConstructRollForwardBytes = createRollForwardMessage(blockHeaderBytes, tip);
+                        RollForward reConstructRollForward = RollForwardSerializer.INSTANCE.deserialize(reConstructRollForwardBytes);
 
-                        RollForward rollForward = new RollForward(null, null, null, tip, blockHeaderBytes);
+                        RollForward rollForward = new RollForward(reConstructRollForward.getByronEbHead(), reConstructRollForward.getByronBlockHead(), reConstructRollForward.getBlockHeader(), tip, blockHeaderBytes);
 
                         if (log.isDebugEnabled()) {
                             log.debug("Sending RollForward for point: slot={}, hash={}, tip: slot={}, block={}/{}",

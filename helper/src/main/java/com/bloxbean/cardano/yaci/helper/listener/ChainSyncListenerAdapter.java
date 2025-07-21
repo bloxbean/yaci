@@ -22,22 +22,34 @@ public class ChainSyncListenerAdapter implements ChainSyncAgentListener {
         blockChainDataListener.intersactNotFound(tip);
     }
 
-    public void rollforward(Tip tip, BlockHeader blockHeader) {
-
-    }
-
     public void rollbackward(Tip tip, Point toPoint) {
         blockChainDataListener.onRollback(toPoint);
     }
 
     @Override
     public void rollforwardByronEra(Tip tip, ByronEbHead byronEbHead) {
-
+        blockChainDataListener.rollforwardByronEra(tip, byronEbHead, new byte[0]);
     }
 
     @Override
     public void rollforwardByronEra(Tip tip, ByronBlockHead byronBlockHead) {
+        blockChainDataListener.rollforwardByronEra(tip, byronBlockHead, new byte[0]);
+    }
 
+    public void rollforward(Tip tip, BlockHeader blockHeader) {
+        blockChainDataListener.rollforward(tip, blockHeader, new byte[0]);
+    }
+
+    public void rollforward(Tip tip, BlockHeader blockHeader, byte[] originalHeaderBytes) {
+        blockChainDataListener.rollforward(tip, blockHeader, originalHeaderBytes);
+    }
+
+    public void rollforwardByronEra(Tip tip, ByronBlockHead byronBlockHead, byte[] originalHeaderBytes) {
+        blockChainDataListener.rollforwardByronEra(tip, byronBlockHead, originalHeaderBytes);
+    }
+
+    public void rollforwardByronEra(Tip tip, ByronEbHead byronEbHead, byte[] originalHeaderBytes) {
+        blockChainDataListener.rollforwardByronEra(tip, byronEbHead, originalHeaderBytes);
     }
 
     @Override
