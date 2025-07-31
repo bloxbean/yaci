@@ -4,15 +4,19 @@ import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Era;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
+import com.bloxbean.cardano.yaci.helper.util.TcpProxyManager;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -165,4 +169,149 @@ public class BlockSyncIT extends BaseTest {
         countDownLatch.await(60, TimeUnit.SECONDS);
         assertThat(blockNo.get()).isGreaterThan(3300404 + 5);
     }
+
+    @Test
+    void syncFromPoint_disconnect() throws Exception {
+        TcpProxyManager tcpProxyManager = new TcpProxyManager();
+        tcpProxyManager.startProxy(5818, node, nodePort);
+        BlockSync blockSync = new BlockSync("localhost", 5818, protocolMagic, Constants.WELL_KNOWN_PREPROD_POINT);
+
+        final Set<Long> seenBlocks = new HashSet<>();
+        AtomicLong lastProccesedBlock = new AtomicLong();
+        AtomicInteger noOfTxs = new AtomicInteger();
+        AtomicInteger counter = new AtomicInteger();
+        AtomicBoolean stopped = new AtomicBoolean(false);
+        AtomicBoolean assertionFailed = new AtomicBoolean(false);
+        blockSync.startSync(new Point(13107195, "ad2ceec67a07069d6e9295ed2144015860602c29f42505dc6ea2f55b9fc0dd93"),
+                new BlockChainDataListener() {
+                    @Override
+                    public void onBlock(Era era, Block block, List<Transaction> transactions) {
+                        long blockNum = block.getHeader().getHeaderBody().getBlockNumber();
+
+                        if (seenBlocks.contains(blockNum)) {
+                            System.out.println("Duplicate block detected: " + blockNum + " (expected with at-least-once delivery)");
+                        }
+                        seenBlocks.add(blockNum);
+
+                        int count = counter.incrementAndGet();
+                        if (count % 5 == 0) {
+                            tcpProxyManager.stopAll();
+                            stopped.set(true);
+                            throw new RuntimeException("Stopping proxy to test continuation");
+                        }
+
+                        if (lastProccesedBlock.get() != 0 && lastProccesedBlock.get() + 1 != block.getHeader().getHeaderBody().getBlockNumber()) {
+                            System.out.println("Assertion failed. Last processed block: " + lastProccesedBlock.get() +
+                                    ", Current block: " + block.getHeader().getHeaderBody().getBlockNumber());
+                            assertionFailed.set(true);
+                        }
+
+                        System.out.println("Processed block: " + block.getHeader().getHeaderBody().getBlockNumber());
+                        lastProccesedBlock.set(block.getHeader().getHeaderBody().getBlockNumber());
+                        System.out.println("# of transactions >> " + transactions.size());
+                        noOfTxs.set(transactions.size());
+                    }
+
+                    @Override
+                    public void onRollback(Point point) {
+                        System.out.println("Rollback to point: " + point);
+                    }
+                });
+
+        int count = 0;
+        int times = 0;
+        while (true && times < 2) {
+            Thread.sleep(1000);
+            if (stopped.get()) {
+                count ++;
+                if (count == 2) {
+                    System.out.println("Restarting proxy...");
+                    tcpProxyManager.startProxy(5818, node, nodePort);
+                    stopped.set(false);
+                    count = 0;
+                    times++;
+                }
+            }
+
+            if (assertionFailed.get()) {
+                throw new AssertionError("Assertion failed during block continuation check. Last processed block: " + lastProccesedBlock.get());
+            }
+        }
+
+        tcpProxyManager.stopAll();
+        blockSync.stop();
+    }
+
+    @Test
+    void syncFromPoint_disconnect_mainnet() throws Exception {
+        TcpProxyManager tcpProxyManager = new TcpProxyManager();
+        tcpProxyManager.startProxy(6818, Constants.MAINNET_PUBLIC_RELAY_ADDR, Constants.MAINNET_PUBLIC_RELAY_PORT);
+
+        BlockSync blockSync = new BlockSync("localhost", 6818, Constants.MAINNET_PROTOCOL_MAGIC,
+                Constants.WELL_KNOWN_MAINNET_POINT);
+
+
+        final Set<Long> seenBlocks = new HashSet<>();
+        AtomicLong lastProccesedBlock = new AtomicLong();
+        AtomicInteger counter = new AtomicInteger();
+        AtomicBoolean stopped = new AtomicBoolean(false);
+        AtomicBoolean assertionFailed = new AtomicBoolean(false);
+        blockSync.startSync(new Point(215997, "f953d7cfb666f5254577872e9c8e9cca813eade7aab63f3f68f2cb4fb9dee55b"),
+                new BlockChainDataListener() {
+                    @Override
+                    public void onByronBlock(ByronMainBlock block) {
+                        long blockNum = block.getHeader().getConsensusData().getDifficulty().longValue();
+
+                        if (seenBlocks.contains(blockNum)) {
+                            System.out.println("Duplicate block detected: " + blockNum + " (expected with at-least-once delivery)");
+                        }
+                        seenBlocks.add(blockNum);
+
+                        int count = counter.incrementAndGet();
+                        if (count % 5 == 0) {
+                            tcpProxyManager.stopAll();
+                            stopped.set(true);
+                            throw new RuntimeException("Stopping proxy to test continuation");
+                        }
+
+                        if (lastProccesedBlock.get() != 0 && lastProccesedBlock.get() + 1 != blockNum) {
+                            System.out.println("Assertion failed. Last processed block: " + lastProccesedBlock.get() +
+                                    ", Current block: " + blockNum);
+                            assertionFailed.set(true);
+                        }
+
+                        System.out.println("Processed block: " + blockNum);
+                        lastProccesedBlock.set(blockNum);
+                    }
+
+                    @Override
+                    public void onRollback(Point point) {
+                        System.out.println("Rollback to point: " + point);
+                    }
+                });
+
+        int count = 0;
+        int times = 0;
+        while (true && times < 2) {
+            Thread.sleep(1000);
+            if (stopped.get()) {
+                count ++;
+                if (count == 2) {
+                    System.out.println("Restarting proxy...");
+                    tcpProxyManager.startProxy(6818, Constants.MAINNET_PUBLIC_RELAY_ADDR, Constants.MAINNET_PUBLIC_RELAY_PORT);
+                    stopped.set(false);
+                    count = 0;
+                    times++;
+                }
+            }
+
+            if (assertionFailed.get()) {
+                throw new AssertionError("Assertion failed during block continuation check. Last processed block: " + lastProccesedBlock.get());
+            }
+        }
+
+        tcpProxyManager.stopAll();
+        blockSync.stop();
+    }
+
 }
