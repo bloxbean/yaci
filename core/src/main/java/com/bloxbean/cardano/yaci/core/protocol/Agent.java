@@ -72,8 +72,22 @@ public abstract class Agent<T extends AgentListener> {
         return currenState.hasAgency();
     }
 
+    /**
+     * Add a listener to this agent. Listeners are executed in LIFO (Last In, First Out) order.
+     * <p>
+     * This means that listeners added later will execute before listeners added earlier.
+     * This design ensures that:
+     * <ul>
+     *   <li>External application listeners (added later) execute first</li>
+     *   <li>Internal protocol listeners (added during initialization) execute last</li>
+     *   <li>Any failure in external listeners prevents protocol advancement</li>
+     *   <li>Provides fail-fast semantics for atomic block processing</li>
+     * </ul>
+     * 
+     * @param agentListener the listener to add
+     */
     public final synchronized void addListener(T agentListener) {
-        agentListeners.add(agentListener);
+        agentListeners.add(0, agentListener);
     }
 
     public final synchronized void removeListener(T agentListener) {
