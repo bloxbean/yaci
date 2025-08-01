@@ -12,12 +12,23 @@ public enum TipSerializer implements Serializer<Tip> {
 
     public Tip deserializeDI(DataItem di) {
         Array array = (Array) di;
-        DataItem pointDI = array.getDataItems().get(0);
-        Point tipPoint = PointSerializer.INSTANCE.deserializeDI(pointDI);
 
-        long block = ((UnsignedInteger) array.getDataItems().get(1)).getValue().longValue();
-
-        return new Tip(tipPoint, block);
+        // Handle both nested [[slot, hash], block] and flattened [slot, hash, block] formats
+        if (array.getDataItems().size() == 2) {
+            // Nested format: [[slot, hash], block]
+            DataItem pointDI = array.getDataItems().get(0);
+            Point tipPoint = PointSerializer.INSTANCE.deserializeDI(pointDI);
+            long block = ((UnsignedInteger) array.getDataItems().get(1)).getValue().longValue();
+            return new Tip(tipPoint, block);
+        } else {
+            // Flattened format: [slot, hash, block] - legacy support
+            Array pointArray = new Array();
+            pointArray.add(array.getDataItems().get(0));
+            pointArray.add(array.getDataItems().get(1));
+            Point tipPoint = PointSerializer.INSTANCE.deserializeDI(pointArray);
+            long block = ((UnsignedInteger) array.getDataItems().get(2)).getValue().longValue();
+            return new Tip(tipPoint, block);
+        }
     }
 
     @Override

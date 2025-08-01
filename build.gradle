@@ -2,7 +2,7 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id 'signing'
-    id 'org.unbroken-dome.test-sets' version("4.0.0")
+    id 'org.unbroken-dome.test-sets' version("4.1.0")
     id 'org.ajoberstar.grgit' version '5.2.0'
     id 'io.github.gradle-nexus.publish-plugin' version '2.0.0'
 }
@@ -13,8 +13,8 @@ repositories {
 }
 
 compileJava {
-    sourceCompatibility = '11'
-    targetCompatibility = '11'
+    sourceCompatibility = '21'
+    targetCompatibility = '21'
 
     options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
 }
@@ -146,8 +146,8 @@ subprojects {
     }
 
     compileJava {
-        sourceCompatibility = '11'
-        targetCompatibility = '11'
+        sourceCompatibility = '21'
+        targetCompatibility = '21'
 
         options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
     }
@@ -157,12 +157,12 @@ subprojects {
     }
 
     task sourceJar(type: Jar) {
-        classifier "sources"
+        archiveClassifier = "sources"
         from sourceSets.main.allJava
     }
 
     task javadocJar(type: Jar, dependsOn: javadoc) {
-        classifier "javadoc"
+        archiveClassifier = "javadoc"
         from javadoc.destinationDir
     }
 

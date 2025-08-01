@@ -21,6 +21,8 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
+import com.bloxbean.cardano.yaci.core.common.GenesisConfig;
+import com.bloxbean.cardano.yaci.core.model.Era;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.function.Consumer;
@@ -183,16 +185,45 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
                 if (log.isDebugEnabled()) {
                     log.debug("Block Found >> " + block);
                 }
+
+                Point fetchedPoint = new Point(
+                    block.getHeader().getHeaderBody().getSlot(),
+                    block.getHeader().getHeaderBody().getBlockHash()
+                );
+                chainSyncAgent.confirmBlock(fetchedPoint);
+
                 chainSyncAgent.sendNextMessage();
             }
 
             @Override
             public void byronBlockFound(ByronMainBlock byronBlock) {
+                long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(Era.Byron,
+                        byronBlock.getHeader().getConsensusData().getSlotId().getEpoch(),
+                        byronBlock.getHeader().getConsensusData().getSlotId().getSlot());
+
+                Point fetchedPoint = new Point(
+                    absoluteSlot,
+                    byronBlock.getHeader().getBlockHash()
+                );
+
+                chainSyncAgent.confirmBlock(fetchedPoint);
+
                 chainSyncAgent.sendNextMessage();
             }
 
             @Override
             public void byronEbBlockFound(ByronEbBlock byronEbBlock) {
+                long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(
+                    Era.Byron,
+                    byronEbBlock.getHeader().getConsensusData().getEpoch(),
+                    0
+                );
+                Point fetchedPoint = new Point(
+                    absoluteSlot,
+                    byronEbBlock.getHeader().getBlockHash()
+                );
+                chainSyncAgent.confirmBlock(fetchedPoint);
+
                 chainSyncAgent.sendNextMessage();
             }
 

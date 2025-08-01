@@ -160,6 +160,13 @@ public class BlockStreamer {
                                 log.trace("Block found {}", block);
                             }
                             sink.next(block);
+
+                            Point fetchedPoint = new Point(
+                                block.getHeader().getHeaderBody().getSlot(),
+                                block.getHeader().getHeaderBody().getBlockHash()
+                            );
+                            chainSyncAgent.confirmBlock(fetchedPoint);
+
                             chainSyncAgent.sendNextMessage();
                         }
 

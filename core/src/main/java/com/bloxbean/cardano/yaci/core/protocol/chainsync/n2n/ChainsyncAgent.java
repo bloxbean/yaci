@@ -1,5 +1,7 @@
 package com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n;
 
+import com.bloxbean.cardano.yaci.core.common.GenesisConfig;
+import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.*;
@@ -15,7 +17,19 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     private Tip tip;
     private Point[] knownPoints;
 
+    /**
+     * The last confirmed block point. This point represents blocks that have been
+     * successfully processed by the application. Used for FindIntersect during
+     * reconnection to ensure no blocks are lost.
+     */
     private Point currentPoint;
+
+    /**
+     * The point of the block currently being requested but not yet confirmed.
+     * This implements a two-phase commit pattern where blocks are first requested
+     * (requestedPoint set) then confirmed (moved to currentPoint) after successful processing.
+     */
+    private Point requestedPoint;
     private long stopAt;
     private int agentNo;
     private int counter = 0;
@@ -58,10 +72,12 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
             if (currentPoint == null) {
                 if (log.isDebugEnabled())
                     log.debug("FindIntersect for point: {}", knownPoints);
+                log.info("FindIntersect for point: {}", knownPoints);
                 return new FindIntersect(knownPoints);
             } else {
                 if (log.isDebugEnabled())
                     log.debug("FindIntersect for point: {}", currentPoint);
+                log.info("FindIntersect for current point: {}", currentPoint);
                 return new FindIntersect(new Point[]{currentPoint});
             }
         } else if (intersact != null) {
@@ -108,6 +124,8 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     private void onIntersactFound(IntersectFound intersectFound) {
+        log.info("Intersect found at slot: {} - hash: {}",
+                intersectFound.getPoint().getSlot(), intersectFound.getPoint().getHash());
         getAgentListeners().stream().forEach(
                 chainSyncAgentListener -> {
                     chainSyncAgentListener.intersactFound(intersectFound.getTip(), intersectFound.getPoint());
@@ -143,17 +161,23 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
         getAgentListeners().stream().forEach(
                 chainSyncAgentListener -> {
                     chainSyncAgentListener.rollbackward(rollBackward.getTip(), rollBackward.getPoint());
-                }
-        );
+                });
     }
 
     private void onRollForward(RollForward rollForward) {
         if (rollForward.getBlockHeader() != null) { //shelley and later
-            this.currentPoint = new Point(rollForward.getBlockHeader().getHeaderBody().getSlot(), rollForward.getBlockHeader().getHeaderBody().getBlockHash());
+            this.requestedPoint = new Point(rollForward.getBlockHeader().getHeaderBody().getSlot(), rollForward.getBlockHeader().getHeaderBody().getBlockHash());
         } else if (rollForward.getByronBlockHead() != null) { //Byron Block
-            this.currentPoint = new Point(rollForward.getByronBlockHead().getConsensusData().getSlotId().getSlot(), rollForward.getByronBlockHead().getBlockHash());
-        } else if (rollForward.getByronEbHead() != null) { //Byron Epoch block. TODO -- SlotId = 0??
-            this.currentPoint = new Point(0, rollForward.getByronEbHead().getBlockHash());
+            long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(Era.Byron,
+                    rollForward.getByronBlockHead().getConsensusData().getSlotId().getEpoch(),
+                    rollForward.getByronBlockHead().getConsensusData().getSlotId().getSlot());
+            this.requestedPoint = new Point(absoluteSlot, rollForward.getByronBlockHead().getBlockHash());
+        } else if (rollForward.getByronEbHead() != null) { //Byron Epoch block.
+            long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(
+                    Era.Byron,
+                    rollForward.getByronEbHead().getConsensusData().getEpoch(),
+                    0);
+            this.requestedPoint = new Point(absoluteSlot, rollForward.getByronEbHead().getBlockHash());
         }
 
         if (counter++ % 100 == 0 || (tip.getPoint().getSlot() - currentPoint.getSlot()) < 10) {
@@ -173,7 +197,11 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
        if (rollForward.getBlockHeader() != null) { //For Shelley and later eras
             getAgentListeners().stream().forEach(
                     chainSyncAgentListener -> {
-                        chainSyncAgentListener.rollforward(rollForward.getTip(), rollForward.getBlockHeader());
+                        if (rollForward.getOriginalHeaderBytes() != null) {
+                            chainSyncAgentListener.rollforward(rollForward.getTip(), rollForward.getBlockHeader(), rollForward.getOriginalHeaderBytes());
+                        } else {
+                            chainSyncAgentListener.rollforward(rollForward.getTip(), rollForward.getBlockHeader());
+                        }
                     }
             );
         } else if(rollForward.getByronBlockHead() != null) { //For Byron main block
@@ -181,7 +209,11 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
                 log.trace("Byron Block: " + rollForward.getByronBlockHead().getConsensusData().getSlotId());
             getAgentListeners().stream().forEach(
                     chainSyncAgentListener -> {
-                        chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronBlockHead());
+                        if (rollForward.getOriginalHeaderBytes() != null) {
+                            chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronBlockHead(), rollForward.getOriginalHeaderBytes());
+                        } else {
+                            chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronBlockHead());
+                        }
                     }
             );
         } else if (rollForward.getByronEbHead() != null) { //For Byron Eb block
@@ -189,7 +221,11 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
                log.trace("Byron Eb Block: " + rollForward.getByronEbHead().getConsensusData());
            getAgentListeners().stream().forEach(
                    chainSyncAgentListener -> {
-                       chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronEbHead());
+                       if (rollForward.getOriginalHeaderBytes() != null) {
+                           chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronEbHead(), rollForward.getOriginalHeaderBytes());
+                       } else {
+                           chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronEbHead());
+                       }
                    }
            );
        }
@@ -200,14 +236,45 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
         return currenState == Done;
     }
 
+    /**
+     * Confirms that a block has been successfully processed by the application.
+     * <p>
+     * This method implements the second phase of a two-phase commit pattern:
+     * <ol>
+     *   <li>Phase 1: Block header received via RollForward → requestedPoint set</li>
+     *   <li>Phase 2: Block successfully processed → confirmBlock() called → currentPoint updated</li>
+     * </ol>
+     *
+     * <p><strong>IMPORTANT:</strong> When using ChainsyncAgent directly, you MUST call this method
+     * after successfully processing each block and before calling sendNextMessage().
+     * Failure to do so will result in duplicate block delivery on reconnection.
+     *
+     * <p>Use cases include:
+     * <ul>
+     *   <li>After successfully fetching and storing a full block body</li>
+     *   <li>After processing block headers in header-only sync</li>
+     *   <li>After any application-specific block processing is complete</li>
+     * </ul>
+     *
+     * @param confirmedPoint the point of the block that has been successfully processed
+     */
+    public void confirmBlock(Point confirmedPoint) {
+        if (requestedPoint != null && requestedPoint.equals(confirmedPoint)) {
+            this.currentPoint = confirmedPoint;
+            this.requestedPoint = null;
+        }
+    }
+
     public void reset() {
         this.currenState = Idle;
         this.counter = 0;
+        this.requestedPoint = null;
     }
 
     public void reset(Point point) {
         this.currentPoint = null;
         this.intersact = null;
         this.knownPoints = new Point[] {point};
+        this.requestedPoint = null;
     }
 }
