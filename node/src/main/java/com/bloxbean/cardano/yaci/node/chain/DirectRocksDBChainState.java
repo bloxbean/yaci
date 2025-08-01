@@ -126,7 +126,9 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 // If we successfully extracted slot and block number, update indices
                 if (slot != null && blockNumber != null) {
                     updateChainState(batch, blockHash, blockNumber, slot);
-                    log.info("Updated Metadata: slot={}, blockNumber={}", slot, blockNumber);
+                    if (log.isDebugEnabled()) {
+                        log.debug("Updated Metadata: slot={}, blockNumber={}", slot, blockNumber);
+                    }
                 }
 
                 // Write batch atomically
@@ -320,15 +322,21 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             }
 
             // Get the next block directly by block number
-            log.info("DEBUG: Looking for next block number {} after current block {}", nextBlockNumber, currentBlockNumber);
+            if (log.isDebugEnabled()) {
+                log.debug("Looking for next block number {} after current block {}", nextBlockNumber, currentBlockNumber);
+            }
             byte[] nextBlockHash = db.get(hashByNumberHandle, longToBytes(nextBlockNumber));
-            log.info("DEBUG: Hash lookup for block {} result: {}", nextBlockNumber,
-                    nextBlockHash != null ? "FOUND (" + HexUtil.encodeHexString(nextBlockHash) + ")" : "NULL");
+            if (log.isDebugEnabled()) {
+                log.debug("Hash lookup for block {} result: {}", nextBlockNumber,
+                        nextBlockHash != null ? "FOUND (" + HexUtil.encodeHexString(nextBlockHash) + ")" : "NULL");
+            }
 
             if (nextBlockHash != null) {
                 byte[] nextSlotBytes = db.get(slotByNumberHandle, longToBytes(nextBlockNumber));
-                log.info("DEBUG: Slot lookup for block {} result: {}", nextBlockNumber,
-                        nextSlotBytes != null ? "FOUND (" + bytesToLong(nextSlotBytes) + ")" : "NULL");
+                if (log.isDebugEnabled()) {
+                    log.debug("Slot lookup for block {} result: {}", nextBlockNumber,
+                            nextSlotBytes != null ? "FOUND (" + bytesToLong(nextSlotBytes) + ")" : "NULL");
+                }
 
                 if (nextSlotBytes != null) {
                     long nextSlot = bytesToLong(nextSlotBytes);
@@ -337,10 +345,14 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                              nextBlockNumber, nextSlot, nextBlock.getHash());
                     return nextBlock;
                 } else {
-                    log.warn("DEBUG: Found hash for block {} but missing slot mapping", nextBlockNumber);
+                    if (log.isDebugEnabled()) {
+                        log.debug("Found hash for block {} but missing slot mapping", nextBlockNumber);
+                    }
                 }
             } else {
-                log.warn("DEBUG: Missing hash mapping for block {}", nextBlockNumber);
+                if (log.isDebugEnabled()) {
+                    log.debug("Missing hash mapping for block {}", nextBlockNumber);
+                }
             }
 
             log.warn("Could not find next block after block number {}", currentBlockNumber);

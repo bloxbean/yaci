@@ -65,8 +65,6 @@ public class HybridNodeConfig {
                 .selectiveBodyFetchRatio(0)
                 .enableMonitoring(false)
                 .monitoringPort(8080)
-//                .syncStartSlot(96623101)
-//                .syncStartBlockHash("2b9d2ab4945d8e5f115d7b3ad992a7fc6a623de232d0d7fc06605da5bf1ad272")
                 .build();
     }
 

@@ -10,7 +10,7 @@
     </appender>
     <!-- Info Log File Appender -->
     <appender name="info-log" class="org.apache.log4j.FileAppender">
-        <param name="File" value="info.log" />
+        <param name="File" value="./logs/yaci-node.log" />
         <layout class="org.apache.log4j.PatternLayout">
             <param name="ConversionPattern" value="%-5p | %d{yyyy-MM-dd HH:mm:ss} | [%t] %C{2} (%F:%L) - %m%n" />
         </layout>
@@ -23,7 +23,7 @@
     <!-- Error Log File Appender -->
     <appender name="error-log" class="org.apache.log4j.FileAppender">
         <param name="Append" value="false" />
-        <param name="File" value="yaci_error.log" />
+        <param name="File" value="./logs/yaci-error.log" />
         <layout class="org.apache.log4j.PatternLayout">
             <param name="ConversionPattern" value="%-5p | %d{yyyy-MM-dd HH:mm:ss} | [%t] %C{2} (%F:%L) - %m%n" />
         </layout>
@@ -34,7 +34,7 @@
         </filter>
     </appender>
     <logger name="com.bloxbean.cardano">
-<!--        <appender-ref ref="info-log" />-->
+        <appender-ref ref="info-log" />
         <appender-ref ref="error-log" />
     </logger>
     <root>

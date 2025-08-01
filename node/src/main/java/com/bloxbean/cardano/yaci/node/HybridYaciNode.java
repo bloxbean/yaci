@@ -172,7 +172,9 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
                 }
 
             } catch (Exception e) {
-                log.debug("Error in selective body fetch strategy, defaulting to fetch: {}", e.getMessage());
+                if (log.isDebugEnabled()) {
+                    log.debug("Error in selective body fetch strategy, defaulting to fetch: {}", e.getMessage());
+                }
                 return true; // Default to fetching when in doubt
             }
         };
@@ -287,14 +289,6 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
             log.info("Starting pipelined sync from point: {}", startPoint);
 
             // Find remote tip to understand sync scope
-            // TEMPORARILY DISABLED: TipFinder with Point.ORIGIN might cause rollbacks
-//             if (remoteTip == null) {
-//                 TipFinder tipFinder = new TipFinder(remoteCardanoHost, remoteCardanoPort,
-//                         Point.ORIGIN, protocolMagic);
-//                 remoteTip = tipFinder.find().block(Duration.ofSeconds(5));
-//                 log.info("Remote tip: slot={}, block={}",
-//                     remoteTip.getPoint().getSlot(), remoteTip.getBlock());
-//             }
 
             // Create PeerClient
             if (peerClient == null) {
@@ -404,17 +398,6 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
             log.info("No local tip, using bulk sync to get initial blockchain data");
             return true;
         }
-//
-//        // Estimate if local tip is old by comparing with current time
-//        // Preprod has 1 slot per second, so we can estimate remote tip slot
-//        long currentTimeSeconds = System.currentTimeMillis() / 1000;
-//        // Preprod epoch started around 2022-02-01, estimate slots from then
-//        long estimatedCurrentSlot = currentTimeSeconds - 1643673600; // Rough estimate
-//
-//        long slotDifference = Math.max(0, estimatedCurrentSlot - localTip.getSlot());
-//
-//        log.info("Local tip slot: {}, estimated current slot: {}, difference: {} slots",
-//                localTip.getSlot(), estimatedCurrentSlot, slotDifference);
 
         long slotDifference = chainTip.getSlot() - localTip.getSlot();
 
@@ -746,8 +729,10 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
         lastProcessedSlot = block.getHeader().getHeaderBody().getSlot();
         long blockNumber = block.getHeader().getHeaderBody().getBlockNumber();
 
-        log.info("Successfully processed block: era={}, blockNumber={}, slot={}",
-            era, blockNumber, lastProcessedSlot);
+        if (log.isDebugEnabled()) {
+            log.debug("Successfully processed block: era={}, blockNumber={}, slot={}",
+                era, blockNumber, lastProcessedSlot);
+        }
 
         // Check if we've caught up to the remote tip (BlockFetch complete)
         checkSyncProgress();
@@ -765,7 +750,6 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
             }
         }
 
-//        log.info("ChainSync: Block #{} at slot {} ({})", blockNumber, lastProcessedSlot, era);
         // Enhanced logging for pipelined mode
         if (isPipelinedMode) {
             if (isInitialSyncComplete) {
@@ -923,7 +907,9 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
         try {
             // Skip validation for genesis block
             if (currentBlockNumber == 0 || prevBlockHash == null || prevBlockHash.isEmpty()) {
+                if (log.isDebugEnabled()) {
                 log.debug("Skipping chain continuity check for genesis block: {}", currentBlockNumber);
+            }
                 return;
             }
 
@@ -949,8 +935,10 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
                 System.exit(1);
             }
 
-            log.debug("Chain continuity validated for block #{}: previous block {} exists",
-                     currentBlockNumber, prevBlockHash);
+            if (log.isDebugEnabled()) {
+                log.debug("Chain continuity validated for block #{}: previous block {} exists",
+                         currentBlockNumber, prevBlockHash);
+            }
 
         } catch (Exception e) {
             log.error("Error validating chain continuity for block #{}: {}", currentBlockNumber, e.getMessage());
@@ -973,14 +961,6 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
             // Store complete block
             chainState.storeBlock(blockHash, blockNumber, slot, blockCbor);
 
-            // Store header separately if it wasn't already stored via pipelined ChainSync
-            /*if (chainState.getBlockHeader(blockHash) == null) {
-                byte[] headerCbor = extractHeaderFromBlock(blockCbor);
-                if (headerCbor != null) {
-                    chainState.storeBlockHeader(blockHash, headerCbor);
-                    log.debug("Extracted and stored Byron header from full block: slot={}", slot);
-                }
-            }*/
         } catch (Exception e) {
             log.error("Error storing Byron block", e);
             throw new RuntimeException("Failed to store Byron block " + blockNumber, e);
@@ -1001,14 +981,6 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
             // Store complete block
             chainState.storeBlock(blockHash, blockNumber, slot, blockCbor);
 
-            // Store header separately if it wasn't already stored via pipelined ChainSync
-            /*if (chainState.getBlockHeader(blockHash) == null) {
-                byte[] headerCbor = extractHeaderFromBlock(blockCbor);
-                if (headerCbor != null) {
-                    chainState.storeBlockHeader(blockHash, headerCbor);
-                    log.debug("Extracted and stored Byron EB header from full block: slot={}", slot);
-                }
-            }*/
         } catch (Exception e) {
             log.error("Error storing Byron EB block", e);
             throw new RuntimeException("Failed to store Byron EB block " + blockNumber, e);
@@ -1029,14 +1001,6 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
             // Store complete block
             chainState.storeBlock(blockHash, blockNumber, slot, blockCbor);
 
-            // Store header separately if it wasn't already stored via pipelined ChainSync
-            /*if (chainState.getBlockHeader(blockHash) == null) {
-                byte[] headerCbor = extractHeaderFromBlock(blockCbor);
-                if (headerCbor != null) {
-                    chainState.storeBlockHeader(blockHash, headerCbor);
-                    log.debug("Extracted and stored Shelley+ header from full block: slot={}", slot);
-                }
-            }*/
         } catch (Exception e) {
             log.error("Error storing Shelley+ block", e);
             throw new RuntimeException("Failed to store Shelley+ block " + blockNumber, e);
@@ -1228,9 +1192,11 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
                     originalHeaderBytes
                 );
 
-                log.info("Successfully stored Shelley+ block header: slot={}, hash={}",
-                    blockHeader.getHeaderBody().getSlot(),
-                    blockHeader.getHeaderBody().getBlockHash());
+                if (log.isDebugEnabled()) {
+                    log.debug("Successfully stored Shelley+ block header: slot={}, hash={}",
+                        blockHeader.getHeaderBody().getSlot(),
+                        blockHeader.getHeaderBody().getBlockHash());
+                }
 
                 // Log header progress in pipelined mode
                 if (isPipelinedMode) {
@@ -1246,9 +1212,11 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
                     }
                 }
 
-                log.debug("Stored Shelley+ header: slot={}, hash={}",
-                    blockHeader.getHeaderBody().getSlot(),
-                    blockHeader.getHeaderBody().getBlockHash());
+                if (log.isDebugEnabled()) {
+                    log.debug("Stored Shelley+ header: slot={}, hash={}",
+                        blockHeader.getHeaderBody().getSlot(),
+                        blockHeader.getHeaderBody().getBlockHash());
+                }
 
             } catch (Exception e) {
                 log.error("Error storing Shelley+ block header from original bytes", e);
@@ -1290,9 +1258,11 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
                     }
                 }
 
-                log.debug("Stored Byron header: slot={}, hash={}",
-                    byronBlockHead.getConsensusData().getAbsoluteSlot(),
-                    byronBlockHead.getBlockHash());
+                if (log.isDebugEnabled()) {
+                    log.debug("Stored Byron header: slot={}, hash={}",
+                        byronBlockHead.getConsensusData().getAbsoluteSlot(),
+                        byronBlockHead.getBlockHash());
+                }
 
             } catch (Exception e) {
                 log.error("Error storing Byron block header from original bytes", e);
@@ -1328,9 +1298,11 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
                     }
                 }
 
-                log.debug("Stored Byron EB header: slot={}, hash={}",
-                    byronEbHead.getConsensusData().getAbsoluteSlot(),
-                    byronEbHead.getBlockHash());
+                if (log.isDebugEnabled()) {
+                    log.debug("Stored Byron EB header: slot={}, hash={}",
+                        byronEbHead.getConsensusData().getAbsoluteSlot(),
+                        byronEbHead.getBlockHash());
+                }
 
             } catch (Exception e) {
                 log.error("Error storing Byron EB block header from original bytes", e);
