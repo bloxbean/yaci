@@ -17,7 +17,7 @@ public class ChainStateDiagnosticTest {
 
     @Test
     void diagnoseChainState() {
-        String chainstatePath = "/Users/satya/work/bloxbean/yaci/chainstate";
+        String chainstatePath = "./chainstate";
         log.info("=== ChainState Diagnostic Analysis ===");
 
         DirectRocksDBChainState chainState = new DirectRocksDBChainState(chainstatePath);

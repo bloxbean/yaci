@@ -226,8 +226,8 @@ public class ServerIntegrationTest {
         private final byte[] block3HeaderBytes = TestBlockHeaderGenerator.generateShelleyBlockHeader(3, 3000, block2Hash, block3Hash);
 
         @Override
-        public void storeBlock(byte[] blockHash, long blockNumber, long slot, byte[] block) {
-            // Not needed for this test
+        public void storeBlock(byte[] blockHash, Long blockNumber, Long slot, byte[] block) {
+
         }
 
         @Override
@@ -236,8 +236,8 @@ public class ServerIntegrationTest {
         }
 
         @Override
-        public void storeBlockHeader(byte[] blockHash, byte[] blockHeader) {
-            // Not needed for this test
+        public void storeBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
+
         }
 
         @Override
@@ -254,12 +254,12 @@ public class ServerIntegrationTest {
         }
 
         @Override
-        public byte[] getBlockByNumber(long blockNumber) {
-            return null; // Not needed for this test
+        public byte[] getBlockByNumber(Long blockNumber) {
+            return new byte[0];
         }
 
         @Override
-        public byte[] getBlockHeaderByNumber(long blockNumber) {
+        public byte[] getBlockHeaderByNumber(Long blockNumber) {
             if (blockNumber == 1) {
                 return block1HeaderBytes;
             } else if (blockNumber == 2) {
@@ -309,7 +309,7 @@ public class ServerIntegrationTest {
         }
 
         @Override
-        public Long getBlockNumberBySlot(long slot) {
+        public Long getBlockNumberBySlot(Long slot) {
             if (slot == 1000) return 1L;
             if (slot == 2000) return 2L;
             if (slot == 3000) return 3L;
@@ -317,7 +317,7 @@ public class ServerIntegrationTest {
         }
 
         @Override
-        public void rollbackTo(long slot) {
+        public void rollbackTo(Long slot) {
             // Not needed for this test
         }
 

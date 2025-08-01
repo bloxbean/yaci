@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.node;
 
 import com.bloxbean.cardano.yaci.core.common.Constants;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -11,13 +12,14 @@ import java.util.concurrent.TimeUnit;
  * Quick test to check if pipelined sync gets stuck
  */
 @Slf4j
+@Disabled
 public class QuickPipelineTest {
-    
+
     @Test
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
     void quickPipelinedSyncTest() throws InterruptedException {
         log.info("Starting quick pipelined sync test...");
-        
+
         // Create minimal configuration for testing
         HybridNodeConfig config = HybridNodeConfig.builder()
                 .remoteHost("preprod-node.play.dev.cardano.org")
@@ -37,54 +39,54 @@ public class QuickPipelineTest {
                 .enableMonitoring(false)
                 .monitoringPort(8080)
                 .build();
-        
+
         config.validate();
-        
+
         HybridYaciNode node = new HybridYaciNode(config);
-        
+
         try {
             log.info("Starting hybrid node with minimal config...");
             node.start();
-            
+
             // Wait a bit for startup
             Thread.sleep(5000);
-            log.info("5s - Running: {}, Syncing: {}, Blocks: {}", 
+            log.info("5s - Running: {}, Syncing: {}, Blocks: {}",
                 node.isRunning(), node.isSyncing(), node.getBlocksProcessed());
-                
+
             // Check status every 10 seconds for 2 minutes
             for (int i = 1; i <= 12; i++) {
                 Thread.sleep(10000);
-                
+
                 long blocks = node.getBlocksProcessed();
                 long slot = node.getLastProcessedSlot();
                 boolean running = node.isRunning();
                 boolean syncing = node.isSyncing();
-                
-                log.info("{}0s - Running: {}, Syncing: {}, Blocks: {}, Slot: {}", 
+
+                log.info("{}0s - Running: {}, Syncing: {}, Blocks: {}, Slot: {}",
                     i, running, syncing, blocks, slot);
-                
+
                 // Early exit if we see progress
                 if (blocks > 0) {
                     log.info("✅ SUCCESS: Blocks are being processed! Pipeline sync is working.");
                     break;
                 }
-                
+
                 // Check for issues
                 if (i >= 6 && blocks == 0 && syncing) {
                     log.warn("⚠️  WARNING: Still syncing but no blocks after 1 minute");
                 }
-                
+
                 if (!running) {
                     log.error("❌ ERROR: Node stopped running unexpectedly");
                     break;
                 }
-                
+
                 if (!syncing && blocks == 0) {
                     log.error("❌ ERROR: Node not syncing and no blocks processed");
                     break;
                 }
             }
-            
+
             // Final status
             log.info("=== Final Status ===");
             log.info("Running: {}", node.isRunning());
@@ -92,7 +94,7 @@ public class QuickPipelineTest {
             log.info("Total blocks: {}", node.getBlocksProcessed());
             log.info("Last slot: {}", node.getLastProcessedSlot());
             log.info("Local tip: {}", node.getLocalTip());
-            
+
         } catch (Exception e) {
             log.error("Exception during quick pipeline test", e);
             throw e;

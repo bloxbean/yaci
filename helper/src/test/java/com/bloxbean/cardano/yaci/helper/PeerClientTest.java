@@ -10,6 +10,8 @@ import com.bloxbean.cardano.yaci.helper.model.Transaction;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 class PeerClientTest {
 
@@ -19,6 +21,7 @@ class PeerClientTest {
                 Constants.PREVIEW_PUBLIC_RELAY_PORT,
                 Constants.PREPROD_PROTOCOL_MAGIC, Constants.WELL_KNOWN_PREPROD_POINT);
 
+        var countDownLatch = new CountDownLatch(2);
         peerClient.connect(new BlockChainDataListener() {
             @Override
             public void onRollback(Point point) {
@@ -28,6 +31,7 @@ class PeerClientTest {
             @Override
             public void onBlock(Era era, Block block, List<Transaction> transactions) {
                 System.out.println("Peerclient.block : " + block.getHeader().getHeaderBody().getBlockNumber());
+                countDownLatch.countDown();
             }
 
             public void intersactFound(Tip tip, Point point) {
@@ -38,8 +42,6 @@ class PeerClientTest {
 
         peerClient.startSync(new Point(96734565, "26972da27366f15f86fa6844c257ccce117596e839cabad0372390047e71519c"));
 
-        while (true) {
-            Thread.sleep(10000);
-        }
+        countDownLatch.await(3, TimeUnit.SECONDS);
     }
 }

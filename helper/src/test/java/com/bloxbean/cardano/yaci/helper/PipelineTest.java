@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
@@ -26,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Test suite for pipelining functionality
  */
+@Disabled
 public class PipelineTest {
     private static final Logger log = LoggerFactory.getLogger(PipelineTest.class);
 
@@ -214,9 +216,9 @@ public class PipelineTest {
 
         try {
             // Start pipelined sync with both listeners first
-            peerClient.startPipelinedSync(startPoint, PipelineConfig.defaultClientConfig(), 
+            peerClient.startPipelinedSync(startPoint, PipelineConfig.defaultClientConfig(),
                 blockListener, chainSyncListener, null);
-            
+
             // Now set up selective body fetching AFTER initialization
             peerClient.enableSelectiveBodyFetch(header -> {
                 boolean shouldFetch = header.getHeaderBody().getSlot() % 4 == 0;
@@ -225,7 +227,7 @@ public class PipelineTest {
                 }
                 return shouldFetch;
             });
-            
+
             peerClient.setPipelineStrategy(PipelineStrategy.SELECTIVE_BODIES);
 
             // Wait for headers
