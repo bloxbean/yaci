@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.core.network.NodeClient;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.N2NVersionData;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
@@ -56,10 +57,10 @@ public class PeerDiscovery extends ReactiveFetcher<List<PeerAddress>> {
 
                 // Check if peer sharing is supported
                 if (handshakeAgent.getProtocolVersion() != null &&
-                    handshakeAgent.getProtocolVersion().getVersionData() instanceof com.bloxbean.cardano.yaci.core.protocol.handshake.messages.N2NVersionData) {
+                    handshakeAgent.getProtocolVersion().getVersionData() instanceof N2NVersionData) {
 
-                    com.bloxbean.cardano.yaci.core.protocol.handshake.messages.N2NVersionData versionData =
-                        (com.bloxbean.cardano.yaci.core.protocol.handshake.messages.N2NVersionData) handshakeAgent.getProtocolVersion().getVersionData();
+                    N2NVersionData versionData =
+                        (N2NVersionData) handshakeAgent.getProtocolVersion().getVersionData();
 
                     if (log.isDebugEnabled()) {
                         log.debug("Handshake completed with {}:{}", host, port);
