@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.protocol.peersharing.messages.PeerAddress;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 
@@ -13,8 +14,9 @@ import static org.junit.jupiter.api.Assertions.*;
 public class PeerDiscoveryIT extends BaseTest {
 
     @Test
-    public void testPeerDiscoveryPreprod() {
-        PeerDiscovery peerDiscovery = new PeerDiscovery("localhost", 32000, Constants.PREPROD_PROTOCOL_MAGIC, 10);
+    @Disabled
+    public void testPeerDiscoveryPreprodLocalHost() {
+        PeerDiscovery peerDiscovery = new PeerDiscovery("localhost", 32000, Constants.PREPROD_PROTOCOL_MAGIC, 100);
 
         try {
             Mono<List<PeerAddress>> peersMono = peerDiscovery.discover();
