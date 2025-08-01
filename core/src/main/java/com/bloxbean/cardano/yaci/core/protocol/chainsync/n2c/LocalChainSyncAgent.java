@@ -148,27 +148,6 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     }
 
     private void onRollForward(LocalRollForward rollForward) {
-        if (rollForward.getBlock() != null) { //For Byron era, this value is null. Will be fixed later
-            this.currentPoint = new Point(rollForward.getBlock().getHeader().getHeaderBody().getSlot(), rollForward.getBlock().getHeader().getHeaderBody().getBlockHash());
-        } else if (rollForward.getByronBlock() != null) {
-            this.currentPoint = new Point(rollForward.getByronBlock().getHeader().getConsensusData().getSlotId().getSlot(), rollForward.getByronBlock().getHeader().getBlockHash());
-        } else if (rollForward.getByronEbBlock() != null) {
-            this.currentPoint = new Point(0, rollForward.getByronEbBlock().getHeader().getBlockHash()); //TODO -- SlotId == 0 for ByronEbBlock ??
-        }
-
-        if (counter++ % 100 == 0 || (tip.getPoint().getSlot() - currentPoint.getSlot()) < 10) {
-
-            if (log.isDebugEnabled()) {
-                log.debug("**********************************************************");
-                log.debug(String.valueOf(currentPoint));
-                log.debug("[Agent No: " + agentNo + "] : " + rollForward);
-                log.debug("**********************************************************");
-            }
-
-            if (stopAt != 0 && rollForward.getBlock().getHeader().getHeaderBody().getSlot() >= stopAt) {
-                this.currenState = HandshkeState.Done;
-            }
-        }
 
         if (rollForward.getBlock() != null) { //For shelley and later era
             getAgentListeners().stream().forEach(
@@ -192,6 +171,28 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
                         chainSyncAgentListener.rollforwardByronEra(rollForward.getTip(), rollForward.getByronEbBlock());
                     }
             );
+        }
+
+        if (rollForward.getBlock() != null) { //For Byron era, this value is null. Will be fixed later
+            this.currentPoint = new Point(rollForward.getBlock().getHeader().getHeaderBody().getSlot(), rollForward.getBlock().getHeader().getHeaderBody().getBlockHash());
+        } else if (rollForward.getByronBlock() != null) {
+            this.currentPoint = new Point(rollForward.getByronBlock().getHeader().getConsensusData().getSlotId().getSlot(), rollForward.getByronBlock().getHeader().getBlockHash());
+        } else if (rollForward.getByronEbBlock() != null) {
+            this.currentPoint = new Point(0, rollForward.getByronEbBlock().getHeader().getBlockHash()); //TODO -- SlotId == 0 for ByronEbBlock ??
+        }
+
+        if (counter++ % 100 == 0 || (tip.getPoint().getSlot() - currentPoint.getSlot()) < 10) {
+
+            if (log.isDebugEnabled()) {
+                log.debug("**********************************************************");
+                log.debug(String.valueOf(currentPoint));
+                log.debug("[Agent No: " + agentNo + "] : " + rollForward);
+                log.debug("**********************************************************");
+            }
+
+            if (stopAt != 0 && rollForward.getBlock().getHeader().getHeaderBody().getSlot() >= stopAt) {
+                this.currenState = HandshkeState.Done;
+            }
         }
     }
 

@@ -53,7 +53,7 @@ public class HybridNodeConfig {
                 .protocolMagic(Constants.PREPROD_PROTOCOL_MAGIC)
                 .serverPort(13337)
                 .enableServer(true)
-                .enableClient(false)
+                .enableClient(true)
                 .useRocksDB(true)
                 .rocksDBPath("./chainstate")
                 .fullSyncThreshold(1800) // 30 minutes worth of slots

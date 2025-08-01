@@ -44,7 +44,7 @@ public class KeepAliveServerAgent extends Agent<KeepAliveListener> {
         if (pendingResponse != null) {
             Message response = pendingResponse;
             pendingResponse = null; // Clear after returning
-            
+
             // Don't manually set state - let Agent.sendRequest handle it
             return response;
         }
@@ -66,16 +66,15 @@ public class KeepAliveServerAgent extends Agent<KeepAliveListener> {
     }
 
     private void handleKeepAlive(MsgKeepAlive keepAlive) {
-        log.debug("Received KeepAlive message with cookie: {}", keepAlive.getCookie());
-
-        // Transition to Client state so server has agency to send response
-//        this.currenState = KeepAliveState.Client;
+        if (log.isDebugEnabled())
+            log.debug("Received KeepAlive message with cookie: {}", keepAlive.getCookie());
 
         // Echo back the same cookie value
         MsgKeepAliveResponse response = new MsgKeepAliveResponse(keepAlive.getCookie());
         this.pendingResponse = response;
 
-        log.debug("Sending KeepAliveResponse with cookie: {}", keepAlive.getCookie());
+        if (log.isDebugEnabled())
+            log.info("Sending KeepAliveResponse with cookie: {}", keepAlive.getCookie());
 
         // Notify listeners
         getAgentListeners().forEach(listener ->

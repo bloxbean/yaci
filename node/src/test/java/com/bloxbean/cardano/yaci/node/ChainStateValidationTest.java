@@ -83,12 +83,12 @@ public class ChainStateValidationTest {
         byte[] blockCbor2 = generateMockBlockCbor(1001, 101);
 
         // Store headers
-        chainState.storeBlockHeader(blockHash1, headerCbor1);
-        chainState.storeBlockHeader(blockHash2, headerCbor2);
+        chainState.storeBlockHeader(blockHash1, 1L, 1L, headerCbor1);
+        chainState.storeBlockHeader(blockHash2, 2L, 2L, headerCbor2);
 
         // Store complete blocks
-        chainState.storeBlock(blockHash1, 100, 1000, blockCbor1);
-        chainState.storeBlock(blockHash2, 101, 1001, blockCbor2);
+        chainState.storeBlock(blockHash1, 100L, 1000L, blockCbor1);
+        chainState.storeBlock(blockHash2, 101L, 1001L, blockCbor2);
 
         // Verify headers can be retrieved
         byte[] retrievedHeader1 = chainState.getBlockHeader(blockHash1);
@@ -120,7 +120,7 @@ public class ChainStateValidationTest {
             byte[] headerCbor = generateMockHeaderCbor(2000, 200);
 
             // Store header
-            chainState.storeBlockHeader(blockHash, headerCbor);
+            chainState.storeBlockHeader(blockHash, 1L, 1L, headerCbor);
 
             // Retrieve header
             byte[] retrievedHeader = chainState.getBlockHeader(blockHash);
@@ -168,7 +168,7 @@ public class ChainStateValidationTest {
             byte[] blockHash = generateRandomHash();
             byte[] blockCbor = generateMockBlockCbor(1000 + i, 100 + i);
 
-            chainState.storeBlock(blockHash, 100 + i, 1000 + i, blockCbor);
+            chainState.storeBlock(blockHash, 100L + i, 1000L + i, blockCbor);
         }
 
         // Check tip
@@ -189,8 +189,8 @@ public class ChainStateValidationTest {
         byte[] headerCbor = generateMockHeaderCbor(3000, 300);
         byte[] blockCbor = generateMockBlockCbor(3000, 300);
 
-        chainState.storeBlockHeader(blockHash, headerCbor);
-        chainState.storeBlock(blockHash, 300, 3000, blockCbor);
+        chainState.storeBlockHeader(blockHash, 1L, 1L, headerCbor);
+        chainState.storeBlock(blockHash, 300L, 3000L, blockCbor);
 
         // Get tip before restart
         ChainTip tipBeforeRestart = chainState.getTip();

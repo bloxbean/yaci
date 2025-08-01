@@ -2,9 +2,11 @@ package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
 import com.bloxbean.cardano.yaci.core.common.Constants;
+import com.bloxbean.cardano.yaci.core.common.GenesisConfig;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
+import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronBlockHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
@@ -306,6 +308,12 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
         if (legacyMode) {
             // Original behavior - immediately request next header
+            Point fetchedPoint = new Point(
+                    block.getHeader().getHeaderBody().getSlot(),
+                    block.getHeader().getHeaderBody().getBlockHash()
+            );
+            chainSyncAgent.confirmBlock(fetchedPoint);
+
             chainSyncAgent.sendNextMessage();
         } else {
             // Pipeline mode - process in background
@@ -317,6 +325,17 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         pipelineMetrics.recordBodyReceived(byronBlock.getCbor() != null ? byronBlock.getCbor().length() : 0);
 
         if (legacyMode) {
+            long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(Era.Byron,
+                    byronBlock.getHeader().getConsensusData().getSlotId().getEpoch(),
+                    byronBlock.getHeader().getConsensusData().getSlotId().getSlot());
+
+            Point fetchedPoint = new Point(
+                    absoluteSlot,
+                    byronBlock.getHeader().getBlockHash()
+            );
+
+            chainSyncAgent.confirmBlock(fetchedPoint);
+
             chainSyncAgent.sendNextMessage();
         } else {
             processBatchCompleted();
@@ -327,6 +346,17 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         pipelineMetrics.recordBodyReceived(byronEbBlock.getCbor() != null ? byronEbBlock.getCbor().length() : 0);
 
         if (legacyMode) {
+            long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(
+                    Era.Byron,
+                    byronEbBlock.getHeader().getConsensusData().getEpoch(),
+                    0
+            );
+            Point fetchedPoint = new Point(
+                    absoluteSlot,
+                    byronEbBlock.getHeader().getBlockHash()
+            );
+            chainSyncAgent.confirmBlock(fetchedPoint);
+
             chainSyncAgent.sendNextMessage();
         } else {
             processBatchCompleted();

@@ -21,7 +21,7 @@ public class InMemoryChainState implements ChainState {
     private ChainTip tip;
 
     @Override
-    public void storeBlock(byte[] blockHash, long blockNumber, long slot, byte[] block) {
+    public void storeBlock(byte[] blockHash, Long blockNumber, Long slot, byte[] block) {
         blockStore.put(blockHash, block);
         blockHeaderStore.put(blockHash, block);
         blockHashByNumber.put(blockNumber, blockHash);
@@ -35,7 +35,7 @@ public class InMemoryChainState implements ChainState {
     }
 
     @Override
-    public void storeBlockHeader(byte[] blockHash, byte[] blockHeader) {
+    public void storeBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
         blockHeaderStore.put(blockHash, blockHeader);
     }
 
@@ -45,7 +45,7 @@ public class InMemoryChainState implements ChainState {
     }
 
     @Override
-    public byte[] getBlockByNumber(long number) {
+    public byte[] getBlockByNumber(Long number) {
         byte[] blockHash = blockHashByNumber.get(number);
         if (blockHash != null) {
             return blockStore.get(blockHash);
@@ -54,7 +54,7 @@ public class InMemoryChainState implements ChainState {
     }
 
     @Override
-    public void rollbackTo(long slot) {
+    public void rollbackTo(Long slot) {
         // Get all block numbers greater than the provided slot
         blockNumberBySlot.tailMap(slot, false).forEach((blockSlot, blockNumber) -> {
             byte[] blockHash = blockHashByNumber.get(blockNumber);
@@ -73,31 +73,31 @@ public class InMemoryChainState implements ChainState {
     public ChainTip getTip() {
         return tip;
     }
-    
+
     @Override
-    public byte[] getBlockHeaderByNumber(long blockNumber) {
+    public byte[] getBlockHeaderByNumber(Long blockNumber) {
         byte[] blockHash = blockHashByNumber.get(blockNumber);
         if (blockHash != null) {
             return blockHeaderStore.get(blockHash);
         }
         return null;
     }
-    
+
     @Override
     public Point findNextBlock(Point currentPoint) {
         if (currentPoint == null) {
             return null;
         }
-        
+
         // Special case: if asking for next block after Point.ORIGIN, return our first block
         if (currentPoint.getSlot() == 0 && currentPoint.getHash() == null) {
             return getFirstBlock();
         }
-        
+
         try {
             // Find the current block's number
             Long currentBlockNumber = null;
-            
+
             if (currentPoint.getHash() != null) {
                 byte[] currentBlockHash = HexUtil.decodeHexString(currentPoint.getHash());
                 // Find block number by scanning through our stored blocks
@@ -108,17 +108,17 @@ public class InMemoryChainState implements ChainState {
                     }
                 }
             }
-            
+
             if (currentBlockNumber == null) {
                 // Try to find by slot
                 currentBlockNumber = blockNumberBySlot.get(currentPoint.getSlot());
             }
-            
+
             if (currentBlockNumber != null) {
                 // Get the next block
                 long nextBlockNumber = currentBlockNumber + 1;
                 byte[] nextBlockHash = blockHashByNumber.get(nextBlockNumber);
-                
+
                 if (nextBlockHash != null) {
                     // Find the slot for this block
                     Long nextSlot = null;
@@ -128,7 +128,7 @@ public class InMemoryChainState implements ChainState {
                             break;
                         }
                     }
-                    
+
                     if (nextSlot != null) {
                         return new Point(nextSlot, HexUtil.encodeHexString(nextBlockHash));
                     }
@@ -138,10 +138,10 @@ public class InMemoryChainState implements ChainState {
             // Log error and return null
             System.err.println("Error finding next block: " + e.getMessage());
         }
-        
+
         return null;
     }
-    
+
     /**
      * Find the first (earliest) block in our chain
      */
@@ -149,17 +149,17 @@ public class InMemoryChainState implements ChainState {
         if (blockHashByNumber.isEmpty()) {
             return null;
         }
-        
+
         try {
             // Find the minimum block number
             long minBlockNumber = blockHashByNumber.keySet().stream()
                     .mapToLong(Long::longValue)
                     .min()
                     .orElse(-1);
-            
+
             if (minBlockNumber >= 0) {
                 byte[] firstBlockHash = blockHashByNumber.get(minBlockNumber);
-                
+
                 // Find the slot for this block
                 Long firstSlot = null;
                 for (Map.Entry<Long, Long> entry : blockNumberBySlot.entrySet()) {
@@ -168,7 +168,7 @@ public class InMemoryChainState implements ChainState {
                         break;
                     }
                 }
-                
+
                 if (firstBlockHash != null && firstSlot != null) {
                     return new Point(firstSlot, HexUtil.encodeHexString(firstBlockHash));
                 }
@@ -176,18 +176,18 @@ public class InMemoryChainState implements ChainState {
         } catch (Exception e) {
             System.err.println("Error finding first block: " + e.getMessage());
         }
-        
+
         return null;
     }
-    
+
     @Override
     public List<Point> findBlocksInRange(Point from, Point to) {
         List<Point> blocks = new ArrayList<>();
-        
+
         if (from == null || to == null) {
             return blocks;
         }
-        
+
         try {
             // Special case: if from is Point.ORIGIN, start from our first block
             Point startPoint = from;
@@ -197,19 +197,19 @@ public class InMemoryChainState implements ChainState {
                     return blocks; // No blocks in our chain
                 }
             }
-            
+
             // Get the block numbers for start and end points
             Long startBlockNumber = getBlockNumberForPoint(startPoint);
             Long endBlockNumber = getBlockNumberForPoint(to);
-            
+
             if (startBlockNumber == null || endBlockNumber == null) {
                 return blocks; // Can't find block numbers for the points
             }
-            
+
             // Ensure we traverse in the correct direction
             long minBlockNumber = Math.min(startBlockNumber, endBlockNumber);
             long maxBlockNumber = Math.max(startBlockNumber, endBlockNumber);
-            
+
             // Collect all blocks in the range
             for (long blockNum = minBlockNumber; blockNum <= maxBlockNumber; blockNum++) {
                 byte[] blockHash = blockHashByNumber.get(blockNum);
@@ -222,20 +222,20 @@ public class InMemoryChainState implements ChainState {
                             break;
                         }
                     }
-                    
+
                     if (slot != null) {
                         blocks.add(new Point(slot, HexUtil.encodeHexString(blockHash)));
                     }
                 }
             }
-            
+
         } catch (Exception e) {
             System.err.println("Error finding blocks in range: " + e.getMessage());
         }
-        
+
         return blocks;
     }
-    
+
     /**
      * Helper method to get block number for a given point
      */
@@ -243,7 +243,7 @@ public class InMemoryChainState implements ChainState {
         if (point == null) {
             return null;
         }
-        
+
         // Try to find by hash first
         if (point.getHash() != null) {
             try {
@@ -257,28 +257,28 @@ public class InMemoryChainState implements ChainState {
                 // Fall through to slot-based lookup
             }
         }
-        
+
         // Try to find by slot
         return blockNumberBySlot.get(point.getSlot());
     }
-    
+
     @Override
     public boolean hasPoint(Point point) {
         if (point == null) {
             return false;
         }
-        
+
         // Handle genesis point (Point.ORIGIN with slot=0, hash=null)
         if (point.getSlot() == 0 && point.getHash() == null) {
             // Genesis point is always considered valid if we have any blocks
             return tip != null;
         }
-        
+
         // Handle normal points with hash
         if (point.getHash() == null) {
             return false;
         }
-        
+
         try {
             byte[] blockHash = HexUtil.decodeHexString(point.getHash());
             return blockStore.containsKey(blockHash) || blockHeaderStore.containsKey(blockHash);
@@ -286,9 +286,9 @@ public class InMemoryChainState implements ChainState {
             return false;
         }
     }
-    
+
     @Override
-    public Long getBlockNumberBySlot(long slot) {
+    public Long getBlockNumberBySlot(Long slot) {
         return blockNumberBySlot.get(slot);
     }
 }

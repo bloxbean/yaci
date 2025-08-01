@@ -7,6 +7,8 @@ import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.Segment;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.timeout.IdleState;
+import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -39,19 +41,27 @@ public class MiniProtoServerInboundHandler extends SimpleChannelInboundHandler<S
                 log.debug("Routing message for protocol {} to agents", segment.getProtocol());
                 boolean messageHandled = false;
                 for (Agent agent : session.getAgents()) {
-                    log.debug("Checking agent - protocolId: {}, isDone: {}, matches: {}",
+                    if (log.isDebugEnabled())
+                        log.debug("Checking agent - protocolId: {}, isDone: {}, matches: {}",
                              agent.getProtocolId(), agent.isDone(), agent.getProtocolId() == segment.getProtocol());
                     if (!agent.isDone() && agent.getProtocolId() == segment.getProtocol()) {
-                        log.debug("Message matched agent with protocol {}", agent.getProtocolId());
+                        if (log.isDebugEnabled())
+                            log.debug("Message matched agent with protocol {}", agent.getProtocolId());
                         Message message = agent.deserializeResponse(segment.getPayload());
-                        log.info("Deserialized message: {}", message != null ? message.getClass().getSimpleName() : "null");
+                        if (log.isDebugEnabled())
+                            log.info("Deserialized message: {}", message != null ? message.getClass().getSimpleName() : "null");
                         agent.receiveResponse(message);
 
+                        // **IMPORTANT**: No while loop here. Send only one message.
+                        // The channelWritabilityChanged handler will trigger subsequent messages for streaming.
                         if (agent.hasAgency()) {
-                            log.info("Agent has agency, sending next message: protocol id: {}", agent.getProtocolId());
+                            if (log.isDebugEnabled()) {
+                                log.debug("Agent has agency, sending one message for protocol id: {}", agent.getProtocolId());
+                            }
                             agent.sendNextMessage();
                         } else {
-                            log.info("Agent does not have agency for protocol {}", agent.getProtocolId());
+                            if (log.isTraceEnabled())
+                                log.trace("Agent does not have agency for protocol {}", agent.getProtocolId());
                         }
                         messageHandled = true;
                         break;
@@ -77,12 +87,35 @@ public class MiniProtoServerInboundHandler extends SimpleChannelInboundHandler<S
     }
 
     @Override
+    public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
+        for (Agent agent : session.getAgents()) {
+            agent.onChannelWritabilityChanged(ctx.channel());
+        }
+        super.channelWritabilityChanged(ctx);
+    }
+
+    @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        if (evt instanceof IdleStateEvent) {
+            IdleStateEvent e = (IdleStateEvent) evt;
+            if (e.state() == IdleState.ALL_IDLE) {
+                log.warn("Connection idle for 10 minutes, closing stale connection: {}", ctx.channel().remoteAddress());
+                ctx.close();
+            }
+        }
+    }
+
+    @Override
     public void channelInactive(ChannelHandlerContext ctx) {
         log.info("Client disconnected: {}", ctx.channel().remoteAddress());
+
+        // Notify all agents about disconnection
+        for (Agent agent : session.getAgents()) {
+            agent.disconnected();
+        }
 
         // Remove session from NodeServer when client disconnects
         session.close();
         NodeServer.removeSession(ctx.channel());
     }
-
 }

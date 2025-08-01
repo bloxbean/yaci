@@ -1,10 +1,10 @@
 package com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n;
 
+import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.State;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.*;
-import com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers.RollForwardSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers.TipSerializer;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
@@ -267,13 +267,12 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
                         log.debug("Creating RollForward from stored wrapped header for point: {}, header bytes length: {}", nextPoint, blockHeaderBytes.length);
 
-                        // Since we now store complete wrapped headers, create a mock RollForward message
-                        // and let RollForwardSerializer handle the reconstruction during serialization
                         //TODO : THis deserialization is not needed anymore, we can directly use the bytes. But it's here for debugging purposes
-                        byte[] reConstructRollForwardBytes = createRollForwardMessage(blockHeaderBytes, tip);
-                        RollForward reConstructRollForward = RollForwardSerializer.INSTANCE.deserialize(reConstructRollForwardBytes);
+//                        byte[] reConstructRollForwardBytes = createRollForwardMessage(blockHeaderBytes, tip);
+//                        RollForward reConstructRollForward = RollForwardSerializer.INSTANCE.deserialize(reConstructRollForwardBytes);
 
-                        RollForward rollForward = new RollForward(reConstructRollForward.getByronEbHead(), reConstructRollForward.getByronBlockHead(), reConstructRollForward.getBlockHeader(), tip, blockHeaderBytes);
+//                        RollForward rollForward = new RollForward(reConstructRollForward.getByronEbHead(), reConstructRollForward.getByronBlockHead(), reConstructRollForward.getBlockHeader(), tip, blockHeaderBytes);
+                        RollForward rollForward = new RollForward(null, null, null, tip, blockHeaderBytes);
 
                         if (log.isDebugEnabled()) {
                             log.debug("Sending RollForward for point: slot={}, hash={}, tip: slot={}, block={}/{}",
@@ -395,7 +394,11 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
             }
 
             if (rollbackPoint != null) {
-                log.info("Rolling back to point: {}", rollbackPoint);
+                log.info("ROLLBACK_TO_CLIENT: client={}, rollbackPoint={}, clientAtTip={}, hasAgency={}",
+                        getChannel() != null ? getChannel().remoteAddress() : "unknown",
+                        rollbackPoint, clientAtTip, hasAgency());
+
+                log.info("Rolling back to point: slot={}, hash={}", rollbackPoint.getSlot(), rollbackPoint.getHash());
 
                 ChainTip currentTip = chainState.getTip();
                 if (currentTip == null) {
@@ -413,6 +416,9 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 this.intersectedPoint = rollbackPoint;
                 this.lastSentPoint = rollbackPoint;
                 this.clientAtTip = false;
+
+                log.info("ChainSyncServerAgent: Enqueued Rollbackward message to point: slot={}, new tip: slot={}",
+                        rollbackPoint.getSlot(), tip.getPoint().getSlot());
 
                 // Notify listeners
                 final Point finalRollbackPoint = rollbackPoint;
@@ -434,19 +440,92 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     }
 
     /**
-     * Find the rollback point (common ancestor)
+     * Find the rollback point (common ancestor) by traversing backwards from the current position
+     * to find a point that still exists in the chain. This handles deep reorganizations.
      */
     private Point findRollbackPoint() {
         if (intersectedPoint == null) {
+            log.warn("Cannot find rollback point - no intersection point set");
             return null;
         }
 
-        // Start from the intersection point and work backwards
-        Point currentPoint = intersectedPoint;
+        // Start from the last sent point and work backwards to find a common ancestor
+        Point candidatePoint = lastSentPoint;
 
-        // Simple implementation - in a real scenario, this would traverse the chain backwards
-        // For now, we'll rollback to the intersection point
-        return currentPoint;
+        // First, try the last sent point
+        if (candidatePoint != null && chainState.hasPoint(candidatePoint)) {
+            log.debug("Last sent point is still valid in chain, using it as rollback point");
+            return candidatePoint;
+        }
+
+        // Next, try the current intersection point
+        if (chainState.hasPoint(intersectedPoint)) {
+            log.debug("Using current intersection point as rollback point");
+            return intersectedPoint;
+        }
+
+        // If both are invalid, we have a deep reorganization
+        log.warn("Deep chain reorganization detected - both last sent point and intersection point are invalid");
+
+        // Try to find a valid point by checking previous slots
+        // Start from the intersection point and work backwards
+        long currentSlot = intersectedPoint.getSlot();
+
+        // Strategy: Try to go back in steps, checking if blocks exist at those slots
+        // Start with small steps, then increase if needed
+        long[] stepSizes = {10, 50, 100, 500}; // Progressive step sizes
+
+        for (long stepSize : stepSizes) {
+            long trySlot = currentSlot;
+
+            // Try up to 10 steps with current step size
+            for (int i = 0; i < 10 && trySlot > 0; i++) {
+                trySlot = Math.max(0, trySlot - stepSize);
+
+                if (trySlot == 0) {
+                    // Reached genesis
+                    log.info("Rollback search reached genesis, returning Point.ORIGIN");
+                    return Point.ORIGIN;
+                }
+
+                // Check if a block exists at this slot
+                Long blockNumber = chainState.getBlockNumberBySlot(trySlot);
+                if (blockNumber != null) {
+                    // Found a block at this slot, get its hash
+                    byte[] blockHeader = chainState.getBlockHeaderByNumber(blockNumber);
+                    if (blockHeader != null) {
+                        // Extract the hash from the header to create a proper Point
+                        // For now, we'll create a Point with the slot
+                        // In a real implementation, we'd parse the header to get the hash
+                        log.info("Found valid block at slot {} (block number {}) for rollback", trySlot, blockNumber);
+
+                        // Try to get the block to extract its hash
+                        byte[] block = chainState.getBlockByNumber(blockNumber);
+                        if (block != null) {
+                            var blockObj = BlockSerializer.INSTANCE.deserialize(block);
+                            String blockHash = blockObj.getHeader().getHeaderBody().getBlockHash();
+                            // Create a Point with slot but without hash
+                            // The client will need to verify this
+                            Point rollbackPoint = new Point(trySlot, blockHash);
+                            log.warn("Creating rollback point at slot {} without hash - client will need to verify", trySlot);
+                            return rollbackPoint;
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we've searched back far and found nothing, try genesis
+        log.warn("No valid rollback point found after extensive search, trying Point.ORIGIN");
+        Long genesisBlock = chainState.getBlockNumberBySlot(0L);
+        if (genesisBlock != null) {
+            return Point.ORIGIN;
+        }
+
+        // If we can't find any valid rollback point, return null
+        // This will force the client to send AwaitReply and potentially reconnect
+        log.error("Could not find any valid rollback point after deep reorganization - chain state may be corrupted");
+        return null;
     }
 
     /**
@@ -520,8 +599,10 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                     Tip tip = createTipFromChainTip(currentTip);
 
                     // Create RollForward message directly from stored wrapped header bytes
-                    byte[] rollForwardBytes = createRollForwardMessage(blockHeaderBytes, tip);
-                    RollForward rollForward = RollForwardSerializer.INSTANCE.deserialize(rollForwardBytes);
+//                    byte[] rollForwardBytes = createRollForwardMessage(blockHeaderBytes, tip);
+//                    RollForward rollForward = RollForwardSerializer.INSTANCE.deserialize(rollForwardBytes);
+
+                    RollForward rollForward = new RollForward(null, null, null, tip, blockHeaderBytes);
 
                     this.pendingResponses.add(rollForward);
                     this.lastSentPoint = newBlockPoint;
@@ -573,5 +654,82 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
         this.pendingResponses.clear();
         this.lastSentPoint = null;
         this.clientAtTip = false;
+    }
+
+    /**
+     * Called when new blockchain data becomes available.
+     * If client is waiting at tip, we check for new blocks and notify them.
+     * Also checks for rollback scenarios when the chain has reorganized.
+     */
+    @Override
+    public void onNewDataAvailable() {
+        try {
+            // Check for rollback scenarios first
+            if (lastSentPoint != null && !clientAtTip) {
+                // Check if our last sent point is still valid in chain
+                if (!chainState.hasPoint(lastSentPoint)) {
+                    log.info("ChainSyncServerAgent: Detected chain rollback - last sent point no longer valid");
+
+                    if (hasAgency()) {
+                        // Use existing rollback handling
+                        if (shouldRollback()) {
+                            handleRollback();
+                            return;
+                        }
+                    } else {
+                        log.debug("ChainSyncServerAgent: Rollback detected but don't have agency to notify client");
+                    }
+                }
+            }
+
+            // Only check for new data if client is at tip and we have agency
+            if (!clientAtTip) {
+                log.debug("ChainSyncServerAgent: Client not at tip, ignoring new data notification");
+                return;
+            }
+
+            if (!hasAgency()) {
+                log.debug("ChainSyncServerAgent: Don't have agency, cannot send new block");
+                return;
+            }
+
+            log.debug("ChainSyncServerAgent: Client is at tip and we have agency, checking for new blocks or rollbacks");
+
+            // Get current tip from chain state
+            ChainTip currentTip = chainState.getTip();
+            if (currentTip == null) {
+                log.debug("ChainSyncServerAgent: No tip available, cannot notify about new blocks");
+                return;
+            }
+
+            // Create point from current tip
+            Point currentTipPoint = new Point(currentTip.getSlot(),
+                                             HexUtil.encodeHexString(currentTip.getBlockHash()));
+
+            // Check if this is actually a new block (not the same as last sent)
+            if (lastSentPoint != null &&
+                lastSentPoint.getSlot() == currentTipPoint.getSlot() &&
+                lastSentPoint.getHash().equals(currentTipPoint.getHash())) {
+                log.debug("ChainSyncServerAgent: Tip hasn't changed, no new block to send");
+                return;
+            }
+
+            // Check if we need to rollback (tip moved backwards)
+            if (lastSentPoint != null && currentTipPoint.getSlot() < lastSentPoint.getSlot()) {
+                log.info("ChainSyncServerAgent: Chain reorganization detected - current tip slot {} is before last sent slot {}",
+                        currentTipPoint.getSlot(), lastSentPoint.getSlot());
+                handleRollback();
+                return;
+            }
+
+            log.info("ChainSyncServerAgent: New block available at tip: slot={}, hash={}",
+                    currentTipPoint.getSlot(), currentTipPoint.getHash());
+
+            // Use existing notifyNewBlock method
+            notifyNewBlock(currentTipPoint);
+
+        } catch (Exception e) {
+            log.error("ChainSyncServerAgent: Error handling new data notification", e);
+        }
     }
 }

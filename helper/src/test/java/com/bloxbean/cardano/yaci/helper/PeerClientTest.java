@@ -3,18 +3,13 @@ package com.bloxbean.cardano.yaci.helper;
 import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Era;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
-import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
-import com.bloxbean.cardano.yaci.helper.listener.ChainSyncListenerAdapter;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 class PeerClientTest {
 
@@ -27,7 +22,7 @@ class PeerClientTest {
         peerClient.connect(new BlockChainDataListener() {
             @Override
             public void onRollback(Point point) {
-                System.out.println("PeerClientTest.onRollback: " + point);
+                    System.out.println("PeerClientTest.onRollback: " + point);
             }
 
             @Override

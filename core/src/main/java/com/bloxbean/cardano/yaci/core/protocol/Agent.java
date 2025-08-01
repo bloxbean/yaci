@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.core.protocol;
 
-import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.RollForward;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
@@ -54,7 +53,7 @@ public abstract class Agent<T extends AgentListener> {
         return this.currenState.handleInbound(bytes);
     }
 
-    public synchronized final void receiveResponse(Message message) {
+    public synchronized void receiveResponse(Message message) {
         State oldState = currenState;
         currenState = currenState.nextState(message);
 
@@ -69,69 +68,128 @@ public abstract class Agent<T extends AgentListener> {
             if (message == null)
                 return;
 
-            if (instant == null)
-                instant = Instant.now();
+            // Use the same segmentation logic as writeMessage
+            writeMessage(message, () -> {
+                // Update state only after message is successfully sent
+                this.sendRequest(message);
+            });
+        }
+    }
 
-            int elapseTime = Duration.between(instant, Instant.now()).getNano() / 1000;
-            instant = Instant.now();
+    protected void writeMessage(Message message, Runnable onSuccess) {
+        if (channel == null || !channel.isActive()) {
+            log.warn("Cannot write message: channel is null or inactive");
+            return;
+        }
 
-            // Apply response flag (0x8000) for server agents
-            int protocolWithFlag = this.getProtocolId();
-            if (!isClient) {
-                protocolWithFlag |= 0x8000; // Set response flag for server
+        int protocolWithFlag = this.getProtocolId();
+        if (log.isDebugEnabled()) {
+            log.debug("Writing message for protocol id: {}, isClient: {}", protocolWithFlag, isClient);
+        }
+        if (!isClient) {
+            protocolWithFlag |= 0x8000; // Server response flag
+            if (log.isDebugEnabled()) {
+                log.debug("Server mode: adding response flag - protocol {} -> {} (0x{})",
+                         this.getProtocolId(), protocolWithFlag, Integer.toHexString(protocolWithFlag));
             }
+        }
 
-            Segment segment = Segment.builder()
-                    .timestamp(elapseTime)
-                    .protocol((short) protocolWithFlag)
-                    .payload(message.serialize())
-                    .build();
+        // Check the base protocol ID without the response flag
+        int baseProtocolId = protocolWithFlag & 0x7FFF;
+        if (baseProtocolId < 0 || baseProtocolId > 100) {
+            log.error("🚨 Suspicious protocol ID: {} (0x{}) (base: {} 0x{})",
+                     protocolWithFlag, Integer.toHexString(protocolWithFlag),
+                     baseProtocolId, Integer.toHexString(baseProtocolId));
+        }
 
-            log.info("Sending msg : " + message);
-            if (message instanceof RollForward) {
-                log.info("RollForward message: " + ((RollForward)message).getOriginalHeaderBytes());
-            }
-//            try {
-//                if (segment.getPayload().length > 0) {
-//                    log.info("Protocol Id: " + segment.getProtocol() + " Payload : " + CborSerializationUtil.deserializeOne(segment.getPayload()));
-//                } else {
-//                    log.info("Protocol Id: " + segment.getProtocol() + " Payload : <empty>");
-//                }
-//            } catch (Exception e) {
-//                log.warn("Protocol Id: " + segment.getProtocol() + " Payload : <failed to deserialize - " + e.getMessage() + ">");
-//            }
+        byte[] payload = message.serialize();
 
-            channel.writeAndFlush(segment).addListener(future -> {;
+        // Handle large payloads with automatic segmentation
+        if (payload.length > 65535) {
+            log.info("Large payload detected ({} bytes) - using mux-level segmentation", payload.length);
+            writeSegmentedMessage(protocolWithFlag, payload, onSuccess);
+            return;
+        }
+
+        // Normal single segment message
+        writeSingleSegment(protocolWithFlag, payload, onSuccess);
+    }
+
+    private void writeSingleSegment(int protocolWithFlag, byte[] payload, Runnable onSuccess) {
+        int elapseTime = calculateElapsedTime();
+
+        Segment segment = Segment.builder()
+                .timestamp(elapseTime)
+                .protocol(protocolWithFlag)
+                .payload(payload)
+                .build();
+
+        // Synchronize on channel to prevent concurrent writes from different agents
+        synchronized (channel) {
+            channel.writeAndFlush(segment).addListener(future -> {
                 if (future.isSuccess()) {
-//                    log.info("Message sent successfully for protocol id: " + this.getProtocolId());
-                    // Update state only after message is successfully sent
-                    State oldState = currenState;
-                    this.sendRequest(message);
-
-                    // If agent still has agency after state transition, send next message
-                    // This is crucial for BlockFetch Streaming state where server keeps agency
-//                    if (this.hasAgency() && oldState != currenState) {
-//                        if (log.isDebugEnabled()) {
-//                            log.debug("Agent {} still has agency after state transition {} -> {}, sending next message",
-//                                    this.getProtocolId(), oldState, currenState);
-//                        }
-//                        this.sendNextMessage();
-//                    }
-                    // Special case for BlockFetch: continue sending in Streaming state even without state change
-                    if (this.hasAgency() && this.getProtocolId() == 3 && currenState.toString().equals("Streaming")) {
-                        if (log.isDebugEnabled()) {
-                            log.debug("Agent {} (BlockFetch) continuing in Streaming state after {}, sending next message",
-                                    this.getProtocolId(), message.getClass().getSimpleName());
-                        }
-                        this.sendNextMessage();
-                    }
+                    if (onSuccess != null) onSuccess.run();
                 } else {
-                    log.info(message.toString());
-                    log.error("Failed to send message for protocol id: " + this.getProtocolId(), future.cause());
+                    log.error("Failed to send message for protocol {}: {}", getProtocolId(), future.cause().getMessage());
                 }
             });
         }
     }
+
+    private void writeSegmentedMessage(int protocolWithFlag, byte[] payload, Runnable onSuccess) {
+        final int MAX_SEGMENT_SIZE = 65535;
+        final int totalSegments = (payload.length + MAX_SEGMENT_SIZE - 1) / MAX_SEGMENT_SIZE;
+
+        log.info("Segmenting large message: {} bytes into {} segments", payload.length, totalSegments);
+
+        synchronized (channel) {
+            for (int i = 0; i < totalSegments; i++) {
+                int offset = i * MAX_SEGMENT_SIZE;
+                int segmentSize = Math.min(MAX_SEGMENT_SIZE, payload.length - offset);
+
+                byte[] segmentPayload = new byte[segmentSize];
+                System.arraycopy(payload, offset, segmentPayload, 0, segmentSize);
+
+                int elapseTime = calculateElapsedTime();
+
+                Segment segment = Segment.builder()
+                        .timestamp(elapseTime)
+                        .protocol(protocolWithFlag)
+                        .payload(segmentPayload)
+                        .build();
+
+                final boolean isLastSegment = (i == totalSegments - 1);
+                final int segmentIndex = i;
+
+                log.debug("Sending segment {}/{} - {} bytes", segmentIndex + 1, totalSegments, segmentSize);
+
+                channel.writeAndFlush(segment).addListener(future -> {
+                    if (future.isSuccess()) {
+                        if (isLastSegment && onSuccess != null) {
+                            onSuccess.run();
+                        }
+                        log.debug("Segment {}/{} sent successfully", segmentIndex + 1, totalSegments);
+                    } else {
+                        log.error("Failed to send segment {}/{} for protocol {}: {}",
+                                 segmentIndex + 1, totalSegments, getProtocolId(), future.cause().getMessage());
+                    }
+                });
+            }
+        }
+    }
+
+    private int calculateElapsedTime() {
+        if (instant == null) {
+            instant = Instant.now();
+            return 0; // First message has 0 elapsed time
+        } else {
+            // Calculate elapsed time in microseconds properly
+            Duration elapsed = Duration.between(instant, Instant.now());
+            instant = Instant.now();
+            return (int) Math.min(elapsed.toNanos() / 1000, Integer.MAX_VALUE); // Convert to microseconds, cap at max int
+        }
+    }
+
 
     public final boolean hasAgency() {
         return currenState.hasAgency(isClient);
@@ -141,8 +199,22 @@ public abstract class Agent<T extends AgentListener> {
         return isClient;
     }
 
+    /**
+     * Add a listener to this agent. Listeners are executed in LIFO (Last In, First Out) order.
+     * <p>
+     * This means that listeners added later will execute before listeners added earlier.
+     * This design ensures that:
+     * <ul>
+     *   <li>External application listeners (added later) execute first</li>
+     *   <li>Internal protocol listeners (added during initialization) execute last</li>
+     *   <li>Any failure in external listeners prevents protocol advancement</li>
+     *   <li>Provides fail-fast semantics for atomic block processing</li>
+     * </ul>
+     *
+     * @param agentListener the listener to add
+     */
     public final synchronized void addListener(T agentListener) {
-        agentListeners.add(agentListener);
+        agentListeners.add(0, agentListener);
     }
 
     public final synchronized void removeListener(T agentListener) {
@@ -156,7 +228,7 @@ public abstract class Agent<T extends AgentListener> {
     /**
      * This method is called after disconnection and during connection retry failure.
      */
-    public final void disconnected() {
+    public void disconnected() {
         getAgentListeners().stream().forEach(agentListener -> agentListener.onDisconnect());
     }
 
@@ -169,6 +241,10 @@ public abstract class Agent<T extends AgentListener> {
 
     public void shutdown() {
 
+    }
+
+    protected  Channel getChannel() {
+        return channel;
     }
 
     /**
@@ -191,6 +267,20 @@ public abstract class Agent<T extends AgentListener> {
 
     public State getCurrentState() {
         return currenState;
+    }
+
+    public void onChannelWritabilityChanged(Channel channel) {
+
+    }
+
+    /**
+     * Called when new blockchain data becomes available.
+     * Agents can override this method to react to new blocks, rollbacks, etc.
+     * Default implementation does nothing.
+     */
+    public void onNewDataAvailable() {
+        // Default implementation - do nothing
+        // Individual agents can override this to handle new data notifications
     }
 
     public abstract int getProtocolId();

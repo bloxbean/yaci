@@ -21,10 +21,18 @@ import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
 import com.bloxbean.cardano.yaci.node.chain.InMemoryChainState;
 import com.bloxbean.cardano.yaci.node.chain.DirectRocksDBChainState;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import co.nstant.in.cbor.CborEncoder;
+import co.nstant.in.cbor.model.Array;
+import co.nstant.in.cbor.model.DataItem;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.ByteArrayOutputStream;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -74,6 +82,12 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
     // Statistics
     private long blocksProcessed = 0;
     private long lastProcessedSlot = 0;
+
+    // Rollback classification fields
+    private SyncPhase syncPhase = SyncPhase.INITIAL_SYNC;
+    private ChainTip lastKnownChainTip;
+    private long rollbackClassificationTimeout = 30000; // 30 seconds
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     public HybridYaciNode(HybridNodeConfig config) {
         this.config = config;
@@ -265,6 +279,9 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
             ChainTip localTip = chainState.getTip();
             log.info("Local tip: {}", localTip);
 
+            // Initialize last known tip
+            lastKnownChainTip = localTip;
+
             // Determine starting point for sync
             Point startPoint = determineStartPoint(localTip);
             log.info("Starting pipelined sync from point: {}", startPoint);
@@ -303,6 +320,9 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
      * Start pipelined client sync with parallel ChainSync and BlockFetch
      */
     private void startPipelinedClientSync(ChainTip localTip, com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip remoteTip, Point startPoint) {
+        // Reset sync phase when starting new sync
+        syncPhase = SyncPhase.INITIAL_SYNC;
+        log.info("ChainSync agent started - reset to INITIAL_SYNC phase");
         // Determine sync strategy based on local vs remote tip
         boolean shouldUseBulkSync = shouldUseBulkSync(localTip, remoteTip.getPoint());
 
@@ -603,6 +623,17 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
                 isServerRunning.set(false);
             }
 
+            // Shutdown scheduler
+            scheduler.shutdown();
+            try {
+                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                    scheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                scheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+
             // Close ChainState if it's RocksDB
             if (chainState instanceof DirectRocksDBChainState) {
                 ((DirectRocksDBChainState) chainState).close();
@@ -623,6 +654,19 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
 
         // Check if we've caught up to the remote tip (BlockFetch complete)
         checkSyncProgress();
+        updateSyncPhase();
+
+        // Update last known tip
+        lastKnownChainTip = chainState.getTip();
+
+        // Notify server agents about new block (only in real-time mode)
+        if (isServerRunning.get() && isInitialSyncComplete) {
+            try {
+                nodeServer.notifyNewDataAvailable();
+            } catch (Exception e) {
+                log.warn("Error notifying server agents about new Byron block", e);
+            }
+        }
 
         // Enhanced logging for pipelined mode
         if (isPipelinedMode) {
@@ -657,6 +701,19 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
 
         // Check if we've caught up to the remote tip (BlockFetch complete)
         checkSyncProgress();
+        updateSyncPhase();
+
+        // Update last known tip
+        lastKnownChainTip = chainState.getTip();
+
+        // Notify server agents about new block (only in real-time mode)
+        if (isServerRunning.get() && isInitialSyncComplete) {
+            try {
+                nodeServer.notifyNewDataAvailable();
+            } catch (Exception e) {
+                log.warn("Error notifying server agents about new Byron EB block", e);
+            }
+        }
 
         // Enhanced logging for pipelined mode
         if (isPipelinedMode) {
@@ -689,8 +746,24 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
         lastProcessedSlot = block.getHeader().getHeaderBody().getSlot();
         long blockNumber = block.getHeader().getHeaderBody().getBlockNumber();
 
+        log.info("Successfully processed block: era={}, blockNumber={}, slot={}",
+            era, blockNumber, lastProcessedSlot);
+
         // Check if we've caught up to the remote tip (BlockFetch complete)
         checkSyncProgress();
+        updateSyncPhase();
+
+        // Update last known tip
+        lastKnownChainTip = chainState.getTip();
+
+        // Notify server agents about new block (only in real-time mode)
+        if (isServerRunning.get() && isInitialSyncComplete) {
+            try {
+                nodeServer.notifyNewDataAvailable();
+            } catch (Exception e) {
+                log.warn("Error notifying server agents about new {} block", era, e);
+            }
+        }
 
 //        log.info("ChainSync: Block #{} at slot {} ({})", blockNumber, lastProcessedSlot, era);
         // Enhanced logging for pipelined mode
@@ -745,10 +818,32 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
             return;
         }
 
-        // Normal rollback (small rollbacks are expected)
+        // Classify rollback type
+        boolean isReal = isRealRollback(point);
+
+        // Perform rollback
         chainState.rollbackTo(rollbackSlot);
-        log.info("Rollback to slot: {} (from tip: {})", rollbackSlot,
-            localTip != null ? String.format("slot=%d, block=%d", localTip.getSlot(), localTip.getBlockNumber()) : "null");
+
+        log.info("ROLLBACK_EVENT: slot={}, type={}, phase={}, serverNotified={}",
+                rollbackSlot, isReal ? "REAL_REORG" : "RECONNECTION", syncPhase, isReal && isServerRunning.get());
+
+        log.info("Rollback to slot: {} (from tip: {}) - Type: {}",
+                rollbackSlot,
+                localTip != null ? String.format("slot=%d, block=%d", localTip.getSlot(), localTip.getBlockNumber()) : "null",
+                isReal ? "REAL_REORG" : "RECONNECTION");
+
+        // Notify server agents only for real rollbacks
+        if (isReal && isServerRunning.get()) {
+            try {
+                nodeServer.notifyNewDataAvailable();
+                log.info("Notified server agents about chain reorganization");
+            } catch (Exception e) {
+                log.warn("Error notifying server agents about rollback", e);
+            }
+        }
+
+        // Update last known tip
+        lastKnownChainTip = chainState.getTip();
     }
 
     @Override
@@ -759,6 +854,7 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
             startClientSync();
         }
     }
+
 
     @Override
     public void intersactNotFound(Tip tip) {
@@ -813,87 +909,214 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
     }
 
     // Private helper methods
+
+    /**
+     * Validate chain continuity by checking if the previous block exists
+     * Exits the system if a gap is detected to prevent corrupt chain state
+     * @param prevBlockHash Previous block hash (null for genesis)
+     * @param currentBlockNumber Current block number
+     * @param currentSlot Current slot
+     * @param currentBlockHash Current block hash (for logging)
+     */
+    private void validateChainContinuity(String prevBlockHash, long currentBlockNumber,
+                                           long currentSlot, String currentBlockHash) {
+        try {
+            // Skip validation for genesis block
+            if (currentBlockNumber == 0 || prevBlockHash == null || prevBlockHash.isEmpty()) {
+                log.debug("Skipping chain continuity check for genesis block: {}", currentBlockNumber);
+                return;
+            }
+
+            // Check if previous block exists in storage
+            byte[] prevBlockHashBytes = HexUtil.decodeHexString(prevBlockHash);
+            byte[] prevBlock = chainState.getBlock(prevBlockHashBytes);
+            byte[] prevHeader = chainState.getBlockHeader(prevBlockHashBytes);
+
+            if (prevBlock == null && prevHeader == null) {
+                log.error("🚨 CRITICAL: CHAIN CONTINUITY GAP DETECTED! 🚨");
+                log.error("Missing previous block when trying to store block #{} at slot {}", currentBlockNumber, currentSlot);
+                log.error("Current block hash: {}", currentBlockHash);
+                log.error("Missing previous block hash: {}", prevBlockHash);
+                log.error("Previous block number would be: {}", currentBlockNumber - 1);
+                log.error("");
+                log.error("This indicates a serious gap in blockchain data synchronization!");
+                log.error("The chain state would be incomplete and unreliable if we continue.");
+                log.error("");
+                log.error("STOPPING PROCESS to prevent data corruption.");
+                log.error("A recovery mechanism needs to be implemented to fetch missing blocks.");
+
+                // Exit immediately to prevent corrupt chain state
+                System.exit(1);
+            }
+
+            log.debug("Chain continuity validated for block #{}: previous block {} exists",
+                     currentBlockNumber, prevBlockHash);
+
+        } catch (Exception e) {
+            log.error("Error validating chain continuity for block #{}: {}", currentBlockNumber, e.getMessage());
+            log.error("Stopping process due to validation error to ensure data integrity");
+            System.exit(1);
+        }
+    }
+
     private void storeByronBlock(ByronMainBlock byronBlock) {
+        long blockNumber = byronBlock.getHeader().getConsensusData().getDifficulty().longValue();
         try {
             byte[] blockHash = HexUtil.decodeHexString(byronBlock.getHeader().getBlockHash());
-            long blockNumber = byronBlock.getHeader().getConsensusData().getDifficulty().longValue();
             long slot = byronBlock.getHeader().getConsensusData().getAbsoluteSlot();
             byte[] blockCbor = HexUtil.decodeHexString(byronBlock.getCbor());
 
-            // Store complete block (body received from BlockFetch)
+            // Validate chain continuity
+            validateChainContinuity(byronBlock.getHeader().getPrevBlock(), blockNumber, slot,
+                                   byronBlock.getHeader().getBlockHash());
+
+            // Store complete block
             chainState.storeBlock(blockHash, blockNumber, slot, blockCbor);
 
-            // Also store header separately if not already stored from ChainSync
-            // This ensures we have header-only access for serving downstream clients
-            try {
-                byte[] existingHeader = chainState.getBlockHeader(blockHash);
-                if (existingHeader == null) {
-                    // Header not stored yet via ChainSync, store it now
-                    chainState.storeBlockHeader(blockHash, blockCbor); // Use full block CBOR for now
-                    log.debug("Stored Byron header from BlockFetch: slot={}", slot);
+            // Store header separately if it wasn't already stored via pipelined ChainSync
+            /*if (chainState.getBlockHeader(blockHash) == null) {
+                byte[] headerCbor = extractHeaderFromBlock(blockCbor);
+                if (headerCbor != null) {
+                    chainState.storeBlockHeader(blockHash, headerCbor);
+                    log.debug("Extracted and stored Byron header from full block: slot={}", slot);
                 }
-            } catch (Exception headerException) {
-                log.debug("Could not check/store Byron header separately: {}", headerException.getMessage());
-            }
-
+            }*/
         } catch (Exception e) {
             log.error("Error storing Byron block", e);
+            throw new RuntimeException("Failed to store Byron block " + blockNumber, e);
         }
     }
 
     private void storeByronEbBlock(ByronEbBlock byronEbBlock) {
+        long blockNumber = byronEbBlock.getHeader().getConsensusData().getDifficulty().longValue();
         try {
             byte[] blockHash = HexUtil.decodeHexString(byronEbBlock.getHeader().getBlockHash());
-            long blockNumber = byronEbBlock.getHeader().getConsensusData().getDifficulty().longValue();
             long slot = byronEbBlock.getHeader().getConsensusData().getAbsoluteSlot();
             byte[] blockCbor = HexUtil.decodeHexString(byronEbBlock.getCbor());
 
-            // Store complete block (body received from BlockFetch)
+            // Validate chain continuity
+            validateChainContinuity(byronEbBlock.getHeader().getPrevBlock(), blockNumber, slot,
+                                   byronEbBlock.getHeader().getBlockHash());
+
+            // Store complete block
             chainState.storeBlock(blockHash, blockNumber, slot, blockCbor);
 
-            // Also store header separately if not already stored from ChainSync
-            // This ensures we have header-only access for serving downstream clients
-            try {
-                byte[] existingHeader = chainState.getBlockHeader(blockHash);
-                if (existingHeader == null) {
-                    // Header not stored yet via ChainSync, store it now
-                    chainState.storeBlockHeader(blockHash, blockCbor); // Use full block CBOR for now
-                    log.debug("Stored Byron EB header from BlockFetch: slot={}", slot);
+            // Store header separately if it wasn't already stored via pipelined ChainSync
+            /*if (chainState.getBlockHeader(blockHash) == null) {
+                byte[] headerCbor = extractHeaderFromBlock(blockCbor);
+                if (headerCbor != null) {
+                    chainState.storeBlockHeader(blockHash, headerCbor);
+                    log.debug("Extracted and stored Byron EB header from full block: slot={}", slot);
                 }
-            } catch (Exception headerException) {
-                log.debug("Could not check/store Byron EB header separately: {}", headerException.getMessage());
-            }
-
+            }*/
         } catch (Exception e) {
             log.error("Error storing Byron EB block", e);
+            throw new RuntimeException("Failed to store Byron EB block " + blockNumber, e);
         }
     }
 
     private void storeShelleyBlock(Block block) {
+        long blockNumber = block.getHeader().getHeaderBody().getBlockNumber();
         try {
             byte[] blockHash = HexUtil.decodeHexString(block.getHeader().getHeaderBody().getBlockHash());
-            long blockNumber = block.getHeader().getHeaderBody().getBlockNumber();
             long slot = block.getHeader().getHeaderBody().getSlot();
             byte[] blockCbor = HexUtil.decodeHexString(block.getCbor());
 
-            // Store complete block (body received from BlockFetch)
+            // Validate chain continuity
+            validateChainContinuity(block.getHeader().getHeaderBody().getPrevHash(), blockNumber, slot,
+                                   block.getHeader().getHeaderBody().getBlockHash());
+
+            // Store complete block
             chainState.storeBlock(blockHash, blockNumber, slot, blockCbor);
 
-            // Also store header separately if not already stored from ChainSync
-            // This ensures we have header-only access for serving downstream clients
-            try {
-                byte[] existingHeader = chainState.getBlockHeader(blockHash);
-                if (existingHeader == null) {
-                    // Header not stored yet via ChainSync, store it now
-                    chainState.storeBlockHeader(blockHash, blockCbor); // Use full block CBOR for now
-                    log.debug("Stored Shelley+ header from BlockFetch: slot={}", slot);
+            // Store header separately if it wasn't already stored via pipelined ChainSync
+            /*if (chainState.getBlockHeader(blockHash) == null) {
+                byte[] headerCbor = extractHeaderFromBlock(blockCbor);
+                if (headerCbor != null) {
+                    chainState.storeBlockHeader(blockHash, headerCbor);
+                    log.debug("Extracted and stored Shelley+ header from full block: slot={}", slot);
                 }
-            } catch (Exception headerException) {
-                log.debug("Could not check/store Shelley+ header separately: {}", headerException.getMessage());
-            }
-
+            }*/
         } catch (Exception e) {
             log.error("Error storing Shelley+ block", e);
+            throw new RuntimeException("Failed to store Shelley+ block " + blockNumber, e);
+        }
+    }
+
+    /**
+     * Extracts the header CBOR from a full block's CBOR.
+     * The block is expected to be an array where the header is the first element.
+     *
+     * @param blockCbor The CBOR bytes of the full block.
+     * @return The CBOR bytes of the header, or null if extraction fails.
+     */
+    private byte[] extractHeaderFromBlock(byte[] blockCbor) {
+        try {
+            DataItem[] dataItems = CborSerializationUtil.deserialize(blockCbor);
+            if (dataItems != null && dataItems.length > 0 && dataItems[0] instanceof Array) {
+                Array blockArray = (Array) dataItems[0];
+                if (!blockArray.getDataItems().isEmpty()) {
+                    DataItem headerDI = blockArray.getDataItems().get(0);
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    new CborEncoder(baos).encode(headerDI);
+                    return baos.toByteArray();
+                }
+            }
+            log.warn("Could not extract header; block CBOR format not as expected.");
+            return null;
+        } catch (Exception e) {
+            log.warn("Failed to extract header from block CBOR", e);
+            return null;
+        }
+    }
+
+    /**
+     * Determines if a rollback is a real chain reorganization or just a reconnection rollback
+     */
+    private boolean isRealRollback(Point rollbackPoint) {
+        // Skip notification for initial/reconnection rollbacks
+        if (syncPhase == SyncPhase.INTERSECT_PHASE || syncPhase == SyncPhase.INITIAL_SYNC) {
+            log.info("Rollback during {} phase - skipping server notification", syncPhase);
+            return false;
+        }
+
+        // Check if chain tip has genuinely moved backwards
+        ChainTip currentTip = chainState.getTip();
+
+        if (lastKnownChainTip != null &&
+            rollbackPoint.getSlot() < lastKnownChainTip.getSlot() &&
+            currentTip.getSlot() <= rollbackPoint.getSlot()) {
+            log.info("Real chain reorganization detected - rollback from slot {} to slot {}",
+                    lastKnownChainTip.getSlot(), rollbackPoint.getSlot());
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Handle intersection found event - transition to INTERSECT_PHASE
+     */
+    public void onIntersectionFound() {
+        syncPhase = SyncPhase.INTERSECT_PHASE;
+        log.info("Transitioned to INTERSECT_PHASE - expect rollback to intersection");
+
+        // Reset to steady state after timeout (handles normal post-intersection rollback)
+        scheduler.schedule(() -> {
+            if (syncPhase == SyncPhase.INTERSECT_PHASE) {
+                syncPhase = SyncPhase.STEADY_STATE;
+                log.info("Auto-transitioned to STEADY_STATE after intersection phase timeout");
+            }
+        }, rollbackClassificationTimeout, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Update sync phase based on sync progress
+     */
+    private void updateSyncPhase() {
+        if (syncPhase == SyncPhase.INITIAL_SYNC && isInitialSyncComplete) {
+            syncPhase = SyncPhase.STEADY_STATE;
+            log.info("Transitioned to STEADY_STATE sync phase");
         }
     }
 
@@ -984,7 +1207,7 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
     @Override
     public void intersactFound(Tip tip, Point point) {
         // Implementation for both interfaces
-        log.debug("Intersection found at point: {}", point);
+        log.info("Intersection found at point: {}", point);
     }
 
     // ChainSyncAgentListener methods with originalHeaderBytes for proper storage
@@ -1000,8 +1223,14 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
                 // Store header immediately when received from ChainSync
                 chainState.storeBlockHeader(
                     HexUtil.decodeHexString(blockHeader.getHeaderBody().getBlockHash()),
+                    blockHeader.getHeaderBody().getBlockNumber(),
+                    blockHeader.getHeaderBody().getSlot(),
                     originalHeaderBytes
                 );
+
+                log.info("Successfully stored Shelley+ block header: slot={}, hash={}",
+                    blockHeader.getHeaderBody().getSlot(),
+                    blockHeader.getHeaderBody().getBlockHash());
 
                 // Log header progress in pipelined mode
                 if (isPipelinedMode) {
@@ -1023,10 +1252,12 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
 
             } catch (Exception e) {
                 log.error("Error storing Shelley+ block header from original bytes", e);
+                throw new RuntimeException("Failed to store Shelley+ block header", e);
             }
         } else {
             // Fall back to existing behavior if originalHeaderBytes not available
             log.warn("No original header bytes available for Shelley+ block: {}", blockHeader.getHeaderBody().getBlockHash());
+            throw new RuntimeException("Original header bytes not available for Shelley+ block: " + blockHeader.getHeaderBody().getBlockHash());
         }
     }
 
@@ -1040,6 +1271,8 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
                 // Store Byron header immediately when received from ChainSync
                 chainState.storeBlockHeader(
                     HexUtil.decodeHexString(byronBlockHead.getBlockHash()),
+                    byronBlockHead.getConsensusData().getDifficulty().longValue(),
+                    byronBlockHead.getConsensusData().getAbsoluteSlot(),
                     originalHeaderBytes
                 );
 
@@ -1063,10 +1296,12 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
 
             } catch (Exception e) {
                 log.error("Error storing Byron block header from original bytes", e);
+                throw new RuntimeException("Failed to store Byron block header", e);
             }
         } else {
             // Fall back to existing behavior if originalHeaderBytes not available
             log.warn("No original header bytes available for Byron block: {}", byronBlockHead.getBlockHash());
+            throw new RuntimeException("Original header bytes not available for Byron block: " + byronBlockHead.getBlockHash());
         }
     }
 
@@ -1080,6 +1315,8 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
                 // Store Byron EB header immediately when received from ChainSync
                 chainState.storeBlockHeader(
                     HexUtil.decodeHexString(byronEbHead.getBlockHash()),
+                    byronEbHead.getConsensusData().getDifficulty().longValue(),
+                    byronEbHead.getConsensusData().getAbsoluteSlot(),
                     originalHeaderBytes
                 );
 
@@ -1097,10 +1334,12 @@ public class HybridYaciNode implements BlockChainDataListener, ChainSyncAgentLis
 
             } catch (Exception e) {
                 log.error("Error storing Byron EB block header from original bytes", e);
+                throw new RuntimeException("Failed to store Byron EB block header", e);
             }
         } else {
             // Fall back to existing behavior if originalHeaderBytes not available
             log.warn("No original header bytes available for Byron EB block: {}", byronEbHead.getBlockHash());
+            throw new RuntimeException("Original header bytes not available for Byron EB block: " + byronEbHead.getBlockHash());
         }
     }
 }

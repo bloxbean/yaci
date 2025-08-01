@@ -13,6 +13,7 @@ import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveServerAgent;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelPipeline;
+import io.netty.handler.timeout.IdleStateHandler;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -33,6 +34,8 @@ public class NodeServerSession {
 
     private void setupPipeline() {
         ChannelPipeline pipeline = clientChannel.pipeline();
+        // Add idle state detection - 10 minutes of inactivity triggers disconnect  
+        pipeline.addLast(new IdleStateHandler(0, 0, 600));
         pipeline.addLast(new MiniProtoRequestDataEncoder());
         pipeline.addLast(new MiniProtoStreamingByteToMessageDecoder(agents));
         pipeline.addLast(new MiniProtoServerInboundHandler(this));
