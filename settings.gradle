@@ -1,5 +1,6 @@
 rootProject.name = 'yaci'
 include 'core'
 include 'helper'
-include 'node'
-
+include 'node-api'
+include 'node-runtime'
+include 'node-app'

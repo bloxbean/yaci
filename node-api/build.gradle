@@ -1,0 +1,15 @@
+dependencies {
+    api project(':core')
+    api project(':helper')
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            pom {
+                name = 'Yaci Node API'
+                description = 'Yaci Node API - Node-level interfaces and contracts for Yaci (A Cardano mini-protocol implementation in Java)'
+            }
+        }
+    }
+}
