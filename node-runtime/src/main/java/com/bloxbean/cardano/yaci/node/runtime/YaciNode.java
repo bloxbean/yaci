@@ -26,6 +26,10 @@ import com.bloxbean.cardano.yaci.node.api.listener.NodeEventListener;
 import com.bloxbean.cardano.yaci.node.api.model.NodeStatus;
 import com.bloxbean.cardano.yaci.node.runtime.chain.InMemoryChainState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
+import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
+import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
+import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.CborEncoder;
 import co.nstant.in.cbor.model.Array;
@@ -42,7 +46,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Hybrid Yaci Node - Acts as both client and server
+ * Yaci Node - Acts as both client and server
  *
  * CLIENT MODE: Syncs with real Cardano nodes (preprod relay nodes)
  * SERVER MODE: Serves other Yaci clients with blockchain data
@@ -79,6 +83,9 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
     private NodeServer nodeServer;
     private final int serverPort;
 
+    // MemPool for transaction handling
+    private final MemPool memPool;
+
     // Status tracking
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private final AtomicBoolean isSyncing = new AtomicBoolean(false);
@@ -112,6 +119,9 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             this.chainState = new InMemoryChainState();
         }
 
+        // Initialize MemPool for transaction handling
+        this.memPool = new DefaultMemPool();
+
         // Configure Yaci
         YaciConfig.INSTANCE.setReturnBlockCbor(true);
         YaciConfig.INSTANCE.setReturnTxBodyCbor(true);
@@ -119,7 +129,7 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
         // Initialize pipeline configuration
         this.pipelineConfig = createPipelineConfig();
 
-        log.info("Hybrid Yaci Node initialized");
+        log.info("Yaci Node initialized");
         log.info("Remote: {}:{} (magic: {})", remoteCardanoHost, remoteCardanoPort, protocolMagic);
         log.info("Server port: {}", serverPort);
         log.info("Storage: {}", config.isUseRocksDB() ? "RocksDB" : "InMemory");
@@ -127,7 +137,7 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
     }
 
     /**
-     * Create pipeline configuration using values from HybridNodeConfig
+     * Create pipeline configuration using values from NodeConfig
      */
     private PipelineConfig createPipelineConfig() {
         return PipelineConfig.builder()
@@ -190,11 +200,11 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
     }
 
     /**
-     * Start the hybrid node (both client and server)
+     * Start the node (both client and server)
      */
     public void start() {
         if (isRunning.compareAndSet(false, true)) {
-            log.info("Starting Hybrid Yaci Node...");
+            log.info("Starting Yaci Node...");
 
             // Start server first
             if (config.isEnableServer()) {
@@ -206,7 +216,7 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
                 startClientSync();
             }
 
-            log.info("Hybrid Yaci Node started successfully");
+            log.info("Yaci Node started successfully");
 
             // Print startup status
             printStartupStatus();
@@ -243,12 +253,23 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             } else {
                 log.error("❌ CRITICAL: Server starting with empty chain state (no tip)");
                 log.error("❌ Real Cardano nodes will not connect to an empty server");
-                log.error("❌ HybridNode must sync some blockchain data first before serving");
+                log.error("❌ Yaci Node must sync some blockchain data first before serving");
             }
+
+            // Create TxSubmission handler for transaction processing
+            YaciTxSubmissionHandler txSubmissionHandler = new YaciTxSubmissionHandler(memPool);
+
+            // Create TxSubmission configuration for periodic requests
+            TxSubmissionConfig txSubmissionConfig = TxSubmissionConfig.builder()
+                    .batchSize(10)       // 10 transactions per request
+                    .useBlockingMode(false)
+                    .build();
 
             nodeServer = new NodeServer(serverPort,
                     N2NVersionTableConstant.v11AndAbove(protocolMagic, false, 0, false),
-                    chainState);
+                    chainState,
+                    txSubmissionHandler,
+                    txSubmissionConfig);
 
             Thread serverThread = new Thread(() -> {
                 try {
@@ -266,6 +287,8 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             // Give server time to start
             Thread.sleep(2000);
             isServerRunning.set(true);
+
+            // Agent will self-manage periodic requests when sessions are established
 
             log.info("NodeServer started successfully on port {}", serverPort);
             log.info("Server is ready to accept connections from Cardano nodes");
@@ -581,18 +604,18 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
                 isInitialSyncComplete = true;
                 log.info("🚀 ==> TRANSITION: BlockFetch → ChainSync");
                 log.info("🚀 ==> Initial BlockFetch sync complete! Now in real-time ChainSync mode at slot {}", lastProcessedSlot);
-                log.info("🚀 ==> Hybrid Yaci Node is now fully synchronized and serving clients");
+                log.info("🚀 ==> Yaci Node is now fully synchronized and serving clients");
                 log.info("🚀 ==> Will now log every block as it arrives in real-time");
             }
         }
     }
 
     /**
-     * Stop the hybrid node
+     * Stop the Yaci node
      */
     public void stop() {
         if (isRunning.compareAndSet(true, false)) {
-            log.info("Stopping Hybrid Yaci Node...");
+            log.info("Stopping Yaci Node...");
 
             // Stop client sync
             if (isSyncing.get()) {
@@ -631,7 +654,7 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
                 ((DirectRocksDBChainState) chainState).close();
             }
 
-            log.info("Hybrid Yaci Node stopped");
+            log.info("Yaci Node stopped");
         }
     }
 
@@ -1127,6 +1150,10 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
         return config;
     }
 
+    public MemPool getMemPool() {
+        return memPool;
+    }
+
     @Override
     public NodeStatus getStatus() {
         ChainTip localTip = getLocalTip();
@@ -1176,7 +1203,7 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
      */
     private void printStartupStatus() {
         log.info("═══════════════════════════════════════════════════════════");
-        log.info("🚀 HYBRID YACI NODE STARTUP STATUS");
+        log.info("🚀 YACI NODE STARTUP STATUS");
         log.info("═══════════════════════════════════════════════════════════");
 
         // Client status
@@ -1372,4 +1399,5 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             throw new RuntimeException("Original header bytes not available for Byron EB block: " + byronEbHead.getBlockHash());
         }
     }
+
 }

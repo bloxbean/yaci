@@ -2,6 +2,8 @@ package com.bloxbean.cardano.yaci.core.network.server;
 
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
@@ -21,14 +23,26 @@ public class NodeServer {
     private Channel serverChannel;
     private VersionTable versionTable;
     private ChainState chainState;
+    private TxSubmissionListener txSubmissionListener;
+    private TxSubmissionConfig txSubmissionConfig;
     private final static Map<Channel, NodeServerSession> sessions = new ConcurrentHashMap<>();
 
     public NodeServer(int port, VersionTable versionTable, ChainState chainState) {
+        this(port, versionTable, chainState, null, null);
+    }
+
+    public NodeServer(int port, VersionTable versionTable, ChainState chainState, TxSubmissionListener txSubmissionListener) {
+        this(port, versionTable, chainState, txSubmissionListener, null);
+    }
+
+    public NodeServer(int port, VersionTable versionTable, ChainState chainState, TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig) {
         this.port = port;
         this.bossGroup = new NioEventLoopGroup(1);
         this.workerGroup = new NioEventLoopGroup();
         this.versionTable = versionTable;
         this.chainState = chainState;
+        this.txSubmissionListener = txSubmissionListener;
+        this.txSubmissionConfig = txSubmissionConfig != null ? txSubmissionConfig : TxSubmissionConfig.createDefault();
     }
 
     public void start() {
@@ -47,7 +61,7 @@ public class NodeServer {
                             log.info("Local address: {}", ch.localAddress());
 
                             try {
-                                NodeServerSession session = new NodeServerSession(ch, versionTable, chainState);
+                                NodeServerSession session = new NodeServerSession(ch, versionTable, chainState, txSubmissionListener, txSubmissionConfig);
                                 sessions.put(ch, session);
                                 log.info("Created session for client: {}", ch.remoteAddress());
                             } catch (Exception e) {

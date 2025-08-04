@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.helper;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
@@ -10,6 +11,7 @@ import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.listener.BlockFetchAgentListenerAdapter;
 import com.bloxbean.cardano.yaci.helper.listener.ChainSyncListenerAdapter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 import java.util.function.Predicate;
@@ -23,6 +25,7 @@ import java.util.function.Predicate;
  * - Node implementations: Use new pipelining methods for independent control
  * - Performance optimization: Configure pipelining strategies and parameters
  */
+@Slf4j
 public class PeerClient {
     private String host;
     private int port;
@@ -68,6 +71,9 @@ public class PeerClient {
         n2NPeerFetcher.addChainSyncListener(chainSyncAgentListener);
         n2NPeerFetcher.addBlockFetchListener(blockfetchAgentListener);
         n2NPeerFetcher.addTxSubmissionListener(txSubmissionListener);
+
+        // Add a keep alive thread listener to send periodic keep alive messages
+        n2NPeerFetcher.addChainSyncListener(new ChainSyncListenerAdapter(new KeepAliveThreadListener()));
 
         n2NPeerFetcher.start();
     }
@@ -387,4 +393,61 @@ public class PeerClient {
         PipelineConfig lowResourceConfig = PipelineConfig.lowResourceConfig();
         startPipelinedSync(from, lowResourceConfig, blockChainDataListener, null, null);
     }
+
+    class KeepAliveThreadListener implements BlockChainDataListener {
+        private Thread keepAliveThread;
+
+        @Override
+        public void intersactFound(Tip tip, Point point) {
+            if (keepAliveThread == null || !keepAliveThread.isAlive()) {
+                if (!n2NPeerFetcher.isRunning())
+                    return;
+                log.info("Starting keep alive thread for peer: " + host + ":" + port);
+                keepAliveThread = Thread.ofVirtual().unstarted(() -> {
+                    int interval = 10000; // 10 seconds
+                    while (true) {
+
+                        if (!n2NPeerFetcher.isRunning()) {
+                            log.info("Keep alive thread stopping as peer is not running anymore: " + host + ":" + port);
+                            break;
+                        }
+
+                        try {
+                            Thread.sleep(interval);
+                            int randomNo = getRandomNumber(0, 60000);
+
+                            if (log.isDebugEnabled()) {
+                                log.debug("Last keep alive response cookie: " + n2NPeerFetcher.getLastKeepAliveResponseCookie());
+                                log.debug("Sending keep alive : " + randomNo);
+                            }
+
+                            n2NPeerFetcher.sendKeepAliveMessage(randomNo);
+
+                        } catch (InterruptedException e) {
+                            log.info("Keep alive thread interrupted");
+                            break;
+                        }
+                    }
+                });
+                keepAliveThread.start();
+            }
+        }
+
+        @Override
+        public void onDisconnect() {
+            try {
+                if (keepAliveThread != null && keepAliveThread.isAlive()) {
+                    keepAliveThread.interrupt();
+                    log.info("Stopping keep alive thread for peer: " + host + ":" + port);
+                }
+            } catch (Exception e) {
+                log.error("Error stopping keep alive thread", e);
+            }
+        }
+
+        private int getRandomNumber(int min, int max) {
+            return (int) ((Math.random() * (max - min)) + min);
+        }
+    }
+
 }

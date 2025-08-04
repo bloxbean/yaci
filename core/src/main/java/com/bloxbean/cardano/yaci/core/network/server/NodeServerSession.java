@@ -9,6 +9,8 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncServerAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockFetchServerAgent;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionServerAgent;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveServerAgent;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import io.netty.channel.Channel;
@@ -22,11 +24,16 @@ public class NodeServerSession {
     private final HandshakeAgent handshakeAgent;
     private final Agent[] agents;
     private final ChainState chainState;
+    private final TxSubmissionListener txSubmissionListener;
+    private final TxSubmissionConfig txSubmissionConfig;
 
-    public NodeServerSession(Channel clientChannel, VersionTable versionTable, ChainState chainState) {
+    public NodeServerSession(Channel clientChannel, VersionTable versionTable, ChainState chainState,
+                           TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig) {
         this.clientChannel = clientChannel;
         this.handshakeAgent = new HandshakeAgent(versionTable, false);
         this.chainState = chainState;
+        this.txSubmissionListener = txSubmissionListener;
+        this.txSubmissionConfig = txSubmissionConfig != null ? txSubmissionConfig : TxSubmissionConfig.createDefault();
         this.agents = createAgents();
 
         setupPipeline();
@@ -34,7 +41,7 @@ public class NodeServerSession {
 
     private void setupPipeline() {
         ChannelPipeline pipeline = clientChannel.pipeline();
-        // Add idle state detection - 10 minutes of inactivity triggers disconnect  
+        // Add idle state detection - 10 minutes of inactivity triggers disconnect
         pipeline.addLast(new IdleStateHandler(0, 0, 600));
         pipeline.addLast(new MiniProtoRequestDataEncoder());
         pipeline.addLast(new MiniProtoStreamingByteToMessageDecoder(agents));
@@ -49,10 +56,6 @@ public class NodeServerSession {
         return agents;
     }
 
-    public Channel getClientChannel() {
-        return clientChannel;
-    }
-
     public void close() {
         log.info("Closing session for client: {}", clientChannel.remoteAddress());
         clientChannel.close();
@@ -62,7 +65,7 @@ public class NodeServerSession {
         // Initialize specific mini-protocol handlers (ChainSync, BlockFetch, etc.)
         ChainSyncServerAgent chainSyncAgent = new ChainSyncServerAgent(chainState);
         BlockFetchServerAgent blockFetchAgent = new BlockFetchServerAgent(chainState);
-        TxSubmissionServerAgent txSubmissionAgent = new TxSubmissionServerAgent();
+        TxSubmissionServerAgent txSubmissionAgent = new TxSubmissionServerAgent(txSubmissionConfig);
         KeepAliveServerAgent keepAliveAgent = new KeepAliveServerAgent();
 
         // Set channels for agents
@@ -70,6 +73,11 @@ public class NodeServerSession {
         blockFetchAgent.setChannel(clientChannel);
         txSubmissionAgent.setChannel(clientChannel);
         keepAliveAgent.setChannel(clientChannel);
+
+        // Register TxSubmissionListener if provided
+        if (txSubmissionListener != null) {
+            txSubmissionAgent.addListener(txSubmissionListener);
+        }
 
         return new Agent[]{
             chainSyncAgent,
