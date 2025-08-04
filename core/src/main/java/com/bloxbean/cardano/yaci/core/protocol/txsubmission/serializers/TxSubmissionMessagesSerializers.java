@@ -135,7 +135,7 @@ public class TxSubmissionMessagesSerializers {
             }
 
             if (log.isTraceEnabled()) {
-                log.trace(">> Inside ReplyTxIdsSerializer deserializeDI() method. " +);
+                log.trace(">> Inside ReplyTxIdsSerializer deserializeDI() method. " +
                                 "TxIdAndSizeMap size: {}", txIdAndSizeMap.size());
             }
             return new ReplyTxIds(txIdAndSizeMap);
