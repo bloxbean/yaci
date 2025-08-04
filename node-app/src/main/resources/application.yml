@@ -1,0 +1,99 @@
+# Yaci Node Application Configuration
+
+# Quarkus Configuration
+quarkus:
+  application:
+    name: yaci-node
+    version: 1.0.0
+
+  package:
+    output-name: yaci-node
+    type: uber-jar
+    runner-suffix: "-app"
+
+  # Native image configuration
+  native:
+    # Enable native image build
+    enabled: false  # Set to true to build native image by default
+    container-build: false  # Set to true for containerized builds
+
+    # Native image build arguments
+    additional-build-args:
+      - "--verbose"
+      - "--no-fallback"
+      - "-H:+ReportExceptionStackTraces"
+      - "-H:+AllowVMInspection"
+      - "--initialize-at-build-time=org.slf4j"
+      - "--initialize-at-build-time=ch.qos.logback"
+
+  http:
+    port: 8080
+
+  log:
+    level: INFO
+    category:
+      "com.bloxbean.cardano.yaci":
+        level: INFO
+
+  banner:
+    enabled: true
+    path: "banner.txt"
+
+# Yaci Node Configuration
+yaci:
+  node:
+    # Network configuration (preprod, mainnet)
+    network: preprod
+
+    # Auto-start configuration
+    auto-sync-start: true  # Set to true to automatically start syncing on application startup
+
+    # Client configuration (for syncing with remote nodes)
+    client:
+      enabled: true
+    remote:
+      host: preprod-node.play.dev.cardano.org
+      port: 3001
+      protocol-magic: 1
+
+    # Server configuration (for serving other clients)
+    server:
+      enabled: true
+      port: 13337
+
+    # Storage configuration
+    storage:
+      rocksdb: true
+      path: "./chainstate"
+
+# Profile-specific configurations
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+  yaci:
+    node:
+      auto-sync-start: true  # Auto-start in development for convenience
+      storage:
+        path: "./chainstate"
+
+"%test":
+  quarkus:
+    log:
+      level: INFO
+  yaci:
+    node:
+      auto-sync-start: false  # Don't auto-start during tests
+      storage:
+        rocksdb: false
+        path: "./chainstate"
+
+"%prod":
+  quarkus:
+    log:
+      level: INFO
+  yaci:
+    node:
+      auto-sync-start: true  # Manual control in production
+      storage:
+        path: "./chainstate"

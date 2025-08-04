@@ -3,9 +3,9 @@ package com.bloxbean.cardano.yaci.core.protocol.txsubmission.serializers;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
+import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
-import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -42,9 +42,16 @@ public class TxSubmissionMessagesSerializers {
         @Override
         public byte[] serialize(RequestTxIds requestTxIds) { //Not Used
             Array array = new Array();
+            array.add(new UnsignedInteger(0));
             array.add(requestTxIds.isBlocking() ? SimpleValue.TRUE : SimpleValue.FALSE);
             array.add(new UnsignedInteger(requestTxIds.getAckTxIds()));
             array.add(new UnsignedInteger(requestTxIds.getReqTxIds()));
+
+            if (log.isTraceEnabled()) {
+                log.trace(">> Inside RequestTxIdsSerializer serialize() method. " +
+                                "Blocking: {}, AckTxIds: {}, ReqTxIds: {}",
+                        requestTxIds.isBlocking(), requestTxIds.getAckTxIds(), requestTxIds.getReqTxIds());
+            }
 
             return CborSerializationUtil.serialize(array);
         }
@@ -80,11 +87,11 @@ public class TxSubmissionMessagesSerializers {
             pairs.setChunked(true);
 
             if (replyTxIds.getTxIdAndSizeMap() != null) {
-                replyTxIds.getTxIdAndSizeMap().forEach((id, size) -> {
+                replyTxIds.getTxIdAndSizeMap().forEach((txId, size) -> {
                     var pair = new Array();
                     var era = new Array();
-                    era.add(new UnsignedInteger(replyTxIds.getEra().getValue()));
-                    era.add(new ByteString(HexUtil.decodeHexString(id)));
+                    era.add(new UnsignedInteger(txId.getEra().getValue()));
+                    era.add(new ByteString(txId.getTxId()));
                     pair.add(era);
                     pair.add(new UnsignedInteger(size));
                     pairs.add(pair);
@@ -99,7 +106,40 @@ public class TxSubmissionMessagesSerializers {
             return CborSerializationUtil.serialize(array);
         }
 
-        //TODO deserializeDI() -- Not used
+        @Override
+        public ReplyTxIds deserializeDI(DataItem di) {
+            Array array = (Array) di;
+            List<DataItem> dataItemList = array.getDataItems();
+
+            int label = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue();
+            if (label != 1)
+                throw new CborRuntimeException("Parsing error. Invalid label: " + di);
+
+            Array pairsArray = (Array) dataItemList.get(1);
+            List<DataItem> pairs = pairsArray.getDataItems();
+            var txIdAndSizeMap = new java.util.HashMap<TxId, Integer>();
+
+            for (DataItem pairDI : pairs) {
+                if (pairDI instanceof Special) {
+                    break; // Handle the BREAK special case
+                }
+
+                Array pair = (Array) pairDI;
+                Array eraAndIdArray = (Array) pair.getDataItems().get(0);
+
+                int eraValue = ((UnsignedInteger) eraAndIdArray.getDataItems().get(0)).getValue().intValue(); // Era
+                byte[] txBytes = ((ByteString) eraAndIdArray.getDataItems().get(1)).getBytes();
+                int size = ((UnsignedInteger) pair.getDataItems().get(1)).getValue().intValue();
+
+                txIdAndSizeMap.put(new TxId(Era.fromInt(eraValue), txBytes), size);
+            }
+
+            if (log.isTraceEnabled()) {
+                log.trace(">> Inside ReplyTxIdsSerializer deserializeDI() method. " +
+                                "TxIdAndSizeMap size: {}", txIdAndSizeMap.size());
+            }
+            return new ReplyTxIds(txIdAndSizeMap);
+        }
     }
 
     public enum RequestTxsSerializer implements Serializer<RequestTxs> {
@@ -111,10 +151,18 @@ public class TxSubmissionMessagesSerializers {
             array.add(new UnsignedInteger(2));
 
             Array txIdArray = new Array();
+            txIdArray.setChunked(true);
+
             if (requestTxs.getTxIds() != null) {
-                requestTxs.getTxIds().forEach(txId -> txIdArray.add(new ByteString(HexUtil.decodeHexString(txId))));
+                requestTxs.getTxIds().forEach(txId -> {
+                    Array txIdArr = new Array();
+                    txIdArr.add(new UnsignedInteger(txId.getEra().getValue()));
+                    txIdArr.add(new ByteString(txId.getTxId()));
+                    txIdArray.add(txIdArr);
+                });
             }
 
+            txIdArray.add(Special.BREAK);
             array.add(txIdArray);
 
             return CborSerializationUtil.serialize(array);
@@ -131,15 +179,17 @@ public class TxSubmissionMessagesSerializers {
 
             // list of pairs
             Array txIdArray = (Array) dataItemList.get(1);
-            List<String> txIds = new ArrayList<>();
+            List<TxId> txIds = new ArrayList<>();
             for (DataItem txIdDI : txIdArray.getDataItems()) {
                 // if we get to the end of the list exit.
                 if (txIdDI instanceof Special) {
                     break;
                 }
                 var pairs = (Array) txIdDI;
-                String txId = HexUtil.encodeHexString(((ByteString) pairs.getDataItems().get(1)).getBytes());
-                txIds.add(txId);
+                // Era
+                int eraValue = ((UnsignedInteger) pairs.getDataItems().get(0)).getValue().intValue();
+                byte[] txId = ((ByteString) pairs.getDataItems().get(1)).getBytes();
+                txIds.add(new TxId(Era.fromInt(eraValue), txId));
             }
 
             return new RequestTxs(txIds);
@@ -161,10 +211,10 @@ public class TxSubmissionMessagesSerializers {
                 replyTxs.getTxns().forEach(tx -> {
 
                     var transactions = new Array();
-                    var txBody = new ByteString(tx);
+                    var txBody = new ByteString(tx.getTx());
                     txBody.setTag(24L);
 
-                    transactions.add(new UnsignedInteger(replyTxs.getEra().getValue())); // Era
+                    transactions.add(new UnsignedInteger(tx.getEra().getValue())); // Era
                     transactions.add(txBody);
 
                     txArray.add(transactions);
@@ -187,10 +237,15 @@ public class TxSubmissionMessagesSerializers {
                 throw new CborRuntimeException("Parsing error. Invalid label: " + di);
 
             Array txArray = (Array) dataItemList.get(1);
-            List<byte[]> txs = new ArrayList<>();
+            List<Tx> txs = new ArrayList<>();
             for (DataItem txDI : txArray.getDataItems()) {
-                byte[] tx = ((ByteString) txDI).getBytes();
-                txs.add(tx);
+                if (txDI == SimpleValue.BREAK)
+                    break;
+                Array tx = (Array) txDI;
+                // Era
+                int eraValue = ((UnsignedInteger) tx.getDataItems().get(0)).getValue().intValue();
+                byte[] txBytes = ((ByteString) tx.getDataItems().get(1)).getBytes();
+                txs.add(new Tx(Era.fromInt(eraValue), txBytes));
             }
 
             var replyTxs = new ReplyTxs();

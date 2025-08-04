@@ -1,0 +1,33 @@
+dependencies {
+    api project(':node-api')
+    api project(':core')
+    api project(':helper')
+    api libs.project.reactor.core
+
+    implementation libs.rocksdb
+
+    // Logging dependencies
+    implementation libs.slf4j.api
+    implementation libs.slf4j.reload4j
+    implementation libs.reload4j
+
+    implementation libs.cardano.client.core
+
+    testImplementation libs.project.reactor.test
+}
+
+java {
+    sourceCompatibility = 21
+    targetCompatibility = 21
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            pom {
+                name = 'Yaci Node Runtime'
+                description = 'Yaci Node Runtime - Node implementation for Yaci (A Cardano mini-protocol implementation in Java)'
+            }
+        }
+    }
+}

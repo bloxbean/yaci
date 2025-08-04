@@ -2,8 +2,11 @@ package com.bloxbean.cardano.yaci.helper.listener;
 
 import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.Block;
+import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.Era;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronBlockHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
@@ -45,4 +48,17 @@ public interface BlockChainDataListener {
     default void onDisconnect() {}
 
     default void onParsingError(BlockParseRuntimeException e) {}
+
+
+    default void rollforward(Tip tip, BlockHeader blockHeader, byte[] originalHeaderBytes) {
+
+    }
+
+    default void rollforwardByronEra(Tip tip, ByronBlockHead byronBlockHead, byte[] originalHeaderBytes) {
+
+    }
+
+    default void rollforwardByronEra(Tip tip, ByronEbHead byronEbHead, byte[] originalHeaderBytes) {
+
+    }
 }

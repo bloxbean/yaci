@@ -21,6 +21,10 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     private int counter = 0;
 
     public LocalChainSyncAgent(Point[] knownPoints) {
+        this(knownPoints, true);
+    }
+    public LocalChainSyncAgent(Point[] knownPoints, boolean isClient) {
+        super(isClient);
         this.currenState = Idle;
         this.knownPoints = knownPoints;
 
@@ -29,6 +33,10 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     }
 
     public LocalChainSyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo) {
+        this(knownPoints,stopSlotNo, agentNo, true);
+    }
+    public LocalChainSyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo, boolean isClient) {
+        super(isClient);
         this.currenState = Idle;
         this.knownPoints = knownPoints;
         this.stopAt = stopSlotNo;
@@ -140,6 +148,7 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     }
 
     private void onRollForward(LocalRollForward rollForward) {
+
         if (rollForward.getBlock() != null) { //For shelley and later era
             getAgentListeners().stream().forEach(
                     chainSyncAgentListener -> {
