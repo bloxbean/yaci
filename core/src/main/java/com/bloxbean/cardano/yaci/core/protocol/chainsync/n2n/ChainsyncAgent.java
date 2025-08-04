@@ -165,35 +165,6 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     private void onRollForward(RollForward rollForward) {
-        if (rollForward.getBlockHeader() != null) { //shelley and later
-            this.requestedPoint = new Point(rollForward.getBlockHeader().getHeaderBody().getSlot(), rollForward.getBlockHeader().getHeaderBody().getBlockHash());
-        } else if (rollForward.getByronBlockHead() != null) { //Byron Block
-            long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(Era.Byron,
-                    rollForward.getByronBlockHead().getConsensusData().getSlotId().getEpoch(),
-                    rollForward.getByronBlockHead().getConsensusData().getSlotId().getSlot());
-            this.requestedPoint = new Point(absoluteSlot, rollForward.getByronBlockHead().getBlockHash());
-        } else if (rollForward.getByronEbHead() != null) { //Byron Epoch block.
-            long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(
-                    Era.Byron,
-                    rollForward.getByronEbHead().getConsensusData().getEpoch(),
-                    0);
-            this.requestedPoint = new Point(absoluteSlot, rollForward.getByronEbHead().getBlockHash());
-        }
-
-        if (counter++ % 100 == 0 || (tip.getPoint().getSlot() - currentPoint.getSlot()) < 10) {
-
-            if (log.isDebugEnabled()) {
-                log.debug("**********************************************************");
-                log.debug(String.valueOf(currentPoint));
-                log.debug("[Agent No: " + agentNo + "] : " + rollForward);
-                log.debug("**********************************************************");
-            }
-
-            if (stopAt != 0 && rollForward.getBlockHeader().getHeaderBody().getSlot() >= stopAt) {
-                this.currenState = HandshkeState.Done;
-            }
-        }
-
        if (rollForward.getBlockHeader() != null) { //For Shelley and later eras
             getAgentListeners().stream().forEach(
                     chainSyncAgentListener -> {
@@ -229,6 +200,35 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
                    }
            );
        }
+
+        if (rollForward.getBlockHeader() != null) { //shelley and later
+            this.requestedPoint = new Point(rollForward.getBlockHeader().getHeaderBody().getSlot(), rollForward.getBlockHeader().getHeaderBody().getBlockHash());
+        } else if (rollForward.getByronBlockHead() != null) { //Byron Block
+            long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(Era.Byron,
+                    rollForward.getByronBlockHead().getConsensusData().getSlotId().getEpoch(),
+                    rollForward.getByronBlockHead().getConsensusData().getSlotId().getSlot());
+            this.requestedPoint = new Point(absoluteSlot, rollForward.getByronBlockHead().getBlockHash());
+        } else if (rollForward.getByronEbHead() != null) { //Byron Epoch block.
+            long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(
+                    Era.Byron,
+                    rollForward.getByronEbHead().getConsensusData().getEpoch(),
+                    0);
+            this.requestedPoint = new Point(absoluteSlot, rollForward.getByronEbHead().getBlockHash());
+        }
+
+        if (counter++ % 100 == 0 || (tip.getPoint().getSlot() - currentPoint.getSlot()) < 10) {
+
+            if (log.isDebugEnabled()) {
+                log.debug("**********************************************************");
+                log.debug(String.valueOf(currentPoint));
+                log.debug("[Agent No: " + agentNo + "] : " + rollForward);
+                log.debug("**********************************************************");
+            }
+
+            if (stopAt != 0 && rollForward.getBlockHeader().getHeaderBody().getSlot() >= stopAt) {
+                this.currenState = HandshkeState.Done;
+            }
+        }
     }
 
     @Override

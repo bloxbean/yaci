@@ -148,7 +148,15 @@ public class HandshakeSerializers {
                 DataItem initiatorAndResponderDiffusionModeDI = versionDataArr.getDataItems().get(1);
                 boolean iardm = initiatorAndResponderDiffusionModeDI == SimpleValue.TRUE ? true : false;
 
-                return new AcceptVersion(versionNumber, new N2NVersionData(networkMagic, iardm));
+                // Check if this is protocol v11+ with peer sharing and query support
+                if (versionNumber >= N2NVersionTableConstant.PROTOCOL_V11 && versionDataArr.getDataItems().size() == 4) {
+                    int peerSharing = ((UnsignedInteger) versionDataArr.getDataItems().get(2)).getValue().intValue();
+                    Boolean query = versionDataArr.getDataItems().get(3) == SimpleValue.TRUE ? Boolean.TRUE : Boolean.FALSE;
+                    
+                    return new AcceptVersion(versionNumber, new N2NVersionData(networkMagic, iardm, peerSharing, query));
+                } else {
+                    return new AcceptVersion(versionNumber, new N2NVersionData(networkMagic, iardm));
+                }
             } else if (versionDataDI.getMajorType() == MajorType.UNSIGNED_INTEGER) { //N2C
                 UnsignedInteger networkMagic = (UnsignedInteger) dataItems.get(2); //versiondata == networkmagic
 
