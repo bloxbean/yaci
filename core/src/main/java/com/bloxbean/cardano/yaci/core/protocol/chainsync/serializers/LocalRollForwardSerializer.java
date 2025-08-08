@@ -53,4 +53,36 @@ public enum LocalRollForwardSerializer implements Serializer<LocalRollForward> {
         return new LocalRollForward(byronEbBlock, byronMainBlock, block, tip);
     }
 
+    //TODO -- Need tests
+    @Override
+    public DataItem serializeDI(LocalRollForward object) {
+        Array contentArr = new Array();
+
+        // Add the rollForwardType for serialization
+        if (object.getByronEbBlock() != null) {
+            contentArr.add(new UnsignedInteger(0)); // Era 0 for ByronEbBlock
+        } else if (object.getByronBlock() != null) {
+            contentArr.add(new UnsignedInteger(1)); // ByronMainBlock era value TODO ??
+        } else if (object.getBlock() != null) {
+            contentArr.add(new UnsignedInteger(object.getBlock().getEra().getValue())); // Other block's era value
+        } else {
+            throw new IllegalArgumentException("Incomplete LocalRollForward object.");
+        }
+
+        // Add the serialized block
+        byte[] blockBytes;
+        if (object.getByronEbBlock() != null) {
+            blockBytes = ByronEbBlockSerializer.INSTANCE.serialize(object.getByronEbBlock());
+        } else if (object.getByronBlock() != null) {
+            blockBytes = ByronBlockSerializer.INSTANCE.serialize(object.getByronBlock());
+        } else {
+            blockBytes = BlockSerializer.INSTANCE.serialize(object.getBlock());
+        }
+        contentArr.add(new ByteString(blockBytes));
+
+        // Add the serialized Tip
+        contentArr.add(TipSerializer.INSTANCE.serializeDI(object.getTip()));
+
+        return contentArr;
+    }
 }
