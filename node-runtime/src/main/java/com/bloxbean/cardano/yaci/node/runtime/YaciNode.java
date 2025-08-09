@@ -377,14 +377,14 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
         }
 
         // Start pipelined sync with both header and body listeners
-        log.info("🚀 ==> Starting pipelined sync with config: {}", pipelineConfig);
-        peerClient.startPipelinedSync(startPoint, pipelineConfig, this, this, null);
-
-        // Enable selective body fetching with adaptive strategy
-        peerClient.enableSelectiveBodyFetch(createSelectiveBodyFetchStrategy());
-
-        // Use FULL_PARALLEL strategy for maximum performance
-        peerClient.setPipelineStrategy(PipelineStrategy.FULL_PARALLEL);
+//        log.info("🚀 ==> Starting pipelined sync with config: {}", pipelineConfig);
+//        peerClient.startPipelinedSync(startPoint, pipelineConfig, this, this, null);
+//
+//        // Enable selective body fetching with adaptive strategy
+//        peerClient.enableSelectiveBodyFetch(createSelectiveBodyFetchStrategy());
+//
+//        // Use FULL_PARALLEL strategy for maximum performance
+//        peerClient.setPipelineStrategy(PipelineStrategy.FULL_PARALLEL);
 
         // Start monitoring
         startPipelineMonitor();
@@ -448,52 +448,52 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
      * Start pipeline monitoring for performance tracking
      */
     private void startPipelineMonitor() {
-        Thread monitorThread = new Thread(() -> {
-            try {
-                while (isSyncing.get() && isPipelinedMode) {
-                    try {
-                        if (peerClient != null) {
-                            PipelineMetrics metrics = peerClient.getPipelineMetrics();
-                            if (metrics != null) {
-                                // Update local counters
-                                long currentHeaders = metrics.getHeadersReceived().get();
-                                long currentBodies = metrics.getBodiesReceived().get();
-
-                                // Log pipeline progress every 30 seconds
-                                if (currentHeaders > 0 || currentBodies > 0) {
-                                    log.info("🔄 Pipeline Status: Headers: {} ({}/s), Bodies: {} ({}/s), Efficiency: {}%",
-                                            currentHeaders, String.format("%.1f", metrics.getHeadersPerSecond()),
-                                            currentBodies, String.format("%.1f", metrics.getBodiesPerSecond()),
-                                            String.format("%.1f", metrics.getPipelineEfficiency() * 100));
-
-                                    // Check if we're catching up (bulk sync complete)
-                                    if (!isInitialSyncComplete && remoteTip != null) {
-                                        long slotDifference = remoteTip.getPoint().getSlot() - lastProcessedSlot;
-                                        if (slotDifference <= 20) {
-                                            isInitialSyncComplete = true;
-                                            log.info("🚀 ==> PIPELINE SYNC COMPLETE: Now in real-time mode");
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Thread.sleep(30000); // Check every 30 seconds
-                    } catch (Exception e) {
-                        log.debug("Pipeline monitor error: {}", e.getMessage());
-                        Thread.sleep(10000);
-                    }
-                }
-            } catch (InterruptedException e) {
-                log.info("Pipeline monitor interrupted");
-                Thread.currentThread().interrupt();
-            }
-        });
-
-        monitorThread.setDaemon(true);
-        monitorThread.setName("YaciPipelineMonitor");
-        monitorThread.start();
-
-        log.info("Pipeline monitor started");
+//        Thread monitorThread = new Thread(() -> {
+//            try {
+//                while (isSyncing.get() && isPipelinedMode) {
+//                    try {
+//                        if (peerClient != null) {
+//                            PipelineMetrics metrics = peerClient.getPipelineMetrics();
+//                            if (metrics != null) {
+//                                // Update local counters
+//                                long currentHeaders = metrics.getHeadersReceived().get();
+//                                long currentBodies = metrics.getBodiesReceived().get();
+//
+//                                // Log pipeline progress every 30 seconds
+//                                if (currentHeaders > 0 || currentBodies > 0) {
+//                                    log.info("🔄 Pipeline Status: Headers: {} ({}/s), Bodies: {} ({}/s), Efficiency: {}%",
+//                                            currentHeaders, String.format("%.1f", metrics.getHeadersPerSecond()),
+//                                            currentBodies, String.format("%.1f", metrics.getBodiesPerSecond()),
+//                                            String.format("%.1f", metrics.getPipelineEfficiency() * 100));
+//
+//                                    // Check if we're catching up (bulk sync complete)
+//                                    if (!isInitialSyncComplete && remoteTip != null) {
+//                                        long slotDifference = remoteTip.getPoint().getSlot() - lastProcessedSlot;
+//                                        if (slotDifference <= 20) {
+//                                            isInitialSyncComplete = true;
+//                                            log.info("🚀 ==> PIPELINE SYNC COMPLETE: Now in real-time mode");
+//                                        }
+//                                    }
+//                                }
+//                            }
+//                        }
+//                        Thread.sleep(30000); // Check every 30 seconds
+//                    } catch (Exception e) {
+//                        log.debug("Pipeline monitor error: {}", e.getMessage());
+//                        Thread.sleep(10000);
+//                    }
+//                }
+//            } catch (InterruptedException e) {
+//                log.info("Pipeline monitor interrupted");
+//                Thread.currentThread().interrupt();
+//            }
+//        });
+//
+//        monitorThread.setDaemon(true);
+//        monitorThread.setName("YaciPipelineMonitor");
+//        monitorThread.start();
+//
+//        log.info("Pipeline monitor started");
     }
 
     /**

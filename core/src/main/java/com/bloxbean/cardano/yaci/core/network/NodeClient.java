@@ -71,7 +71,6 @@ public abstract class NodeClient {
                 @Override
                 public void initChannel(Channel ch)
                         throws Exception {
-                    //ch.pipeline().addLast("readTimeoutHandler", new ReadTimeoutHandler(30));
                     ch.pipeline().addLast(new MiniProtoRequestDataEncoder(),
                             new MiniProtoStreamingByteToMessageDecoder(agents),
                             new MiniProtoClientInboundHandler(handshakeAgent, agents));
@@ -175,8 +174,7 @@ public abstract class NodeClient {
                 agent.disconnected();
             }
 
-            //TODO some delay
-            //Try to start again
+            // Try to start again
             if (session != null && session.shouldReconnect()) {
                 log.warn("Trying to reconnect !!!");
                 session = null; //reset session before creating a new one.

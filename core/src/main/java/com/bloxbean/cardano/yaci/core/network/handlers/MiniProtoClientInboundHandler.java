@@ -3,13 +3,11 @@ package com.bloxbean.cardano.yaci.core.network.handlers;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.Segment;
-import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Arrays;
 
 @Slf4j
 public class MiniProtoClientInboundHandler extends ChannelInboundHandlerAdapter {
@@ -24,10 +22,6 @@ public class MiniProtoClientInboundHandler extends ChannelInboundHandlerAdapter 
         this.agents = agents;
     }
 
-    @Override
-    public void channelActive(ChannelHandlerContext ctx) throws Exception {
-        super.channelActive(ctx);
-    }
     
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
@@ -84,9 +78,4 @@ public class MiniProtoClientInboundHandler extends ChannelInboundHandlerAdapter 
         }
     }
 
-    public static void main(String[] args) {
-        byte[] bytes = HexUtil.decodeHexString("000001e8000000618200ac011a2d964a091980021a2d964a091980031a2d964a091980041a2d964a091980051a2d964a091980061a2d964a091980071a2d964a091980081a2d964a091980091a2d964a0919800a1a2d964a0919800b1a2d964a0919800c1a2d964a09");
-        byte[] slice = Arrays.copyOfRange(bytes, 8, bytes.length);
-        log.info(HexUtil.encodeHexString(slice));
-    }
 }

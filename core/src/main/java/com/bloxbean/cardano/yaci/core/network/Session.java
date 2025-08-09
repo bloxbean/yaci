@@ -15,6 +15,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @Slf4j
 class Session implements Disposable {
+    private static final long RECONNECTION_DELAY_MS = 8000;
+    
     private final SocketAddress socketAddress;
     private final Bootstrap clientBootstrap;
     private Channel activeChannel;
@@ -48,7 +50,7 @@ class Session implements Disposable {
                 connectFuture = clientBootstrap.connect(socketAddress).sync();
             } catch (Exception e) {
                 log.error("Connection failed", e);
-                Thread.sleep(8000);
+                Thread.sleep(RECONNECTION_DELAY_MS);
                 log.debug("Trying to reconnect !!!");
             }
         }
