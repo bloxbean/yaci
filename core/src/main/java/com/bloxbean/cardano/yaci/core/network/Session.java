@@ -70,6 +70,7 @@ class Session implements Disposable {
             if (cf.isSuccess()) {
                 if (showConnectionLog())
                     log.info("Connection established");
+                
                 if (sessionListener != null)
                     sessionListener.connected();
                 //Listen to the channel closing
@@ -77,6 +78,7 @@ class Session implements Disposable {
                 closeFuture.addListeners((ChannelFuture closeFut) -> {
                     if (log.isDebugEnabled())
                         log.warn("Channel closed !!!");
+                    
                     if (sessionListener != null)
                         sessionListener.disconnected();
                 });
@@ -100,13 +102,23 @@ class Session implements Disposable {
     public void dispose() {
         if (showConnectionLog())
             log.info("Disposing the session !!!");
-      //  try {
+        try {
             if (activeChannel != null) {
-                activeChannel.close();
+                // Clear agent channel references to prevent messages from closed channel
+                handshakeAgent.setChannel(null);
+                for (Agent agent: agents) {
+                    agent.setChannel(null);
+                }
+                
+                // Wait for channel to actually close
+                activeChannel.close().sync();
+                if (showConnectionLog())
+                    log.info("Channel closed successfully");
             }
-//        } catch (InterruptedException e) {
-//            log.error("Interrupted while shutting down TcpClient");
-//        }
+        } catch (InterruptedException e) {
+            log.error("Interrupted while shutting down session", e);
+            Thread.currentThread().interrupt();
+        }
     }
 
     public void disableReconnection() {
