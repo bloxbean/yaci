@@ -30,6 +30,7 @@ import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxs;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import static com.bloxbean.cardano.yaci.core.common.TxBodyType.CONWAY;
@@ -68,6 +69,9 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     private volatile boolean firstTimeHandshake = true;
 
     private boolean headersOnlyFetch = false;
+
+    // Latest tip from the network
+    private volatile Tip latestTip;
 
     /**
      * Reset the firstTimeHandshake flag on disconnection to prevent duplicate messages
@@ -118,7 +122,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
             @Override
             public void handshakeOk() {
                 keepAliveAgent.sendKeepAlive(1234);
-                
+
                 // Notify agent about new connection to handle stale responses
                 chainSyncAgent.onConnectionEstablished();
 
@@ -168,7 +172,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
             public void rollbackward(Tip tip, Point toPoint) {
                 handleRollbackward(tip, toPoint);
             }
-            
+
             @Override
             public void onDisconnect() {
                 log.info("ChainSync agent disconnected - resetting handshake flag");
@@ -227,6 +231,8 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     // ========================================
 
     private void handleIntersectFound(Tip tip, Point point) {
+        // Store the latest tip
+        this.latestTip = tip;
         if (log.isDebugEnabled()) {
             log.debug("Intersect found : Point : {},  Tip: {}", point, tip);
         }
@@ -237,6 +243,8 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     private synchronized void handleRollForward(Tip tip, BlockHeader blockHeader) {
+        // Update the latest tip
+        this.latestTip = tip;
         if (headersOnlyFetch) {
             Point blockPoint = new Point(blockHeader.getHeaderBody().getSlot(), blockHeader.getHeaderBody().getBlockHash());
             chainSyncAgent.confirmBlock(blockPoint);
@@ -248,6 +256,8 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     private synchronized void handleByronRollForward(Tip tip, ByronBlockHead byronHead) {
+        // Update the latest tip
+        this.latestTip = tip;
         long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(Era.Byron,
                 byronHead.getConsensusData().getSlotId().getEpoch(),
                 byronHead.getConsensusData().getSlotId().getSlot());
@@ -262,6 +272,8 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     private synchronized void handleByronEbRollForward(Tip tip, ByronEbHead byronEbHead) {
+        // Update the latest tip
+        this.latestTip = tip;
         long absoluteSlot = GenesisConfig.getInstance().absoluteSlot(Era.Byron,
                 byronEbHead.getConsensusData().getEpoch(),
                 0);
@@ -276,6 +288,8 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     private synchronized void handleRollbackward(Tip tip, Point toPoint) {
+        // Update the latest tip even on rollback
+        this.latestTip = tip;
         log.info("Rollback to point: {}", toPoint);
         chainSyncAgent.sendNextMessage();
     }
@@ -460,15 +474,29 @@ public class N2NPeerFetcher implements Fetcher<Block> {
             log.warn("Agent status is Done. Can't reschedule new points.");
     }
 
-    public void startSync(Point from) {
+    public void startSync(Point from, boolean isPipelined) {
         if (!n2nClient.isRunning())
             throw new IllegalStateException("startSync() should be called after start()");
 
+        chainSyncAgent.enablePipelining(isPipelined);
         //This was missing earlier, so reset the chainSyncAgent to start from the given point
         chainSyncAgent.reset(from);
 
         chainSyncAgent.sendNextMessage();
         log.info("Starting sync from current point or intersection");
+    }
+
+    public Optional<Tip> getLatestTip() {
+        if (!n2nClient.isRunning())
+            throw new IllegalStateException("getTip() should be called after start()");
+
+        // Return the latest known tip if available
+        if (latestTip != null) {
+            return Optional.of(latestTip);
+        } else {
+            // No tip available yet - chain sync probably hasn't started
+            return Optional.empty();
+        }
     }
 
     public void enableTxSubmission() {
@@ -492,4 +520,5 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
         headerFetcher.startChainSyncOnly(Constants.WELL_KNOWN_PREPROD_POINT, true);
     }
+
 }

@@ -1,10 +1,8 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
-import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
-import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener;
@@ -13,8 +11,7 @@ import com.bloxbean.cardano.yaci.helper.listener.BlockFetchAgentListenerAdapter;
 import com.bloxbean.cardano.yaci.helper.listener.ChainSyncListenerAdapter;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.List;
-import java.util.function.Predicate;
+import java.util.Optional;
 
 /**
  * A high level helper class to sync blockchain data from tip or from a particular point using node-to-node miniprotocol
@@ -78,37 +75,29 @@ public class PeerClient {
         n2NPeerFetcher.start();
     }
 
-    /**
-     * Start sync from a given point
-     * @param point point to start sync from
-     * @param blockChainDataListener {@link BlockChainDataListener} instance
-     */
-    public void startSync(Point point, BlockChainDataListener blockChainDataListener, TxSubmissionListener txSubmissionListener) {
-        if (n2NPeerFetcher != null && n2NPeerFetcher.isRunning())
-            n2NPeerFetcher.shutdown();
-
-        initializeAgentAndStart(point, blockChainDataListener, txSubmissionListener);
-    }
-
-    private void initializeAgentAndStart(Point point, BlockChainDataListener blockChainDataListener,
-                                         TxSubmissionListener txSubmissionListener) {
-        n2NPeerFetcher = new N2NPeerFetcher(host, port, point, versionTable);
-
-        BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(blockChainDataListener);
-        ChainSyncListenerAdapter chainSyncAgentListener = new ChainSyncListenerAdapter(blockChainDataListener);
-        n2NPeerFetcher.addChainSyncListener(chainSyncAgentListener);
-        n2NPeerFetcher.addBlockFetchListener(blockfetchAgentListener);
-        n2NPeerFetcher.addTxSubmissionListener(txSubmissionListener);
-
-        n2NPeerFetcher.start();
-    }
+//    private void initializeAgentAndStart(Point point, BlockChainDataListener blockChainDataListener,
+//                                         TxSubmissionListener txSubmissionListener) {
+//        n2NPeerFetcher = new N2NPeerFetcher(host, port, point, versionTable);
+//
+//        BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(blockChainDataListener);
+//        ChainSyncListenerAdapter chainSyncAgentListener = new ChainSyncListenerAdapter(blockChainDataListener);
+//        n2NPeerFetcher.addChainSyncListener(chainSyncAgentListener);
+//        n2NPeerFetcher.addBlockFetchListener(blockfetchAgentListener);
+//        n2NPeerFetcher.addTxSubmissionListener(txSubmissionListener);
+//
+//        n2NPeerFetcher.start();
+//    }
 
     public void fetch(Point from, Point to) {
         n2NPeerFetcher.fetch(from, to);
     }
 
     public void startSync(Point from) {
-        n2NPeerFetcher.startSync(from);
+        startSync(from, false);
+    }
+
+    public void startSync(Point from, boolean isPipelined) {
+        n2NPeerFetcher.startSync(from, isPipelined);
     }
 
     public void startHeaderSync(Point from) {
@@ -119,18 +108,9 @@ public class PeerClient {
         n2NPeerFetcher.startChainSyncOnly(from, isPipelined);
     }
 
-    /**
-     * Start sync from tip
-     * @param blockChainDataListener {@link BlockChainDataListener} instance
-     */
-    public void startSyncFromTip(BlockChainDataListener blockChainDataListener, TxSubmissionListener txSubmissionListener) {
-
-        if (n2NPeerFetcher != null && n2NPeerFetcher.isRunning())
-            n2NPeerFetcher.shutdown();
-
-        initializeAgentAndStart(wellKnownPoint, blockChainDataListener, txSubmissionListener);
+    public Optional<Tip> getLatestTip() {
+        return n2NPeerFetcher.getLatestTip();
     }
-
 
     /**
      * Send keep alive message
@@ -186,8 +166,6 @@ public class PeerClient {
     public void enableTxSubmission() {
         n2NPeerFetcher.enableTxSubmission();
     }
-
-
 
     class KeepAliveThreadListener implements BlockChainDataListener {
         private Thread keepAliveThread;
