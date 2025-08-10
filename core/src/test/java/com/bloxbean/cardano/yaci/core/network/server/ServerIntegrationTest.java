@@ -326,6 +326,11 @@ public class ServerIntegrationTest {
             return new ChainTip(3000, HexUtil.decodeHexString(block3Hash), 3);
         }
 
+        @Override
+        public ChainTip getHeaderTip() {
+            return new ChainTip(3000, HexUtil.decodeHexString(block3Hash), 3);
+        }
+
         public Point getKnownPoint() {
             return new Point(0, genesisHash);
         }

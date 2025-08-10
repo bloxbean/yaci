@@ -376,6 +376,7 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             pipelineConfig = createPipelineConfig();
         }
 
+        peerClient.startSync(startPoint);
         // Start pipelined sync with both header and body listeners
 //        log.info("🚀 ==> Starting pipelined sync with config: {}", pipelineConfig);
 //        peerClient.startPipelinedSync(startPoint, pipelineConfig, this, this, null);

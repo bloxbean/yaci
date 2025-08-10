@@ -21,6 +21,7 @@ import java.util.List;
 public class DirectRocksDBChainState implements ChainState, AutoCloseable {
 
     private static final byte[] TIP_KEY = "tip".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] HEADER_TIP_KEY = "header_tip".getBytes(StandardCharsets.UTF_8);
     private static final byte[] FIRST_BLOCK_KEY = "first_block".getBytes(StandardCharsets.UTF_8);
 
     private final RocksDB db;
@@ -122,6 +123,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             try (WriteBatch batch = new WriteBatch()) {
                 // Store header
                 batch.put(headersHandle, blockHash, blockHeader);
+                ChainTip newHeaderTip = new ChainTip(slot, blockHash, blockNumber);
+                batch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newHeaderTip));
 
                 // If we successfully extracted slot and block number, update indices
                 if (slot != null && blockNumber != null) {
@@ -245,6 +248,20 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     public ChainTip getTip() {
         try {
             byte[] tipData = db.get(metadataHandle, TIP_KEY);
+            if (tipData != null) {
+                return deserializeChainTip(tipData);
+            }
+            return null;
+        } catch (Exception e) {
+            log.error("Failed to get tip", e);
+            return null;
+        }
+    }
+
+    @Override
+    public ChainTip getHeaderTip() {
+        try {
+            byte[] tipData = db.get(metadataHandle, HEADER_TIP_KEY);
             if (tipData != null) {
                 return deserializeChainTip(tipData);
             }

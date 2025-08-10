@@ -71,6 +71,11 @@ public class ServerAgentTest {
         }
 
         @Override
+        public ChainTip getHeaderTip() {
+            return null;
+        }
+
+        @Override
         public com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point findNextBlock(com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point currentPoint) {
             return null; // Test implementation
         }

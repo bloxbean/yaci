@@ -44,4 +44,5 @@ public interface ChainState {
     void rollbackTo(Long slot);
 
     ChainTip getTip();
+    ChainTip getHeaderTip();
 }

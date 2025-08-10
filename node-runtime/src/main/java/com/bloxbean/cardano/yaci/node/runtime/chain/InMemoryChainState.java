@@ -21,6 +21,7 @@ public class InMemoryChainState implements ChainState {
     private ConcurrentSkipListMap<Long, Long> blockNumberBySlot = new ConcurrentSkipListMap<>();
 
     private ChainTip tip;
+    private ChainTip headerTip;
 
     @Override
     public void storeBlock(byte[] blockHash, Long blockNumber, Long slot, byte[] block) {
@@ -39,6 +40,7 @@ public class InMemoryChainState implements ChainState {
     @Override
     public void storeBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
         blockHeaderStore.put(blockHash, blockHeader);
+        headerTip = new ChainTip(slot, blockHash, blockNumber);
     }
 
     @Override
@@ -74,6 +76,11 @@ public class InMemoryChainState implements ChainState {
     @Override
     public ChainTip getTip() {
         return tip;
+    }
+
+    @Override
+    public ChainTip getHeaderTip() {
+        return headerTip;
     }
 
     @Override
