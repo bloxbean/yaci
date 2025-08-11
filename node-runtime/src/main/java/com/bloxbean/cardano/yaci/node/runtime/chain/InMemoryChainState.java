@@ -93,6 +93,40 @@ public class InMemoryChainState implements ChainState {
     }
 
     @Override
+    public Point findNextBlockHeader(Point currentPoint) {
+        // For in-memory implementation, headers and blocks are stored together
+        // So this behaves the same as findNextBlock but checks against header tip
+        if (currentPoint == null) {
+            return null;
+        }
+        
+        long currentSlot = currentPoint.getSlot();
+        ChainTip headerTip = getHeaderTip();
+        
+        if (headerTip == null || currentSlot >= headerTip.getSlot()) {
+            return null;
+        }
+        
+        // Find the next slot with a block/header after currentSlot
+        Long nextSlot = blockNumberBySlot.keySet().stream()
+                .filter(slot -> slot > currentSlot)
+                .min(Long::compareTo)
+                .orElse(null);
+                
+        if (nextSlot != null) {
+            Long blockNumber = blockNumberBySlot.get(nextSlot);
+            if (blockNumber != null) {
+                byte[] blockHash = blockHashByNumber.get(blockNumber);
+                if (blockHash != null) {
+                    return new Point(nextSlot, HexUtil.encodeHexString(blockHash));
+                }
+            }
+        }
+        
+        return null;
+    }
+
+    @Override
     public Point findNextBlock(Point currentPoint) {
         if (currentPoint == null) {
             return null;
@@ -299,6 +333,46 @@ public class InMemoryChainState implements ChainState {
             return blockStore.containsKey(blockHash) || blockHeaderStore.containsKey(blockHash);
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    @Override
+    public Point findLastPointAfterNBlocks(Point from, long batchSize) {
+        if (from == null) {
+            return null;
+        }
+
+        try {
+            long fromSlot = from.getSlot();
+            
+            // Get all available slots starting from the fromSlot in order
+            List<Long> sortedSlots = blockNumberBySlot.keySet().stream()
+                    .filter(slot -> slot >= fromSlot)
+                    .sorted()
+                    .limit(batchSize)
+                    .toList();
+
+            if (sortedSlots.isEmpty()) {
+                return null;
+            }
+
+            // Get the last slot and its corresponding block
+            Long lastSlot = sortedSlots.get(sortedSlots.size() - 1);
+            Long lastBlockNumber = blockNumberBySlot.get(lastSlot);
+            
+            if (lastBlockNumber != null) {
+                byte[] lastBlockHash = blockHashByNumber.get(lastBlockNumber);
+                if (lastBlockHash != null) {
+                    return new Point(lastSlot, HexUtil.encodeHexString(lastBlockHash));
+                }
+            }
+
+            return null;
+        } catch (Exception e) {
+            if (log.isDebugEnabled()) {
+                log.debug("Error finding last point after N blocks: {}", e.getMessage());
+            }
+            return null;
         }
     }
 

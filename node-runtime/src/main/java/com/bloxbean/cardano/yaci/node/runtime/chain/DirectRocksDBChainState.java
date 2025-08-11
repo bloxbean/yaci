@@ -382,6 +382,59 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     }
 
     @Override
+    public Point findNextBlockHeader(Point currentPoint) {
+        try {
+            long currentSlot = currentPoint.getSlot();
+            ChainTip headerTip = getHeaderTip();
+
+            if (headerTip == null) {
+                log.warn("Header tip is null, cannot find next block header");
+                return null;
+            }
+
+            long headerTipSlot = headerTip.getSlot();
+
+            // If current slot is already at or beyond header tip, no next header available
+            if (currentSlot >= headerTipSlot) {
+                log.debug("Current slot {} is at or beyond header tip slot {}, no next header", currentSlot, headerTipSlot);
+                return null;
+            }
+
+            // Use the numberBySlotHandle iterator to find the next slot with a header after currentSlot
+            try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
+                // Seek to the position just after currentSlot
+                iterator.seek(longToBytes(currentSlot + 1));
+
+                if (iterator.isValid()) {
+                    // Found a slot with a block/header
+                    long nextSlot = bytesToLong(iterator.key());
+                    long nextBlockNumber = bytesToLong(iterator.value());
+
+                    // Get the hash for this block number (check headers first, then blocks)
+                    byte[] nextBlockHash = db.get(hashByNumberHandle, longToBytes(nextBlockNumber));
+
+                    if (nextBlockHash != null) {
+                        Point nextHeader = new Point(nextSlot, HexUtil.encodeHexString(nextBlockHash));
+                        log.debug("Found next header after slot {}: block #{} at slot {} with hash {}",
+                                currentSlot, nextBlockNumber, nextSlot, nextHeader.getHash());
+                        return nextHeader;
+                    } else {
+                        log.warn("Found slot {} with block number {} but missing hash", nextSlot, nextBlockNumber);
+                    }
+                } else {
+                    log.debug("No headers found after slot {} up to header tip at slot {}", currentSlot, headerTipSlot);
+                }
+            }
+
+            return null;
+
+        } catch (Exception e) {
+            log.error("Failed to find next block header after slot {}", currentPoint.getSlot(), e);
+            return null;
+        }
+    }
+
+    @Override
     public List<Point> findBlocksInRange(Point from, Point to) {
         List<Point> blocks = new ArrayList<>();
         try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
@@ -408,6 +461,37 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
         } catch (Exception e) {
             log.error("Failed to find blocks in range", e);
             return blocks; // Return what we have so far
+        }
+    }
+
+
+    @Override
+    public Point findLastPointAfterNBlocks(Point from, long batchSize) {
+
+        long lastBlockNumber = 0;
+        long lastSlot = 0;
+        try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
+            long fromSlot = from.getSlot();
+
+            iterator.seek(longToBytes(fromSlot));
+
+            int counter = 0;
+            while (counter < batchSize && iterator.isValid()) {
+                lastSlot = bytesToLong(iterator.key());
+                lastBlockNumber = bytesToLong(iterator.value());
+
+                iterator.next();
+                counter ++;
+            }
+
+            byte[] blockHash = db.get(hashByNumberHandle, longToBytes(lastBlockNumber));
+            if (blockHash == null)
+                return null;
+
+            return new Point(lastSlot, HexUtil.encodeHexString(blockHash));
+        } catch (Exception e) {
+            log.error("Failed to find last point after n blocks", e);
+            return null;
         }
     }
 

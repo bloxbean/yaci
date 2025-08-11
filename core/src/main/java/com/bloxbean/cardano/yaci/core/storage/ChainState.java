@@ -27,14 +27,28 @@ public interface ChainState {
     Point findNextBlock(Point currentPoint);
 
     /**
+     * Find the next block header after the given point
+     * This is useful for pipeline mode where headers are ahead of bodies
+     */
+    Point findNextBlockHeader(Point currentPoint);
+
+    /**
      * Find blocks in a range between two points
      */
     List<Point> findBlocksInRange(Point from, Point to);
+
+
+    Point findLastPointAfterNBlocks(Point from, long batchSize);
 
     /**
      * Check if a point exists in the chain
      */
     boolean hasPoint(Point point);
+
+    /**
+     * Get the first block in the chain
+     */
+    Point getFirstBlock();
 
     /**
      * Get block number for a given slot

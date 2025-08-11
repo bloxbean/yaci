@@ -69,9 +69,9 @@ public class YaciNodeConfig implements NodeConfig {
                 .useRocksDB(true)
                 .rocksDBPath("./chainstate")
                 .fullSyncThreshold(1800) // 30 minutes worth of slots
-                .enablePipelinedSync(false)  // Changed to false for sequential sync by default
+                .enablePipelinedSync(true)  // Changed to false for sequential sync by default
                 .headerPipelineDepth(200)
-                .bodyBatchSize(50)
+                .bodyBatchSize(200)
                 .maxParallelBodies(50)
                 .enableSelectiveBodyFetch(false)  // Disabled for sequential mode
                 .selectiveBodyFetchRatio(0)

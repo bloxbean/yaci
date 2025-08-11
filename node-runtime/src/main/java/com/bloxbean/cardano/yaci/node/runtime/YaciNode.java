@@ -1,24 +1,15 @@
 package com.bloxbean.cardano.yaci.node.runtime;
 
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
-import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.model.Era;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.network.server.NodeServer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
-import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.helper.*;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
-import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronBlockHead;
-import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
-import com.bloxbean.cardano.yaci.helper.model.Transaction;
 import com.bloxbean.cardano.yaci.node.api.NodeAPI;
 import com.bloxbean.cardano.yaci.node.api.SyncPhase;
 import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
@@ -30,15 +21,9 @@ import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
 import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
-import co.nstant.in.cbor.CborEncoder;
-import co.nstant.in.cbor.model.Array;
-import co.nstant.in.cbor.model.DataItem;
 import lombok.extern.slf4j.Slf4j;
 
-import java.io.ByteArrayOutputStream;
 import java.time.Duration;
-import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -47,14 +32,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Yaci Node - Acts as both client and server
- *
+ * <p>
  * CLIENT MODE: Syncs with real Cardano nodes (preprod relay nodes)
  * SERVER MODE: Serves other Yaci clients with blockchain data
- *
+ * <p>
  * This enables Yaci to act as a bridge/relay node
  */
 @Slf4j
-public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgentListener {
+public class YaciNode implements NodeAPI {
 
     // Configuration
     private final YaciNodeConfig config;
@@ -75,6 +60,10 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
     private boolean isPipelinedMode = false;
     private long headersReceived = 0;
     private long bodiesReceived = 0;
+
+    // Pipeline managers
+    private HeaderSyncManager headerSyncManager;
+    private BodyFetchManager bodyFetchManager;
 
     // Remote tip info for sync strategy
     private com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip remoteTip;
@@ -321,11 +310,15 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             log.info("Starting pipelined sync from point: {}", startPoint);
 
             // Find remote tip to understand sync scope
+            TipFinder tipFinder = new TipFinder(remoteCardanoHost, remoteCardanoPort, startPoint, protocolMagic);
+            remoteTip = tipFinder.find()
+                    .doFinally(signalType -> tipFinder.shutdown())
+                    .block(Duration.ofSeconds(5));
 
             // Create PeerClient
             if (peerClient == null) {
                 peerClient = new PeerClient(remoteCardanoHost, remoteCardanoPort, protocolMagic, startPoint);
-                peerClient.connect(this, null);
+                // Note: Connection will be established in pipeline or sequential mode below
             }
 
             if (isPipelinedMode) {
@@ -376,19 +369,74 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             pipelineConfig = createPipelineConfig();
         }
 
-        peerClient.startSync(startPoint);
-        // Start pipelined sync with both header and body listeners
-//        log.info("🚀 ==> Starting pipelined sync with config: {}", pipelineConfig);
-//        peerClient.startPipelinedSync(startPoint, pipelineConfig, this, this, null);
-//
-//        // Enable selective body fetching with adaptive strategy
-//        peerClient.enableSelectiveBodyFetch(createSelectiveBodyFetchStrategy());
-//
-//        // Use FULL_PARALLEL strategy for maximum performance
-//        peerClient.setPipelineStrategy(PipelineStrategy.FULL_PARALLEL);
+        // Initialize pipeline managers
+        initializePipelineManagers();
 
-        // Start monitoring
-        startPipelineMonitor();
+        // Create composite listener that delegates to both managers
+        PipelineDataListener pipelineListener = new PipelineDataListener(
+                headerSyncManager,
+                bodyFetchManager,
+                this  // Pass YaciNode reference for rollback coordination
+        );
+
+        // Connect using existing PeerClient.connect() method with pipeline listener
+        peerClient.connect(pipelineListener, null); // TxSubmission handled separately if needed
+
+        // Start header-only sync
+        peerClient.startHeaderSync(startPoint, true); // Enable pipelining for headers
+        log.info("🔗 ==> Header sync started with pipelining enabled");
+
+        // Start body fetch manager monitoring
+        bodyFetchManager.start();
+        log.info("📦 ==> Body fetch manager started for range-based fetching");
+
+        log.info("🚀 Pipeline startup complete - HeaderSync and BodyFetch active");
+    }
+
+    /**
+     * Initialize HeaderSyncManager and BodyFetchManager for pipeline mode.
+     */
+    private void initializePipelineManagers() {
+        if (headerSyncManager != null) {
+            // Reset existing managers
+            headerSyncManager.resetMetrics();
+        } else {
+            // Create new HeaderSyncManager
+            headerSyncManager = new HeaderSyncManager(peerClient, chainState);
+            log.info("📋 HeaderSyncManager created");
+        }
+
+        if (bodyFetchManager != null) {
+            // Stop and reset existing manager
+            if (bodyFetchManager.isRunning()) {
+                bodyFetchManager.stop();
+            }
+            bodyFetchManager.resetMetrics();
+        } else {
+            // Create new BodyFetchManager with appropriate configuration
+            int gapThreshold = pipelineConfig != null ?
+                    Math.max(pipelineConfig.getBodyBatchSize() / 10, 5) : 10; // Dynamic threshold
+            int maxBatchSize = pipelineConfig != null ?
+                    pipelineConfig.getBodyBatchSize() : 500;
+
+            maxBatchSize = 5000;
+
+            bodyFetchManager = new BodyFetchManager(
+                    peerClient,
+                    chainState,
+                    gapThreshold,
+                    maxBatchSize,
+                    500 // 500ms monitoring interval
+            );
+            log.info("📦 BodyFetchManager created with gapThreshold={}, maxBatchSize={}",
+                    gapThreshold, maxBatchSize);
+        }
+
+        log.info("🔗 Pipeline managers initialized and ready");
+        log.info("ℹ️  HeaderSyncManager will receive headers through ChainSync protocol");
+        if (bodyFetchManager != null) {
+            log.info("ℹ️  BodyFetchManager will monitor for gaps and fetch ranges automatically");
+        }
     }
 
     /**
@@ -397,6 +445,16 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
     private void startSequentialClientSync(Point startPoint) {
         log.info("📦 ==> SEQUENTIAL SYNC: Using traditional header+body sync");
         isInitialSyncComplete = false;
+
+        // Create composite listener that delegates to both managers
+        PipelineDataListener pipelineListener = new PipelineDataListener(
+                headerSyncManager,
+                bodyFetchManager,
+                this  // Pass YaciNode reference for rollback coordination
+        );
+
+        // Connect using existing PeerClient.connect() method with pipeline listener
+        peerClient.connect(pipelineListener, null); // TxSubmission handled separately if needed
 
         // Start traditional sync from tip or point
         peerClient.startSync(startPoint);
@@ -442,152 +500,6 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             log.info("Local tip is {} slots behind (<= {} threshold), using real-time sync",
                     slotDifference, config.getFullSyncThreshold());
             return false;
-        }
-    }
-
-    /**
-     * Start pipeline monitoring for performance tracking
-     */
-    private void startPipelineMonitor() {
-//        Thread monitorThread = new Thread(() -> {
-//            try {
-//                while (isSyncing.get() && isPipelinedMode) {
-//                    try {
-//                        if (peerClient != null) {
-//                            PipelineMetrics metrics = peerClient.getPipelineMetrics();
-//                            if (metrics != null) {
-//                                // Update local counters
-//                                long currentHeaders = metrics.getHeadersReceived().get();
-//                                long currentBodies = metrics.getBodiesReceived().get();
-//
-//                                // Log pipeline progress every 30 seconds
-//                                if (currentHeaders > 0 || currentBodies > 0) {
-//                                    log.info("🔄 Pipeline Status: Headers: {} ({}/s), Bodies: {} ({}/s), Efficiency: {}%",
-//                                            currentHeaders, String.format("%.1f", metrics.getHeadersPerSecond()),
-//                                            currentBodies, String.format("%.1f", metrics.getBodiesPerSecond()),
-//                                            String.format("%.1f", metrics.getPipelineEfficiency() * 100));
-//
-//                                    // Check if we're catching up (bulk sync complete)
-//                                    if (!isInitialSyncComplete && remoteTip != null) {
-//                                        long slotDifference = remoteTip.getPoint().getSlot() - lastProcessedSlot;
-//                                        if (slotDifference <= 20) {
-//                                            isInitialSyncComplete = true;
-//                                            log.info("🚀 ==> PIPELINE SYNC COMPLETE: Now in real-time mode");
-//                                        }
-//                                    }
-//                                }
-//                            }
-//                        }
-//                        Thread.sleep(30000); // Check every 30 seconds
-//                    } catch (Exception e) {
-//                        log.debug("Pipeline monitor error: {}", e.getMessage());
-//                        Thread.sleep(10000);
-//                    }
-//                }
-//            } catch (InterruptedException e) {
-//                log.info("Pipeline monitor interrupted");
-//                Thread.currentThread().interrupt();
-//            }
-//        });
-//
-//        monitorThread.setDaemon(true);
-//        monitorThread.setName("YaciPipelineMonitor");
-//        monitorThread.start();
-//
-//        log.info("Pipeline monitor started");
-    }
-
-    /**
-     * Start background tip finder to get accurate remote tip information
-     */
-    private void startRemoteTipFinder() {
-        Thread tipFinderThread = new Thread(() -> {
-            try {
-                // Wait a bit before starting tip finder to avoid startup conflicts
-                Thread.sleep(10000);
-
-                while (isSyncing.get()) {
-                    try {
-                        TipFinder tipFinder = new TipFinder(remoteCardanoHost, remoteCardanoPort,
-                                Point.ORIGIN, protocolMagic);
-                        var remoteTip = tipFinder.find().block(Duration.ofSeconds(5));
-
-                        if (remoteTip != null) {
-                            this.remoteTip = remoteTip;
-                            log.debug("Remote tip updated: slot={}, hash={}",
-                                    remoteTip.getPoint().getSlot(), remoteTip.getPoint().getHash());
-                        }
-
-                        tipFinder.shutdown();
-
-                        // Check every 30 seconds
-                        Thread.sleep(30000);
-
-                    } catch (Exception e) {
-                        log.debug("Could not get remote tip: {}", e.getMessage());
-                        Thread.sleep(30000);
-                    }
-                }
-            } catch (InterruptedException e) {
-                log.debug("Remote tip finder interrupted");
-                Thread.currentThread().interrupt();
-            }
-        });
-
-        tipFinderThread.setDaemon(true);
-        tipFinderThread.setName("YaciRemoteTipFinder");
-        tipFinderThread.start();
-
-        log.info("Background remote tip finder started");
-    }
-
-    /**
-     * Start a background monitor to handle sync progress and automatic transitions
-     */
-    private void startSyncMonitor() {
-        Thread monitorThread = new Thread(() -> {
-            try {
-                // Monitor for initial sync completion and handle BlockFetch to ChainSync transition
-                monitorSyncProgress();
-            } catch (Exception e) {
-                log.error("Sync monitor error", e);
-            }
-        });
-        monitorThread.setDaemon(true);
-        monitorThread.setName("YaciSyncMonitor");
-        monitorThread.start();
-
-        log.info("Sync monitor started");
-    }
-
-    /**
-     * Monitor sync progress and handle automatic transitions between protocols
-     */
-    private void monitorSyncProgress() {
-        try {
-            // Wait for initial connection establishment
-            Thread.sleep(5000);
-
-            while (isSyncing.get() && peerClient != null && peerClient.isRunning()) {
-                try {
-                    // Monitor sync health
-                    if (blocksProcessed % 100 == 0 && blocksProcessed > 0) {
-                        log.info("Sync progress: {} blocks processed, current slot: {}",
-                                blocksProcessed, lastProcessedSlot);
-                    }
-
-                    Thread.sleep(10000); // Check every 10 seconds
-
-                } catch (Exception e) {
-                    log.warn("Error in sync monitoring", e);
-                    Thread.sleep(5000);
-                }
-            }
-        } catch (InterruptedException e) {
-            log.info("Sync monitor interrupted");
-            Thread.currentThread().interrupt();
-        } catch (Exception e) {
-            log.error("Sync monitor failed", e);
         }
     }
 
@@ -659,10 +571,19 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
         }
     }
 
-    // BlockChainDataListener implementation
+    // Legacy BlockChainDataListener methods - now handled by pipeline managers
+    // Kept for backward compatibility but commented out
+    /*
     @Override
     public void onByronBlock(ByronMainBlock byronBlock) {
-        storeByronBlock(byronBlock);
+        // In pipeline mode, delegate to BodyFetchManager for block storage
+        if (isPipelinedMode && bodyFetchManager != null) {
+            bodyFetchManager.onByronBlock(byronBlock);
+        } else {
+            // Sequential mode - handle normally
+            storeByronBlock(byronBlock);
+        }
+
         blocksProcessed++;
         bodiesReceived++;
         lastProcessedSlot = byronBlock.getHeader().getConsensusData().getAbsoluteSlot();
@@ -706,7 +627,9 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             }
         }
     }
+    */
 
+    /*
     @Override
     public void onByronEbBlock(ByronEbBlock byronEbBlock) {
         storeByronEbBlock(byronEbBlock);
@@ -753,10 +676,19 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             }
         }
     }
+    */
 
+    /*
     @Override
     public void onBlock(Era era, Block block, List<Transaction> transactions) {
-        storeShelleyBlock(block);
+        // In pipeline mode, delegate to BodyFetchManager for block storage
+        if (isPipelinedMode && bodyFetchManager != null) {
+            bodyFetchManager.onBlock(era, block, transactions);
+        } else {
+            // Sequential mode - handle normally
+            storeShelleyBlock(block);
+        }
+
         blocksProcessed++;
         bodiesReceived++;
         lastProcessedSlot = block.getHeader().getHeaderBody().getSlot();
@@ -807,11 +739,18 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             }
         }
     }
+    */
 
-    @Override
-    public void onRollback(Point point) {
+    // Rollback handling - coordinates between managers and handles server notifications
+    public void handleRollback(Point point) {
         var localTip = chainState.getTip();
         long rollbackSlot = point.getSlot();
+
+        // In pipeline mode, pause BodyFetchManager during rollback
+        if (isPipelinedMode && bodyFetchManager != null) {
+            bodyFetchManager.pause();
+            log.info("⏸️ BodyFetchManager paused for rollback to slot {}", rollbackSlot);
+        }
 
         if (rollbackSlot == 0) {
             log.warn("Rollback requested to genesis (slot 0) - no action taken");
@@ -863,6 +802,7 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
         lastKnownChainTip = chainState.getTip();
     }
 
+    /*
     @Override
     public void batchDone() {
         if (isBulkBatchSync) {
@@ -871,8 +811,10 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             startClientSync();
         }
     }
+    */
 
 
+    /*
     @Override
     public void intersactNotFound(Tip tip) {
         var localTip = chainState.getTip();
@@ -900,7 +842,9 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             log.warn("Local tip is empty - no rollback needed");
         }
     }
+    */
 
+    /*
     @Override
     public void onDisconnect() {
         // Prevent multiple disconnect log messages within a short time window
@@ -924,17 +868,12 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             isSyncing.set(false);
         }
     }
+    */
 
     // Private helper methods
 
-    /**
-     * Validate chain continuity by checking if the previous block exists
-     * Exits the system if a gap is detected to prevent corrupt chain state
-     * @param prevBlockHash Previous block hash (null for genesis)
-     * @param currentBlockNumber Current block number
-     * @param currentSlot Current slot
-     * @param currentBlockHash Current block hash (for logging)
-     */
+    // Storage helper methods - now handled by pipeline managers
+    /*
     private void validateChainContinuity(String prevBlockHash, long currentBlockNumber,
                                          long currentSlot, String currentBlockHash) {
         try {
@@ -979,7 +918,9 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             System.exit(1);
         }
     }
+    */
 
+    /*
     private void storeByronBlock(ByronMainBlock byronBlock) {
         long blockNumber = byronBlock.getHeader().getConsensusData().getDifficulty().longValue();
         try {
@@ -999,7 +940,9 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             throw new RuntimeException("Failed to store Byron block " + blockNumber, e);
         }
     }
+    */
 
+    /*
     private void storeByronEbBlock(ByronEbBlock byronEbBlock) {
         long blockNumber = byronEbBlock.getHeader().getConsensusData().getDifficulty().longValue();
         try {
@@ -1019,7 +962,9 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             throw new RuntimeException("Failed to store Byron EB block " + blockNumber, e);
         }
     }
+    */
 
+    /*
     private void storeShelleyBlock(Block block) {
         long blockNumber = block.getHeader().getHeaderBody().getBlockNumber();
         try {
@@ -1039,14 +984,9 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             throw new RuntimeException("Failed to store Shelley+ block " + blockNumber, e);
         }
     }
+    */
 
-    /**
-     * Extracts the header CBOR from a full block's CBOR.
-     * The block is expected to be an array where the header is the first element.
-     *
-     * @param blockCbor The CBOR bytes of the full block.
-     * @return The CBOR bytes of the header, or null if extraction fails.
-     */
+    /*
     private byte[] extractHeaderFromBlock(byte[] blockCbor) {
         try {
             DataItem[] dataItems = CborSerializationUtil.deserialize(blockCbor);
@@ -1066,6 +1006,7 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             return null;
         }
     }
+    */
 
     /**
      * Determines if a rollback is a real chain reorganization or just a reconnection rollback
@@ -1091,29 +1032,36 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
         return false;
     }
 
-    /**
-     * Handle intersection found event - transition to INTERSECT_PHASE
-     */
-    public void onIntersectionFound() {
-        syncPhase = SyncPhase.INTERSECT_PHASE;
-        log.info("Transitioned to INTERSECT_PHASE - expect rollback to intersection");
-
-        // Reset to steady state after timeout (handles normal post-intersection rollback)
-        scheduler.schedule(() -> {
-            if (syncPhase == SyncPhase.INTERSECT_PHASE) {
-                syncPhase = SyncPhase.STEADY_STATE;
-                log.info("Auto-transitioned to STEADY_STATE after intersection phase timeout");
-            }
-        }, rollbackClassificationTimeout, TimeUnit.MILLISECONDS);
-    }
 
     /**
      * Update sync phase based on sync progress
      */
-    private void updateSyncPhase() {
+    public void updateSyncProgress() {
         if (syncPhase == SyncPhase.INITIAL_SYNC && isInitialSyncComplete) {
             syncPhase = SyncPhase.STEADY_STATE;
             log.info("Transitioned to STEADY_STATE sync phase");
+
+            // Resume BodyFetchManager after transition to steady state
+            if (isPipelinedMode && bodyFetchManager != null && bodyFetchManager.isPaused()) {
+                bodyFetchManager.resume();
+                log.info("▶️ BodyFetchManager resumed after transition to STEADY_STATE");
+            }
+        }
+    }
+
+    /**
+     * Resume BodyFetchManager when headers start flowing after intersection.
+     * This provides immediate resume instead of waiting for the 30s timeout.
+     */
+    public void resumeBodyFetchOnHeaderFlow() {
+        // Only resume during INTERSECT_PHASE when headers are flowing again
+        if (isPipelinedMode && syncPhase == SyncPhase.INTERSECT_PHASE &&
+            bodyFetchManager != null && bodyFetchManager.isPaused()) {
+
+            syncPhase = SyncPhase.STEADY_STATE;
+            bodyFetchManager.resume();
+
+            log.info("🏃‍♂️ FAST RESUME: Headers flowing - transitioned to STEADY_STATE and resumed BodyFetchManager");
         }
     }
 
@@ -1158,6 +1106,37 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
     @Override
     public NodeStatus getStatus() {
         ChainTip localTip = getLocalTip();
+        ChainTip headerTip = chainState.getHeaderTip();
+
+        String statusMessage = "Node is " + (isRunning() ? "running" : "stopped");
+
+        // Add pipeline-specific status if in pipeline mode
+        if (isPipelinedMode) {
+            statusMessage += " (phase: " + syncPhase.name() + ")";
+
+            // Add header tip information
+            if (headerTip != null) {
+                // Calculate header-body gap for pipeline monitoring
+                long gap = localTip != null ?
+                        headerTip.getSlot() - localTip.getSlot() :
+                        headerTip.getSlot();
+
+                statusMessage += String.format(" [gap: %d blocks]", gap);
+            }
+
+            // Add header metrics if available
+            if (headerSyncManager != null) {
+                var headerMetrics = headerSyncManager.getHeaderMetrics();
+                statusMessage += String.format(" [headers: %d]", headerMetrics.totalHeaders);
+            }
+
+            // Add body metrics if available
+            if (bodyFetchManager != null) {
+                var bodyStatus = bodyFetchManager.getStatus();
+                statusMessage += String.format(" [bodies: %d]", bodyStatus.bodiesReceived);
+            }
+        }
+
         return NodeStatus.builder()
                 .running(isRunning())
                 .syncing(isSyncing())
@@ -1170,7 +1149,7 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
                 .remoteTipBlockNumber(remoteTip != null ? remoteTip.getBlock() : null)
                 .initialSyncComplete(isInitialSyncComplete)
                 .syncMode(isPipelinedMode ? "pipelined" : "sequential")
-                .statusMessage("Node is " + (isRunning() ? "running" : "stopped"))
+                .statusMessage(statusMessage)
                 .timestamp(System.currentTimeMillis())
                 .build();
     }
@@ -1253,18 +1232,39 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
         log.info("═══════════════════════════════════════════════════════════");
     }
 
-    // Override conflicting method from both interfaces
-    @Override
-    public void intersactFound(Tip tip, Point point) {
-        // Implementation for both interfaces
-        log.info("Intersection found at point: {}", point);
+    /**
+     * Handle intersection found event - transition to INTERSECT_PHASE
+     */
+    public void onIntersectionFound() {
+        syncPhase = SyncPhase.INTERSECT_PHASE;
+        log.info("Transitioned to INTERSECT_PHASE - expect rollback to intersection");
+
+        // Reset to steady state after timeout (handles normal post-intersection rollback)
+        scheduler.schedule(() -> {
+            if (syncPhase == SyncPhase.INTERSECT_PHASE) {
+                syncPhase = SyncPhase.STEADY_STATE;
+                log.info("Auto-transitioned to STEADY_STATE after intersection phase timeout");
+
+                // Resume BodyFetchManager after auto-transition to steady state
+                if (isPipelinedMode && bodyFetchManager != null && bodyFetchManager.isPaused()) {
+                    bodyFetchManager.resume();
+                    log.info("▶️ BodyFetchManager resumed after auto-transition to STEADY_STATE");
+                }
+            }
+        }, rollbackClassificationTimeout, TimeUnit.MILLISECONDS);
     }
 
-    // ChainSyncAgentListener methods with originalHeaderBytes for proper storage
+    // Legacy ChainSyncAgentListener methods - now handled by HeaderSyncManager
+    /*
     @Override
     public void rollforward(Tip tip, BlockHeader blockHeader, byte[] originalHeaderBytes) {
         headersReceived++;
         lastProcessedSlot = Math.max(lastProcessedSlot, blockHeader.getHeaderBody().getSlot());
+
+        // In pipeline mode, delegate to HeaderSyncManager for header-only processing
+        if (isPipelinedMode && headerSyncManager != null) {
+            headerSyncManager.rollforward(tip, blockHeader, originalHeaderBytes);
+        }
 
         remoteTip = tip;
 
@@ -1314,7 +1314,9 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             throw new RuntimeException("Original header bytes not available for Shelley+ block: " + blockHeader.getHeaderBody().getBlockHash());
         }
     }
+    */
 
+    /*
     @Override
     public void rollforwardByronEra(Tip tip, ByronBlockHead byronBlockHead, byte[] originalHeaderBytes) {
         headersReceived++;
@@ -1360,7 +1362,9 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             throw new RuntimeException("Original header bytes not available for Byron block: " + byronBlockHead.getBlockHash());
         }
     }
+    */
 
+    /*
     @Override
     public void rollforwardByronEra(Tip tip, ByronEbHead byronEbHead, byte[] originalHeaderBytes) {
         headersReceived++;
@@ -1400,5 +1404,6 @@ public class YaciNode implements NodeAPI, BlockChainDataListener, ChainSyncAgent
             throw new RuntimeException("Original header bytes not available for Byron EB block: " + byronEbHead.getBlockHash());
         }
     }
+    */
 
 }
