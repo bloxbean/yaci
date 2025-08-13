@@ -288,9 +288,19 @@ public class ServerIntegrationTest {
         }
 
         @Override
+        public Point findNextBlockHeader(Point currentPoint) {
+            return null;
+        }
+
+        @Override
         public List<Point> findBlocksInRange(Point from, Point to) {
             // Simple implementation for test
             return new ArrayList<>();
+        }
+
+        @Override
+        public Point findLastPointAfterNBlocks(Point from, long batchSize) {
+            return null;
         }
 
         @Override
@@ -306,6 +316,11 @@ public class ServerIntegrationTest {
 
             log.info("hasPoint: checking hash {}, found: {}", hash, hasPoint);
             return hasPoint;
+        }
+
+        @Override
+        public Point getFirstBlock() {
+            return null;
         }
 
         @Override

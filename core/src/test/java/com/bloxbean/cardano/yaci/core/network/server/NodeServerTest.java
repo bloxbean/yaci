@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.network.server;
 
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
@@ -110,13 +111,28 @@ public class NodeServerTest {
         }
 
         @Override
+        public Point findNextBlockHeader(Point currentPoint) {
+            return null;
+        }
+
+        @Override
         public java.util.List<com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point> findBlocksInRange(com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point from, com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point to) {
             return new java.util.ArrayList<>(); // Test implementation
         }
 
         @Override
+        public Point findLastPointAfterNBlocks(Point from, long batchSize) {
+            return null;
+        }
+
+        @Override
         public boolean hasPoint(com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point point) {
             return false; // Test implementation
+        }
+
+        @Override
+        public Point getFirstBlock() {
+            return null;
         }
 
         @Override

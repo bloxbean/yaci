@@ -57,7 +57,8 @@ class BodyFetchManagerTest {
             chainState, 
             GAP_THRESHOLD, 
             MAX_BATCH_SIZE, 
-            MONITORING_INTERVAL
+            MONITORING_INTERVAL,
+            1000  // tipProximityThreshold
         );
     }
     

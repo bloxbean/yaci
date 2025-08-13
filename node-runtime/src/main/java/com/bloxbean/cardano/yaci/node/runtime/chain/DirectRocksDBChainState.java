@@ -83,6 +83,24 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     @Override
     public void storeBlock(byte[] blockHash, Long blockNumber, Long slot, byte[] block) {
         try {
+            // MANDATORY CONTINUITY CHECK: Prevent gaps in chainstate
+            if (blockNumber > 1) {
+                byte[] previousBlock = getBlockByNumber(blockNumber - 1);
+                if (previousBlock == null) {
+                    String errorMsg = String.format(
+                        "🚨 CONTINUITY VIOLATION: Cannot store block #%d - previous block #%d is missing! " +
+                        "This would create gaps in chainstate. slot=%d, hash=%s",
+                        blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
+                    log.error(errorMsg);
+                    
+                    // Throw exception to stop sync and prevent gaps
+                    throw new IllegalStateException(errorMsg);
+                }
+                log.debug("✅ Continuity check passed for block #{}", blockNumber);
+            } else if (blockNumber == 1) {
+                log.info("📍 Storing genesis/first block #{}", blockNumber);
+            }
+
             // Use write batch for atomic updates
             try (WriteBatch batch = new WriteBatch()) {
                 // Store block
@@ -119,6 +137,24 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     @Override
     public void storeBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
         try {
+            // MANDATORY CONTINUITY CHECK: Prevent gaps in header chainstate
+            if (blockNumber != null && blockNumber > 1) {
+                byte[] previousHeader = getBlockHeaderByNumber(blockNumber - 1);
+                if (previousHeader == null) {
+                    String errorMsg = String.format(
+                        "🚨 HEADER CONTINUITY VIOLATION: Cannot store header #%d - previous header #%d is missing! " +
+                        "This would create gaps in header chainstate. slot=%d, hash=%s",
+                        blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
+                    log.error(errorMsg);
+                    
+                    // Throw exception to stop sync and prevent gaps
+                    throw new IllegalStateException(errorMsg);
+                }
+                log.debug("✅ Header continuity check passed for header #{}", blockNumber);
+            } else if (blockNumber != null && blockNumber == 1) {
+                log.info("📍 Storing genesis/first header #{}", blockNumber);
+            }
+
             // Use write batch for atomic updates
             try (WriteBatch batch = new WriteBatch()) {
                 // Store header

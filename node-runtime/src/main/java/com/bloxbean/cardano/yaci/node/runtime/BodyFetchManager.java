@@ -12,6 +12,7 @@ import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.helper.PeerClient;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
+import com.bloxbean.cardano.yaci.node.api.SyncPhase;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -44,11 +45,13 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     private final long gapThreshold;
     private final int maxBatchSize;
     private final long monitoringIntervalMs;
+    private final long tipProximityThreshold;
 
     // State management
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean paused = new AtomicBoolean(false);
     private volatile Thread monitoringThread;
+    private volatile SyncPhase syncPhase = SyncPhase.INITIAL_SYNC;
 
     // Metrics
     private final AtomicInteger bodiesReceived = new AtomicInteger(0);
@@ -67,7 +70,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
      * Create BodyFetchManager with default configuration.
      */
     public BodyFetchManager(PeerClient peerClient, ChainState chainState) {
-        this(peerClient, chainState, 10, 100, 500);
+        this(peerClient, chainState, 10, 100, 500, 10);
     }
 
     /**
@@ -78,9 +81,10 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
      * @param gapThreshold Minimum gap size to trigger fetching (default: 10 blocks)
      * @param maxBatchSize Maximum blocks per range request (default: 100)
      * @param monitoringIntervalMs Gap monitoring frequency (default: 500ms)
+     * @param tipProximityThreshold Maximum gap to consider "at tip" for immediate resume (default: 10 slots)
      */
     public BodyFetchManager(PeerClient peerClient, ChainState chainState,
-                           long gapThreshold, int maxBatchSize, long monitoringIntervalMs) {
+                           long gapThreshold, int maxBatchSize, long monitoringIntervalMs, long tipProximityThreshold) {
         if (peerClient == null) {
             throw new IllegalArgumentException("PeerClient cannot be null");
         }
@@ -102,10 +106,11 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
         this.gapThreshold = gapThreshold;
         this.maxBatchSize = maxBatchSize;
         this.monitoringIntervalMs = monitoringIntervalMs;
+        this.tipProximityThreshold = tipProximityThreshold;
 
         if (log.isInfoEnabled()) {
-            log.info("🏗️ BodyFetchManager created with config: gapThreshold={}, maxBatchSize={}, monitoringInterval={}ms",
-                    gapThreshold, maxBatchSize, monitoringIntervalMs);
+            log.info("🏗️ BodyFetchManager created with config: gapThreshold={}, maxBatchSize={}, monitoringInterval={}ms, tipProximityThreshold={}",
+                    gapThreshold, maxBatchSize, monitoringIntervalMs, tipProximityThreshold);
         }
     }
 
@@ -120,6 +125,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
 
         startTime = System.currentTimeMillis();
         resetMetrics();
+
+        // Check if we should immediately resume (when already near tip)
+        checkForImmediateResume();
 
         // Use virtual thread for lightweight concurrency
         monitoringThread = Thread.ofVirtual()
@@ -406,8 +414,15 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             bodiesReceived.incrementAndGet();
             totalBlocksFetched.incrementAndGet();
 
-            if (totalBlocksFetched.get() % 100 == 0) {
+            // Phase-aware logging: log every block when at tip (STEADY_STATE), otherwise every 100 blocks
+            if (syncPhase == SyncPhase.STEADY_STATE) {
+                // At tip - log every single block
                 log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, block.getEra());
+            } else {
+                // During initial sync - only log every 100 blocks for performance
+                if (totalBlocksFetched.get() % 100 == 0) {
+                    log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, block.getEra());
+                }
             }
 
             if (log.isDebugEnabled() && bodiesReceived.get() % 10 == 0) {
@@ -700,6 +715,58 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             this.lastHeaderBlockNumber = lastHeaderBlockNumber;
             this.totalBlocksFetched = totalBlocksFetched;
             this.uptimeMs = uptimeMs;
+        }
+    }
+
+    /**
+     * Set the current sync phase. Called by YaciNode to coordinate logging behavior.
+     *
+     * @param syncPhase The current sync phase
+     */
+    public void setSyncPhase(SyncPhase syncPhase) {
+        SyncPhase oldPhase = this.syncPhase;
+        this.syncPhase = syncPhase;
+        if (oldPhase != syncPhase) {
+            if (log.isDebugEnabled()) {
+                log.debug("🔄 BodyFetchManager sync phase changed: {} -> {}", oldPhase, syncPhase);
+            }
+        }
+    }
+
+    /**
+     * Get the current sync phase.
+     */
+    public SyncPhase getSyncPhase() {
+        return syncPhase;
+    }
+
+    /**
+     * Check if we're already near tip and should immediately transition to STEADY_STATE.
+     * This enables fast resume when restarting a node that's already synced.
+     */
+    private void checkForImmediateResume() {
+        long gapSize = calculateGapSize();
+        
+        // If gap is small (within tipProximityThreshold), we're already near tip
+        if (gapSize <= tipProximityThreshold) {
+            // Transition immediately to STEADY_STATE for real-time logging
+            syncPhase = SyncPhase.STEADY_STATE;
+            
+            ChainTip tip = chainState.getTip();
+            ChainTip headerTip = chainState.getHeaderTip();
+            
+            log.info("⚡ IMMEDIATE RESUME: Already near tip (gap={} slots <= threshold={})", 
+                     gapSize, tipProximityThreshold);
+            log.info("⚡ Current state: body tip={}, header tip={}", 
+                     tip != null ? "slot=" + tip.getSlot() : "null",
+                     headerTip != null ? "slot=" + headerTip.getSlot() : "null");
+            log.info("⚡ Transitioned directly to STEADY_STATE - will log every block");
+            
+            // Don't pause since we're already at tip
+            paused.set(false);
+        } else {
+            log.info("📊 Starting with gap of {} slots (threshold={}), beginning sync", 
+                     gapSize, tipProximityThreshold);
         }
     }
 

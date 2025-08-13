@@ -414,7 +414,7 @@ public class YaciNode implements NodeAPI {
             bodyFetchManager.resetMetrics();
         } else {
             // Create new BodyFetchManager with appropriate configuration
-            int gapThreshold = pipelineConfig != null ?
+            long gapThreshold = pipelineConfig != null ?
                     Math.max(pipelineConfig.getBodyBatchSize() / 10, 5) : 10; // Dynamic threshold
             int maxBatchSize = pipelineConfig != null ?
                     pipelineConfig.getBodyBatchSize() : 500;
@@ -426,7 +426,8 @@ public class YaciNode implements NodeAPI {
                     chainState,
                     gapThreshold,
                     maxBatchSize,
-                    500 // 500ms monitoring interval
+                    500, // 500ms monitoring interval
+                    1000   // tipProximityThreshold - consider "at tip" when within 1000 slots (~16 minutes)
             );
             log.info("📦 BodyFetchManager created with gapThreshold={}, maxBatchSize={}",
                     gapThreshold, maxBatchSize);
@@ -800,6 +801,20 @@ public class YaciNode implements NodeAPI {
 
         // Update last known tip
         lastKnownChainTip = chainState.getTip();
+
+        // For reconnection rollbacks during STEADY_STATE, check if we should immediately resume
+        if (isPipelinedMode && bodyFetchManager != null && !isReal && syncPhase == SyncPhase.STEADY_STATE) {
+            // Calculate gap after rollback to see if we're still near tip
+            long gapAfterRollback = bodyFetchManager.getCurrentGapSize();
+            
+            // If gap is still small (within tipProximityThreshold), immediately resume
+            if (gapAfterRollback <= 1000) { // Using same threshold as BodyFetchManager (1000 slots ~16 minutes)
+                bodyFetchManager.resume();
+                log.info("🏃‍♂️ IMMEDIATE RESUME AFTER ROLLBACK: Gap is {} slots, resuming BodyFetchManager", gapAfterRollback);
+            } else {
+                log.info("📊 Gap after rollback is {} slots, waiting for normal resume logic", gapAfterRollback);
+            }
+        }
     }
 
     /*
@@ -1041,10 +1056,13 @@ public class YaciNode implements NodeAPI {
             syncPhase = SyncPhase.STEADY_STATE;
             log.info("Transitioned to STEADY_STATE sync phase");
 
-            // Resume BodyFetchManager after transition to steady state
-            if (isPipelinedMode && bodyFetchManager != null && bodyFetchManager.isPaused()) {
-                bodyFetchManager.resume();
-                log.info("▶️ BodyFetchManager resumed after transition to STEADY_STATE");
+            // Update BodyFetchManager sync phase and resume if needed
+            if (isPipelinedMode && bodyFetchManager != null) {
+                bodyFetchManager.setSyncPhase(SyncPhase.STEADY_STATE);
+                if (bodyFetchManager.isPaused()) {
+                    bodyFetchManager.resume();
+                    log.info("▶️ BodyFetchManager resumed after transition to STEADY_STATE");
+                }
             }
         }
     }
@@ -1059,6 +1077,7 @@ public class YaciNode implements NodeAPI {
             bodyFetchManager != null && bodyFetchManager.isPaused()) {
 
             syncPhase = SyncPhase.STEADY_STATE;
+            bodyFetchManager.setSyncPhase(SyncPhase.STEADY_STATE);
             bodyFetchManager.resume();
 
             log.info("🏃‍♂️ FAST RESUME: Headers flowing - transitioned to STEADY_STATE and resumed BodyFetchManager");
@@ -1238,6 +1257,11 @@ public class YaciNode implements NodeAPI {
     public void onIntersectionFound() {
         syncPhase = SyncPhase.INTERSECT_PHASE;
         log.info("Transitioned to INTERSECT_PHASE - expect rollback to intersection");
+        
+        // Update BodyFetchManager sync phase
+        if (isPipelinedMode && bodyFetchManager != null) {
+            bodyFetchManager.setSyncPhase(SyncPhase.INTERSECT_PHASE);
+        }
 
         // Reset to steady state after timeout (handles normal post-intersection rollback)
         scheduler.schedule(() -> {
@@ -1245,10 +1269,13 @@ public class YaciNode implements NodeAPI {
                 syncPhase = SyncPhase.STEADY_STATE;
                 log.info("Auto-transitioned to STEADY_STATE after intersection phase timeout");
 
-                // Resume BodyFetchManager after auto-transition to steady state
-                if (isPipelinedMode && bodyFetchManager != null && bodyFetchManager.isPaused()) {
-                    bodyFetchManager.resume();
-                    log.info("▶️ BodyFetchManager resumed after auto-transition to STEADY_STATE");
+                // Update BodyFetchManager sync phase and resume if needed
+                if (isPipelinedMode && bodyFetchManager != null) {
+                    bodyFetchManager.setSyncPhase(SyncPhase.STEADY_STATE);
+                    if (bodyFetchManager.isPaused()) {
+                        bodyFetchManager.resume();
+                        log.info("▶️ BodyFetchManager resumed after auto-transition to STEADY_STATE");
+                    }
                 }
             }
         }, rollbackClassificationTimeout, TimeUnit.MILLISECONDS);
