@@ -92,6 +92,9 @@ public class PipelineDataListener implements BlockChainDataListener {
         
         // Update sync progress tracking in YaciNode
         yaciNode.updateSyncProgress();
+        
+        // Notify server about new block availability (only during STEADY_STATE)
+        yaciNode.notifyServerNewBlockStored();
     }
     
     @Override
@@ -101,6 +104,9 @@ public class PipelineDataListener implements BlockChainDataListener {
         
         // Update sync progress tracking in YaciNode
         yaciNode.updateSyncProgress();
+        
+        // Notify server about new block availability (only during STEADY_STATE)
+        yaciNode.notifyServerNewBlockStored();
     }
     
     @Override
@@ -110,6 +116,9 @@ public class PipelineDataListener implements BlockChainDataListener {
         
         // Update sync progress tracking in YaciNode
         yaciNode.updateSyncProgress();
+        
+        // Notify server about new block availability (only during STEADY_STATE)
+        yaciNode.notifyServerNewBlockStored();
     }
     
     @Override

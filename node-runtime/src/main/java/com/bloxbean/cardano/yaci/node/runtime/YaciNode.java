@@ -1066,6 +1066,24 @@ public class YaciNode implements NodeAPI {
             }
         }
     }
+    
+    /**
+     * Notify the server about new block availability when blocks are stored in pipeline mode.
+     * This is called by PipelineDataListener after blocks are successfully stored by BodyFetchManager.
+     * Only notifies during STEADY_STATE (at tip) to avoid excessive notifications during initial sync.
+     */
+    public void notifyServerNewBlockStored() {
+        // Only notify server if we're in real-time mode (STEADY_STATE) and server is running
+        // This avoids excessive notifications during initial sync when processing thousands of blocks
+        if (syncPhase == SyncPhase.STEADY_STATE && isServerRunning.get() && nodeServer != null) {
+            try {
+                nodeServer.notifyNewDataAvailable();
+                log.debug("Notified server agents about new block availability (at tip)");
+            } catch (Exception e) {
+                log.warn("Error notifying server agents about new block", e);
+            }
+        }
+    }
 
     /**
      * Resume BodyFetchManager when headers start flowing after intersection.
