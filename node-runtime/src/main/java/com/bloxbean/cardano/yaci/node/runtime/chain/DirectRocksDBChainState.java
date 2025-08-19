@@ -337,10 +337,47 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                     }
                 }
 
-                // Update both tips to rollback point
-                ChainTip newTip = new ChainTip(slot, rollbackHash, rollbackBlockNumber);
-                batch.put(metadataHandle, TIP_KEY, serializeChainTip(newTip));
-                batch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newTip));
+                // Update tips to rollback point
+                // For header tip, we can use the rollback point directly
+                ChainTip newHeaderTip = new ChainTip(slot, rollbackHash, rollbackBlockNumber);
+                batch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newHeaderTip));
+                
+                // For body tip, we need to ensure the block body actually exists
+                // If rolling back to a header-only point, find the last block with a body
+                byte[] blockBody = db.get(blocksHandle, rollbackHash);
+                if (blockBody != null) {
+                    // The rollback point has a body, safe to use as tip
+                    batch.put(metadataHandle, TIP_KEY, serializeChainTip(newHeaderTip));
+                } else {
+                    // The rollback point is header-only, need to find last block with body
+                    log.warn("Rollback point at slot {} is header-only, finding last block with body", slot);
+                    
+                    // Search backwards for the last block that has a body
+                    Long lastBlockWithBody = null;
+                    for (long blockNum = rollbackBlockNumber; blockNum > 0; blockNum--) {
+                        byte[] hash = db.get(hashByNumberHandle, longToBytes(blockNum));
+                        if (hash != null) {
+                            byte[] body = db.get(blocksHandle, hash);
+                            if (body != null) {
+                                lastBlockWithBody = blockNum;
+                                byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(blockNum));
+                                if (slotBytes != null) {
+                                    long bodySlot = bytesToLong(slotBytes);
+                                    ChainTip bodyTip = new ChainTip(bodySlot, hash, blockNum);
+                                    batch.put(metadataHandle, TIP_KEY, serializeChainTip(bodyTip));
+                                    log.info("Set body tip to last block with body: slot={}, block={}", bodySlot, blockNum);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (lastBlockWithBody == null) {
+                        log.error("CRITICAL: No blocks with bodies found during rollback!");
+                        // Set to null or genesis as a last resort
+                        batch.delete(metadataHandle, TIP_KEY);
+                    }
+                }
 
                 db.write(new WriteOptions(), batch);
                 
