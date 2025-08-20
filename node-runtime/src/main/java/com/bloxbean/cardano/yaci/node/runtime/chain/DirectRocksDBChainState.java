@@ -22,7 +22,6 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
 
     private static final byte[] TIP_KEY = "tip".getBytes(StandardCharsets.UTF_8);
     private static final byte[] HEADER_TIP_KEY = "header_tip".getBytes(StandardCharsets.UTF_8);
-    private static final byte[] FIRST_BLOCK_KEY = "first_block".getBytes(StandardCharsets.UTF_8);
 
     private final RocksDB db;
     private final String dbPath;
@@ -683,24 +682,29 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
      */
     public Point getFirstBlock() {
         try {
-            byte[] firstBlockData = db.get(metadataHandle, FIRST_BLOCK_KEY);
-            if (firstBlockData != null) {
-                return deserializePoint(firstBlockData);
-            }
-
-            // If no first block stored, try to find it
-            // Look for block 0 or the lowest slot
-            ChainTip tip = getTip();
-            if (tip != null) {
-                // For now, assume genesis is at slot 0
-                byte[] blockNumberBytes = db.get(numberBySlotHandle, longToBytes(0));
-                if (blockNumberBytes != null) {
-                    long blockNumber = bytesToLong(blockNumberBytes);
-                    byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNumber));
+            // Find the first block/header dynamically from indices
+            // This works for both headers and blocks since both update the indices
+            
+            // Start from block number 1 (Byron mainnet has block 1 at slot 0)
+            // We check sequentially to find the minimum block number that exists
+            for (long blockNum = 1; blockNum <= 100; blockNum++) {
+                byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(blockNum));
+                if (slotBytes != null) {
+                    // Found the first block number
+                    long slot = bytesToLong(slotBytes);
+                    byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNum));
                     if (blockHash != null) {
-                        return new Point(0, HexUtil.encodeHexString(blockHash));
+                        log.debug("Found first block/header at blockNumber={}, slot={}", blockNum, slot);
+                        return new Point(slot, HexUtil.encodeHexString(blockHash));
                     }
                 }
+            }
+
+            // If we still haven't found anything, check if there's a header tip
+            // This might happen if headers are synced but no mapping exists yet
+            ChainTip headerTip = getHeaderTip();
+            if (headerTip != null) {
+                log.warn("No first block found in indices, but header tip exists. Chain state might be incomplete.");
             }
 
             return null;
@@ -744,13 +748,6 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             batch.put(metadataHandle, TIP_KEY, serializeChainTip(newTip));
             log.debug("Updated tip: slot={}, blockNumber={}", slot, blockNumber);
         }
-
-        // Update first block if needed
-        Point firstBlock = getFirstBlock();
-        if (firstBlock == null || slot < firstBlock.getSlot()) {
-            batch.put(metadataHandle, FIRST_BLOCK_KEY,
-                    serializePoint(new Point(slot, HexUtil.encodeHexString(blockHash))));
-        }
     }
 
     private byte[] longToBytes(long value) {
@@ -786,39 +783,4 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
         }
     }
 
-    private byte[] serializePoint(Point point) {
-        try {
-            byte[] hashBytes = point.getHash() != null ?
-                    HexUtil.decodeHexString(point.getHash()) : new byte[0];
-
-            ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES + Integer.BYTES + hashBytes.length);
-            buffer.putLong(point.getSlot());
-            buffer.putInt(hashBytes.length);
-            if (hashBytes.length > 0) {
-                buffer.put(hashBytes);
-            }
-            return buffer.array();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize point", e);
-        }
-    }
-
-    private Point deserializePoint(byte[] data) {
-        try {
-            ByteBuffer buffer = ByteBuffer.wrap(data);
-            long slot = buffer.getLong();
-            int hashLength = buffer.getInt();
-
-            String hash = null;
-            if (hashLength > 0) {
-                byte[] hashBytes = new byte[hashLength];
-                buffer.get(hashBytes);
-                hash = HexUtil.encodeHexString(hashBytes);
-            }
-
-            return new Point(slot, hash);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to deserialize point", e);
-        }
-    }
 }

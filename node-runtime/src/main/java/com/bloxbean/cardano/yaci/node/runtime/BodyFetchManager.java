@@ -291,8 +291,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             // This handles genesis sync where headers are available but no bodies yet
             log.debug("No body tip yet - looking for first available header to start body fetch");
 
-            // Try to get the first block/header from chainstate
-            Point firstHeader = chainState.findNextBlockHeader(Point.ORIGIN);
+            // Get the first block/header from chainstate
+            // This now works for all networks including mainnet (Byron block 1 at slot 0)
+            Point firstHeader = chainState.getFirstBlock();
             if (firstHeader == null) {
                 log.debug("No headers available yet - waiting for headers before starting body fetch");
                 return null;
@@ -479,6 +480,16 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
 
             bodiesReceived.incrementAndGet();
             totalBlocksFetched.incrementAndGet();
+
+            if (syncPhase == SyncPhase.STEADY_STATE) {
+                // At tip - log every single block
+                log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, "Byron");
+            } else {
+                // During initial sync - only log every 100 blocks for performance
+                if (totalBlocksFetched.get() % 100 == 0) {
+                    log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, "Byron");
+                }
+            }
 
             if (log.isDebugEnabled()) {
                 log.debug("📦 Byron block received: slot={}, hash={}", slot, hash);
@@ -746,26 +757,26 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
      */
     private void checkForImmediateResume() {
         long gapSize = calculateGapSize();
-        
+
         // If gap is small (within tipProximityThreshold), we're already near tip
         if (gapSize <= tipProximityThreshold) {
             // Transition immediately to STEADY_STATE for real-time logging
             syncPhase = SyncPhase.STEADY_STATE;
-            
+
             ChainTip tip = chainState.getTip();
             ChainTip headerTip = chainState.getHeaderTip();
-            
-            log.info("⚡ IMMEDIATE RESUME: Already near tip (gap={} slots <= threshold={})", 
+
+            log.info("⚡ IMMEDIATE RESUME: Already near tip (gap={} slots <= threshold={})",
                      gapSize, tipProximityThreshold);
-            log.info("⚡ Current state: body tip={}, header tip={}", 
+            log.info("⚡ Current state: body tip={}, header tip={}",
                      tip != null ? "slot=" + tip.getSlot() : "null",
                      headerTip != null ? "slot=" + headerTip.getSlot() : "null");
             log.info("⚡ Transitioned directly to STEADY_STATE - will log every block");
-            
+
             // Don't pause since we're already at tip
             paused.set(false);
         } else {
-            log.info("📊 Starting with gap of {} slots (threshold={}), beginning sync", 
+            log.info("📊 Starting with gap of {} slots (threshold={}), beginning sync",
                      gapSize, tipProximityThreshold);
         }
     }
