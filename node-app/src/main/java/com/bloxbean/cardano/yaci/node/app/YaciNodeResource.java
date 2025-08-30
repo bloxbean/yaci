@@ -83,4 +83,35 @@ public class YaciNodeResource {
     public Response getConfig() {
         return Response.ok(nodeAPI.getConfig()).build();
     }
+
+    @POST
+    @Path("/recover")
+    public Response recoverChainState() {
+        try {
+            // Check if node is running - recovery should be done when node is stopped
+            if (nodeAPI.isRunning()) {
+                return Response.status(Response.Status.CONFLICT)
+                        .entity("{\"error\": \"Cannot recover chain state while node is running. Please stop the node first.\"}")
+                        .build();
+            }
+
+            // Trigger recovery
+            boolean recovered = nodeAPI.recoverChainState();
+            
+            if (recovered) {
+                return Response.ok()
+                        .entity("{\"message\": \"Chain state recovery completed successfully\"}")
+                        .build();
+            } else {
+                return Response.ok()
+                        .entity("{\"message\": \"No corruption detected or recovery not needed\"}")
+                        .build();
+            }
+
+        } catch (Exception e) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity("{\"error\": \"Recovery failed: " + e.getMessage() + "\"}")
+                    .build();
+        }
+    }
 }

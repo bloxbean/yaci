@@ -107,4 +107,16 @@ public interface NodeAPI {
      * @return the node configuration
      */
     NodeConfig getConfig();
+    
+    /**
+     * Recover chain state from corruption by finding the last valid continuous point
+     * and removing all corrupted data after that point.
+     * 
+     * This method should only be called when the node is not running.
+     * 
+     * @return true if recovery was performed, false if no corruption was detected
+     * @throws IllegalStateException if the node is currently running
+     * @throws RuntimeException if recovery fails
+     */
+    boolean recoverChainState();
 }

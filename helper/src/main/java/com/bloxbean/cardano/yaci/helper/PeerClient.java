@@ -167,6 +167,60 @@ public class PeerClient {
         n2NPeerFetcher.enableTxSubmission();
     }
 
+    // ========================================
+    // PAUSE/RESUME CONTROL API
+    // ========================================
+
+    /**
+     * Pause ChainSync protocol - headers will stop being processed
+     */
+    public void pauseChainSync() {
+        if (n2NPeerFetcher != null) {
+            n2NPeerFetcher.pauseChainSync();
+        }
+    }
+
+    /**
+     * Resume ChainSync protocol - headers will continue being processed
+     */
+    public void resumeChainSync() {
+        if (n2NPeerFetcher != null) {
+            n2NPeerFetcher.resumeChainSync();
+        }
+    }
+
+    /**
+     * Pause BlockFetch protocol - bodies will stop being processed
+     */
+    public void pauseBlockFetch() {
+        if (n2NPeerFetcher != null) {
+            n2NPeerFetcher.pauseBlockFetch();
+        }
+    }
+
+    /**
+     * Resume BlockFetch protocol - bodies will continue being processed
+     */
+    public void resumeBlockFetch() {
+        if (n2NPeerFetcher != null) {
+            n2NPeerFetcher.resumeBlockFetch();
+        }
+    }
+
+    /**
+     * Check if ChainSync is currently paused
+     */
+    public boolean isChainSyncPaused() {
+        return n2NPeerFetcher != null && n2NPeerFetcher.isChainSyncPaused();
+    }
+
+    /**
+     * Check if BlockFetch is currently paused
+     */
+    public boolean isBlockFetchPaused() {
+        return n2NPeerFetcher != null && n2NPeerFetcher.isBlockFetchPaused();
+    }
+
     class KeepAliveThreadListener implements BlockChainDataListener {
         private Thread keepAliveThread;
 

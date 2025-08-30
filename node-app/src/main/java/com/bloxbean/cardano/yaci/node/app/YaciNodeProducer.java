@@ -19,7 +19,7 @@ public class YaciNodeProducer {
 
     private static final Logger log = LoggerFactory.getLogger(YaciNodeProducer.class);
 
-    @ConfigProperty(name = "yaci.node.network", defaultValue = "preprod")
+    @ConfigProperty(name = "yaci.node.network", defaultValue = "mainnet")
     String network;
 
     @ConfigProperty(name = "yaci.node.remote.host", defaultValue = "localhost")

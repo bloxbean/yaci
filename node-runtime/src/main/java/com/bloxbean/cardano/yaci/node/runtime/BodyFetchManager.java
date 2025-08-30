@@ -66,6 +66,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     private volatile Point currentBatchTo;
     private volatile int currentBatchSize;
 
+    // Rollback tracking to prevent storing stale blocks
+    private volatile Point lastRollbackPoint = null;
+
     /**
      * Create BodyFetchManager with default configuration.
      */
@@ -230,14 +233,18 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
         // Debug logging to understand gap detection
         ChainTip headerTip = chainState.getHeaderTip();
         ChainTip tip = chainState.getTip();
-        log.debug("🔍 Gap check: headerTip={}, tip={}, gapSize={}, threshold={}",
-                 headerTip != null ? "slot=" + headerTip.getSlot() : "null",
-                 tip != null ? "slot=" + tip.getSlot() : "null",
-                 gapSize, gapThreshold);
+
+        if (log.isDebugEnabled()) {
+            log.debug("🔍 Gap check: headerTip={}, tip={}, gapSize={}, threshold={}",
+                    headerTip != null ? "slot=" + headerTip.getSlot() + " block#" + headerTip.getBlockNumber() : "null",
+                    tip != null ? "slot=" + tip.getSlot() + " block#" + tip.getBlockNumber() : "null",
+                    gapSize, gapThreshold);
+        }
 
         if (shouldFetchBodies(gapSize)) {
             if (log.isDebugEnabled())
                 log.debug("📈 Gap detected: {} slots >= threshold {}, triggering body fetch", gapSize, gapThreshold);
+
             BlockRange range = calculateNextRange();
             if (range != null) {
                 fetchBlockRange(range);
@@ -385,6 +392,13 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             long blockNumber = block.getHeader().getHeaderBody().getBlockNumber();
             String hash = block.getHeader().getHeaderBody().getBlockHash();
 
+            // Check for stale blocks that arrived after rollback
+            if (isStaleBlock(blockNumber, slot, hash)) {
+                log.warn("🗑️ DISCARDED STALE BLOCK: Block #{} at slot {} arrived after rollback - skipping storage",
+                        blockNumber, slot);
+                return;
+            }
+
             // Store the complete block (header + body)
             // Require CBOR bytes for proper storage
             if (block.getCbor() == null || block.getCbor().isEmpty()) {
@@ -418,7 +432,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             // Phase-aware logging: log every block when at tip (STEADY_STATE), otherwise every 100 blocks
             if (syncPhase == SyncPhase.STEADY_STATE) {
                 // At tip - log every single block
-                log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, block.getEra());
+                if (totalBlocksFetched.get() % 100 == 0) {
+                    log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, block.getEra());
+                }
             } else {
                 // During initial sync - only log every 100 blocks for performance
                 if (totalBlocksFetched.get() % 100 == 0) {
@@ -452,6 +468,13 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             long blockNumber = byronBlock.getHeader().getConsensusData().getDifficulty().longValue();
             String hash = byronBlock.getHeader().getBlockHash();
 
+            // Check for stale blocks that arrived after rollback
+            if (isStaleBlock(blockNumber, slot, hash)) {
+                log.warn("🗑️ DISCARDED STALE BLOCK: Block #{} at slot {} arrived after rollback - skipping storage",
+                        blockNumber, slot);
+                return;
+            }
+
             // Require CBOR bytes for proper storage
             if (byronBlock.getCbor() == null || byronBlock.getCbor().isEmpty()) {
                 throw new RuntimeException("Byron block CBOR is required but was null/empty for block: " + hash);
@@ -483,7 +506,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
 
             if (syncPhase == SyncPhase.STEADY_STATE) {
                 // At tip - log every single block
-                log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, "Byron");
+                if (totalBlocksFetched.get() % 100 == 0) {
+                    log.info("📦--  Block: {}, Slot: {} ({})", blockNumber, slot, "Byron");
+                }
             } else {
                 // During initial sync - only log every 100 blocks for performance
                 if (totalBlocksFetched.get() % 100 == 0) {
@@ -515,6 +540,13 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             long slot = byronEbBlock.getHeader().getConsensusData().getAbsoluteSlot();
             long blockNumber = byronEbBlock.getHeader().getConsensusData().getDifficulty().longValue();
             String hash = byronEbBlock.getHeader().getBlockHash();
+
+            // Check for stale blocks that arrived after rollback
+            if (isStaleBlock(blockNumber, slot, hash)) {
+                log.warn("🗑️ DISCARDED STALE BLOCK: Byron EB Block #{} at slot {} arrived after rollback - skipping storage",
+                        blockNumber, slot);
+                return;
+            }
 
             // Require CBOR bytes for proper storage
             if (byronEbBlock.getCbor() == null || byronEbBlock.getCbor().isEmpty()) {
@@ -594,6 +626,8 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     @Override
     public void onRollback(Point point) {
         log.info("🔄 Rollback detected to point: {}", point);
+        // Store the rollback point to prevent storing stale blocks
+        lastRollbackPoint = point;
         // Body fetching will be paused by external rollback handling
         // Reset any in-progress batch
         batchInProgress = false;
@@ -678,6 +712,78 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     // ================================================================
 
     /**
+     * Check if an incoming block is stale or would create a gap.
+     *
+     * A block is considered stale/invalid if:
+     * 1. The block would create a gap (missing prerequisite blocks)
+     * 2. The block is not the immediate next block after current tip
+     * 3. A rollback occurred and the block is beyond the rollback point with gaps
+     *
+     * @param blockNumber The block number of the incoming block
+     * @param slot The slot of the incoming block
+     * @param hash The hash of the incoming block
+     * @return true if the block should be discarded as stale/invalid
+     */
+    private boolean isStaleBlock(long blockNumber, long slot, String hash) {
+        try {
+            // Get current tip to understand the current state
+            ChainTip currentTip = chainState.getTip();
+
+            if (currentTip == null) {
+                // If no tip exists, only allow block #1 (genesis)
+                if (blockNumber == 1) {
+                    log.debug("No tip exists, allowing block #1 as genesis block");
+                    return false;
+                } else {
+                    log.debug("No tip exists but incoming block #{} is not genesis - marking as stale", blockNumber);
+                    return true;
+                }
+            }
+
+            // CRITICAL: For Byron blocks, ensure strict sequential ordering
+            // Block numbers must be exactly currentTip.blockNumber + 1
+            long expectedNextBlockNumber = currentTip.getBlockNumber() + 1;
+
+            if (blockNumber != expectedNextBlockNumber) {
+                log.warn("🚫 BLOCK SEQUENCE VIOLATION: Expected block #{}, but received block #{} - marking as stale",
+                        expectedNextBlockNumber, blockNumber);
+
+                // Additional context for debugging
+                if (lastRollbackPoint != null) {
+                    log.warn("🚫 Rollback context: rollback was to slot {}, current tip is block {} at slot {}",
+                            lastRollbackPoint.getSlot(), currentTip.getBlockNumber(), currentTip.getSlot());
+                }
+
+                return true;
+            }
+
+            // Verify the prerequisite block exists (additional safety check)
+            if (blockNumber > 1) {
+                byte[] previousBlock = chainState.getBlockByNumber(blockNumber - 1);
+                if (previousBlock == null) {
+                    log.warn("🚫 PREREQUISITE MISSING: Previous block #{} not found for incoming block #{} - marking as stale",
+                            blockNumber - 1, blockNumber);
+                    return true;
+                }
+            }
+
+            // If we had a rollback and this block is beyond the rollback point,
+            // log additional context but allow it since it passed the sequential check above
+            if (lastRollbackPoint != null && slot > lastRollbackPoint.getSlot()) {
+                log.debug("✅ Block #{} at slot {} passed sequential check despite being beyond rollback point slot {}",
+                         blockNumber, slot, lastRollbackPoint.getSlot());
+            }
+
+            // Block is sequential and valid
+            return false;
+
+        } catch (Exception e) {
+            log.warn("Error checking if block #{} is stale - marking as stale for safety: {}", blockNumber, e.getMessage());
+            return true; // If we can't determine safely, discard the block
+        }
+    }
+
+    /**
      * Represents a block range to fetch.
      */
     private static class BlockRange {
@@ -754,30 +860,71 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     /**
      * Check if we're already near tip and should immediately transition to STEADY_STATE.
      * This enables fast resume when restarting a node that's already synced.
+     *
+     * IMPORTANT: This now compares against network tip, not just header-body gap.
+     * For Byron blocks syncing from early epochs, we don't want to incorrectly
+     * detect STEADY_STATE just because headers and bodies are synchronized.
      */
     private void checkForImmediateResume() {
-        long gapSize = calculateGapSize();
+        long headerBodyGap = calculateGapSize();
 
-        // If gap is small (within tipProximityThreshold), we're already near tip
-        if (gapSize <= tipProximityThreshold) {
+        // Get network tip from peer client
+        ChainTip localTip = chainState.getTip();
+        Long networkTipSlot = null;
+
+        try {
+            if (peerClient != null && peerClient.isRunning()) {
+                var networkTipOpt = peerClient.getLatestTip();
+                if (networkTipOpt.isPresent()) {
+                    networkTipSlot = networkTipOpt.get().getPoint().getSlot();
+                    log.debug("📡 Retrieved network tip: slot={}", networkTipSlot);
+                } else {
+                    log.debug("📡 Network tip not available yet from peer client");
+                }
+            } else {
+                log.debug("📡 PeerClient not running, cannot get network tip");
+            }
+        } catch (Exception e) {
+            log.debug("Could not get network tip for sync phase detection: {}", e.getMessage());
+        }
+
+        // Calculate distance from network tip
+        long distanceFromNetworkTip = Long.MAX_VALUE;
+        if (localTip != null && networkTipSlot != null) {
+            distanceFromNetworkTip = networkTipSlot - localTip.getSlot();
+        }
+
+        // Only transition to STEADY_STATE if we're actually near the network tip
+        // Use a larger threshold (1000 slots) for network tip proximity since Byron blocks
+        // are much older than current tip
+        long networkTipThreshold = 1000;
+        boolean nearNetworkTip = (networkTipSlot != null) && (distanceFromNetworkTip <= networkTipThreshold);
+
+        // IMPORTANT: Default to INITIAL_SYNC if we can't determine network tip
+        // This prevents incorrectly detecting STEADY_STATE for Byron blocks
+        if (nearNetworkTip && headerBodyGap <= tipProximityThreshold) {
             // Transition immediately to STEADY_STATE for real-time logging
             syncPhase = SyncPhase.STEADY_STATE;
 
             ChainTip tip = chainState.getTip();
             ChainTip headerTip = chainState.getHeaderTip();
 
-            log.info("⚡ IMMEDIATE RESUME: Already near tip (gap={} slots <= threshold={})",
-                     gapSize, tipProximityThreshold);
-            log.info("⚡ Current state: body tip={}, header tip={}",
+            log.info("⚡ IMMEDIATE RESUME: Already near network tip (distance={} slots <= threshold={})",
+                     distanceFromNetworkTip, networkTipThreshold);
+            log.info("⚡ Current state: body tip={}, header tip={}, network tip={}",
                      tip != null ? "slot=" + tip.getSlot() : "null",
-                     headerTip != null ? "slot=" + headerTip.getSlot() : "null");
+                     headerTip != null ? "slot=" + headerTip.getSlot() : "null",
+                     networkTipSlot != null ? "slot=" + networkTipSlot : "unknown");
             log.info("⚡ Transitioned directly to STEADY_STATE - will log every block");
 
             // Don't pause since we're already at tip
             paused.set(false);
         } else {
-            log.info("📊 Starting with gap of {} slots (threshold={}), beginning sync",
-                     gapSize, tipProximityThreshold);
+            log.info("📊 Starting INITIAL_SYNC: header-body gap={} slots, network distance={} slots (threshold={})",
+                     headerBodyGap,
+                     distanceFromNetworkTip != Long.MAX_VALUE ? distanceFromNetworkTip : "unknown",
+                     networkTipThreshold);
+            log.info("📊 Will log every 100 blocks during initial sync, every block when near tip");
         }
     }
 

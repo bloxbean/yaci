@@ -14,17 +14,24 @@ import com.bloxbean.cardano.yaci.helper.PeerClient;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * HeaderSyncManager handles header-only synchronization using ChainSyncAgent.
+ * HeaderSyncManager handles header-only synchronization using ChainSyncAgent with intelligent backpressure.
  *
  * This component:
  * - Implements ChainSyncAgentListener to receive header events
  * - Stores headers immediately via chainState.storeBlockHeader()
  * - Updates header_tip in ChainState after each header storage
  * - Handles Byron and Shelley+ era headers with proper CBOR storage
+ * - Applies backpressure when headers race too far ahead of bodies (prevents massive rollbacks)
  * - Relies on ChainSyncAgent's automatic reconnection (no manual reconnection logic)
  *
+ * BACKPRESSURE MECHANISM:
+ * - Monitors gap between header_tip and body_tip block numbers
+ * - When gap exceeds maxGapThreshold (default 50,000), pauses header processing
+ * - Resumes header processing when bodies catch up and gap becomes acceptable
+ * - This prevents the scenario that caused massive rollbacks during mainnet sync
+ *
  * The HeaderSyncManager works in parallel with BodyFetchManager to achieve
- * true pipeline synchronization performance.
+ * true pipeline synchronization performance while preventing runaway headers.
  */
 @Slf4j
 public class HeaderSyncManager implements ChainSyncAgentListener {
@@ -38,14 +45,23 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
     private volatile long byronHeadersReceived = 0;
     private volatile long byronEbHeadersReceived = 0;
 
+    // Backpressure configuration
+    private final long maxGapThreshold;  // Maximum gap allowed between header tip and body tip
+    private volatile boolean isPaused = false;  // Whether header sync is paused due to backpressure
+
     // Progress logging
     private static final int PROGRESS_LOG_INTERVAL = 1000;
 
     public HeaderSyncManager(PeerClient peerClient, ChainState chainState) {
+        this(peerClient, chainState, 50000); // Default gap threshold of 50,000 blocks
+    }
+
+    public HeaderSyncManager(PeerClient peerClient, ChainState chainState, long maxGapThreshold) {
         this.peerClient = peerClient;
         this.chainState = chainState;
+        this.maxGapThreshold = maxGapThreshold;
 
-        log.info("HeaderSyncManager initialized - ready for header-only synchronization");
+        log.info("HeaderSyncManager initialized - ready for header-only synchronization (gap threshold: {} blocks)", maxGapThreshold);
     }
 
     // =================================================================
@@ -79,10 +95,14 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
             headersReceived++;
             shelleyHeadersReceived++;
 
+            // Apply backpressure if headers are racing too far ahead of bodies
+            checkAndApplyBackpressure(blockNumber);
+
             // Log progress periodically
             if (headersReceived % PROGRESS_LOG_INTERVAL == 0) {
-                log.info("📄 Headers: {} received (Shelley+ Block #{} at slot {})",
-                        headersReceived, blockNumber, slot);
+                long gap = getCurrentGap();
+                log.info("📄 Headers: {} received (Shelley+ Block #{} at slot {}) - Gap: {} blocks{}",
+                        headersReceived, blockNumber, slot, gap, isPaused ? " [PAUSED]" : "");
             }
 
             if (log.isDebugEnabled()) {
@@ -90,7 +110,7 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
                         slot, blockNumber, blockHash);
             }
 
-        } catch (Exception e) {
+} catch (Exception e) {
             log.error("Failed to store Shelley+ header: slot={}, blockNumber={}",
                     blockHeader.getHeaderBody().getSlot(),
                     blockHeader.getHeaderBody().getBlockNumber(), e);
@@ -132,10 +152,16 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
             headersReceived++;
             byronHeadersReceived++;
 
+            // Apply backpressure if headers are racing too far ahead of bodies
+            checkAndApplyBackpressure(blockNumber);
+
             // Log progress periodically
             if (headersReceived % PROGRESS_LOG_INTERVAL == 0) {
-                log.info("📄 Headers: {} received (Byron Block #{} at slot {})",
-                        headersReceived, blockNumber, absoluteSlot);
+                long gap = getCurrentGap();
+
+                if (log.isDebugEnabled())
+                    log.debug("📄 Headers: {} received (Byron Block #{} at slot {}) - Gap: {} blocks{}",
+                            headersReceived, blockNumber, absoluteSlot, gap, isPaused ? " [PAUSED]" : "");
             }
 
             if (log.isDebugEnabled()) {
@@ -181,10 +207,14 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
             headersReceived++;
             byronEbHeadersReceived++;
 
+            // Apply backpressure if headers are racing too far ahead of bodies
+            checkAndApplyBackpressure(blockNumber);
+
             // Log progress periodically
             if (headersReceived % PROGRESS_LOG_INTERVAL == 0) {
-                log.info("📄 Headers: {} received (Byron EB Block #{} at slot {})",
-                        headersReceived, blockNumber, absoluteSlot);
+                long gap = getCurrentGap();
+                log.info("📄 Headers: {} received (Byron EB Block #{} at slot {}) - Gap: {} blocks{}",
+                        headersReceived, blockNumber, absoluteSlot, gap, isPaused ? " [PAUSED]" : "");
             }
 
             if (log.isDebugEnabled()) {
@@ -232,6 +262,140 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
         // No action needed here - ChainSyncAgent handles reconnection automatically
         // using its internal currentPoint tracking for robust resumption
         log.debug("📄 ChainSyncAgent will automatically resume headers from last confirmed point");
+    }
+
+    // =================================================================
+    // Backpressure Control Methods
+    // =================================================================
+
+    /**
+     * Check if headers are racing too far ahead of bodies and need backpressure
+     */
+    private boolean checkBackpressure(long currentHeaderBlockNumber) {
+        try {
+            var bodyTip = chainState.getTip();
+
+            // If no body tip yet, allow headers to proceed (initial sync)
+            if (bodyTip == null) {
+                return false; // No backpressure during initial sync
+            }
+
+            long bodyBlockNumber = bodyTip.getBlockNumber();
+            long gap = currentHeaderBlockNumber - bodyBlockNumber;
+
+            if (log.isDebugEnabled())
+                log.debug("Current gap between headers and bodies: {} blocks (Header block #{}, Body block #{})",
+                    gap, currentHeaderBlockNumber, bodyBlockNumber);
+
+            // Return true if gap exceeds threshold (needs backpressure)
+            return gap > maxGapThreshold;
+
+        } catch (Exception e) {
+            log.warn("Failed to check backpressure, continuing without throttling", e);
+            return false; // On error, don't apply backpressure
+        }
+    }
+
+    /**
+     * Check and apply non-blocking backpressure by pausing ChainSync if needed
+     */
+    private void checkAndApplyBackpressure(long headerBlockNumber) {
+        boolean shouldApplyBackpressure = checkBackpressure(headerBlockNumber);
+
+        if (shouldApplyBackpressure && !isPaused) {
+            // Pause header sync to prevent further messages
+            pauseHeaderSync();
+
+            // Start a virtual thread to monitor when bodies catch up
+            Thread.ofVirtual()
+                .name("HeaderSyncManager-BackpressureMonitor")
+                .start(() -> {
+                    log.info("🔄 Starting backpressure monitor thread for gap monitoring");
+
+                    while (isPaused && peerClient != null && peerClient.isRunning()) {
+                        try {
+                            // Use current header tip for gap checking (it may have advanced)
+                            var currentHeaderTip = chainState.getHeaderTip();
+                            if (currentHeaderTip == null) {
+                                log.warn("Header tip is null during backpressure monitoring - resuming");
+                                break;
+                            }
+
+                            // Check if gap is still too large
+                            if (!checkBackpressure(currentHeaderTip.getBlockNumber())) {
+                                log.info("📈 Bodies have caught up - gap is now acceptable, resuming header sync");
+                                break; // Gap is acceptable now
+                            }
+
+                            Thread.sleep(1000); // Check every second
+                            log.info("⏸️ Headers paused - waiting for bodies to catch up (gap still too large)...");
+                        } catch (InterruptedException e) {
+                            log.info("Backpressure monitor thread interrupted");
+                            Thread.currentThread().interrupt();
+                            break;
+                        } catch (Exception e) {
+                            log.warn("Error in backpressure monitoring, resuming header sync", e);
+                            break; // On error, resume to prevent permanent pause
+                        }
+                    }
+
+                    // Resume header sync when gap becomes acceptable or on error/shutdown
+                    resumeHeaderSync();
+                    log.info("🔄 Backpressure monitor thread completed");
+                });
+        }
+    }
+
+    /**
+     * Get current gap between header and body tips
+     */
+    public long getCurrentGap() {
+        try {
+            var headerTip = chainState.getHeaderTip();
+            var bodyTip = chainState.getTip();
+
+            if (headerTip == null || bodyTip == null) {
+                return 0;
+            }
+
+            return headerTip.getBlockNumber() - bodyTip.getBlockNumber();
+        } catch (Exception e) {
+            log.warn("Failed to calculate gap", e);
+            return 0;
+        }
+    }
+
+    /**
+     * Check if header sync is currently paused due to backpressure
+     */
+    public boolean isPaused() {
+        return isPaused;
+    }
+
+    /**
+     * Pause header synchronization (used by backpressure mechanism)
+     */
+    private void pauseHeaderSync() {
+        if (peerClient != null) {
+            peerClient.pauseChainSync();
+            isPaused = true;
+            log.warn("🛑 BACKPRESSURE: Header sync paused via PeerClient");
+        } else {
+            log.warn("Cannot pause header sync - PeerClient is null");
+        }
+    }
+
+    /**
+     * Resume header synchronization (used by backpressure mechanism)
+     */
+    private void resumeHeaderSync() {
+        if (peerClient != null) {
+            peerClient.resumeChainSync();
+            isPaused = false;
+            log.info("✅ BACKPRESSURE: Header sync resumed via PeerClient");
+        } else {
+            log.warn("Cannot resume header sync - PeerClient is null");
+        }
     }
 
     // =================================================================

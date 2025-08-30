@@ -91,7 +91,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                         "This would create gaps in chainstate. slot=%d, hash=%s",
                         blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
                     log.error(errorMsg);
-                    
+
+                    System.exit(1);
                     // Throw exception to stop sync and prevent gaps
                     throw new IllegalStateException(errorMsg);
                 }
@@ -145,7 +146,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                         "This would create gaps in header chainstate. slot=%d, hash=%s",
                         blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
                     log.error(errorMsg);
-                    
+
                     // Throw exception to stop sync and prevent gaps
                     throw new IllegalStateException(errorMsg);
                 }
@@ -253,58 +254,149 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             }
 
             // Remove all blocks and headers after rollback point
-            try (WriteBatch batch = new WriteBatch()) {
-                int blocksDeleted = 0;
-                int headersOnlyDeleted = 0;
-                int slotsDeleted = 0;
-                
-                // FIRST PASS: Delete all slots after the rollback slot
-                // This catches orphaned slots with non-sequential block numbers
-                log.info("Starting slot-based cleanup for rollback to slot {}", slot);
+            // Use final batch for the last operations and tip updates
+            WriteBatch finalBatch = new WriteBatch();
+            int totalBlocksDeleted = 0;
+            int totalHeadersOnlyDeleted = 0;
+            int totalSlotsDeleted = 0;
+
+            try {
+                // Delete slots in REVERSE order (from tip backwards to rollback point)
+                // This maintains consistent state and allows resumable rollbacks
+                log.info("Starting reverse slot deletion for rollback to slot {}", slot);
+
+                final int BATCH_SIZE = 10000;
+                WriteBatch currentBatch = new WriteBatch();
+                int batchCounter = 0;
+                long highestSlotInBatch = -1;
+                long lowestSlotInBatch = -1;
+                int blocksInBatch = 0;
+                int headersOnlyInBatch = 0;
+
                 try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
-                    iterator.seek(longToBytes(slot + 1)); // Start from slot after rollback point
-                    
+                    // Start from the highest slot and work backwards
+                    iterator.seekToLast();
+
                     while (iterator.isValid()) {
                         long currentSlot = bytesToLong(iterator.key());
+
+                        // Stop when we reach the rollback point
+                        if (currentSlot <= slot) {
+                            break;
+                        }
+
                         long blockNumber = bytesToLong(iterator.value());
-                        
+
+                        // Track slot range in this batch (highest to lowest)
+                        if (batchCounter == 0) {
+                            highestSlotInBatch = currentSlot;
+                        }
+                        lowestSlotInBatch = currentSlot;
+
                         if (log.isDebugEnabled()) {
                             log.debug("Deleting slot {} (block {}) during rollback", currentSlot, blockNumber);
                         }
-                        
+
                         // Get block hash for this block number
                         byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNumber));
-                        
+
                         if (blockHash != null) {
                             // Delete block and header data
                             byte[] blockBody = db.get(blocksHandle, blockHash);
                             byte[] headerData = db.get(headersHandle, blockHash);
-                            
+
                             if (blockBody != null) {
-                                batch.delete(blocksHandle, blockHash);
-                                blocksDeleted++;
+                                currentBatch.delete(blocksHandle, blockHash);
+                                blocksInBatch++;
+                                totalBlocksDeleted++;
                             }
                             if (headerData != null) {
-                                batch.delete(headersHandle, blockHash);
+                                currentBatch.delete(headersHandle, blockHash);
                                 if (blockBody == null) {
-                                    headersOnlyDeleted++;
+                                    headersOnlyInBatch++;
+                                    totalHeadersOnlyDeleted++;
                                 }
                             }
-                            
+
                             // Delete hash mapping
-                            batch.delete(hashByNumberHandle, longToBytes(blockNumber));
+                            currentBatch.delete(hashByNumberHandle, longToBytes(blockNumber));
                         }
-                        
+
                         // Delete slot mappings
-                        batch.delete(numberBySlotHandle, iterator.key()); // Delete slot->blockNumber
-                        batch.delete(slotByNumberHandle, longToBytes(blockNumber)); // Delete blockNumber->slot
-                        slotsDeleted++;
-                        
-                        iterator.next();
+                        currentBatch.delete(numberBySlotHandle, iterator.key());
+                        currentBatch.delete(slotByNumberHandle, longToBytes(blockNumber));
+                        batchCounter++;
+                        totalSlotsDeleted++;
+
+                        // Commit batch when full
+                        if (batchCounter >= BATCH_SIZE) {
+                            // Commit deletions first
+                            db.write(new WriteOptions(), currentBatch);
+                            log.info("Deleted slot range {}-{} ({} slots, {} blocks, {} header-only) during rollback",
+                                    lowestSlotInBatch, highestSlotInBatch, batchCounter, blocksInBatch, headersOnlyInBatch);
+                            currentBatch.close();
+
+                            // Find current highest slot and set as new header_tip
+                            try (RocksIterator tipIterator = db.newIterator(numberBySlotHandle)) {
+                                tipIterator.seekToLast();
+                                if (tipIterator.isValid()) {
+                                    long highestSlot = bytesToLong(tipIterator.key());
+                                    if (highestSlot >= slot) { // Ensure it's above rollback point
+                                        long blockNum = bytesToLong(tipIterator.value());
+                                        byte[] hash = db.get(hashByNumberHandle, longToBytes(blockNum));
+                                        if (hash != null) {
+                                            ChainTip newTip = new ChainTip(highestSlot, hash, blockNum);
+                                            try (WriteBatch tipBatch = new WriteBatch()) {
+                                                tipBatch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newTip));
+                                                db.write(new WriteOptions(), tipBatch);
+                                            }
+                                            log.debug("Updated header_tip to slot {} during rollback", highestSlot);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Reset for next batch
+                            currentBatch = new WriteBatch();
+                            batchCounter = 0;
+                            blocksInBatch = 0;
+                            headersOnlyInBatch = 0;
+                        }
+
+                        iterator.prev(); // Move backwards
                     }
+
+                    // Commit any remaining entries in the last batch
+                    if (batchCounter > 0) {
+                        db.write(new WriteOptions(), currentBatch);
+                        log.info("Deleted slot range {}-{} ({} slots, {} blocks, {} header-only) during rollback",
+                                lowestSlotInBatch, highestSlotInBatch, batchCounter, blocksInBatch, headersOnlyInBatch);
+
+                        // Update header_tip after final batch
+                        try (RocksIterator tipIterator = db.newIterator(numberBySlotHandle)) {
+                            tipIterator.seekToLast();
+                            if (tipIterator.isValid()) {
+                                long highestSlot = bytesToLong(tipIterator.key());
+                                if (highestSlot >= slot) {
+                                    long blockNum = bytesToLong(tipIterator.value());
+                                    byte[] hash = db.get(hashByNumberHandle, longToBytes(blockNum));
+                                    if (hash != null) {
+                                        ChainTip newTip = new ChainTip(highestSlot, hash, blockNum);
+                                        try (WriteBatch tipBatch = new WriteBatch()) {
+                                            tipBatch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newTip));
+                                            db.write(new WriteOptions(), tipBatch);
+                                        }
+                                        log.debug("Updated header_tip to slot {} after final batch", highestSlot);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    currentBatch.close();
                 }
-                log.info("Slot-based cleanup deleted {} slots", slotsDeleted);
-                
+
+                log.info("Reverse slot deletion completed - deleted {} total slots", totalSlotsDeleted);
+
                 // SECOND PASS: Delete any remaining blocks by block number
                 // This is a safety net for any blocks that might have been missed
                 for (long blockNum = rollbackBlockNumber + 1; blockNum <= maxBlockToDelete; blockNum++) {
@@ -313,44 +405,44 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                         // Check if this hasn't been deleted already
                         byte[] blockBody = db.get(blocksHandle, blockHash);
                         byte[] headerData = db.get(headersHandle, blockHash);
-                        
+
                         if (blockBody != null) {
-                            batch.delete(blocksHandle, blockHash);
-                            blocksDeleted++;
+                            finalBatch.delete(blocksHandle, blockHash);
+                            totalBlocksDeleted++;
                         }
                         if (headerData != null) {
-                            batch.delete(headersHandle, blockHash);
+                            finalBatch.delete(headersHandle, blockHash);
                             if (blockBody == null) {
-                                headersOnlyDeleted++;
+                                totalHeadersOnlyDeleted++;
                             }
                         }
 
                         // Remove mappings (may already be deleted, but safe to re-delete)
-                        batch.delete(hashByNumberHandle, longToBytes(blockNum));
+                        finalBatch.delete(hashByNumberHandle, longToBytes(blockNum));
 
                         byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(blockNum));
                         if (slotBytes != null) {
-                            batch.delete(numberBySlotHandle, slotBytes);
+                            finalBatch.delete(numberBySlotHandle, slotBytes);
                         }
-                        batch.delete(slotByNumberHandle, longToBytes(blockNum));
+                        finalBatch.delete(slotByNumberHandle, longToBytes(blockNum));
                     }
                 }
 
                 // Update tips to rollback point
                 // For header tip, we can use the rollback point directly
                 ChainTip newHeaderTip = new ChainTip(slot, rollbackHash, rollbackBlockNumber);
-                batch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newHeaderTip));
-                
+                finalBatch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newHeaderTip));
+
                 // For body tip, we need to ensure the block body actually exists
                 // If rolling back to a header-only point, find the last block with a body
                 byte[] blockBody = db.get(blocksHandle, rollbackHash);
                 if (blockBody != null) {
                     // The rollback point has a body, safe to use as tip
-                    batch.put(metadataHandle, TIP_KEY, serializeChainTip(newHeaderTip));
+                    finalBatch.put(metadataHandle, TIP_KEY, serializeChainTip(newHeaderTip));
                 } else {
                     // The rollback point is header-only, need to find last block with body
                     log.warn("Rollback point at slot {} is header-only, finding last block with body", slot);
-                    
+
                     // Search backwards for the last block that has a body
                     Long lastBlockWithBody = null;
                     for (long blockNum = rollbackBlockNumber; blockNum > 0; blockNum--) {
@@ -363,25 +455,35 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                                 if (slotBytes != null) {
                                     long bodySlot = bytesToLong(slotBytes);
                                     ChainTip bodyTip = new ChainTip(bodySlot, hash, blockNum);
-                                    batch.put(metadataHandle, TIP_KEY, serializeChainTip(bodyTip));
+                                    finalBatch.put(metadataHandle, TIP_KEY, serializeChainTip(bodyTip));
                                     log.info("Set body tip to last block with body: slot={}, block={}", bodySlot, blockNum);
                                 }
                                 break;
                             }
                         }
                     }
-                    
+
                     if (lastBlockWithBody == null) {
                         log.error("CRITICAL: No blocks with bodies found during rollback!");
                         // Set to null or genesis as a last resort
-                        batch.delete(metadataHandle, TIP_KEY);
+                        finalBatch.delete(metadataHandle, TIP_KEY);
                     }
                 }
 
-                db.write(new WriteOptions(), batch);
-                
-                log.warn("Rollback completed: to slot={}, new tip at block={}, deleted {} slots, {} blocks and {} header-only entries",
-                        slot, rollbackBlockNumber, slotsDeleted, blocksDeleted, headersOnlyDeleted);
+                db.write(new WriteOptions(), finalBatch);
+                finalBatch.close();
+
+                log.warn("Rollback completed: to slot={}, new tip at block={}, deleted {} total slots, {} total blocks and {} total header-only entries",
+                        slot, rollbackBlockNumber, totalSlotsDeleted, totalBlocksDeleted, totalHeadersOnlyDeleted);
+            } finally {
+                // Ensure finalBatch is closed even if an exception occurs
+                if (finalBatch != null) {
+                    try {
+                        finalBatch.close();
+                    } catch (Exception ignored) {
+                        // Ignore close errors
+                    }
+                }
             }
 
         } catch (Exception e) {
@@ -538,41 +640,49 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 return null;
             }
 
-            long headerTipSlot = headerTip.getSlot();
-
-            // If current slot is already at or beyond header tip, no next header available
-            if (currentSlot >= headerTipSlot) {
-                log.debug("Current slot {} is at or beyond header tip slot {}, no next header", currentSlot, headerTipSlot);
-                return null;
-            }
-
-            // Use the numberBySlotHandle iterator to find the next slot with a header after currentSlot
-            try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
-                // Seek to the position just after currentSlot
-                iterator.seek(longToBytes(currentSlot + 1));
-
-                if (iterator.isValid()) {
-                    // Found a slot with a block/header
-                    long nextSlot = bytesToLong(iterator.key());
-                    long nextBlockNumber = bytesToLong(iterator.value());
-
-                    // Get the hash for this block number (check headers first, then blocks)
-                    byte[] nextBlockHash = db.get(hashByNumberHandle, longToBytes(nextBlockNumber));
-
-                    if (nextBlockHash != null) {
-                        Point nextHeader = new Point(nextSlot, HexUtil.encodeHexString(nextBlockHash));
-                        log.debug("Found next header after slot {}: block #{} at slot {} with hash {}",
-                                currentSlot, nextBlockNumber, nextSlot, nextHeader.getHash());
-                        return nextHeader;
-                    } else {
-                        log.warn("Found slot {} with block number {} but missing hash", nextSlot, nextBlockNumber);
+            // First, determine the current block number from the slot
+            Long currentBlockNumber = getBlockNumberBySlot(currentSlot);
+            if (currentBlockNumber == null) {
+                // If exact slot doesn't have a block, find the nearest previous block
+                log.debug("No block at exact slot {}, searching for nearest previous block", currentSlot);
+                try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
+                    iterator.seekForPrev(longToBytes(currentSlot));
+                    if (iterator.isValid()) {
+                        currentBlockNumber = bytesToLong(iterator.value());
+                        long foundSlot = bytesToLong(iterator.key());
+                        log.debug("Found nearest block number {} at previous slot {}", currentBlockNumber, foundSlot);
                     }
-                } else {
-                    log.debug("No headers found after slot {} up to header tip at slot {}", currentSlot, headerTipSlot);
                 }
             }
 
-            return null;
+            if (currentBlockNumber == null) {
+                log.warn("Cannot determine current block number for slot {}", currentSlot);
+                return null;
+            }
+
+            // Look for the next sequential block number
+            long nextBlockNumber = currentBlockNumber + 1;
+
+            // Check if the next sequential block exists
+            byte[] nextBlockHash = db.get(hashByNumberHandle, longToBytes(nextBlockNumber));
+            if (nextBlockHash == null) {
+                log.info("Next sequential block #{} not found in headers yet", nextBlockNumber);
+                return null;
+            }
+
+            // Get the slot for this block
+            byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(nextBlockNumber));
+            if (slotBytes == null) {
+                log.warn("Block #{} exists but slot mapping is missing", nextBlockNumber);
+                return null;
+            }
+
+            long nextSlot = bytesToLong(slotBytes);
+            Point nextHeader = new Point(nextSlot, HexUtil.encodeHexString(nextBlockHash));
+
+            log.debug("Found next sequential header: block #{} at slot {} with hash {}",
+                     nextBlockNumber, nextSlot, nextHeader.getHash());
+            return nextHeader;
 
         } catch (Exception e) {
             log.error("Failed to find next block header after slot {}", currentPoint.getSlot(), e);
@@ -613,6 +723,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
 
     @Override
     public Point findLastPointAfterNBlocks(Point from, long batchSize) {
+        if (log.isDebugEnabled())
+            log.debug("🔍 findLastPointAfterNBlocks called: from={}, batchSize={}", from, batchSize);
 
         long lastBlockNumber = 0;
         long lastSlot = 0;
@@ -630,11 +742,20 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 counter ++;
             }
 
-            byte[] blockHash = db.get(hashByNumberHandle, longToBytes(lastBlockNumber));
-            if (blockHash == null)
-                return null;
+            if (log.isDebugEnabled())
+                log.debug("🔍 After iteration: counter={}, lastBlockNumber={}, lastSlot={}", counter, lastBlockNumber, lastSlot);
 
-            return new Point(lastSlot, HexUtil.encodeHexString(blockHash));
+            byte[] blockHash = db.get(hashByNumberHandle, longToBytes(lastBlockNumber));
+            if (blockHash == null) {
+                log.info("❌ findLastPointAfterNBlocks returning NULL - no hash for block {}", lastBlockNumber);
+                return null;
+            }
+
+            Point result = new Point(lastSlot, HexUtil.encodeHexString(blockHash));
+
+            if (log.isDebugEnabled())
+                log.debug("✅ findLastPointAfterNBlocks returning: {}", result);
+            return result;
         } catch (Exception e) {
             log.error("Failed to find last point after n blocks", e);
             return null;
@@ -684,7 +805,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
         try {
             // Find the first block/header dynamically from indices
             // This works for both headers and blocks since both update the indices
-            
+
             // Start from block number 1 (Byron mainnet has block 1 at slot 0)
             // We check sequentially to find the minimum block number that exists
             for (long blockNum = 1; blockNum <= 100; blockNum++) {
@@ -712,6 +833,181 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             log.error("Failed to get first block", e);
             return null;
         }
+    }
+
+    /**
+     * Recover from corrupted chain state by finding the last valid continuous point
+     * and removing all data after that point.
+     *
+     * This method:
+     * 1. Scans backwards from current tips to find last continuous block/header
+     * 2. Removes all data after that point
+     * 3. Updates tips to the recovered position
+     */
+    public void recoverFromCorruption() {
+        log.warn("🔧 Starting chain state recovery from corruption...");
+
+        try {
+            ChainTip currentHeaderTip = getHeaderTip();
+            ChainTip currentBodyTip = getTip();
+
+            if (currentHeaderTip == null && currentBodyTip == null) {
+                log.info("✅ Chain state is empty, no recovery needed");
+                return;
+            }
+
+            // Find the last continuous header sequence
+            Long lastValidHeaderBlock = findLastContinuousHeaderBlock();
+            Long lastValidBodyBlock = findLastContinuousBodyBlock();
+
+            log.info("🔍 Recovery analysis: Last valid header block: {}, Last valid body block: {}",
+                    lastValidHeaderBlock, lastValidBodyBlock);
+
+            // Determine recovery point - use the lower of the two
+            Long recoveryBlockNumber = null;
+            if (lastValidHeaderBlock != null && lastValidBodyBlock != null) {
+                recoveryBlockNumber = Math.min(lastValidHeaderBlock, lastValidBodyBlock);
+            } else if (lastValidHeaderBlock != null) {
+                recoveryBlockNumber = lastValidHeaderBlock;
+            } else if (lastValidBodyBlock != null) {
+                recoveryBlockNumber = lastValidBodyBlock;
+            }
+
+            if (recoveryBlockNumber == null || recoveryBlockNumber <= 0) {
+                log.error("❌ Cannot find any valid continuous data. Manual intervention required.");
+                return;
+            }
+
+            // Get the slot for the recovery point
+            byte[] recoverySlotBytes = db.get(slotByNumberHandle, longToBytes(recoveryBlockNumber));
+            if (recoverySlotBytes == null) {
+                log.error("❌ Cannot find slot for recovery block {}. Manual intervention required.", recoveryBlockNumber);
+                return;
+            }
+
+            long recoverySlot = bytesToLong(recoverySlotBytes);
+
+            log.warn("🔧 RECOVERY: Rolling back to block #{} at slot {} to restore continuity",
+                    recoveryBlockNumber, recoverySlot);
+
+            // Use the existing rollback mechanism to clean up everything after the recovery point
+            rollbackTo(recoverySlot);
+
+            log.info("✅ Chain state recovery completed successfully at block #{}, slot {}",
+                    recoveryBlockNumber, recoverySlot);
+
+        } catch (Exception e) {
+            log.error("❌ Chain state recovery failed", e);
+            throw new RuntimeException("Recovery from corruption failed", e);
+        }
+    }
+
+    /**
+     * Quick corruption detection - checks for gaps near current tips
+     * More efficient than full scan, suitable for startup checks
+     */
+    public boolean detectCorruption() {
+        try {
+            ChainTip headerTip = getHeaderTip();
+            ChainTip bodyTip = getTip();
+
+            // No tips means empty state (not corrupted)
+            if (headerTip == null && bodyTip == null) {
+                return false;
+            }
+
+            // Check continuity in a window around current tips
+            long maxBlock = 0;
+            if (headerTip != null) {
+                maxBlock = Math.max(maxBlock, headerTip.getBlockNumber());
+            }
+            if (bodyTip != null) {
+                maxBlock = Math.max(maxBlock, bodyTip.getBlockNumber());
+            }
+
+            // Check last 1000 blocks for gaps
+            long startBlock = Math.max(1, maxBlock - 1000);
+
+            for (long blockNum = startBlock; blockNum <= maxBlock; blockNum++) {
+                byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNum));
+                if (blockHash == null) {
+                    log.warn("🚨 Corruption detected: Missing block #{} in recent range", blockNum);
+                    return true;
+                }
+            }
+
+            return false; // No corruption found in recent range
+
+        } catch (Exception e) {
+            log.warn("Error during corruption detection", e);
+            return false; // Assume not corrupted if we can't check
+        }
+    }
+
+    /**
+     * Find the last block number where headers form a continuous sequence
+     */
+    private Long findLastContinuousHeaderBlock() throws RocksDBException {
+        log.info("🔍 Scanning for last continuous header sequence...");
+
+        // Start from block 1 and scan forward to find the first gap
+        for (long blockNum = 1; blockNum < 10_000_000; blockNum++) {
+            byte[] headerHash = db.get(hashByNumberHandle, longToBytes(blockNum));
+            if (headerHash == null) {
+                long lastValid = blockNum - 1;
+                log.info("📄 Last continuous header found at block #{} (gap at block #{})", lastValid, blockNum);
+                return lastValid > 0 ? lastValid : null;
+            }
+
+            // Check if header actually exists
+            byte[] headerData = db.get(headersHandle, headerHash);
+            if (headerData == null) {
+                long lastValid = blockNum - 1;
+                log.info("📄 Last continuous header found at block #{} (missing header data at block #{})", lastValid, blockNum);
+                return lastValid > 0 ? lastValid : null;
+            }
+
+            // Progress logging every 100K blocks
+            if (blockNum % 100_000 == 0) {
+                log.info("📄 Header continuity check: processed up to block #{}", blockNum);
+            }
+        }
+
+        log.warn("📄 Header scan reached maximum without finding gap (this shouldn't happen)");
+        return null;
+    }
+
+    /**
+     * Find the last block number where bodies form a continuous sequence
+     */
+    private Long findLastContinuousBodyBlock() throws RocksDBException {
+        log.info("🔍 Scanning for last continuous body sequence...");
+
+        // Start from block 1 and scan forward to find the first gap
+        for (long blockNum = 1; blockNum < 10_000_000; blockNum++) {
+            byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNum));
+            if (blockHash == null) {
+                long lastValid = blockNum - 1;
+                log.info("🧱 Last continuous body found at block #{} (gap at block #{})", lastValid, blockNum);
+                return lastValid > 0 ? lastValid : null;
+            }
+
+            // Check if body actually exists
+            byte[] bodyData = db.get(blocksHandle, blockHash);
+            if (bodyData == null) {
+                long lastValid = blockNum - 1;
+                log.info("🧱 Last continuous body found at block #{} (missing body data at block #{})", lastValid, blockNum);
+                return lastValid > 0 ? lastValid : null;
+            }
+
+            // Progress logging every 100K blocks
+            if (blockNum % 100_000 == 0) {
+                log.info("🧱 Body continuity check: processed up to block #{}", blockNum);
+            }
+        }
+
+        log.warn("🧱 Body scan reached maximum without finding gap (this shouldn't happen)");
+        return null;
     }
 
     /**

@@ -200,8 +200,9 @@ public class YaciNode implements NodeAPI {
                 startServer();
             }
 
-            // Start client sync
+            // Validate chain state before starting sync
             if (config.isEnableClient()) {
+                validateChainState();
                 startClientSync();
             }
 
@@ -414,8 +415,10 @@ public class YaciNode implements NodeAPI {
             bodyFetchManager.resetMetrics();
         } else {
             // Create new BodyFetchManager with appropriate configuration
+            // Use slot-based threshold since gaps are measured in slots, not blocks
+            // 100 slots ≈ 1.67 minutes at 20s/slot (reasonable for body fetching)
             long gapThreshold = pipelineConfig != null ?
-                    Math.max(pipelineConfig.getBodyBatchSize() / 10, 5) : 10; // Dynamic threshold
+                    Math.max(pipelineConfig.getBodyBatchSize() / 10, 100) : 100; // Slot-based threshold
             int maxBatchSize = pipelineConfig != null ?
                     pipelineConfig.getBodyBatchSize() : 500;
 
@@ -1134,6 +1137,58 @@ public class YaciNode implements NodeAPI {
 
     public YaciNodeConfig getConfig() {
         return config;
+    }
+
+    @Override
+    public boolean recoverChainState() {
+        if (isRunning()) {
+            throw new IllegalStateException("Cannot recover chain state while node is running. Stop the node first.");
+        }
+
+        if (chainState instanceof DirectRocksDBChainState rocksDBChainState) {
+            log.info("🔧 Initiating chain state recovery...");
+            
+            // First check if recovery is needed
+            if (!rocksDBChainState.detectCorruption()) {
+                log.info("✅ No corruption detected, recovery not needed");
+                return false;
+            }
+            
+            // Perform recovery
+            rocksDBChainState.recoverFromCorruption();
+            return true;
+        } else {
+            log.info("Chain state recovery not supported for in-memory storage");
+            return false;
+        }
+    }
+
+    /**
+     * Validate chain state integrity and attempt automatic recovery if corruption is detected
+     */
+    private void validateChainState() {
+        if (chainState instanceof DirectRocksDBChainState rocksDBChainState) {
+            log.info("🔍 Validating chain state integrity...");
+            
+            if (rocksDBChainState.detectCorruption()) {
+                log.warn("🚨 Chain state corruption detected during startup!");
+                
+                // Attempt automatic recovery
+                try {
+                    log.info("🔧 Attempting automatic recovery...");
+                    rocksDBChainState.recoverFromCorruption();
+                    log.info("✅ Chain state recovered successfully - sync can proceed");
+                } catch (Exception e) {
+                    log.error("❌ Automatic recovery failed", e);
+                    throw new RuntimeException("Chain state is corrupted and automatic recovery failed. " +
+                            "Please manually recover using: curl -X POST http://localhost:8080/api/v1/node/recover", e);
+                }
+            } else {
+                log.info("✅ Chain state integrity validated - no corruption detected");
+            }
+        } else {
+            log.debug("Chain state validation skipped (in-memory storage)");
+        }
     }
 
     public MemPool getMemPool() {

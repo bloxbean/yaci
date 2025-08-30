@@ -31,6 +31,7 @@ import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static com.bloxbean.cardano.yaci.core.common.TxBodyType.CONWAY;
@@ -72,6 +73,10 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
     // Latest tip from the network
     private volatile Tip latestTip;
+
+    // Pause/Resume control for protocols
+    private final AtomicBoolean chainSyncPaused = new AtomicBoolean(false);
+    private final AtomicBoolean blockFetchPaused = new AtomicBoolean(false);
 
     /**
      * Reset the firstTimeHandshake flag on disconnection to prevent duplicate messages
@@ -136,7 +141,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
                     // On reconnection, we MUST send the next message to continue the protocol
                     // The agent's reset() method now preserves currentPoint, so FindIntersect
                     // will use the last confirmed point, ensuring we continue from where we left off
-                    chainSyncAgent.sendNextMessage();
+                    sendChainSyncMessage();
                 }
 
             }
@@ -239,7 +244,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
         // Simple approach: intersection found, continue from this point
         // No need to reset - let ChainsyncAgent handle it naturally
-        chainSyncAgent.sendNextMessage();
+        sendChainSyncMessage();
     }
 
     private synchronized void handleRollForward(Tip tip, BlockHeader blockHeader) {
@@ -248,7 +253,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         if (headersOnlyFetch) {
             Point blockPoint = new Point(blockHeader.getHeaderBody().getSlot(), blockHeader.getHeaderBody().getBlockHash());
             chainSyncAgent.confirmBlock(blockPoint);
-            chainSyncAgent.sendNextMessage();
+            sendChainSyncMessage();
         } else {
             resetBlockFetchAgentAndFetchBlock(blockHeader.getHeaderBody().getSlot(),
                     blockHeader.getHeaderBody().getBlockHash());
@@ -264,7 +269,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         if (headersOnlyFetch) {
             Point blockPoint = new Point(absoluteSlot, byronHead.getBlockHash());
             chainSyncAgent.confirmBlock(blockPoint);
-            chainSyncAgent.sendNextMessage();
+            sendChainSyncMessage();
         } else {
             resetBlockFetchAgentAndFetchBlock(absoluteSlot,
                     byronHead.getBlockHash());
@@ -280,7 +285,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         if (headersOnlyFetch) {
             Point blockPoint = new Point(absoluteSlot, byronEbHead.getBlockHash());
             chainSyncAgent.confirmBlock(blockPoint);
-            chainSyncAgent.sendNextMessage();
+            sendChainSyncMessage();
         } else {
             resetBlockFetchAgentAndFetchBlock(absoluteSlot,
                     byronEbHead.getBlockHash());
@@ -291,7 +296,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         // Update the latest tip even on rollback
         this.latestTip = tip;
         log.info("Rollback to point: {}", toPoint);
-        chainSyncAgent.sendNextMessage();
+        sendChainSyncMessage();
     }
 
     // ========================================
@@ -309,7 +314,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         );
         chainSyncAgent.confirmBlock(fetchedPoint);
 
-        chainSyncAgent.sendNextMessage();
+        sendChainSyncMessage();
     }
 
     private void handleByronBlockFound(ByronMainBlock byronBlock) {
@@ -324,7 +329,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
         chainSyncAgent.confirmBlock(fetchedPoint);
 
-        chainSyncAgent.sendNextMessage();
+        sendChainSyncMessage();
     }
 
     private void handleByronEbBlockFound(ByronEbBlock byronEbBlock) {
@@ -339,7 +344,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         );
         chainSyncAgent.confirmBlock(fetchedPoint);
 
-        chainSyncAgent.sendNextMessage();
+        sendChainSyncMessage();
     }
 
 
@@ -352,7 +357,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
         if (log.isDebugEnabled())
             log.debug("Trying to fetch block for {}", new Point(slot, hash));
-        blockFetchAgent.sendNextMessage();
+        sendBlockFetchMessage();
     }
 
     // ========================================
@@ -389,7 +394,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
         log.info("Started ChainSync-only mode from point: {}", from);
         chainSyncAgent.reset(from);
-        chainSyncAgent.sendNextMessage();
+        sendChainSyncMessage();
     }
 
     /**
@@ -402,7 +407,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         }
 
         blockFetchAgent.resetPoints(from, to);
-        blockFetchAgent.sendNextMessage();
+        sendBlockFetchMessage();
 
         log.info("Started BlockFetch-only mode from {} to {}", from, to);
     }
@@ -469,7 +474,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
         blockFetchAgent.resetPoints(from, to);
         if (!blockFetchAgent.isDone())
-            blockFetchAgent.sendNextMessage();
+            sendBlockFetchMessage();
         else
             log.warn("Agent status is Done. Can't reschedule new points.");
     }
@@ -482,7 +487,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         //This was missing earlier, so reset the chainSyncAgent to start from the given point
         chainSyncAgent.reset(from);
 
-        chainSyncAgent.sendNextMessage();
+        sendChainSyncMessage();
         log.info("Starting sync from current point or intersection");
     }
 
@@ -501,6 +506,92 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
     public void enableTxSubmission() {
         txSubmissionAgent.sendNextMessage();
+    }
+
+    // ========================================
+    // PAUSE/RESUME CONTROL API
+    // ========================================
+
+    /**
+     * Pause ChainSync protocol - headers will stop being processed
+     */
+    public void pauseChainSync() {
+        chainSyncPaused.set(true);
+        log.info("🔄 ChainSync paused - no more header messages will be sent");
+    }
+
+    /**
+     * Resume ChainSync protocol - headers will continue being processed
+     */
+    public void resumeChainSync() {
+        if (chainSyncPaused.compareAndSet(true, false)) {
+            log.info("▶️ ChainSync resumed - continuing header processing");
+            // Trigger next message to resume flow if agent has agency
+            sendChainSyncMessage();
+        }
+    }
+
+    /**
+     * Pause BlockFetch protocol - bodies will stop being processed
+     */
+    public void pauseBlockFetch() {
+        blockFetchPaused.set(true);
+        log.info("🔄 BlockFetch paused - no more body messages will be sent");
+    }
+
+    /**
+     * Resume BlockFetch protocol - bodies will continue being processed
+     */
+    public void resumeBlockFetch() {
+        if (blockFetchPaused.compareAndSet(true, false)) {
+            log.info("▶️ BlockFetch resumed - continuing body processing");
+            // Trigger next message to resume flow if agent has agency
+            sendBlockFetchMessage();
+        }
+    }
+
+    /**
+     * Check if ChainSync is currently paused
+     */
+    public boolean isChainSyncPaused() {
+        return chainSyncPaused.get();
+    }
+
+    /**
+     * Check if BlockFetch is currently paused
+     */
+    public boolean isBlockFetchPaused() {
+        return blockFetchPaused.get();
+    }
+
+    // ========================================
+    // INTERNAL PAUSE-AWARE MESSAGE SENDING
+    // ========================================
+
+    /**
+     * Send ChainSync message only if not paused
+     */
+    private void sendChainSyncMessage() {
+        if (!chainSyncPaused.get()) {
+            chainSyncAgent.sendNextMessage();
+        } else {
+            if (log.isDebugEnabled()) {
+                log.debug("ChainSync message skipped - protocol is paused");
+            }
+        }
+    }
+
+    /**
+     * Send BlockFetch message only if not paused
+     */
+    private void sendBlockFetchMessage() {
+        if (!blockFetchPaused.get()) {
+            blockFetchAgent.sendNextMessage();
+        } else {
+            if (log.isDebugEnabled()) {
+                log.debug("BlockFetch message skipped - protocol is paused");
+            }
+        }
     }
 
     // ========================================
