@@ -299,14 +299,21 @@ public class YaciNode implements NodeAPI {
             isSyncing.set(true);
             isPipelinedMode = usePipeline;
 
-            // Get local tip to determine sync strategy
-            ChainTip localTip = chainState.getTip();
-            log.info("Local tip: {}", localTip);
+            // Get local tips to determine sync strategy
+            // Use header_tip as primary reference for restart efficiency
+            ChainTip headerTip = chainState.getHeaderTip();
+            ChainTip bodyTip = chainState.getTip();
+            
+            // Use header_tip if available, fall back to body_tip
+            ChainTip localTip = headerTip != null ? headerTip : bodyTip;
+            
+            log.info("Local header_tip: {}, body_tip: {}, using: {} for sync", 
+                     headerTip, bodyTip, localTip != null ? "slot " + localTip.getSlot() : "genesis");
 
             // Initialize last known tip
             lastKnownChainTip = localTip;
 
-            // Determine starting point for sync
+            // Determine starting point for sync (will use header_tip when available)
             Point startPoint = determineStartPoint(localTip);
             log.info("Starting pipelined sync from point: {}", startPoint);
 

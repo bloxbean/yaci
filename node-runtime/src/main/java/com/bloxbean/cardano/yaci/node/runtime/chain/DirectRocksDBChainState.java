@@ -237,258 +237,168 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 throw new RuntimeException("Cannot rollback to slot " + slot + " - block hash not found");
             }
 
-            ChainTip currentTip = getTip();
+            // Get current tips to determine rollback strategy
+            ChainTip bodyTip = getTip();
             ChainTip headerTip = getHeaderTip();
-            log.warn("Rollback requested: to slot={}, block={}", slot, rollbackBlockNumber);
-
-            // Determine the highest block number to clean up
-            long maxBlockToDelete = currentTip != null ? currentTip.getBlockNumber() : 0;
-            if (headerTip != null && headerTip.getBlockNumber() > maxBlockToDelete) {
-                maxBlockToDelete = headerTip.getBlockNumber();
-                log.info("Rollback will also clean up orphaned headers up to block {}", maxBlockToDelete);
+            
+            // Intelligently decide rollback strategy based on body tip position
+            if (bodyTip == null || slot > bodyTip.getSlot()) {
+                // Header-only rollback: common during restart when starting from header_tip
+                log.info("Header-only rollback to slot {} (body tip at {})", 
+                         slot, bodyTip != null ? bodyTip.getSlot() : "null");
+                performHeaderOnlyRollback(slot, rollbackBlockNumber, rollbackHash, headerTip);
+            } else {
+                // Full rollback: real chain reorganization affecting both headers and bodies
+                log.warn("Full rollback to slot {} (affecting headers and bodies)", slot);
+                performFullRollback(slot, rollbackBlockNumber, rollbackHash, bodyTip, headerTip);
             }
-
-            if (maxBlockToDelete <= rollbackBlockNumber) {
-                log.debug("Rollback skipped: no rollback needed. Current tips are at or before the rollback point.");
-                return;
-            }
-
-            // Remove all blocks and headers after rollback point
-            // Use final batch for the last operations and tip updates
-            WriteBatch finalBatch = new WriteBatch();
-            int totalBlocksDeleted = 0;
-            int totalHeadersOnlyDeleted = 0;
-            int totalSlotsDeleted = 0;
-
-            try {
-                // Delete slots in REVERSE order (from tip backwards to rollback point)
-                // This maintains consistent state and allows resumable rollbacks
-                log.info("Starting reverse slot deletion for rollback to slot {}", slot);
-
-                final int BATCH_SIZE = 10000;
-                WriteBatch currentBatch = new WriteBatch();
-                int batchCounter = 0;
-                long highestSlotInBatch = -1;
-                long lowestSlotInBatch = -1;
-                int blocksInBatch = 0;
-                int headersOnlyInBatch = 0;
-
-                try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
-                    // Start from the highest slot and work backwards
-                    iterator.seekToLast();
-
-                    while (iterator.isValid()) {
-                        long currentSlot = bytesToLong(iterator.key());
-
-                        // Stop when we reach the rollback point
-                        if (currentSlot <= slot) {
-                            break;
-                        }
-
-                        long blockNumber = bytesToLong(iterator.value());
-
-                        // Track slot range in this batch (highest to lowest)
-                        if (batchCounter == 0) {
-                            highestSlotInBatch = currentSlot;
-                        }
-                        lowestSlotInBatch = currentSlot;
-
-                        if (log.isDebugEnabled()) {
-                            log.debug("Deleting slot {} (block {}) during rollback", currentSlot, blockNumber);
-                        }
-
-                        // Get block hash for this block number
-                        byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNumber));
-
-                        if (blockHash != null) {
-                            // Delete block and header data
-                            byte[] blockBody = db.get(blocksHandle, blockHash);
-                            byte[] headerData = db.get(headersHandle, blockHash);
-
-                            if (blockBody != null) {
-                                currentBatch.delete(blocksHandle, blockHash);
-                                blocksInBatch++;
-                                totalBlocksDeleted++;
-                            }
-                            if (headerData != null) {
-                                currentBatch.delete(headersHandle, blockHash);
-                                if (blockBody == null) {
-                                    headersOnlyInBatch++;
-                                    totalHeadersOnlyDeleted++;
-                                }
-                            }
-
-                            // Delete hash mapping
-                            currentBatch.delete(hashByNumberHandle, longToBytes(blockNumber));
-                        }
-
-                        // Delete slot mappings
-                        currentBatch.delete(numberBySlotHandle, iterator.key());
-                        currentBatch.delete(slotByNumberHandle, longToBytes(blockNumber));
-                        batchCounter++;
-                        totalSlotsDeleted++;
-
-                        // Commit batch when full
-                        if (batchCounter >= BATCH_SIZE) {
-                            // Commit deletions first
-                            db.write(new WriteOptions(), currentBatch);
-                            log.info("Deleted slot range {}-{} ({} slots, {} blocks, {} header-only) during rollback",
-                                    lowestSlotInBatch, highestSlotInBatch, batchCounter, blocksInBatch, headersOnlyInBatch);
-                            currentBatch.close();
-
-                            // Find current highest slot and set as new header_tip
-                            try (RocksIterator tipIterator = db.newIterator(numberBySlotHandle)) {
-                                tipIterator.seekToLast();
-                                if (tipIterator.isValid()) {
-                                    long highestSlot = bytesToLong(tipIterator.key());
-                                    if (highestSlot >= slot) { // Ensure it's above rollback point
-                                        long blockNum = bytesToLong(tipIterator.value());
-                                        byte[] hash = db.get(hashByNumberHandle, longToBytes(blockNum));
-                                        if (hash != null) {
-                                            ChainTip newTip = new ChainTip(highestSlot, hash, blockNum);
-                                            try (WriteBatch tipBatch = new WriteBatch()) {
-                                                tipBatch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newTip));
-                                                db.write(new WriteOptions(), tipBatch);
-                                            }
-                                            log.debug("Updated header_tip to slot {} during rollback", highestSlot);
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Reset for next batch
-                            currentBatch = new WriteBatch();
-                            batchCounter = 0;
-                            blocksInBatch = 0;
-                            headersOnlyInBatch = 0;
-                        }
-
-                        iterator.prev(); // Move backwards
-                    }
-
-                    // Commit any remaining entries in the last batch
-                    if (batchCounter > 0) {
-                        db.write(new WriteOptions(), currentBatch);
-                        log.info("Deleted slot range {}-{} ({} slots, {} blocks, {} header-only) during rollback",
-                                lowestSlotInBatch, highestSlotInBatch, batchCounter, blocksInBatch, headersOnlyInBatch);
-
-                        // Update header_tip after final batch
-                        try (RocksIterator tipIterator = db.newIterator(numberBySlotHandle)) {
-                            tipIterator.seekToLast();
-                            if (tipIterator.isValid()) {
-                                long highestSlot = bytesToLong(tipIterator.key());
-                                if (highestSlot >= slot) {
-                                    long blockNum = bytesToLong(tipIterator.value());
-                                    byte[] hash = db.get(hashByNumberHandle, longToBytes(blockNum));
-                                    if (hash != null) {
-                                        ChainTip newTip = new ChainTip(highestSlot, hash, blockNum);
-                                        try (WriteBatch tipBatch = new WriteBatch()) {
-                                            tipBatch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newTip));
-                                            db.write(new WriteOptions(), tipBatch);
-                                        }
-                                        log.debug("Updated header_tip to slot {} after final batch", highestSlot);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    currentBatch.close();
-                }
-
-                log.info("Reverse slot deletion completed - deleted {} total slots", totalSlotsDeleted);
-
-                // SECOND PASS: Delete any remaining blocks by block number
-                // This is a safety net for any blocks that might have been missed
-                for (long blockNum = rollbackBlockNumber + 1; blockNum <= maxBlockToDelete; blockNum++) {
-                    byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNum));
-                    if (blockHash != null) {
-                        // Check if this hasn't been deleted already
-                        byte[] blockBody = db.get(blocksHandle, blockHash);
-                        byte[] headerData = db.get(headersHandle, blockHash);
-
-                        if (blockBody != null) {
-                            finalBatch.delete(blocksHandle, blockHash);
-                            totalBlocksDeleted++;
-                        }
-                        if (headerData != null) {
-                            finalBatch.delete(headersHandle, blockHash);
-                            if (blockBody == null) {
-                                totalHeadersOnlyDeleted++;
-                            }
-                        }
-
-                        // Remove mappings (may already be deleted, but safe to re-delete)
-                        finalBatch.delete(hashByNumberHandle, longToBytes(blockNum));
-
-                        byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(blockNum));
-                        if (slotBytes != null) {
-                            finalBatch.delete(numberBySlotHandle, slotBytes);
-                        }
-                        finalBatch.delete(slotByNumberHandle, longToBytes(blockNum));
-                    }
-                }
-
-                // Update tips to rollback point
-                // For header tip, we can use the rollback point directly
-                ChainTip newHeaderTip = new ChainTip(slot, rollbackHash, rollbackBlockNumber);
-                finalBatch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newHeaderTip));
-
-                // For body tip, we need to ensure the block body actually exists
-                // If rolling back to a header-only point, find the last block with a body
-                byte[] blockBody = db.get(blocksHandle, rollbackHash);
-                if (blockBody != null) {
-                    // The rollback point has a body, safe to use as tip
-                    finalBatch.put(metadataHandle, TIP_KEY, serializeChainTip(newHeaderTip));
-                } else {
-                    // The rollback point is header-only, need to find last block with body
-                    log.warn("Rollback point at slot {} is header-only, finding last block with body", slot);
-
-                    // Search backwards for the last block that has a body
-                    Long lastBlockWithBody = null;
-                    for (long blockNum = rollbackBlockNumber; blockNum > 0; blockNum--) {
-                        byte[] hash = db.get(hashByNumberHandle, longToBytes(blockNum));
-                        if (hash != null) {
-                            byte[] body = db.get(blocksHandle, hash);
-                            if (body != null) {
-                                lastBlockWithBody = blockNum;
-                                byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(blockNum));
-                                if (slotBytes != null) {
-                                    long bodySlot = bytesToLong(slotBytes);
-                                    ChainTip bodyTip = new ChainTip(bodySlot, hash, blockNum);
-                                    finalBatch.put(metadataHandle, TIP_KEY, serializeChainTip(bodyTip));
-                                    log.info("Set body tip to last block with body: slot={}, block={}", bodySlot, blockNum);
-                                }
-                                break;
-                            }
-                        }
-                    }
-
-                    if (lastBlockWithBody == null) {
-                        log.error("CRITICAL: No blocks with bodies found during rollback!");
-                        // Set to null or genesis as a last resort
-                        finalBatch.delete(metadataHandle, TIP_KEY);
-                    }
-                }
-
-                db.write(new WriteOptions(), finalBatch);
-                finalBatch.close();
-
-                log.warn("Rollback completed: to slot={}, new tip at block={}, deleted {} total slots, {} total blocks and {} total header-only entries",
-                        slot, rollbackBlockNumber, totalSlotsDeleted, totalBlocksDeleted, totalHeadersOnlyDeleted);
-            } finally {
-                // Ensure finalBatch is closed even if an exception occurs
-                if (finalBatch != null) {
-                    try {
-                        finalBatch.close();
-                    } catch (Exception ignored) {
-                        // Ignore close errors
-                    }
-                }
-            }
-
+            
         } catch (Exception e) {
             log.error("Rollback failed: to slot={}", slot, e);
-            throw new RuntimeException("Failed to rollback", e);
+            throw new RuntimeException("Failed to rollback to slot " + slot, e);
+        }
+    }
+    
+    /**
+     * Perform a header-only rollback - efficient for restart scenarios
+     * This is used when the rollback point is beyond the current body tip,
+     * typically during restart when we start from header_tip.
+     */
+    private void performHeaderOnlyRollback(Long slot, long rollbackBlockNumber, byte[] rollbackHash, ChainTip headerTip) throws RocksDBException {
+        if (headerTip == null || headerTip.getSlot() <= slot) {
+            log.debug("No header rollback needed - header tip at or before rollback point");
+            return;
+        }
+        
+        WriteBatch batch = new WriteBatch();
+        int headersDeleted = 0;
+        
+        try {
+            // Delete headers after the rollback slot
+            try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
+                iterator.seekToLast();
+                
+                while (iterator.isValid()) {
+                    long currentSlot = bytesToLong(iterator.key());
+                    
+                    // Stop when we reach the rollback point
+                    if (currentSlot <= slot) {
+                        break;
+                    }
+                    
+                    long blockNumber = bytesToLong(iterator.value());
+                    byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNumber));
+                    
+                    if (blockHash != null) {
+                        // Only delete header data (not checking for bodies as this is header-only)
+                        byte[] headerData = db.get(headersHandle, blockHash);
+                        if (headerData != null) {
+                            batch.delete(headersHandle, blockHash);
+                            headersDeleted++;
+                        }
+                        
+                        // Delete mappings
+                        batch.delete(hashByNumberHandle, longToBytes(blockNumber));
+                        batch.delete(numberBySlotHandle, iterator.key());
+                        batch.delete(slotByNumberHandle, longToBytes(blockNumber));
+                    }
+                    
+                    iterator.prev();
+                }
+            }
+            
+            // Update header_tip to rollback point
+            ChainTip newHeaderTip = new ChainTip(slot, rollbackHash, rollbackBlockNumber);
+            batch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newHeaderTip));
+            
+            // Commit all changes
+            db.write(new WriteOptions(), batch);
+            
+            log.info("Header-only rollback completed: deleted {} headers, new header_tip at slot {}", 
+                     headersDeleted, slot);
+                     
+        } finally {
+            batch.close();
+        }
+    }
+    
+    /**
+     * Perform a full rollback of both headers and bodies - for real chain reorganizations
+     * This is the traditional rollback used when the network has a real chain reorg.
+     */
+    private void performFullRollback(Long slot, long rollbackBlockNumber, byte[] rollbackHash, 
+                                    ChainTip bodyTip, ChainTip headerTip) throws RocksDBException {
+        
+        // Determine the highest block number to clean up
+        long maxBlockToDelete = Math.max(
+            bodyTip != null ? bodyTip.getBlockNumber() : 0,
+            headerTip != null ? headerTip.getBlockNumber() : 0
+        );
+        
+        if (maxBlockToDelete <= rollbackBlockNumber) {
+            log.debug("No rollback needed - tips are at or before rollback point");
+            return;
+        }
+        
+        WriteBatch batch = new WriteBatch();
+        int blocksDeleted = 0;
+        int headersDeleted = 0;
+        int slotsDeleted = 0;
+
+        try {
+            // Delete all slots, blocks and headers after the rollback point
+            try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
+                iterator.seekToLast();
+                
+                while (iterator.isValid()) {
+                    long currentSlot = bytesToLong(iterator.key());
+                    
+                    // Stop when we reach the rollback point
+                    if (currentSlot <= slot) {
+                        break;
+                    }
+                    
+                    long blockNumber = bytesToLong(iterator.value());
+                    byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNumber));
+                    
+                    if (blockHash != null) {
+                        // Delete block and header data
+                        byte[] blockBody = db.get(blocksHandle, blockHash);
+                        byte[] headerData = db.get(headersHandle, blockHash);
+                        
+                        if (blockBody != null) {
+                            batch.delete(blocksHandle, blockHash);
+                            blocksDeleted++;
+                        }
+                        if (headerData != null) {
+                            batch.delete(headersHandle, blockHash);
+                            headersDeleted++;
+                        }
+                        
+                        // Delete mappings
+                        batch.delete(hashByNumberHandle, longToBytes(blockNumber));
+                        batch.delete(numberBySlotHandle, iterator.key());
+                        batch.delete(slotByNumberHandle, longToBytes(blockNumber));
+                    }
+                    
+                    slotsDeleted++;
+                    iterator.prev();
+                }
+            }
+            
+            // Update both header_tip and body_tip to rollback point
+            ChainTip newTip = new ChainTip(slot, rollbackHash, rollbackBlockNumber);
+            batch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newTip));
+            batch.put(metadataHandle, TIP_KEY, serializeChainTip(newTip));
+            
+            // Commit all changes
+            db.write(new WriteOptions(), batch);
+            
+            log.warn("Full rollback completed: to slot={}, deleted {} slots, {} blocks, {} headers",
+                     slot, slotsDeleted, blocksDeleted, headersDeleted);
+                     
+        } finally {
+            batch.close();
         }
     }
 

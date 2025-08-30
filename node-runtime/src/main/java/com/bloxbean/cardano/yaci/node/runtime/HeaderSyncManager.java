@@ -53,7 +53,8 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
     private static final int PROGRESS_LOG_INTERVAL = 1000;
 
     public HeaderSyncManager(PeerClient peerClient, ChainState chainState) {
-        this(peerClient, chainState, 50000); // Default gap threshold of 50,000 blocks
+       // this(peerClient, chainState, 50000); // Default gap threshold of 50,000 blocks
+        this(peerClient, chainState, -1); // Disable backpressure by default
     }
 
     public HeaderSyncManager(PeerClient peerClient, ChainState chainState, long maxGapThreshold) {
@@ -273,6 +274,10 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
      */
     private boolean checkBackpressure(long currentHeaderBlockNumber) {
         try {
+
+            if (maxGapThreshold == -1)
+                return false; // Backpressure disabled
+
             var bodyTip = chainState.getTip();
 
             // If no body tip yet, allow headers to proceed (initial sync)
