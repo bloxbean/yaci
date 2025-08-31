@@ -812,10 +812,33 @@ public class YaciNode implements NodeAPI {
         // Update last known tip
         lastKnownChainTip = chainState.getTip();
 
+        // Post-rollback integrity check and opportunistic recovery
+        attemptCorruptionRecovery("post-rollback");
+
         // Always resume BodyFetchManager after rollback - let it handle its own gap detection
         if (isPipelinedMode && bodyFetchManager != null) {
             bodyFetchManager.resume();
             log.info("▶️ BodyFetchManager resumed after rollback - will detect and handle gaps automatically");
+        }
+    }
+
+    /**
+     * Opportunistically validate and recover chainstate outside of startup.
+     * Safe to call after rollback/reconnection.
+     */
+    private void attemptCorruptionRecovery(String context) {
+        try {
+            if (!(chainState instanceof DirectRocksDBChainState rocks)) return;
+
+            if (rocks.detectCorruption()) {
+                log.warn("🚨 Corruption detected during {} - attempting recovery", context);
+                rocks.recoverFromCorruption();
+                log.info("✅ Recovery completed during {} - continuing sync", context);
+            } else {
+                log.debug("No corruption detected during {} check", context);
+            }
+        } catch (Exception e) {
+            log.warn("Recovery attempt during {} failed: {}", context, e.toString());
         }
     }
 

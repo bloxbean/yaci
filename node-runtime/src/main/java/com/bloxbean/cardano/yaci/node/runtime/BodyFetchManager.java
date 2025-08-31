@@ -69,6 +69,11 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     // Rollback tracking to prevent storing stale blocks
     private volatile Point lastRollbackPoint = null;
 
+    // Runtime recovery guardrails
+    private final AtomicInteger consecutiveStaleBlocks = new AtomicInteger(0);
+    private final AtomicBoolean recoveryInProgress = new AtomicBoolean(false);
+    private static final int STALE_RECOVERY_THRESHOLD = 20; // consecutive stale drops before probing for corruption
+
     /**
      * Create BodyFetchManager with default configuration.
      */
@@ -421,6 +426,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             if (isStaleBlock(blockNumber, slot, hash)) {
                 log.warn("🗑️ DISCARDED STALE BLOCK: Block #{} at slot {} arrived after rollback - skipping storage",
                         blockNumber, slot);
+                onStaleBlockObserved();
                 return;
             }
 
@@ -450,6 +456,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 slot,
                 blockBytes
             );
+
+            // successful store resets stale counter
+            consecutiveStaleBlocks.set(0);
 
             bodiesReceived.incrementAndGet();
             totalBlocksFetched.incrementAndGet();
@@ -568,6 +577,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             if (isStaleBlock(blockNumber, slot, hash)) {
                 log.warn("🗑️ DISCARDED STALE BLOCK: Byron EB Block #{} at slot {} arrived after rollback - skipping storage",
                         blockNumber, slot);
+                onStaleBlockObserved();
                 return;
             }
 
@@ -596,6 +606,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 slot,
                 blockBytes
             );
+
+            // successful store resets stale counter
+            consecutiveStaleBlocks.set(0);
 
             bodiesReceived.incrementAndGet();
             totalBlocksFetched.incrementAndGet();
@@ -669,6 +682,48 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     public void onParsingError(BlockParseRuntimeException e) {
         log.error("🚨 Block parsing error in BodyFetchManager", e);
         // Continue operation despite parsing errors
+    }
+
+    // ================================================================
+    // Corruption Probing on Repeated Stale Blocks
+    // ================================================================
+
+    private void onStaleBlockObserved() {
+        int count = consecutiveStaleBlocks.incrementAndGet();
+
+        // Early exit if below threshold or already recovering
+        if (count < STALE_RECOVERY_THRESHOLD || recoveryInProgress.get()) return;
+
+        // Single-flight guard
+        if (!recoveryInProgress.compareAndSet(false, true)) return;
+
+        log.warn("⚠️ Many consecutive stale blocks observed ({}). Probing for corruption...", count);
+
+        Thread.ofVirtual().start(() -> {
+            try {
+                // Pause fetching during probe to avoid churn
+                paused.set(true);
+
+                if (chainState instanceof com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState rocks) {
+                    if (rocks.detectCorruption()) {
+                        log.warn("🚨 Corruption detected during runtime probe - attempting recovery");
+                        rocks.recoverFromCorruption();
+                        log.info("✅ Recovery completed after stale-block probe");
+                        // After recovery, reset counters and allow fetching to resume
+                        consecutiveStaleBlocks.set(0);
+                    } else {
+                        log.debug("No corruption detected during stale-block probe");
+                    }
+                } else {
+                    log.debug("ChainState is not RocksDB-backed; skipping runtime corruption probe");
+                }
+            } catch (Exception e) {
+                log.warn("Runtime recovery probe failed: {}", e.toString());
+            } finally {
+                paused.set(false);
+                recoveryInProgress.set(false);
+            }
+        });
     }
 
     // ================================================================
