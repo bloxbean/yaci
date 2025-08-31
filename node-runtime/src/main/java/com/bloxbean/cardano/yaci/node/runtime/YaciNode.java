@@ -303,11 +303,11 @@ public class YaciNode implements NodeAPI {
             // Use header_tip as primary reference for restart efficiency
             ChainTip headerTip = chainState.getHeaderTip();
             ChainTip bodyTip = chainState.getTip();
-            
+
             // Use header_tip if available, fall back to body_tip
             ChainTip localTip = headerTip != null ? headerTip : bodyTip;
-            
-            log.info("Local header_tip: {}, body_tip: {}, using: {} for sync", 
+
+            log.info("Local header_tip: {}, body_tip: {}, using: {} for sync",
                      headerTip, bodyTip, localTip != null ? "slot " + localTip.getSlot() : "genesis");
 
             // Initialize last known tip
@@ -812,18 +812,10 @@ public class YaciNode implements NodeAPI {
         // Update last known tip
         lastKnownChainTip = chainState.getTip();
 
-        // For reconnection rollbacks during STEADY_STATE, check if we should immediately resume
-        if (isPipelinedMode && bodyFetchManager != null && !isReal && syncPhase == SyncPhase.STEADY_STATE) {
-            // Calculate gap after rollback to see if we're still near tip
-            long gapAfterRollback = bodyFetchManager.getCurrentGapSize();
-            
-            // If gap is still small (within tipProximityThreshold), immediately resume
-            if (gapAfterRollback <= 1000) { // Using same threshold as BodyFetchManager (1000 slots ~16 minutes)
-                bodyFetchManager.resume();
-                log.info("🏃‍♂️ IMMEDIATE RESUME AFTER ROLLBACK: Gap is {} slots, resuming BodyFetchManager", gapAfterRollback);
-            } else {
-                log.info("📊 Gap after rollback is {} slots, waiting for normal resume logic", gapAfterRollback);
-            }
+        // Always resume BodyFetchManager after rollback - let it handle its own gap detection
+        if (isPipelinedMode && bodyFetchManager != null) {
+            bodyFetchManager.resume();
+            log.info("▶️ BodyFetchManager resumed after rollback - will detect and handle gaps automatically");
         }
     }
 
@@ -1076,7 +1068,7 @@ public class YaciNode implements NodeAPI {
             }
         }
     }
-    
+
     /**
      * Notify the server about new block availability when blocks are stored in pipeline mode.
      * This is called by PipelineDataListener after blocks are successfully stored by BodyFetchManager.
@@ -1154,13 +1146,13 @@ public class YaciNode implements NodeAPI {
 
         if (chainState instanceof DirectRocksDBChainState rocksDBChainState) {
             log.info("🔧 Initiating chain state recovery...");
-            
+
             // First check if recovery is needed
             if (!rocksDBChainState.detectCorruption()) {
                 log.info("✅ No corruption detected, recovery not needed");
                 return false;
             }
-            
+
             // Perform recovery
             rocksDBChainState.recoverFromCorruption();
             return true;
@@ -1176,10 +1168,10 @@ public class YaciNode implements NodeAPI {
     private void validateChainState() {
         if (chainState instanceof DirectRocksDBChainState rocksDBChainState) {
             log.info("🔍 Validating chain state integrity...");
-            
+
             if (rocksDBChainState.detectCorruption()) {
                 log.warn("🚨 Chain state corruption detected during startup!");
-                
+
                 // Attempt automatic recovery
                 try {
                     log.info("🔧 Attempting automatic recovery...");
@@ -1337,7 +1329,7 @@ public class YaciNode implements NodeAPI {
     public void onIntersectionFound() {
         syncPhase = SyncPhase.INTERSECT_PHASE;
         log.info("Transitioned to INTERSECT_PHASE - expect rollback to intersection");
-        
+
         // Update BodyFetchManager sync phase
         if (isPipelinedMode && bodyFetchManager != null) {
             bodyFetchManager.setSyncPhase(SyncPhase.INTERSECT_PHASE);
