@@ -60,7 +60,7 @@ public class PipelineDataListener implements BlockChainDataListener {
         headerSyncManager.rollforward(tip, blockHeader, originalHeaderBytes);
 
         //TODO remove this log
-        log.info("Rollforward to header: {} at slot: {}", blockHeader.getHeaderBody().getBlockNumber(), blockHeader.getHeaderBody().getSlot());
+//        log.info("Rollforward to header: {} at slot: {}", blockHeader.getHeaderBody().getBlockNumber(), blockHeader.getHeaderBody().getSlot());
 
         // Resume BodyFetchManager if paused and headers are flowing after intersection
         yaciNode.resumeBodyFetchOnHeaderFlow();
