@@ -1376,6 +1376,34 @@ public class YaciNode implements NodeAPI {
         }, rollbackClassificationTimeout, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * If local tip is already close to the remote tip, transition to STEADY_STATE immediately.
+     * Invoked on intersection-found with the remote tip info available.
+     */
+    public void maybeFastTransitionToSteadyState(com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip remoteTip) {
+        try {
+            if (!isPipelinedMode) return;
+
+            ChainTip localTip = chainState.getTip();
+            if (localTip == null || remoteTip == null || remoteTip.getPoint() == null) return;
+
+            long remoteSlot = remoteTip.getPoint().getSlot();
+            long distance = Math.max(0, remoteSlot - localTip.getSlot());
+
+            long nearTipThreshold = 1000; // slots
+            if (distance <= nearTipThreshold) {
+                syncPhase = SyncPhase.STEADY_STATE;
+                if (bodyFetchManager != null) {
+                    bodyFetchManager.setSyncPhase(SyncPhase.STEADY_STATE);
+                    if (bodyFetchManager.isPaused()) bodyFetchManager.resume();
+                }
+                log.info("⚡ NEAR-TIP FAST PATH: remote-local distance={} slots <= {}, transitioned to STEADY_STATE", distance, nearTipThreshold);
+            }
+        } catch (Exception e) {
+            log.debug("Fast transition near-tip check failed: {}", e.toString());
+        }
+    }
+
     // Legacy ChainSyncAgentListener methods - now handled by HeaderSyncManager
     /*
     @Override
