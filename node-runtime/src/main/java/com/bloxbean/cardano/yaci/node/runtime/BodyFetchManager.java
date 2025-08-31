@@ -182,7 +182,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     }
 
     /**
-     * Main monitoring loop - runs continuously checking for gaps.
+     * Main monitoring loop - runs continuously checking for* Uses adaptive monitoring interval based on sync phase:
+     * - STEADY_STATE (tip): 100ms for immediate response
+     * - INITIAL_SYNC (bulk): 500ms for efficiency
      */
     @Override
     public void run() {
@@ -194,7 +196,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                     checkAndFetchBodies();
                 }
 
-                Thread.sleep(monitoringIntervalMs);
+                // Adaptive monitoring interval based on sync phase
+                long currentInterval = getAdaptiveMonitoringInterval();
+                Thread.sleep(currentInterval);
 
             } catch (InterruptedException e) {
                 log.info("BodyFetchManager monitoring thread interrupted");
@@ -207,6 +211,18 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
         }
 
         log.info("📊 BodyFetchManager monitoring thread stopped");
+    }
+
+    /**
+     * Get adaptive monitoring interval based on sync phase.
+     * At tip: faster monitoring for immediate response
+     * During bulk: slower monitoring for efficiency
+     */
+    private long getAdaptiveMonitoringInterval() {
+        if (syncPhase == SyncPhase.STEADY_STATE) {
+            return 100; // 100ms at tip for immediate body fetching
+        }
+        return monitoringIntervalMs; // Use configured interval for bulk sync
     }
 
     /**
@@ -273,9 +289,18 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     }
 
     /**
-     * Determine if bodies should be fetched based on gap size.
+     * Determine if bodies should be fetched based on gap size and sync phase.
+     *
+     * STEADY_STATE (tip sync): Immediate body fetching (gap >= 1 slot)
+     * INITIAL_SYNC (bulk): Efficient batching (gap >= configured threshold)
      */
     private boolean shouldFetchBodies(long gapSize) {
+        // At tip: fetch immediately when any header is ahead
+        if (syncPhase == SyncPhase.STEADY_STATE) {
+            return gapSize >= 1; // Immediate body fetching at tip
+        }
+
+        // During bulk sync: use configured threshold for efficient batching
         return gapSize >= gapThreshold;
     }
 
@@ -432,9 +457,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             // Phase-aware logging: log every block when at tip (STEADY_STATE), otherwise every 100 blocks
             if (syncPhase == SyncPhase.STEADY_STATE) {
                 // At tip - log every single block
-                if (totalBlocksFetched.get() % 100 == 0) {
-                    log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, block.getEra());
-                }
+                log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, block.getEra());
             } else {
                 // During initial sync - only log every 100 blocks for performance
                 if (totalBlocksFetched.get() % 100 == 0) {

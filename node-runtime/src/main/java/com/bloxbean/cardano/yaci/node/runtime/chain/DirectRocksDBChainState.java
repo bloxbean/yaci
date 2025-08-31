@@ -803,8 +803,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
      * and removing all data after that point.
      *
      * This method:
-     * 1. Scans backwards from current tips to find last continuous block/header
-     * 2. Removes all data after that point
+     * 1. Computes last continuous header/body block numbers up to their tips
+     * 2. Removes all data after the recovery point
      * 3. Updates tips to the recovered position
      */
     public void recoverFromCorruption() {
@@ -879,6 +879,22 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 return false;
             }
 
+            // Sanity check: if a body tip exists, ensure the corresponding body is actually present
+            if (bodyTip != null) {
+                long bodyTipBlockNumber = bodyTip.getBlockNumber();
+                byte[] tipHash = db.get(hashByNumberHandle, longToBytes(bodyTipBlockNumber));
+                if (tipHash == null) {
+                    log.warn("🚨 Corruption detected: Missing hash mapping for body tip block #{}", bodyTipBlockNumber);
+                    return true;
+                }
+
+                byte[] tipBody = db.get(blocksHandle, tipHash);
+                if (tipBody == null) {
+                    log.warn("🚨 Corruption detected: Body tip points to block #{} but body data is missing", bodyTipBlockNumber);
+                    return true;
+                }
+            }
+
             // Check continuity in a window around current tips
             long maxBlock = 0;
             if (headerTip != null) {
@@ -896,6 +912,15 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 if (blockHash == null) {
                     log.warn("🚨 Corruption detected: Missing block #{} in recent range", blockNum);
                     return true;
+                }
+
+                // If this block is expected to have a body (<= body tip), ensure body data exists
+                if (bodyTip != null && blockNum <= bodyTip.getBlockNumber()) {
+                    byte[] bodyData = db.get(blocksHandle, blockHash);
+                    if (bodyData == null) {
+                        log.warn("🚨 Corruption detected: Missing body for block #{} within body tip range", blockNum);
+                        return true;
+                    }
                 }
             }
 
@@ -941,68 +966,90 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     }
 
     /**
-     * Find the last block number where headers form a continuous sequence
+     * Find the last block number where headers form a continuous sequence.
+     * Scans backward from the current header tip until a valid header with consistent indices is found.
      */
     private Long findLastContinuousHeaderBlock() throws RocksDBException {
-        log.info("🔍 Scanning for last continuous header sequence...");
+        log.info("🔍 Scanning backward for last continuous header from header tip...");
 
-        // Start from block 1 and scan forward to find the first gap
-        for (long blockNum = 1; blockNum < 10_000_000; blockNum++) {
-            byte[] headerHash = db.get(hashByNumberHandle, longToBytes(blockNum));
-            if (headerHash == null) {
-                long lastValid = blockNum - 1;
-                log.info("📄 Last continuous header found at block #{} (gap at block #{})", lastValid, blockNum);
-                return lastValid > 0 ? lastValid : null;
-            }
-
-            // Check if header actually exists
-            byte[] headerData = db.get(headersHandle, headerHash);
-            if (headerData == null) {
-                long lastValid = blockNum - 1;
-                log.info("📄 Last continuous header found at block #{} (missing header data at block #{})", lastValid, blockNum);
-                return lastValid > 0 ? lastValid : null;
-            }
-
-            // Progress logging every 100K blocks
-            if (blockNum % 100_000 == 0) {
-                log.info("📄 Header continuity check: processed up to block #{}", blockNum);
-            }
+        ChainTip headerTip = getHeaderTip();
+        if (headerTip == null) {
+            log.info("No header tip present; cannot determine header continuity");
+            return null;
         }
 
-        log.warn("📄 Header scan reached maximum without finding gap (this shouldn't happen)");
+        for (long blockNum = headerTip.getBlockNumber(); blockNum >= 1; blockNum--) {
+            byte[] headerHash = db.get(hashByNumberHandle, longToBytes(blockNum));
+            if (headerHash == null) {
+                continue; // mapping missing at this height; try earlier
+            }
+
+            byte[] headerData = db.get(headersHandle, headerHash);
+            if (headerData == null) {
+                continue; // header bytes missing; try earlier
+            }
+
+            byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(blockNum));
+            if (slotBytes == null) {
+                continue; // slot mapping missing; try earlier
+            }
+            long slot = bytesToLong(slotBytes);
+
+            byte[] backNumber = db.get(numberBySlotHandle, longToBytes(slot));
+            if (backNumber == null || bytesToLong(backNumber) != blockNum) {
+                continue; // reverse mapping mismatch; try earlier
+            }
+
+            // Found the highest block with consistent header state
+            log.info("📄 Last continuous header determined at block #{} (slot {})", blockNum, slot);
+            return blockNum;
+        }
+
+        log.warn("📄 Could not find any valid continuous header block");
         return null;
     }
 
     /**
-     * Find the last block number where bodies form a continuous sequence
+     * Find the last block number where bodies form a continuous sequence.
+     * Scans backward from the current body tip until a valid body with consistent indices is found.
      */
     private Long findLastContinuousBodyBlock() throws RocksDBException {
-        log.info("🔍 Scanning for last continuous body sequence...");
+        log.info("🔍 Scanning backward for last continuous body from body tip...");
 
-        // Start from block 1 and scan forward to find the first gap
-        for (long blockNum = 1; blockNum < 10_000_000; blockNum++) {
-            byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNum));
-            if (blockHash == null) {
-                long lastValid = blockNum - 1;
-                log.info("🧱 Last continuous body found at block #{} (gap at block #{})", lastValid, blockNum);
-                return lastValid > 0 ? lastValid : null;
-            }
-
-            // Check if body actually exists
-            byte[] bodyData = db.get(blocksHandle, blockHash);
-            if (bodyData == null) {
-                long lastValid = blockNum - 1;
-                log.info("🧱 Last continuous body found at block #{} (missing body data at block #{})", lastValid, blockNum);
-                return lastValid > 0 ? lastValid : null;
-            }
-
-            // Progress logging every 100K blocks
-            if (blockNum % 100_000 == 0) {
-                log.info("🧱 Body continuity check: processed up to block #{}", blockNum);
-            }
+        ChainTip bodyTip = getTip();
+        if (bodyTip == null) {
+            log.info("No body tip present; cannot determine body continuity");
+            return null;
         }
 
-        log.warn("🧱 Body scan reached maximum without finding gap (this shouldn't happen)");
+        for (long blockNum = bodyTip.getBlockNumber(); blockNum >= 1; blockNum--) {
+            byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNum));
+            if (blockHash == null) {
+                continue; // mapping missing; try earlier
+            }
+
+            byte[] bodyData = db.get(blocksHandle, blockHash);
+            if (bodyData == null) {
+                continue; // body missing; try earlier
+            }
+
+            byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(blockNum));
+            if (slotBytes == null) {
+                continue; // slot mapping missing; try earlier
+            }
+            long slot = bytesToLong(slotBytes);
+
+            byte[] backNumber = db.get(numberBySlotHandle, longToBytes(slot));
+            if (backNumber == null || bytesToLong(backNumber) != blockNum) {
+                continue; // reverse mapping mismatch; try earlier
+            }
+
+            // Found the highest block with consistent body state
+            log.info("🧱 Last continuous body determined at block #{} (slot {})", blockNum, slot);
+            return blockNum;
+        }
+
+        log.warn("🧱 Could not find any valid continuous body block");
         return null;
     }
 
