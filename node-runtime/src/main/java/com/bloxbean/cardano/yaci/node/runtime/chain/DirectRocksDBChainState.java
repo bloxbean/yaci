@@ -101,13 +101,25 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 log.info("📍 Storing genesis/first block #{}", blockNumber);
             }
 
+            // HASH CONSISTENCY CHECK: Validate block matches stored header
+            byte[] expectedHash = db.get(hashByNumberHandle, longToBytes(blockNumber));
+            if (expectedHash != null && !Arrays.equals(expectedHash, blockHash)) {
+                log.warn("🚨 FORK MISMATCH: Block #{} at slot {} has different hash than header! " +
+                         "Expected: {}, Got: {} - SKIPPING STORAGE TO PREVENT CORRUPTION",
+                         blockNumber, slot, 
+                         HexUtil.encodeHexString(expectedHash), 
+                         HexUtil.encodeHexString(blockHash));
+                return; // Skip storing mismatched block to prevent index corruption
+            }
+
             // Use write batch for atomic updates
             try (WriteBatch batch = new WriteBatch()) {
                 // Store block
                 batch.put(blocksHandle, blockHash, block);
 
-                // Update indexes
-                updateChainState(batch, blockHash, blockNumber, slot);
+                // IMPORTANT: Do NOT update indices here - only headers should manage indices
+                // This prevents body sync from overwriting header mappings during forks
+                // updateChainState(batch, blockHash, blockNumber, slot); // REMOVED
 
                 // Update tip if this is a newer block
                 updateTip(batch, blockHash, blockNumber, slot);
@@ -240,11 +252,11 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             // Get current tips to determine rollback strategy
             ChainTip bodyTip = getTip();
             ChainTip headerTip = getHeaderTip();
-            
+
             // Intelligently decide rollback strategy based on body tip position
             if (bodyTip == null || slot > bodyTip.getSlot()) {
                 // Header-only rollback: common during restart when starting from header_tip
-                log.info("Header-only rollback to slot {} (body tip at {})", 
+                log.info("Header-only rollback to slot {} (body tip at {})",
                          slot, bodyTip != null ? bodyTip.getSlot() : "null");
                 performHeaderOnlyRollback(slot, rollbackBlockNumber, rollbackHash, headerTip);
             } else {
@@ -252,13 +264,13 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 log.warn("Full rollback to slot {} (affecting headers and bodies)", slot);
                 performFullRollback(slot, rollbackBlockNumber, rollbackHash, bodyTip, headerTip);
             }
-            
+
         } catch (Exception e) {
             log.error("Rollback failed: to slot={}", slot, e);
             throw new RuntimeException("Failed to rollback to slot " + slot, e);
         }
     }
-    
+
     /**
      * Perform a header-only rollback - efficient for restart scenarios
      * This is used when the rollback point is beyond the current body tip,
@@ -269,26 +281,26 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             log.debug("No header rollback needed - header tip at or before rollback point");
             return;
         }
-        
+
         WriteBatch batch = new WriteBatch();
         int headersDeleted = 0;
-        
+
         try {
             // Delete headers after the rollback slot
             try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
                 iterator.seekToLast();
-                
+
                 while (iterator.isValid()) {
                     long currentSlot = bytesToLong(iterator.key());
-                    
+
                     // Stop when we reach the rollback point
                     if (currentSlot <= slot) {
                         break;
                     }
-                    
+
                     long blockNumber = bytesToLong(iterator.value());
                     byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNumber));
-                    
+
                     if (blockHash != null) {
                         // Only delete header data (not checking for bodies as this is header-only)
                         byte[] headerData = db.get(headersHandle, blockHash);
@@ -296,50 +308,91 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                             batch.delete(headersHandle, blockHash);
                             headersDeleted++;
                         }
-                        
+
                         // Delete mappings
                         batch.delete(hashByNumberHandle, longToBytes(blockNumber));
                         batch.delete(numberBySlotHandle, iterator.key());
                         batch.delete(slotByNumberHandle, longToBytes(blockNumber));
                     }
-                    
+
                     iterator.prev();
                 }
             }
-            
+
             // Update header_tip to rollback point
             ChainTip newHeaderTip = new ChainTip(slot, rollbackHash, rollbackBlockNumber);
             batch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newHeaderTip));
-            
+
             // Commit all changes
             db.write(new WriteOptions(), batch);
-            
-            log.info("Header-only rollback completed: deleted {} headers, new header_tip at slot {}", 
+
+            log.info("Header-only rollback completed: deleted {} headers, new header_tip at slot {}",
                      headersDeleted, slot);
-                     
+
         } finally {
             batch.close();
         }
     }
-    
+
     /**
      * Perform a full rollback of both headers and bodies - for real chain reorganizations
      * This is the traditional rollback used when the network has a real chain reorg.
      */
-    private void performFullRollback(Long slot, long rollbackBlockNumber, byte[] rollbackHash, 
+    private void performFullRollback(Long slot, long rollbackBlockNumber, byte[] rollbackHash,
                                     ChainTip bodyTip, ChainTip headerTip) throws RocksDBException {
-        
+
         // Determine the highest block number to clean up
         long maxBlockToDelete = Math.max(
             bodyTip != null ? bodyTip.getBlockNumber() : 0,
             headerTip != null ? headerTip.getBlockNumber() : 0
         );
-        
+
         if (maxBlockToDelete <= rollbackBlockNumber) {
-            log.debug("No rollback needed - tips are at or before rollback point");
+            log.info("No rollback needed - tips are at or before rollback point");
+            
+            // CHECK TIP ALIGNMENT: Ensure header and body tips have same hash
+            if (headerTip != null && bodyTip != null && 
+                !Arrays.equals(headerTip.getBlockHash(), bodyTip.getBlockHash())) {
+                
+                log.warn("🚨 TIP MISMATCH DETECTED: Header tip and body tip have different hashes!");
+                log.warn("Header tip: block #{} slot {} hash {}", 
+                         headerTip.getBlockNumber(), headerTip.getSlot(), 
+                         HexUtil.encodeHexString(headerTip.getBlockHash()));
+                log.warn("Body tip: block #{} slot {} hash {}", 
+                         bodyTip.getBlockNumber(), bodyTip.getSlot(), 
+                         HexUtil.encodeHexString(bodyTip.getBlockHash()));
+                
+                // Find the last block where header and body hashes match
+                long alignedBlockNumber = findLastAlignedBlock(rollbackBlockNumber);
+                if (alignedBlockNumber > 0) {
+                    // Get the aligned block's details
+                    byte[] alignedHash = db.get(hashByNumberHandle, longToBytes(alignedBlockNumber));
+                    byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(alignedBlockNumber));
+                    
+                    if (alignedHash != null && slotBytes != null) {
+                        long alignedSlot = bytesToLong(slotBytes);
+                        
+                        // Update body tip to the aligned point
+                        ChainTip alignedTip = new ChainTip(alignedSlot, alignedHash, alignedBlockNumber);
+                        WriteBatch batch = new WriteBatch();
+                        try {
+                            batch.put(metadataHandle, TIP_KEY, serializeChainTip(alignedTip));
+                            db.write(new WriteOptions(), batch);
+                            
+                            log.warn("✅ REALIGNED body tip to block #{} at slot {} where header/body hashes match",
+                                    alignedBlockNumber, alignedSlot);
+                        } finally {
+                            batch.close();
+                        }
+                    }
+                } else {
+                    log.error("Could not find aligned block - manual intervention may be required");
+                }
+            }
+            
             return;
         }
-        
+
         WriteBatch batch = new WriteBatch();
         int blocksDeleted = 0;
         int headersDeleted = 0;
@@ -349,23 +402,23 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             // Delete all slots, blocks and headers after the rollback point
             try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
                 iterator.seekToLast();
-                
+
                 while (iterator.isValid()) {
                     long currentSlot = bytesToLong(iterator.key());
-                    
+
                     // Stop when we reach the rollback point
                     if (currentSlot <= slot) {
                         break;
                     }
-                    
+
                     long blockNumber = bytesToLong(iterator.value());
                     byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNumber));
-                    
+
                     if (blockHash != null) {
                         // Delete block and header data
                         byte[] blockBody = db.get(blocksHandle, blockHash);
                         byte[] headerData = db.get(headersHandle, blockHash);
-                        
+
                         if (blockBody != null) {
                             batch.delete(blocksHandle, blockHash);
                             blocksDeleted++;
@@ -374,29 +427,29 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                             batch.delete(headersHandle, blockHash);
                             headersDeleted++;
                         }
-                        
+
                         // Delete mappings
                         batch.delete(hashByNumberHandle, longToBytes(blockNumber));
                         batch.delete(numberBySlotHandle, iterator.key());
                         batch.delete(slotByNumberHandle, longToBytes(blockNumber));
                     }
-                    
+
                     slotsDeleted++;
                     iterator.prev();
                 }
             }
-            
+
             // Update both header_tip and body_tip to rollback point
             ChainTip newTip = new ChainTip(slot, rollbackHash, rollbackBlockNumber);
             batch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newTip));
             batch.put(metadataHandle, TIP_KEY, serializeChainTip(newTip));
-            
+
             // Commit all changes
             db.write(new WriteOptions(), batch);
-            
+
             log.warn("Full rollback completed: to slot={}, deleted {} slots, {} blocks, {} headers",
                      slot, slotsDeleted, blocksDeleted, headersDeleted);
-                     
+
         } finally {
             batch.close();
         }
@@ -855,6 +908,39 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     }
 
     /**
+     * Find the last block where header and body have matching hashes
+     */
+    private long findLastAlignedBlock(long maxBlockNumber) throws RocksDBException {
+        log.info("🔍 Searching for last aligned block where header and body hashes match...");
+        
+        // Search backwards from maxBlockNumber to find alignment
+        for (long blockNum = maxBlockNumber; blockNum > 0; blockNum--) {
+            byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNum));
+            if (blockHash == null) {
+                continue; // Skip missing blocks
+            }
+            
+            // Check if both header and body exist for this hash
+            byte[] header = db.get(headersHandle, blockHash);
+            byte[] body = db.get(blocksHandle, blockHash);
+            
+            if (header != null && body != null) {
+                log.info("✅ Found aligned block at #{} with matching header and body", blockNum);
+                return blockNum;
+            }
+            
+            // Log progress every 1000 blocks
+            if ((maxBlockNumber - blockNum) % 1000 == 0 && blockNum != maxBlockNumber) {
+                log.debug("Alignment search: checked {} blocks, currently at block #{}",
+                         maxBlockNumber - blockNum, blockNum);
+            }
+        }
+        
+        log.warn("Could not find aligned block in range 1 to {}", maxBlockNumber);
+        return 0; // No aligned block found
+    }
+
+    /**
      * Find the last block number where headers form a continuous sequence
      */
     private Long findLastContinuousHeaderBlock() throws RocksDBException {
@@ -947,12 +1033,26 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     }
 
     private void updateTip(WriteBatch batch, byte[] blockHash, Long blockNumber, Long slot) throws RocksDBException {
-        // Update tip if this is a newer block
+        // Update tip if this is a newer block OR same slot with higher block number (fork handling)
         ChainTip currentTip = getTip();
-        if (currentTip == null || slot > currentTip.getSlot()) {
+        if (currentTip == null || slot > currentTip.getSlot() || 
+            (slot.equals(currentTip.getSlot()) && blockNumber > currentTip.getBlockNumber())) {
             ChainTip newTip = new ChainTip(slot, blockHash, blockNumber);
             batch.put(metadataHandle, TIP_KEY, serializeChainTip(newTip));
-            log.debug("Updated tip: slot={}, blockNumber={}", slot, blockNumber);
+            log.debug("Updated tip: slot={}, blockNumber={} (fork handling: same-slot={})", 
+                     slot, blockNumber, currentTip != null && slot.equals(currentTip.getSlot()));
+        } else if (currentTip != null && slot.equals(currentTip.getSlot()) && blockNumber.equals(currentTip.getBlockNumber())) {
+            // Same slot, same block number but potentially different hash (fork scenario)
+            if (!Arrays.equals(blockHash, currentTip.getBlockHash())) {
+                log.warn("⚠️ FORK DETECTED: Same slot {} and block #{} but different hash! Current: {}, New: {}",
+                        slot, blockNumber, 
+                        HexUtil.encodeHexString(currentTip.getBlockHash()),
+                        HexUtil.encodeHexString(blockHash));
+                // In this case, we should update to the new hash as it represents the canonical chain
+                ChainTip newTip = new ChainTip(slot, blockHash, blockNumber);
+                batch.put(metadataHandle, TIP_KEY, serializeChainTip(newTip));
+                log.info("Updated tip to new fork: slot={}, blockNumber={}", slot, blockNumber);
+            }
         }
     }
 
