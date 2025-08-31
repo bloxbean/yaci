@@ -33,6 +33,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     private final ColumnFamilyHandle numberBySlotHandle;
     private final ColumnFamilyHandle slotByNumberHandle;
     private final ColumnFamilyHandle metadataHandle;
+    private final ColumnFamilyHandle slotToHashHandle;
 
     static {
         RocksDB.loadLibrary();
@@ -57,6 +58,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                     new ColumnFamilyDescriptor("hash_by_number".getBytes()),
                     new ColumnFamilyDescriptor("number_by_slot".getBytes()),
                     new ColumnFamilyDescriptor("slot_by_number".getBytes()),
+                    new ColumnFamilyDescriptor("slot_to_hash".getBytes()),
                     new ColumnFamilyDescriptor("metadata".getBytes())
             );
 
@@ -70,7 +72,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             hashByNumberHandle = cfHandles.get(3);
             numberBySlotHandle = cfHandles.get(4);
             slotByNumberHandle = cfHandles.get(5);
-            metadataHandle = cfHandles.get(6);
+            slotToHashHandle = cfHandles.get(6);
+            metadataHandle = cfHandles.get(7);
 
             log.info("RocksDB initialized at: {}", dbPath);
 
@@ -106,8 +109,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             if (expectedHash != null && !Arrays.equals(expectedHash, blockHash)) {
                 log.warn("🚨 FORK MISMATCH: Block #{} at slot {} has different hash than header! " +
                          "Expected: {}, Got: {} - SKIPPING STORAGE TO PREVENT CORRUPTION",
-                         blockNumber, slot, 
-                         HexUtil.encodeHexString(expectedHash), 
+                         blockNumber, slot,
+                         HexUtil.encodeHexString(expectedHash),
                          HexUtil.encodeHexString(blockHash));
                 return; // Skip storing mismatched block to prevent index corruption
             }
@@ -313,6 +316,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                         batch.delete(hashByNumberHandle, longToBytes(blockNumber));
                         batch.delete(numberBySlotHandle, iterator.key());
                         batch.delete(slotByNumberHandle, longToBytes(blockNumber));
+                        // Delete slot->hash mapping
+                        batch.delete(slotToHashHandle, iterator.key());
                     }
 
                     iterator.prev();
@@ -349,36 +354,36 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
 
         if (maxBlockToDelete <= rollbackBlockNumber) {
             log.info("No rollback needed - tips are at or before rollback point");
-            
+
             // CHECK TIP ALIGNMENT: Ensure header and body tips have same hash
-            if (headerTip != null && bodyTip != null && 
+            if (headerTip != null && bodyTip != null &&
                 !Arrays.equals(headerTip.getBlockHash(), bodyTip.getBlockHash())) {
-                
+
                 log.warn("🚨 TIP MISMATCH DETECTED: Header tip and body tip have different hashes!");
-                log.warn("Header tip: block #{} slot {} hash {}", 
-                         headerTip.getBlockNumber(), headerTip.getSlot(), 
+                log.warn("Header tip: block #{} slot {} hash {}",
+                         headerTip.getBlockNumber(), headerTip.getSlot(),
                          HexUtil.encodeHexString(headerTip.getBlockHash()));
-                log.warn("Body tip: block #{} slot {} hash {}", 
-                         bodyTip.getBlockNumber(), bodyTip.getSlot(), 
+                log.warn("Body tip: block #{} slot {} hash {}",
+                         bodyTip.getBlockNumber(), bodyTip.getSlot(),
                          HexUtil.encodeHexString(bodyTip.getBlockHash()));
-                
+
                 // Find the last block where header and body hashes match
                 long alignedBlockNumber = findLastAlignedBlock(rollbackBlockNumber);
                 if (alignedBlockNumber > 0) {
                     // Get the aligned block's details
                     byte[] alignedHash = db.get(hashByNumberHandle, longToBytes(alignedBlockNumber));
                     byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(alignedBlockNumber));
-                    
+
                     if (alignedHash != null && slotBytes != null) {
                         long alignedSlot = bytesToLong(slotBytes);
-                        
+
                         // Update body tip to the aligned point
                         ChainTip alignedTip = new ChainTip(alignedSlot, alignedHash, alignedBlockNumber);
                         WriteBatch batch = new WriteBatch();
                         try {
                             batch.put(metadataHandle, TIP_KEY, serializeChainTip(alignedTip));
                             db.write(new WriteOptions(), batch);
-                            
+
                             log.warn("✅ REALIGNED body tip to block #{} at slot {} where header/body hashes match",
                                     alignedBlockNumber, alignedSlot);
                         } finally {
@@ -389,7 +394,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                     log.error("Could not find aligned block - manual intervention may be required");
                 }
             }
-            
+
             return;
         }
 
@@ -432,6 +437,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                         batch.delete(hashByNumberHandle, longToBytes(blockNumber));
                         batch.delete(numberBySlotHandle, iterator.key());
                         batch.delete(slotByNumberHandle, longToBytes(blockNumber));
+                        batch.delete(slotToHashHandle, iterator.key());
                     }
 
                     slotsDeleted++;
@@ -495,96 +501,52 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             }
 
             long tipSlot = tip.getSlot();
-            long tipBlockNumber = tip.getBlockNumber();
 
             // If current slot is already at or beyond tip, no next block available
             if (currentSlot >= tipSlot) {
-                log.debug("Current slot {} is at or beyond tip slot {}, no next block", currentSlot, tipSlot);
+                if (log.isDebugEnabled())
+                    log.debug("Current slot {} is at or beyond tip slot {}, no next block", currentSlot, tipSlot);
                 return null;
             }
 
-            // Handle Point.ORIGIN (slot 0) specially
-            if (currentSlot == 0 && currentPoint.getHash() == null) {
-                // Return the first block
-                Point firstBlock = getFirstBlock();
-                if (firstBlock != null) {
-                    log.debug("Returning first block after Point.ORIGIN: {}", firstBlock);
-                    return firstBlock;
-                }
-            }
-
-            // Try to find current block number first
-            Long currentBlockNumber = null;
-
-            // First try to get block number from the current slot
-            byte[] blockNumberBytes = db.get(numberBySlotHandle, longToBytes(currentSlot));
-            if (blockNumberBytes != null) {
-                currentBlockNumber = bytesToLong(blockNumberBytes);
-                log.debug("Found current block number {} for slot {}", currentBlockNumber, currentSlot);
-            } else {
-                // If exact slot doesn't have a block, find the block at the nearest previous slot
-                log.debug("No block at exact slot {}, searching for nearest previous block using iterator", currentSlot);
-                try (RocksIterator iterator = db.newIterator(numberBySlotHandle)) {
-                    iterator.seekForPrev(longToBytes(currentSlot)); // Seek to the last key <= currentSlot
+            // Handle Point.ORIGIN (slot 0) specially: return the first slot in slot_to_hash
+            try (RocksIterator iterator = db.newIterator(slotToHashHandle)) {
+                if (currentSlot == 0 && currentPoint.getHash() == null) {
+                    iterator.seekToFirst();
                     if (iterator.isValid()) {
-                        // The key is the slot, and the value is the block number
-                        currentBlockNumber = bytesToLong(iterator.value());
-                        long foundSlot = bytesToLong(iterator.key());
-                        log.debug("Found nearest block number {} at previous slot {}", currentBlockNumber, foundSlot);
+                        long nextSlot = bytesToLong(iterator.key());
+                        byte[] hash = iterator.value();
+                        Point p = new Point(nextSlot, HexUtil.encodeHexString(hash));
+                        if (log.isDebugEnabled()) log.debug("Returning first block after ORIGIN: {}", p);
+                        return p;
+                    } else {
+                        return null;
                     }
                 }
-            }
 
-            if (currentBlockNumber == null) {
-                log.warn("Could not determine current block number for slot {}", currentSlot);
-                return null;
-            }
-
-            // Now use block number to find the next block efficiently
-            long nextBlockNumber = currentBlockNumber + 1;
-
-            // Check if next block exists
-            if (nextBlockNumber > tipBlockNumber) {
-                log.debug("Next block number {} would exceed tip block number {}", nextBlockNumber, tipBlockNumber);
-                return null;
-            }
-
-            // Get the next block directly by block number
-            if (log.isDebugEnabled()) {
-                log.debug("Looking for next block number {} after current block {}", nextBlockNumber, currentBlockNumber);
-            }
-            byte[] nextBlockHash = db.get(hashByNumberHandle, longToBytes(nextBlockNumber));
-            if (log.isDebugEnabled()) {
-                log.debug("Hash lookup for block {} result: {}", nextBlockNumber,
-                        nextBlockHash != null ? "FOUND (" + HexUtil.encodeHexString(nextBlockHash) + ")" : "NULL");
-            }
-
-            if (nextBlockHash != null) {
-                byte[] nextSlotBytes = db.get(slotByNumberHandle, longToBytes(nextBlockNumber));
-                if (log.isDebugEnabled()) {
-                    log.debug("Slot lookup for block {} result: {}", nextBlockNumber,
-                            nextSlotBytes != null ? "FOUND (" + bytesToLong(nextSlotBytes) + ")" : "NULL");
+                // Seek to currentSlot, then move to strictly greater slot if needed
+                iterator.seek(longToBytes(currentSlot));
+                if (iterator.isValid()) {
+                    long foundSlot = bytesToLong(iterator.key());
+                    if (foundSlot <= currentSlot) iterator.next();
                 }
 
-                if (nextSlotBytes != null) {
-                    long nextSlot = bytesToLong(nextSlotBytes);
-                    Point nextBlock = new Point(nextSlot, HexUtil.encodeHexString(nextBlockHash));
-                    log.debug("Found next block: number={}, slot={}, hash={}",
-                            nextBlockNumber, nextSlot, nextBlock.getHash());
-                    return nextBlock;
-                } else {
-                    if (log.isDebugEnabled()) {
-                        log.debug("Found hash for block {} but missing slot mapping", nextBlockNumber);
-                    }
+                if (!iterator.isValid()) {
+                    if (log.isDebugEnabled()) log.debug("Reached end of slot_to_hash; no next block after slot {}", currentSlot);
+                    return null;
                 }
-            } else {
-                if (log.isDebugEnabled()) {
-                    log.debug("Missing hash mapping for block {}", nextBlockNumber);
-                }
-            }
 
-            log.warn("Could not find next block after block number {}", currentBlockNumber);
-            return null;
+                long nextSlot = bytesToLong(iterator.key());
+                byte[] hash = iterator.value();
+                if (nextSlot > tipSlot) {
+                    if (log.isDebugEnabled()) log.debug("Next slot {} is beyond tip slot {}", nextSlot, tipSlot);
+                    return null;
+                }
+
+                Point next = new Point(nextSlot, HexUtil.encodeHexString(hash));
+                if (log.isDebugEnabled()) log.debug("Next block by slot: {}", next);
+                return next;
+            }
 
         } catch (Exception e) {
             log.error("Failed to find next block after slot {}", currentPoint.getSlot(), e);
@@ -937,30 +899,30 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
      */
     private long findLastAlignedBlock(long maxBlockNumber) throws RocksDBException {
         log.info("🔍 Searching for last aligned block where header and body hashes match...");
-        
+
         // Search backwards from maxBlockNumber to find alignment
         for (long blockNum = maxBlockNumber; blockNum > 0; blockNum--) {
             byte[] blockHash = db.get(hashByNumberHandle, longToBytes(blockNum));
             if (blockHash == null) {
                 continue; // Skip missing blocks
             }
-            
+
             // Check if both header and body exist for this hash
             byte[] header = db.get(headersHandle, blockHash);
             byte[] body = db.get(blocksHandle, blockHash);
-            
+
             if (header != null && body != null) {
                 log.info("✅ Found aligned block at #{} with matching header and body", blockNum);
                 return blockNum;
             }
-            
+
             // Log progress every 1000 blocks
             if ((maxBlockNumber - blockNum) % 1000 == 0 && blockNum != maxBlockNumber) {
                 log.debug("Alignment search: checked {} blocks, currently at block #{}",
                          maxBlockNumber - blockNum, blockNum);
             }
         }
-        
+
         log.warn("Could not find aligned block in range 1 to {}", maxBlockNumber);
         return 0; // No aligned block found
     }
@@ -1077,22 +1039,24 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
         batch.put(hashByNumberHandle, longToBytes(blockNumber), blockHash);
         batch.put(numberBySlotHandle, longToBytes(slot), longToBytes(blockNumber));
         batch.put(slotByNumberHandle, longToBytes(blockNumber), longToBytes(slot));
+        // Also index exact slot -> hash mapping for EBB-safe traversal and serving
+        batch.put(slotToHashHandle, longToBytes(slot), blockHash);
     }
 
     private void updateTip(WriteBatch batch, byte[] blockHash, Long blockNumber, Long slot) throws RocksDBException {
         // Update tip if this is a newer block OR same slot with higher block number (fork handling)
         ChainTip currentTip = getTip();
-        if (currentTip == null || slot > currentTip.getSlot() || 
+        if (currentTip == null || slot > currentTip.getSlot() ||
             (slot.equals(currentTip.getSlot()) && blockNumber > currentTip.getBlockNumber())) {
             ChainTip newTip = new ChainTip(slot, blockHash, blockNumber);
             batch.put(metadataHandle, TIP_KEY, serializeChainTip(newTip));
-            log.debug("Updated tip: slot={}, blockNumber={} (fork handling: same-slot={})", 
+            log.debug("Updated tip: slot={}, blockNumber={} (fork handling: same-slot={})",
                      slot, blockNumber, currentTip != null && slot.equals(currentTip.getSlot()));
         } else if (currentTip != null && slot.equals(currentTip.getSlot()) && blockNumber.equals(currentTip.getBlockNumber())) {
             // Same slot, same block number but potentially different hash (fork scenario)
             if (!Arrays.equals(blockHash, currentTip.getBlockHash())) {
                 log.warn("⚠️ FORK DETECTED: Same slot {} and block #{} but different hash! Current: {}, New: {}",
-                        slot, blockNumber, 
+                        slot, blockNumber,
                         HexUtil.encodeHexString(currentTip.getBlockHash()),
                         HexUtil.encodeHexString(blockHash));
                 // In this case, we should update to the new hash as it represents the canonical chain
