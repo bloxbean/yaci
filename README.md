@@ -11,12 +11,11 @@ Yaci is a Java-based Cardano mini-protocol implementation that allows users to c
 and interact with it in a variety of ways. With Yaci's simple APIs, you can listen to incoming blocks in real-time, fetch 
 previous blocks, query information from a local node, monitor the local mempool, and submit transactions to a local node.
 
-**Previous Releases :** 
-- [0.1.14](https://github.com/bloxbean/yaci/releases/tag/v0.1.14) (**Cardano Node 8.1.1** support and Compatible with Cardano Client Lib 0.4.3)
-- [0.2.5](https://github.com/bloxbean/yaci/releases/tag/v0.2.5) (Compatible with Cardano Client Lib 0.5.0)
-
 **Latest Release :**
-- [0.3.4.1](https://github.com/bloxbean/yaci/releases/tag/v0.3.4.1) (Supports Conway era) 
+- [0.3.8](https://github.com/bloxbean/yaci/releases/tag/v0.3.8)
+
+**Latest Beta :**
+- [0.4.0-beta5](https://github.com/bloxbean/yaci/releases/tag/v0.4.0-beta5)
 
   **Development Branch:** main
 
