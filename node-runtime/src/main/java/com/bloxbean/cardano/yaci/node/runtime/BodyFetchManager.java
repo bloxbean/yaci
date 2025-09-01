@@ -818,21 +818,33 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 }
             }
 
-            // CRITICAL: For Byron blocks, ensure strict sequential ordering
-            // Block numbers must be exactly currentTip.blockNumber + 1
+            // Byron EBB handling: allow same-number block at a strictly greater slot
+            // when header for that slot exists, since EBB shares difficulty with the prior main block.
             long expectedNextBlockNumber = currentTip.getBlockNumber() + 1;
-
             if (blockNumber != expectedNextBlockNumber) {
-                log.warn("🚫 BLOCK SEQUENCE VIOLATION: Expected block #{}, but received block #{} - marking as stale",
-                        expectedNextBlockNumber, blockNumber);
-
-                // Additional context for debugging
-                if (lastRollbackPoint != null) {
-                    log.warn("🚫 Rollback context: rollback was to slot {}, current tip is block {} at slot {}",
-                            lastRollbackPoint.getSlot(), currentTip.getBlockNumber(), currentTip.getSlot());
+                // Permit special case: same block number but higher slot with a known header
+                if (blockNumber == currentTip.getBlockNumber() && slot > currentTip.getSlot()) {
+                    Long headerNumberAtSlot = chainState.getBlockNumberBySlot(slot);
+                    if (headerNumberAtSlot != null && headerNumberAtSlot == blockNumber) {
+                        if (log.isDebugEnabled())
+                            log.debug("Byron EBB allowance: same blockNumber {} at higher slot {} > {}",
+                                    blockNumber, slot, currentTip.getSlot());
+                        // fall through to prerequisite check
+                    } else {
+                        // Not the EBB pattern; treat as violation
+                        if (lastRollbackPoint != null) {
+                            log.warn("🚫 Rollback context: rollback was to slot {}, current tip is block {} at slot {}",
+                                    lastRollbackPoint.getSlot(), currentTip.getBlockNumber(), currentTip.getSlot());
+                        }
+                        return true;
+                    }
+                } else {
+                    if (lastRollbackPoint != null) {
+                        log.warn("🚫 Rollback context: rollback was to slot {}, current tip is block {} at slot {}",
+                                lastRollbackPoint.getSlot(), currentTip.getBlockNumber(), currentTip.getSlot());
+                    }
+                    return true;
                 }
-
-                return true;
             }
 
             // Verify the prerequisite block exists (additional safety check)
@@ -852,7 +864,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                          blockNumber, slot, lastRollbackPoint.getSlot());
             }
 
-            // Block is sequential and valid
+            // Block is accepted
             return false;
 
         } catch (Exception e) {

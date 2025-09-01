@@ -196,13 +196,13 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
             long blockNumber = byronEbHead.getConsensusData().getDifficulty().longValue();
             String blockHash = byronEbHead.getBlockHash();
 
-            // Store Byron EB header immediately when received from ChainSync
-            chainState.storeBlockHeader(
-                HexUtil.decodeHexString(blockHash),
-                blockNumber,
-                absoluteSlot,
-                originalHeaderBytes
-            );
+            // Store Byron EB header: avoid updating number->slot mapping (EBB shares difficulty)
+            var hashBytes = HexUtil.decodeHexString(blockHash);
+            if (chainState instanceof com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState rocks) {
+                rocks.storeByronEbHeader(hashBytes, blockNumber, absoluteSlot, originalHeaderBytes);
+            } else {
+                chainState.storeBlockHeader(hashBytes, blockNumber, absoluteSlot, originalHeaderBytes);
+            }
 
             // Update metrics
             headersReceived++;
