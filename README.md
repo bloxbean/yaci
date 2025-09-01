@@ -17,7 +17,7 @@ previous blocks, query information from a local node, monitor the local mempool,
 **Latest Beta :**
 - [0.4.0-beta5](https://github.com/bloxbean/yaci/releases/tag/v0.4.0-beta5)
 
-  **Development Branch:** main
+**Development Branch:** main
 
 ## Dependencies
 
