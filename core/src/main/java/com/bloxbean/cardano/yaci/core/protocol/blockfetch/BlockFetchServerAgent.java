@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
 
+import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.*;
@@ -111,13 +112,31 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
             List<Point> range = chainState.findBlocksInRange(request.getFrom(), request.getTo());
 
             if (range.isEmpty()) {
-                log.warn("Missing block(s) in range. Sending MsgNoBlocks.");
+                log.warn("No blocks found in requested range {} → {}. Sending NoBlocks.", from, to);
                 sendToClient(new NoBlocks());
                 processNext();
                 return;
             }
 
-            // Send StartBatch
+            if (YaciConfig.INSTANCE.isBlockFetchCheckRangeExists()) {
+                // Preflight availability check (existence-only) to avoid mid-batch failures
+                for (Point point : range) {
+                    byte[] hash = HexUtil.decodeHexString(point.getHash());
+                    boolean exists = false;
+                    try {
+                        exists = chainState.hasBlock(hash);
+                    } catch (Exception ignored) {
+                    }
+                    if (!exists) {
+                        log.warn("Requested range contains missing body at {}. Sending NoBlocks.", point);
+                        sendToClient(new NoBlocks());
+                        processNext();
+                        return;
+                    }
+                }
+            }
+
+            // All bodies available: send batch
             sendToClient(new StartBatch());
 
             counter.incrementAndGet();
@@ -126,6 +145,7 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
                 byte[] blockHash = HexUtil.decodeHexString(point.getHash());
                 byte[] blockBody = chainState.getBlock(blockHash);
 
+                //TODO -- Checking again here. Verify if it breaks protocol
                 if (blockBody == null) {
                     log.error("Block missing after availability check. Point: {}", point);
                     sendToClient(new NoBlocks());
