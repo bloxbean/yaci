@@ -33,6 +33,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     private final ColumnFamilyHandle slotByNumberHandle;
     private final ColumnFamilyHandle metadataHandle;
     private final ColumnFamilyHandle slotToHashHandle;
+    // New CF to store EBBs by epoch start absolute slot (slot 0 of each epoch)
+    private final ColumnFamilyHandle ebbBySlot0Handle;
 
     static {
         RocksDB.loadLibrary();
@@ -57,7 +59,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                     new ColumnFamilyDescriptor("number_by_slot".getBytes()),
                     new ColumnFamilyDescriptor("slot_by_number".getBytes()),
                     new ColumnFamilyDescriptor("slot_to_hash".getBytes()),
-                    new ColumnFamilyDescriptor("metadata".getBytes())
+                    new ColumnFamilyDescriptor("metadata".getBytes()),
+                    new ColumnFamilyDescriptor("ebb_by_slot0".getBytes())
             );
 
             // Open database
@@ -71,6 +74,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             slotByNumberHandle = cfHandles.get(4);
             slotToHashHandle = cfHandles.get(5);
             metadataHandle = cfHandles.get(6);
+            ebbBySlot0Handle = cfHandles.get(7);
 
             log.info("RocksDB initialized at: {}", dbPath);
 
@@ -101,16 +105,25 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 log.info("📍 Storing genesis/first block #{}", blockNumber);
             }
 
-            // HASH CONSISTENCY CHECK: Validate block matches stored header
-            // Validate against header recorded for this slot
+            // HASH CONSISTENCY CHECK: Validate block matches stored header for main blocks.
+            // For Byron EBBs, slot_to_hash maps the main block at the same absolute slot boundary.
+            // In that case, allow storing the body if ebb_by_slot0 points to this hash.
             byte[] expectedHash = db.get(slotToHashHandle, longToBytes(slot));
             if (expectedHash != null && !Arrays.equals(expectedHash, blockHash)) {
-                log.warn("🚨 FORK MISMATCH: Block #{} at slot {} has different hash than header! " +
-                         "Expected: {}, Got: {} - SKIPPING STORAGE TO PREVENT CORRUPTION",
-                         blockNumber, slot, 
-                         HexUtil.encodeHexString(expectedHash), 
-                         HexUtil.encodeHexString(blockHash));
-                return; // Skip storing mismatched block to prevent index corruption
+                byte[] ebbHashAtSlot0 = db.get(ebbBySlot0Handle, longToBytes(slot));
+                boolean isEbbAtThisSlot = ebbHashAtSlot0 != null && Arrays.equals(ebbHashAtSlot0, blockHash);
+                if (!isEbbAtThisSlot) {
+                    log.warn("🚨 FORK MISMATCH: Block #{} at slot {} has different hash than main header! Expected(main): {}, Got: {} - SKIPPING",
+                             blockNumber, slot,
+                             HexUtil.encodeHexString(expectedHash),
+                             HexUtil.encodeHexString(blockHash));
+                    return; // Skip storing mismatched non-EBB block to prevent index corruption
+                }
+                // It's an EBB body at the epoch boundary; proceed to store body keyed by hash only.
+                if (log.isDebugEnabled()) {
+                    log.debug("EBB body store allowed at slot {} (hash {}), main header maps to {}",
+                              slot, HexUtil.encodeHexString(blockHash), HexUtil.encodeHexString(expectedHash));
+                }
             }
 
             // Use write batch for atomic updates
@@ -144,6 +157,19 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
         } catch (Exception e) {
             log.error("Failed to get block", e);
             return null;
+        }
+    }
+
+    @Override
+    public boolean hasBlock(byte[] blockHash) {
+        try {
+            try (ReadOptions ro = new ReadOptions().setFillCache(false)) {
+                byte[] val = db.get(blocksHandle, ro, blockHash);
+                return val != null;
+            }
+        } catch (Exception e) {
+            log.warn("hasBlock check failed", e);
+            return false;
         }
     }
 
@@ -206,19 +232,23 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
         }
     }
 
-    // Store Byron EBB header without updating number->slot mapping (EBB has same difficulty as preceding main)
+    // Store Byron EBB header: keep header bytes and header_tip, index in ebb_by_slot0 only
     public void storeByronEbHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
         try (WriteBatch batch = new WriteBatch()) {
+            // Store EBB header bytes (by hash)
             batch.put(headersHandle, blockHash, blockHeader);
+
+            // Update header_tip
             ChainTip newHeaderTip = new ChainTip(slot, blockHash, blockNumber);
             batch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newHeaderTip));
-            if (slot != null && blockNumber != null) {
-                // slot-first indices only
-                batch.put(numberBySlotHandle, longToBytes(slot), longToBytes(blockNumber));
-                batch.put(slotToHashHandle, longToBytes(slot), blockHash);
+
+            // Index EBB by epoch start absolute slot; do not populate slot_to_hash or number mappings
+            if (slot != null) {
+                batch.put(ebbBySlot0Handle, longToBytes(slot), blockHash);
             }
+
             db.write(new WriteOptions(), batch);
-            log.debug("Stored Byron EBB header: slot={}, blockNumber={}", slot, blockNumber);
+            log.debug("Stored Byron EBB header (ebb_by_slot0 only): slot={}, blockNumber={}", slot, blockNumber);
         } catch (Exception e) {
             throw new RuntimeException("Failed to store Byron EBB header", e);
         }
@@ -519,63 +549,65 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
 
     @Override
     public Point findNextBlock(Point currentPoint) {
-        try {
-            long currentSlot = currentPoint.getSlot();
-            ChainTip tip = getTip();
+        // Merged iteration of EBB + main, bounded by header tip
+        try (RocksIterator mainIter = db.newIterator(slotToHashHandle);
+             RocksIterator ebbIter = db.newIterator(ebbBySlot0Handle)) {
+            ChainTip headerTip = getHeaderTip();
+            if (headerTip == null) return null;
+            long tipSlot = headerTip.getSlot();
 
-            if (tip == null) {
-                log.warn("Chain tip is null, cannot find next block");
-                return null;
-            }
+            long slotC = currentPoint.getSlot();
+            String hashC = currentPoint.getHash();
 
-            long tipSlot = tip.getSlot();
+            if (slotC == 0 && hashC == null) {
+                mainIter.seekToFirst();
+                ebbIter.seekToFirst();
+            } else {
+                mainIter.seek(longToBytes(slotC));
+                while (mainIter.isValid()) {
+                    long s = bytesToLong(mainIter.key());
+                    if (s < slotC) { mainIter.next(); continue; }
+                    if (s == slotC && hashC != null && HexUtil.encodeHexString(mainIter.value()).equals(hashC)) { mainIter.next(); continue; }
+                    break;
+                }
+                ebbIter.seek(longToBytes(slotC));
+                while (ebbIter.isValid()) {
+                    long s = bytesToLong(ebbIter.key());
+                    if (s < slotC) { ebbIter.next(); continue; }
+                    if (s == slotC && hashC != null && HexUtil.encodeHexString(ebbIter.value()).equals(hashC)) { ebbIter.next(); continue; }
+                    break;
+                }
 
-            // If current slot is already at or beyond tip, no next block available
-            if (currentSlot >= tipSlot) {
-                if (log.isDebugEnabled())
-                    log.debug("Current slot {} is at or beyond tip slot {}, no next block", currentSlot, tipSlot);
-                return null;
-            }
-
-            // Handle Point.ORIGIN (slot 0) specially: return the first slot in slot_to_hash
-            try (RocksIterator iterator = db.newIterator(slotToHashHandle)) {
-                if (currentSlot == 0 && currentPoint.getHash() == null) {
-                    iterator.seekToFirst();
-                    if (iterator.isValid()) {
-                        long nextSlot = bytesToLong(iterator.key());
-                        byte[] hash = iterator.value();
-                        Point p = new Point(nextSlot, HexUtil.encodeHexString(hash));
-                        if (log.isDebugEnabled()) log.debug("Returning first block after ORIGIN: {}", p);
-                        return p;
-                    } else {
-                        return null;
+                // Deterministic ordering at equal slot: if current point is the main block at this slot,
+                // we must skip the EBB at the same slot so that we don't emit it again on the next call.
+                // This prevents flipping between EBB and main at slotC.
+                if (hashC != null) {
+                    try {
+                        byte[] mainAtSlot = db.get(slotToHashHandle, longToBytes(slotC));
+                        if (mainAtSlot != null && hashC.equals(HexUtil.encodeHexString(mainAtSlot))) {
+                            // Current is main(s). Advance ebb iterator past slotC so next result is strictly after slotC.
+                            while (ebbIter.isValid() && bytesToLong(ebbIter.key()) == slotC) {
+                                ebbIter.next();
+                            }
+                        }
+                    } catch (Exception ignore) {
+                        // Non-fatal; fall back to existing iterator positions
                     }
                 }
-
-                // Seek to currentSlot, then move to strictly greater slot if needed
-                iterator.seek(longToBytes(currentSlot));
-                if (iterator.isValid()) {
-                    long foundSlot = bytesToLong(iterator.key());
-                    if (foundSlot <= currentSlot) iterator.next();
-                }
-
-                if (!iterator.isValid()) {
-                    if (log.isDebugEnabled()) log.debug("Reached end of slot_to_hash; no next block after slot {}", currentSlot);
-                    return null;
-                }
-
-                long nextSlot = bytesToLong(iterator.key());
-                byte[] hash = iterator.value();
-                if (nextSlot > tipSlot) {
-                    if (log.isDebugEnabled()) log.debug("Next slot {} is beyond tip slot {}", nextSlot, tipSlot);
-                    return null;
-                }
-
-                Point next = new Point(nextSlot, HexUtil.encodeHexString(hash));
-                if (log.isDebugEnabled()) log.debug("Next block by slot: {}", next);
-                return next;
             }
 
+            long mSlot = mainIter.isValid() ? bytesToLong(mainIter.key()) : Long.MAX_VALUE;
+            long eSlot = ebbIter.isValid() ? bytesToLong(ebbIter.key()) : Long.MAX_VALUE;
+            long nextSlot = Math.min(mSlot, eSlot);
+            if (nextSlot == Long.MAX_VALUE || nextSlot > tipSlot) return null;
+
+            if (eSlot < mSlot) {
+                return new Point(eSlot, HexUtil.encodeHexString(ebbIter.value()));
+            } else if (mSlot < eSlot) {
+                return new Point(mSlot, HexUtil.encodeHexString(mainIter.value()));
+            } else { // equal slot: EBB first
+                return new Point(eSlot, HexUtil.encodeHexString(ebbIter.value()));
+            }
         } catch (Exception e) {
             log.error("Failed to find next block after slot {}", currentPoint.getSlot(), e);
             return null;
@@ -584,67 +616,53 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
 
     @Override
     public Point findNextBlockHeader(Point currentPoint) {
-        try {
-            long currentSlot = currentPoint.getSlot();
-            ChainTip headerTip = getHeaderTip();
-
-            if (headerTip == null) {
-                log.warn("Header tip is null, cannot find next block header");
-                return null;
-            }
-
-            try (RocksIterator iterator = db.newIterator(slotToHashHandle)) {
-                // ORIGIN: return first header
-                if (currentSlot == 0 && currentPoint.getHash() == null) {
-                    iterator.seekToFirst();
-                    if (iterator.isValid()) {
-                        long nextSlot = bytesToLong(iterator.key());
-                        byte[] hash = iterator.value();
-                        return new Point(nextSlot, HexUtil.encodeHexString(hash));
-                    }
-                    return null;
-                }
-
-                // Seek to current slot and advance to strictly greater one
-                iterator.seek(longToBytes(currentSlot));
-                if (iterator.isValid()) {
-                    long found = bytesToLong(iterator.key());
-                    if (found <= currentSlot) iterator.next();
-                }
-
-                if (!iterator.isValid()) return null;
-
-                long nextSlot = bytesToLong(iterator.key());
-                byte[] hash = iterator.value();
-                if (nextSlot > headerTip.getSlot()) return null;
-                return new Point(nextSlot, HexUtil.encodeHexString(hash));
-            }
-
-        } catch (Exception e) {
-            log.error("Failed to find next block header after slot {}", currentPoint.getSlot(), e);
-            return null;
-        }
+        // Use the same merged iteration as findNextBlock
+        return findNextBlock(currentPoint);
     }
 
     @Override
     public List<Point> findBlocksInRange(Point from, Point to) {
-        List<Point> blocks = new ArrayList<>();
-        try (RocksIterator iterator = db.newIterator(slotToHashHandle)) {
-            long fromSlot = from.getSlot();
-            long toSlot = to.getSlot();
+        List<Point> out = new ArrayList<>();
+        long fromSlot = from.getSlot();
+        long toSlot = to.getSlot();
+        try (RocksIterator mainIter = db.newIterator(slotToHashHandle);
+             RocksIterator ebbIter = db.newIterator(ebbBySlot0Handle)) {
+            mainIter.seek(longToBytes(fromSlot));
+            ebbIter.seek(longToBytes(fromSlot));
 
-            iterator.seek(longToBytes(fromSlot));
-            while (iterator.isValid()) {
-                long currentSlot = bytesToLong(iterator.key());
-                if (currentSlot > toSlot) break;
-                byte[] hash = iterator.value();
-                blocks.add(new Point(currentSlot, HexUtil.encodeHexString(hash)));
-                iterator.next();
+            // If the starting point is the main block at fromSlot, skip EBB at the same slot
+            String fromHash = from.getHash();
+            if (fromHash != null) {
+                try {
+                    byte[] mainAtSlot = db.get(slotToHashHandle, longToBytes(fromSlot));
+                    if (mainAtSlot != null && fromHash.equals(HexUtil.encodeHexString(mainAtSlot))) {
+                        while (ebbIter.isValid() && bytesToLong(ebbIter.key()) == fromSlot) {
+                            ebbIter.next();
+                        }
+                    }
+                } catch (Exception ignore) {
+                }
             }
-            return blocks;
+            while (true) {
+                long mSlot = mainIter.isValid() ? bytesToLong(mainIter.key()) : Long.MAX_VALUE;
+                long eSlot = ebbIter.isValid() ? bytesToLong(ebbIter.key()) : Long.MAX_VALUE;
+                long nextSlot = Math.min(mSlot, eSlot);
+                if (nextSlot == Long.MAX_VALUE || nextSlot > toSlot) break;
+                if (eSlot < mSlot) {
+                    out.add(new Point(eSlot, HexUtil.encodeHexString(ebbIter.value())));
+                    ebbIter.next();
+                } else if (mSlot < eSlot) {
+                    out.add(new Point(mSlot, HexUtil.encodeHexString(mainIter.value())));
+                    mainIter.next();
+                } else { // equal slot: EBB first
+                    out.add(new Point(eSlot, HexUtil.encodeHexString(ebbIter.value())));
+                    ebbIter.next();
+                }
+            }
+            return out;
         } catch (Exception e) {
             log.error("Failed to find blocks in range", e);
-            return blocks;
+            return out;
         }
     }
 
@@ -654,24 +672,61 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
         if (log.isDebugEnabled())
             log.debug("🔍 findLastPointAfterNBlocks called: from={}, batchSize={}", from, batchSize);
 
-        long lastSlot = 0;
-        try (RocksIterator iterator = db.newIterator(slotToHashHandle)) {
+        try (RocksIterator mainIter = db.newIterator(slotToHashHandle);
+             RocksIterator ebbIter = db.newIterator(ebbBySlot0Handle)) {
             long fromSlot = from.getSlot();
-            iterator.seek(longToBytes(fromSlot));
+            String fromHash = from.getHash();
 
-            int counter = 0;
-            while (counter < batchSize && iterator.isValid()) {
-                lastSlot = bytesToLong(iterator.key());
-                iterator.next();
-                counter++;
+            if (fromSlot == 0 && fromHash == null) {
+                mainIter.seekToFirst();
+                ebbIter.seekToFirst();
+            } else {
+                mainIter.seek(longToBytes(fromSlot));
+                if (mainIter.isValid() && fromHash != null && bytesToLong(mainIter.key()) == fromSlot &&
+                        HexUtil.encodeHexString(mainIter.value()).equals(fromHash)) {
+                    mainIter.next();
+                }
+                ebbIter.seek(longToBytes(fromSlot));
+                if (ebbIter.isValid() && fromHash != null && bytesToLong(ebbIter.key()) == fromSlot &&
+                        HexUtil.encodeHexString(ebbIter.value()).equals(fromHash)) {
+                    ebbIter.next();
+                }
+
+                // If starting from main(fromSlot), skip EBB at fromSlot to avoid re-emitting it in the merged stream
+                if (fromHash != null) {
+                    try {
+                        byte[] mainAtSlot = db.get(slotToHashHandle, longToBytes(fromSlot));
+                        if (mainAtSlot != null && fromHash.equals(HexUtil.encodeHexString(mainAtSlot))) {
+                            while (ebbIter.isValid() && bytesToLong(ebbIter.key()) == fromSlot) {
+                                ebbIter.next();
+                            }
+                        }
+                    } catch (Exception ignore) {
+                    }
+                }
             }
 
-            if (counter == 0) return null;
-            byte[] hash = db.get(slotToHashHandle, longToBytes(lastSlot));
-            if (hash == null) return null;
-            Point result = new Point(lastSlot, HexUtil.encodeHexString(hash));
-            if (log.isDebugEnabled()) log.debug("✅ findLastPointAfterNBlocks returning: {}", result);
-            return result;
+            long count = 0;
+            Point last = null;
+            while (count < batchSize) {
+                long mSlot = mainIter.isValid() ? bytesToLong(mainIter.key()) : Long.MAX_VALUE;
+                long eSlot = ebbIter.isValid() ? bytesToLong(ebbIter.key()) : Long.MAX_VALUE;
+                long nextSlot = Math.min(mSlot, eSlot);
+                if (nextSlot == Long.MAX_VALUE) break;
+                if (eSlot < mSlot) {
+                    last = new Point(eSlot, HexUtil.encodeHexString(ebbIter.value()));
+                    ebbIter.next();
+                } else if (mSlot < eSlot) {
+                    last = new Point(mSlot, HexUtil.encodeHexString(mainIter.value()));
+                    mainIter.next();
+                } else { // equal: emit EBB then continue; main at same slot will be seen next round
+                    last = new Point(eSlot, HexUtil.encodeHexString(ebbIter.value()));
+                    ebbIter.next();
+                }
+                count++;
+            }
+            if (log.isDebugEnabled()) log.debug("✅ findLastPointAfterNBlocks returning: {}", last);
+            return last;
         } catch (Exception e) {
             log.error("Failed to find last point after n blocks", e);
             return null;
@@ -681,10 +736,17 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     @Override
     public boolean hasPoint(Point point) {
         try {
-            byte[] blockHash = db.get(slotToHashHandle, longToBytes(point.getSlot()));
-            if (blockHash == null) return false;
-            if (point.getHash() == null) return true;
-            return HexUtil.encodeHexString(blockHash).equals(point.getHash());
+            long slot = point.getSlot();
+            String hash = point.getHash();
+            byte[] mainHash = db.get(slotToHashHandle, longToBytes(slot));
+            if (mainHash != null) {
+                if (hash == null || HexUtil.encodeHexString(mainHash).equals(hash)) return true;
+            }
+            byte[] ebbHash = db.get(ebbBySlot0Handle, longToBytes(slot));
+            if (ebbHash != null) {
+                if (hash == null || HexUtil.encodeHexString(ebbHash).equals(hash)) return true;
+            }
+            return false;
         } catch (Exception e) {
             log.error("Failed to check point", e);
             return false;
@@ -709,12 +771,16 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
      * Get the first block in the chain
      */
     public Point getFirstBlock() {
-        try (RocksIterator iterator = db.newIterator(slotToHashHandle)) {
-            iterator.seekToFirst();
-            if (!iterator.isValid()) return null;
-            long slot = bytesToLong(iterator.key());
-            byte[] hash = iterator.value();
-            return new Point(slot, HexUtil.encodeHexString(hash));
+        try (RocksIterator mainIter = db.newIterator(slotToHashHandle);
+             RocksIterator ebbIter = db.newIterator(ebbBySlot0Handle)) {
+            mainIter.seekToFirst();
+            ebbIter.seekToFirst();
+            long mSlot = mainIter.isValid() ? bytesToLong(mainIter.key()) : Long.MAX_VALUE;
+            long eSlot = ebbIter.isValid() ? bytesToLong(ebbIter.key()) : Long.MAX_VALUE;
+            if (mSlot == Long.MAX_VALUE && eSlot == Long.MAX_VALUE) return null;
+            if (eSlot < mSlot) return new Point(eSlot, HexUtil.encodeHexString(ebbIter.value()));
+            if (mSlot < eSlot) return new Point(mSlot, HexUtil.encodeHexString(mainIter.value()));
+            return new Point(eSlot, HexUtil.encodeHexString(ebbIter.value()));
         } catch (Exception e) {
             log.error("Failed to get first block", e);
             return null;
@@ -950,6 +1016,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             slotByNumberHandle.close();
             slotToHashHandle.close();
             metadataHandle.close();
+            ebbBySlot0Handle.close();
             db.close();
         } catch (Exception e) {
             log.error("Failed to close RocksDB", e);

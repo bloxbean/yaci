@@ -236,6 +236,11 @@ public class ServerIntegrationTest {
         }
 
         @Override
+        public boolean hasBlock(byte[] blockHash) {
+            return false; // Not needed for this test
+        }
+
+        @Override
         public void storeBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
 
         }

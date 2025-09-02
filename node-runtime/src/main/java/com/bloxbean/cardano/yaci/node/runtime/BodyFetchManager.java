@@ -423,7 +423,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             String hash = block.getHeader().getHeaderBody().getBlockHash();
 
             // Check for stale blocks that arrived after rollback
-            if (isStaleBlock(blockNumber, slot, hash)) {
+            if (isStaleBlock(blockNumber, slot, hash, false)) {
                 log.warn("🗑️ DISCARDED STALE BLOCK: Block #{} at slot {} arrived after rollback - skipping storage",
                         blockNumber, slot);
                 onStaleBlockObserved();
@@ -501,7 +501,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             String hash = byronBlock.getHeader().getBlockHash();
 
             // Check for stale blocks that arrived after rollback
-            if (isStaleBlock(blockNumber, slot, hash)) {
+            if (isStaleBlock(blockNumber, slot, hash, false)) {
                 log.warn("🗑️ DISCARDED STALE BLOCK: Block #{} at slot {} arrived after rollback - skipping storage",
                         blockNumber, slot);
                 return;
@@ -574,7 +574,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             String hash = byronEbBlock.getHeader().getBlockHash();
 
             // Check for stale blocks that arrived after rollback
-            if (isStaleBlock(blockNumber, slot, hash)) {
+            if (isStaleBlock(blockNumber, slot, hash, true)) {
                 log.warn("🗑️ DISCARDED STALE BLOCK: Byron EB Block #{} at slot {} arrived after rollback - skipping storage",
                         blockNumber, slot);
                 onStaleBlockObserved();
@@ -802,36 +802,49 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
      * @param hash The hash of the incoming block
      * @return true if the block should be discarded as stale/invalid
      */
-    private boolean isStaleBlock(long blockNumber, long slot, String hash) {
+    private boolean isStaleBlock(long blockNumber, long slot, String hash, boolean isEbb) {
         try {
             // Get current tip to understand the current state
             ChainTip currentTip = chainState.getTip();
 
             if (currentTip == null) {
-                // If no tip exists, only allow block #1 (genesis)
-                if (blockNumber == 1) {
-                    log.debug("No tip exists, allowing block #1 as genesis block");
+                // If no tip exists:
+                // - Allow Byron EBB at genesis (blockNumber may be 0)
+                // - Allow main block #1
+                if (isEbb) {
+                    if (log.isDebugEnabled())
+                        log.debug("No tip exists, allowing Byron EBB at slot {} (blockNo={})", slot, blockNumber);
                     return false;
-                } else {
-                    log.debug("No tip exists but incoming block #{} is not genesis - marking as stale", blockNumber);
-                    return true;
                 }
+                if (blockNumber == 1) {
+                    if (log.isDebugEnabled())
+                        log.debug("No tip exists, allowing main block #1 at slot {}", slot);
+                    return false;
+                }
+                if (log.isDebugEnabled())
+                    log.debug("No tip exists but incoming block #{} is not allowed as first block - marking as stale", blockNumber);
+                return true;
             }
 
             // Byron EBB handling: allow same-number block at a strictly greater slot
             // when header for that slot exists, since EBB shares difficulty with the prior main block.
             long expectedNextBlockNumber = currentTip.getBlockNumber() + 1;
             if (blockNumber != expectedNextBlockNumber) {
-                // Permit special case: same block number but higher slot with a known header
-                if (blockNumber == currentTip.getBlockNumber() && slot > currentTip.getSlot()) {
-                    Long headerNumberAtSlot = chainState.getBlockNumberBySlot(slot);
-                    if (headerNumberAtSlot != null && headerNumberAtSlot == blockNumber) {
+                // Permit special case: same block number but higher slot with a known header (EBB).
+                if (isEbb && blockNumber == currentTip.getBlockNumber() && slot > currentTip.getSlot()) {
+                    // For EBBs number_by_slot is intentionally not populated; verify by header existence instead.
+                    boolean headerPresent;
+                    try {
+                        headerPresent = chainState.getBlockHeader(HexUtil.decodeHexString(hash)) != null;
+                    } catch (Exception e) {
+                        headerPresent = false;
+                    }
+                    if (headerPresent) {
                         if (log.isDebugEnabled())
-                            log.debug("Byron EBB allowance: same blockNumber {} at higher slot {} > {}",
-                                    blockNumber, slot, currentTip.getSlot());
+                            log.debug("Byron EBB allowance: header present for hash {} at slot {} (same blockNumber {}), accepting",
+                                    hash, slot, blockNumber);
                         // fall through to prerequisite check
                     } else {
-                        // Not the EBB pattern; treat as violation
                         if (lastRollbackPoint != null) {
                             log.warn("🚫 Rollback context: rollback was to slot {}, current tip is block {} at slot {}",
                                     lastRollbackPoint.getSlot(), currentTip.getBlockNumber(), currentTip.getSlot());

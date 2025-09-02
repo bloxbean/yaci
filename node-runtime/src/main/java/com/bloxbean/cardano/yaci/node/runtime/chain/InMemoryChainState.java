@@ -38,6 +38,11 @@ public class InMemoryChainState implements ChainState {
     }
 
     @Override
+    public boolean hasBlock(byte[] blockHash) {
+        return blockStore.containsKey(blockHash);
+    }
+
+    @Override
     public void storeBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
         blockHeaderStore.put(blockHash, blockHeader);
         headerTip = new ChainTip(slot, blockHash, blockNumber);

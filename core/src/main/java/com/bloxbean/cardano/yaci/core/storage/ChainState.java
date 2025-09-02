@@ -10,6 +10,12 @@ public interface ChainState {
 
     byte[] getBlock(byte[] blockHash);
 
+    /**
+     * Lightweight existence check for a stored block body by hash.
+     * Implementations should avoid loading the full value into memory where possible.
+     */
+    boolean hasBlock(byte[] blockHash);
+
     void storeBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader);
 
     byte[] getBlockHeader(byte[] blockHash);

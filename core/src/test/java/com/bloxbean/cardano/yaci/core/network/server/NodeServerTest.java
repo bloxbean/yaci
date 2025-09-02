@@ -76,6 +76,11 @@ public class NodeServerTest {
         }
 
         @Override
+        public boolean hasBlock(byte[] blockHash) {
+            return false; // Test implementation
+        }
+
+        @Override
         public void storeBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
 
         }
