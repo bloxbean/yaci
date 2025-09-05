@@ -191,6 +191,13 @@ class BodyFetchManagerTest {
     @Test
     @DisplayName("Test BlockChainDataListener - onBlock method")
     void testOnBlock() {
+        // Seed previous block to satisfy continuity checks
+        chainState.storeBlock(
+                hexToBytes("0000000000000000000000000000000000000000000000000000000000000abc"),
+                500L,
+                1000L,
+                "00".getBytes()
+        );
         Block block = createTestBlock(1001L, 501L, "b10c1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
         List<Transaction> transactions = Collections.emptyList();
         
@@ -272,6 +279,13 @@ class BodyFetchManagerTest {
     @DisplayName("Test metrics reset")
     void testMetricsReset() {
         // Add some test data
+        // Seed previous block to satisfy continuity checks
+        chainState.storeBlock(
+                hexToBytes("0000000000000000000000000000000000000000000000000000000000000abd"),
+                500L,
+                1000L,
+                "00".getBytes()
+        );
         Block block = createTestBlock(1001L, 501L, "ae111c1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
         bodyFetchManager.onBlock(Era.Shelley, block, Collections.emptyList());
         bodyFetchManager.batchDone();

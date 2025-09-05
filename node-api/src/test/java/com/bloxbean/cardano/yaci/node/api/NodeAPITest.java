@@ -94,6 +94,12 @@ class NodeAPITest {
         public NodeConfig getConfig() {
             return null; // Simple implementation
         }
+
+        @Override
+        public boolean recoverChainState() {
+            // For test stub, assume no corruption detected
+            return false;
+        }
     }
 
     @Test

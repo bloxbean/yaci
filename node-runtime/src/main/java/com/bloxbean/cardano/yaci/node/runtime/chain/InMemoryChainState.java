@@ -99,195 +99,106 @@ public class InMemoryChainState implements ChainState {
 
     @Override
     public Point findNextBlockHeader(Point currentPoint) {
-        // For in-memory implementation, headers and blocks are stored together
-        // So this behaves the same as findNextBlock but checks against header tip
-        if (currentPoint == null) {
-            return null;
-        }
-        
+        // Slot-first: iterate by slot order up to header tip, independent of block number continuity
+        if (currentPoint == null) return null;
+
         long currentSlot = currentPoint.getSlot();
         ChainTip headerTip = getHeaderTip();
-        
-        if (headerTip == null || currentSlot >= headerTip.getSlot()) {
-            return null;
-        }
-        
-        // Find the next slot with a block/header after currentSlot
-        Long nextSlot = blockNumberBySlot.keySet().stream()
-                .filter(slot -> slot > currentSlot)
-                .min(Long::compareTo)
-                .orElse(null);
-                
-        if (nextSlot != null) {
-            Long blockNumber = blockNumberBySlot.get(nextSlot);
-            if (blockNumber != null) {
-                byte[] blockHash = blockHashByNumber.get(blockNumber);
-                if (blockHash != null) {
-                    return new Point(nextSlot, HexUtil.encodeHexString(blockHash));
-                }
-            }
-        }
-        
-        return null;
+
+        if (headerTip == null || currentSlot >= headerTip.getSlot()) return null;
+
+        Long nextSlot = blockNumberBySlot.higherKey(currentSlot);
+        if (nextSlot == null) return null;
+
+        Long blockNumber = blockNumberBySlot.get(nextSlot);
+        if (blockNumber == null) return null;
+
+        byte[] blockHash = blockHashByNumber.get(blockNumber);
+        if (blockHash == null) return null;
+
+        return new Point(nextSlot, HexUtil.encodeHexString(blockHash));
     }
 
     @Override
     public Point findNextBlock(Point currentPoint) {
-        if (currentPoint == null) {
-            return null;
-        }
+        // Slot-first: behave like findNextBlockHeader but bounded by body tip
+        if (currentPoint == null) return null;
 
-        // Special case: if asking for next block after Point.ORIGIN, return our first block
+        // If ORIGIN, return the first block we have
         if (currentPoint.getSlot() == 0 && currentPoint.getHash() == null) {
             return getFirstBlock();
         }
 
-        try {
-            // Find the current block's number
-            Long currentBlockNumber = null;
+        long currentSlot = currentPoint.getSlot();
+        ChainTip bodyTip = getTip();
+        if (bodyTip == null || currentSlot >= bodyTip.getSlot()) return null;
 
-            if (currentPoint.getHash() != null) {
-                byte[] currentBlockHash = HexUtil.decodeHexString(currentPoint.getHash());
-                // Find block number by scanning through our stored blocks
-                for (Map.Entry<Long, byte[]> entry : blockHashByNumber.entrySet()) {
-                    if (Arrays.equals(entry.getValue(), currentBlockHash)) {
-                        currentBlockNumber = entry.getKey();
-                        break;
-                    }
-                }
-            }
+        Long nextSlot = blockNumberBySlot.higherKey(currentSlot);
+        if (nextSlot == null) return null;
 
-            if (currentBlockNumber == null) {
-                // Try to find by slot
-                currentBlockNumber = blockNumberBySlot.get(currentPoint.getSlot());
-            }
+        Long blockNumber = blockNumberBySlot.get(nextSlot);
+        if (blockNumber == null) return null;
 
-            if (currentBlockNumber != null) {
-                // Get the next block
-                long nextBlockNumber = currentBlockNumber + 1;
-                byte[] nextBlockHash = blockHashByNumber.get(nextBlockNumber);
+        byte[] blockHash = blockHashByNumber.get(blockNumber);
+        if (blockHash == null) return null;
 
-                if (nextBlockHash != null) {
-                    // Find the slot for this block
-                    Long nextSlot = null;
-                    for (Map.Entry<Long, Long> entry : blockNumberBySlot.entrySet()) {
-                        if (entry.getValue().equals(nextBlockNumber)) {
-                            nextSlot = entry.getKey();
-                            break;
-                        }
-                    }
-
-                    if (nextSlot != null) {
-                        return new Point(nextSlot, HexUtil.encodeHexString(nextBlockHash));
-                    }
-                }
-            }
-        } catch (Exception e) {
-            // Log error and return null
-            if (log.isDebugEnabled()) {
-                log.debug("Error finding next block: {}", e.getMessage());
-            }
-        }
-
-        return null;
+        return new Point(nextSlot, HexUtil.encodeHexString(blockHash));
     }
 
     /**
      * Find the first (earliest) block in our chain
      */
     public Point getFirstBlock() {
-        if (blockHashByNumber.isEmpty()) {
-            return null;
-        }
+        // Slot-first: earliest slot in our map
+        if (blockNumberBySlot.isEmpty()) return null;
 
         try {
-            // Find the minimum block number
-            long minBlockNumber = blockHashByNumber.keySet().stream()
-                    .mapToLong(Long::longValue)
-                    .min()
-                    .orElse(-1);
+            Long firstSlot = blockNumberBySlot.firstKey();
+            if (firstSlot == null) return null;
 
-            if (minBlockNumber >= 0) {
-                byte[] firstBlockHash = blockHashByNumber.get(minBlockNumber);
+            Long blockNumber = blockNumberBySlot.get(firstSlot);
+            if (blockNumber == null) return null;
 
-                // Find the slot for this block
-                Long firstSlot = null;
-                for (Map.Entry<Long, Long> entry : blockNumberBySlot.entrySet()) {
-                    if (entry.getValue().equals(minBlockNumber)) {
-                        firstSlot = entry.getKey();
-                        break;
-                    }
-                }
+            byte[] blockHash = blockHashByNumber.get(blockNumber);
+            if (blockHash == null) return null;
 
-                if (firstBlockHash != null && firstSlot != null) {
-                    return new Point(firstSlot, HexUtil.encodeHexString(firstBlockHash));
-                }
-            }
+            return new Point(firstSlot, HexUtil.encodeHexString(blockHash));
         } catch (Exception e) {
-            if (log.isDebugEnabled()) {
-                log.debug("Error finding first block: {}", e.getMessage());
-            }
+            if (log.isDebugEnabled()) log.debug("Error finding first block: {}", e.getMessage());
+            return null;
         }
-
-        return null;
     }
 
     @Override
     public List<Point> findBlocksInRange(Point from, Point to) {
-        List<Point> blocks = new ArrayList<>();
-
-        if (from == null || to == null) {
-            return blocks;
-        }
+        // Slot-first: return points between slots [min(from.slot, to.slot), max] inclusive
+        List<Point> out = new ArrayList<>();
+        if (from == null || to == null) return out;
 
         try {
-            // Special case: if from is Point.ORIGIN, start from our first block
-            Point startPoint = from;
-            if (from.getSlot() == 0 && from.getHash() == null) {
-                startPoint = getFirstBlock();
-                if (startPoint == null) {
-                    return blocks; // No blocks in our chain
-                }
-            }
+            // Resolve start slot (handle ORIGIN)
+            Long startSlot = from.getSlot() == 0 && from.getHash() == null
+                    ? blockNumberBySlot.isEmpty() ? null : blockNumberBySlot.firstKey()
+                    : from.getSlot();
+            Long endSlot = to.getSlot();
+            if (startSlot == null || endSlot == null) return out;
 
-            // Get the block numbers for start and end points
-            Long startBlockNumber = getBlockNumberForPoint(startPoint);
-            Long endBlockNumber = getBlockNumberForPoint(to);
+            long minSlot = Math.min(startSlot, endSlot);
+            long maxSlot = Math.max(startSlot, endSlot);
 
-            if (startBlockNumber == null || endBlockNumber == null) {
-                return blocks; // Can't find block numbers for the points
-            }
-
-            // Ensure we traverse in the correct direction
-            long minBlockNumber = Math.min(startBlockNumber, endBlockNumber);
-            long maxBlockNumber = Math.max(startBlockNumber, endBlockNumber);
-
-            // Collect all blocks in the range
-            for (long blockNum = minBlockNumber; blockNum <= maxBlockNumber; blockNum++) {
-                byte[] blockHash = blockHashByNumber.get(blockNum);
+            // Iterate by slot order
+            for (Map.Entry<Long, Long> entry : blockNumberBySlot.subMap(minSlot, true, maxSlot, true).entrySet()) {
+                Long slot = entry.getKey();
+                Long blockNumber = entry.getValue();
+                byte[] blockHash = blockHashByNumber.get(blockNumber);
                 if (blockHash != null) {
-                    // Find the slot for this block
-                    Long slot = null;
-                    for (Map.Entry<Long, Long> entry : blockNumberBySlot.entrySet()) {
-                        if (entry.getValue().equals(blockNum)) {
-                            slot = entry.getKey();
-                            break;
-                        }
-                    }
-
-                    if (slot != null) {
-                        blocks.add(new Point(slot, HexUtil.encodeHexString(blockHash)));
-                    }
+                    out.add(new Point(slot, HexUtil.encodeHexString(blockHash)));
                 }
             }
-
         } catch (Exception e) {
-            if (log.isDebugEnabled()) {
-                log.debug("Error finding blocks in range: {}", e.getMessage());
-            }
+            if (log.isDebugEnabled()) log.debug("Error finding blocks in range: {}", e.getMessage());
         }
-
-        return blocks;
+        return out;
     }
 
     /**

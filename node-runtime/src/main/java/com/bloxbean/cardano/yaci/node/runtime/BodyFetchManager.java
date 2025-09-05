@@ -360,15 +360,22 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
         // Find the end point by getting the last point after maxBatchSize blocks
         // This automatically handles the fact that not every slot has a block in Cardano
         Point toPoint = chainState.findLastPointAfterNBlocks(fromPoint, maxBatchSize);
+        int rangeSize;
         if (toPoint == null) {
-            log.warn("No valid end point found for range starting from slot {}", fromPoint.getSlot());
-            return null;
+            // Fallback: if we couldn't find an end point beyond fromPoint,
+            // request a single block at fromPoint. This happens near tip
+            // or during sparse-slot periods when only one header is available.
+            if (log.isDebugEnabled()) {
+                log.debug("No end point beyond slot {}. Falling back to single-block fetch.", fromPoint.getSlot());
+            }
+            toPoint = fromPoint;
+            rangeSize = 1;
+        } else {
+            // The range size is based on the actual number of blocks found, not slot difference
+            // Since findLastPointAfterNBlocks returns after maxBatchSize blocks, the size is at most maxBatchSize
+            // The server will return what's available within this range
+            rangeSize = maxBatchSize;
         }
-
-        // The range size is based on the actual number of blocks found, not slot difference
-        // Since findLastPointAfterNBlocks returns after maxBatchSize blocks, the size is at most maxBatchSize
-        // The server will return what's available within this range
-        int rangeSize = maxBatchSize;
 
         if (log.isDebugEnabled()) {
             log.debug("📦 Calculated range: from={}, to={}, size={}",

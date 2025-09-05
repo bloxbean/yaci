@@ -86,13 +86,13 @@ class HeaderTipSupportTest {
         // Store a header - should update header_tip
         byte[] headerHash1 = hexToBytes("abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890");
         byte[] headerData1 = "mock-header-1".getBytes();
-        chainState.storeBlockHeader(headerHash1, 100L, 1000L, headerData1);
+        chainState.storeBlockHeader(headerHash1, 1L, 1000L, headerData1);
         
         // Verify header_tip was updated
         ChainTip headerTip = chainState.getHeaderTip();
         assertNotNull(headerTip, implementationName + " should have header tip after storing header");
         assertEquals(1000L, headerTip.getSlot(), "Header tip slot should match stored header");
-        assertEquals(100L, headerTip.getBlockNumber(), "Header tip block number should match stored header");
+        assertEquals(1L, headerTip.getBlockNumber(), "Header tip block number should match stored header");
         assertArrayEquals(headerHash1, headerTip.getBlockHash(), "Header tip hash should match stored header");
         
         // Verify regular tip is still null (no complete blocks stored)
@@ -101,13 +101,13 @@ class HeaderTipSupportTest {
         // Store another header - should update header_tip to latest
         byte[] headerHash2 = hexToBytes("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
         byte[] headerData2 = "mock-header-2".getBytes();
-        chainState.storeBlockHeader(headerHash2, 101L, 1001L, headerData2);
+        chainState.storeBlockHeader(headerHash2, 2L, 1001L, headerData2);
         
         // Verify header_tip was updated to the latest header
         headerTip = chainState.getHeaderTip();
         assertNotNull(headerTip, implementationName + " should still have header tip");
         assertEquals(1001L, headerTip.getSlot(), "Header tip should be updated to latest header");
-        assertEquals(101L, headerTip.getBlockNumber(), "Header tip block number should be updated");
+        assertEquals(2L, headerTip.getBlockNumber(), "Header tip block number should be updated");
         assertArrayEquals(headerHash2, headerTip.getBlockHash(), "Header tip hash should be updated");
         
         // Store a complete block - should update regular tip
@@ -152,12 +152,13 @@ class HeaderTipSupportTest {
         try (DirectRocksDBChainState chainState1 = new DirectRocksDBChainState(dbPath)) {
             byte[] headerHash = hexToBytes("aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111");
             byte[] headerData = "persistent-header".getBytes();
-            chainState1.storeBlockHeader(headerHash, 200L, 2000L, headerData);
-            
+            // Store a first header to satisfy continuity
+            chainState1.storeBlockHeader(headerHash, 1L, 2000L, headerData);
+
             ChainTip headerTip1 = chainState1.getHeaderTip();
             assertNotNull(headerTip1);
             assertEquals(2000L, headerTip1.getSlot());
-            assertEquals(200L, headerTip1.getBlockNumber());
+            assertEquals(1L, headerTip1.getBlockNumber());
         }
         
         // Verify header_tip persists in second instance
@@ -165,7 +166,7 @@ class HeaderTipSupportTest {
             ChainTip headerTip2 = chainState2.getHeaderTip();
             assertNotNull(headerTip2, "Header tip should persist across RocksDB instances");
             assertEquals(2000L, headerTip2.getSlot(), "Persisted header tip slot should match");
-            assertEquals(200L, headerTip2.getBlockNumber(), "Persisted header tip block number should match");
+            assertEquals(1L, headerTip2.getBlockNumber(), "Persisted header tip block number should match");
         }
         
         System.out.println("✅ RocksDB header_tip persistence validated successfully");
@@ -177,29 +178,29 @@ class HeaderTipSupportTest {
         
         // Store some headers first
         byte[] headerHash1 = hexToBytes("bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222");
-        inMemoryChainState.storeBlockHeader(headerHash1, 300L, 3000L, "header-1".getBytes());
+        inMemoryChainState.storeBlockHeader(headerHash1, 1L, 3000L, "header-1".getBytes());
         
         byte[] headerHash2 = hexToBytes("cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333");
-        inMemoryChainState.storeBlockHeader(headerHash2, 301L, 3001L, "header-2".getBytes());
+        inMemoryChainState.storeBlockHeader(headerHash2, 2L, 3001L, "header-2".getBytes());
         
         // Header tip should be at latest header
         ChainTip headerTip = inMemoryChainState.getHeaderTip();
         assertEquals(3001L, headerTip.getSlot());
-        assertEquals(301L, headerTip.getBlockNumber());
+        assertEquals(2L, headerTip.getBlockNumber());
         
         // Store a complete block behind the headers
         byte[] blockHash = hexToBytes("dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444dddd4444");
-        inMemoryChainState.storeBlock(blockHash, 299L, 2999L, "complete-block".getBytes());
+        inMemoryChainState.storeBlock(blockHash, 0L, 2999L, "complete-block".getBytes());
         
         // Regular tip should be at the complete block
         ChainTip tip = inMemoryChainState.getTip();
         assertEquals(2999L, tip.getSlot());
-        assertEquals(299L, tip.getBlockNumber());
+        assertEquals(0L, tip.getBlockNumber());
         
         // Header tip should remain unchanged
         headerTip = inMemoryChainState.getHeaderTip();
         assertEquals(3001L, headerTip.getSlot());
-        assertEquals(301L, headerTip.getBlockNumber());
+        assertEquals(2L, headerTip.getBlockNumber());
         
         // Verify gap between header_tip and tip
         long gap = headerTip.getSlot() - tip.getSlot();

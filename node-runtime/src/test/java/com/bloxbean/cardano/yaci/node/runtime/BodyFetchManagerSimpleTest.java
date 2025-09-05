@@ -142,6 +142,13 @@ class BodyFetchManagerSimpleTest {
     @Test
     @DisplayName("Test BlockChainDataListener - onBlock method")
     void testOnBlockWithRealChainState() {
+        // Seed previous block to satisfy continuity checks
+        chainState.storeBlock(
+            hexToBytes("0000000000000000000000000000000000000000000000000000000000000ac0"),
+            500L,
+            1000L,
+            "00".getBytes()
+        );
         Block block = createTestBlock(1001L, 501L, "b10c1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
         List<Transaction> transactions = Collections.emptyList();
         
@@ -190,6 +197,13 @@ class BodyFetchManagerSimpleTest {
     @DisplayName("Test metrics reset functionality")
     void testMetricsReset() {
         // Add some test data
+        // Seed previous block to satisfy continuity checks
+        chainState.storeBlock(
+            hexToBytes("0000000000000000000000000000000000000000000000000000000000000ac1"),
+            500L,
+            1000L,
+            "00".getBytes()
+        );
         Block block = createTestBlock(1001L, 501L, "ae111c1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
         bodyFetchManager.onBlock(Era.Shelley, block, Collections.emptyList());
         bodyFetchManager.batchDone();
@@ -254,8 +268,15 @@ class BodyFetchManagerSimpleTest {
         // Status should remain unchanged
         assertEquals(0, bodyFetchManager.getStatus().bodiesReceived);
         
+        // Seed previous block to satisfy continuity checks so we reach CBOR validation
+        chainState.storeBlock(
+            hexToBytes("0000000000000000000000000000000000000000000000000000000000000abe"),
+            500L,
+            1000L,
+            "00".getBytes()
+        );
         // Test with blocks that have missing CBOR - should throw exceptions
-        Block blockWithoutCbor = createTestBlockWithoutCbor(1001L, 501L, "missingcbor123");
+        Block blockWithoutCbor = createTestBlockWithoutCbor(1001L, 501L, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
         assertThrows(RuntimeException.class, () -> 
             bodyFetchManager.onBlock(Era.Shelley, blockWithoutCbor, Collections.emptyList()));
     }
