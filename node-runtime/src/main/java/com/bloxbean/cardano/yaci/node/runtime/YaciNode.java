@@ -14,6 +14,8 @@ import com.bloxbean.cardano.yaci.node.api.NodeAPI;
 import com.bloxbean.cardano.yaci.node.api.SyncPhase;
 import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
 import com.bloxbean.cardano.yaci.node.api.listener.NodeEventListener;
+import com.bloxbean.cardano.yaci.node.api.config.RuntimeOptions;
+import com.bloxbean.cardano.yaci.events.api.config.EventsOptions;
 import com.bloxbean.cardano.yaci.node.api.model.NodeStatus;
 import com.bloxbean.cardano.yaci.node.runtime.chain.InMemoryChainState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
@@ -22,6 +24,11 @@ import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
 import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
 import lombok.extern.slf4j.Slf4j;
+import com.bloxbean.cardano.yaci.events.api.*;
+import com.bloxbean.cardano.yaci.events.impl.SimpleEventBus;
+import com.bloxbean.cardano.yaci.events.impl.NoopEventBus;
+import com.bloxbean.cardano.yaci.node.runtime.events.NodeStartedEvent;
+import com.bloxbean.cardano.yaci.node.runtime.plugins.PluginManager;
 
 import java.time.Duration;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -94,8 +101,18 @@ public class YaciNode implements NodeAPI {
     private final CopyOnWriteArrayList<BlockChainDataListener> blockChainDataListeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<NodeEventListener> nodeEventListeners = new CopyOnWriteArrayList<>();
 
+    // Events & Plugins
+    private final RuntimeOptions runtimeOptions;
+    private final EventBus eventBus;
+    private PluginManager pluginManager;
+
     public YaciNode(YaciNodeConfig config) {
+        this(config, RuntimeOptions.defaults());
+    }
+
+    public YaciNode(YaciNodeConfig config, RuntimeOptions options) {
         this.config = config;
+        this.runtimeOptions = options != null ? options : RuntimeOptions.defaults();
         this.remoteCardanoHost = config.getRemoteHost();
         this.remoteCardanoPort = config.getRemotePort();
         this.protocolMagic = config.getProtocolMagic();
@@ -123,6 +140,15 @@ public class YaciNode implements NodeAPI {
         log.info("Server port: {}", serverPort);
         log.info("Storage: {}", config.isUseRocksDB() ? "RocksDB" : "InMemory");
         log.info("Pipeline config: {}", pipelineConfig);
+
+        // Event bus
+        EventsOptions ev = this.runtimeOptions.events();
+        this.eventBus = ev.enabled() ? new SimpleEventBus() : new NoopEventBus();
+
+        // Initialize plugins (discovery is deferred to start())
+        if (this.runtimeOptions.plugins().enabled()) {
+            pluginManager = new PluginManager(eventBus, scheduler, this.runtimeOptions.plugins().config(), Thread.currentThread().getContextClassLoader());
+        }
     }
 
     /**
@@ -210,6 +236,19 @@ public class YaciNode implements NodeAPI {
 
             // Print startup status
             printStartupStatus();
+
+            // Start plugins and publish a startup event
+            if (pluginManager != null && this.runtimeOptions.plugins().enabled()) {
+                try {
+                    pluginManager.discoverAndInit();
+                    pluginManager.startAll();
+                } catch (Exception e) {
+                    log.warn("Plugin manager init/start failed: {}", e.toString(), e);
+                }
+            }
+
+            EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
+            eventBus.publish(new NodeStartedEvent(System.currentTimeMillis()), meta, PublishOptions.builder().build());
         } else {
             log.warn("Node is already running");
         }
@@ -434,6 +473,7 @@ public class YaciNode implements NodeAPI {
             bodyFetchManager = new BodyFetchManager(
                     peerClient,
                     chainState,
+                    eventBus,
                     gapThreshold,
                     maxBatchSize,
                     500, // 500ms monitoring interval
@@ -530,6 +570,13 @@ public class YaciNode implements NodeAPI {
                 log.info("🚀 ==> Initial BlockFetch sync complete! Now in real-time ChainSync mode at slot {}", lastProcessedSlot);
                 log.info("🚀 ==> Yaci Node is now fully synchronized and serving clients");
                 log.info("🚀 ==> Will now log every block as it arrives in real-time");
+                // Reflect phase change
+                var prev = syncPhase;
+                updateSyncProgress();
+                if (prev != syncPhase) {
+                    EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
+                    eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.SyncStatusChangedEvent(prev, syncPhase), meta, PublishOptions.builder().build());
+                }
             }
         }
     }
@@ -577,6 +624,10 @@ public class YaciNode implements NodeAPI {
             if (chainState instanceof DirectRocksDBChainState) {
                 ((DirectRocksDBChainState) chainState).close();
             }
+
+            // Stop plugins and close event bus
+            try { if (pluginManager != null) pluginManager.close(); } catch (Exception ignored) {}
+            try { eventBus.close(); } catch (Exception ignored) {}
 
             log.info("Yaci Node stopped");
         }
@@ -790,6 +841,14 @@ public class YaciNode implements NodeAPI {
 
         // Perform rollback
         chainState.rollbackTo(rollbackSlot);
+
+        // Publish rollback event
+        try {
+            EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
+            eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent(point, isReal), meta, PublishOptions.builder().build());
+        } catch (Exception ex) {
+            log.debug("RollbackEvent publish failed: {}", ex.toString());
+        }
 
         log.info("ROLLBACK_EVENT: slot={}, type={}, phase={}, serverNotified={}",
                 rollbackSlot, isReal ? "REAL_REORG" : "RECONNECTION", syncPhase, isReal && isServerRunning.get());
@@ -1119,11 +1178,16 @@ public class YaciNode implements NodeAPI {
         if (isPipelinedMode && syncPhase == SyncPhase.INTERSECT_PHASE &&
             bodyFetchManager != null && bodyFetchManager.isPaused()) {
 
+            var prev = syncPhase;
             syncPhase = SyncPhase.STEADY_STATE;
             bodyFetchManager.setSyncPhase(SyncPhase.STEADY_STATE);
             bodyFetchManager.resume();
 
             log.info("🏃‍♂️ FAST RESUME: Headers flowing - transitioned to STEADY_STATE and resumed BodyFetchManager");
+            if (prev != syncPhase) {
+                EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
+                eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.SyncStatusChangedEvent(prev, syncPhase), meta, PublishOptions.builder().build());
+            }
         }
     }
 

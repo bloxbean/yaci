@@ -54,7 +54,8 @@ class BodyFetchManagerTest {
         
         bodyFetchManager = new BodyFetchManager(
             mockPeerClient, 
-            chainState, 
+            chainState,
+            new com.bloxbean.cardano.yaci.events.impl.SimpleEventBus(), 
             GAP_THRESHOLD, 
             MAX_BATCH_SIZE, 
             MONITORING_INTERVAL,

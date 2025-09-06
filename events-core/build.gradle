@@ -1,0 +1,11 @@
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            pom {
+                name = 'Yaci Events Core'
+                description = 'Framework-agnostic event SPI and SimpleEventBus for Yaci'
+            }
+        }
+    }
+}
+

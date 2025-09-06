@@ -13,6 +13,11 @@ import com.bloxbean.cardano.yaci.helper.PeerClient;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
 import com.bloxbean.cardano.yaci.node.api.SyncPhase;
+import com.bloxbean.cardano.yaci.events.api.EventBus;
+import com.bloxbean.cardano.yaci.events.api.EventMetadata;
+import com.bloxbean.cardano.yaci.events.api.PublishOptions;
+import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.runtime.events.BlockReceivedEvent;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -40,6 +45,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
 
     private final PeerClient peerClient;
     private final ChainState chainState;
+    private final EventBus eventBus;
 
     // Configuration
     private final long gapThreshold;
@@ -77,8 +83,8 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     /**
      * Create BodyFetchManager with default configuration.
      */
-    public BodyFetchManager(PeerClient peerClient, ChainState chainState) {
-        this(peerClient, chainState, 10, 100, 500, 10);
+    public BodyFetchManager(PeerClient peerClient, ChainState chainState, EventBus eventBus) {
+        this(peerClient, chainState, eventBus, 10, 100, 500, 10);
     }
 
     /**
@@ -91,13 +97,16 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
      * @param monitoringIntervalMs Gap monitoring frequency (default: 500ms)
      * @param tipProximityThreshold Maximum gap to consider "at tip" for immediate resume (default: 10 slots)
      */
-    public BodyFetchManager(PeerClient peerClient, ChainState chainState,
+    public BodyFetchManager(PeerClient peerClient, ChainState chainState, EventBus eventBus,
                            long gapThreshold, int maxBatchSize, long monitoringIntervalMs, long tipProximityThreshold) {
         if (peerClient == null) {
             throw new IllegalArgumentException("PeerClient cannot be null");
         }
         if (chainState == null) {
             throw new IllegalArgumentException("ChainState cannot be null");
+        }
+        if (eventBus == null) {
+            throw new IllegalArgumentException("EventBus cannot be null");
         }
         if (gapThreshold < 1) {
             throw new IllegalArgumentException("Gap threshold must be positive: " + gapThreshold);
@@ -111,6 +120,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
 
         this.peerClient = peerClient;
         this.chainState = chainState;
+        this.eventBus = eventBus;
         this.gapThreshold = gapThreshold;
         this.maxBatchSize = maxBatchSize;
         this.monitoringIntervalMs = monitoringIntervalMs;
@@ -437,6 +447,15 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 return;
             }
 
+            // Publish BlockReceived before storage
+            EventMetadata recvMeta = EventMetadata.builder()
+                    .origin("node-runtime")
+                    .slot(slot)
+                    .blockNo(blockNumber)
+                    .blockHash(hash)
+                    .build();
+            eventBus.publish(new BlockReceivedEvent(era, slot, blockNumber, hash, block), recvMeta, PublishOptions.builder().build());
+
             // Store the complete block (header + body)
             // Require CBOR bytes for proper storage
             if (block.getCbor() == null || block.getCbor().isEmpty()) {
@@ -466,6 +485,30 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
 
             // successful store resets stale counter
             consecutiveStaleBlocks.set(0);
+
+            // Publish BlockApplied after storage
+            EventMetadata appMeta = EventMetadata.builder()
+                    .origin("node-runtime")
+                    .slot(slot)
+                    .blockNo(blockNumber)
+                    .blockHash(hash)
+                    .build();
+            eventBus.publish(new BlockAppliedEvent(era, slot, blockNumber, hash, block), appMeta, PublishOptions.builder().build());
+
+            // Publish TipChanged if tip advanced
+            var _newTip = chainState.getTip();
+            if (_newTip != null) {
+                EventMetadata tipMeta = EventMetadata.builder()
+                        .origin("node-runtime")
+                        .slot(_newTip.getSlot())
+                        .blockNo(_newTip.getBlockNumber())
+                        .blockHash(HexUtil.encodeHexString(_newTip.getBlockHash()))
+                        .build();
+                eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.TipChangedEvent(
+                        null, null, null,
+                        _newTip.getSlot(), _newTip.getBlockNumber(), HexUtil.encodeHexString(_newTip.getBlockHash())
+                ), tipMeta, PublishOptions.builder().build());
+            }
 
             bodiesReceived.incrementAndGet();
             totalBlocksFetched.incrementAndGet();
@@ -514,6 +557,16 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 return;
             }
 
+            // Publish BlockReceived before storage
+            EventMetadata recvMeta = EventMetadata.builder()
+                    .origin("node-runtime")
+                    .slot(slot)
+                    .blockNo(blockNumber)
+                    .blockHash(hash)
+                    .build();
+            // Byron blocks are not Block type; publish with null Block reference
+            eventBus.publish(new BlockReceivedEvent(Era.Byron, slot, blockNumber, hash, null), recvMeta, PublishOptions.builder().build());
+
             // Require CBOR bytes for proper storage
             if (byronBlock.getCbor() == null || byronBlock.getCbor().isEmpty()) {
                 throw new RuntimeException("Byron block CBOR is required but was null/empty for block: " + hash);
@@ -539,6 +592,30 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 slot,
                 blockBytes
             );
+
+            // Publish BlockApplied after storage
+            EventMetadata appMeta = EventMetadata.builder()
+                    .origin("node-runtime")
+                    .slot(slot)
+                    .blockNo(blockNumber)
+                    .blockHash(hash)
+                    .build();
+            eventBus.publish(new BlockAppliedEvent(Era.Byron, slot, blockNumber, hash, null), appMeta, PublishOptions.builder().build());
+
+            // Publish TipChanged if tip advanced
+            var _newTipByron = chainState.getTip();
+            if (_newTipByron != null) {
+                EventMetadata tipMeta = EventMetadata.builder()
+                        .origin("node-runtime")
+                        .slot(_newTipByron.getSlot())
+                        .blockNo(_newTipByron.getBlockNumber())
+                        .blockHash(HexUtil.encodeHexString(_newTipByron.getBlockHash()))
+                        .build();
+                eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.TipChangedEvent(
+                        null, null, null,
+                        _newTipByron.getSlot(), _newTipByron.getBlockNumber(), HexUtil.encodeHexString(_newTipByron.getBlockHash())
+                ), tipMeta, PublishOptions.builder().build());
+            }
 
             bodiesReceived.incrementAndGet();
             totalBlocksFetched.incrementAndGet();
@@ -588,6 +665,15 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 return;
             }
 
+            // Publish BlockReceived before storage
+            EventMetadata recvMeta = EventMetadata.builder()
+                    .origin("node-runtime")
+                    .slot(slot)
+                    .blockNo(blockNumber)
+                    .blockHash(hash)
+                    .build();
+            eventBus.publish(new BlockReceivedEvent(Era.Byron, slot, blockNumber, hash, null), recvMeta, PublishOptions.builder().build());
+
             // Require CBOR bytes for proper storage
             if (byronEbBlock.getCbor() == null || byronEbBlock.getCbor().isEmpty()) {
                 throw new RuntimeException("Byron EB block CBOR is required but was null/empty for block: " + hash);
@@ -616,6 +702,30 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
 
             // successful store resets stale counter
             consecutiveStaleBlocks.set(0);
+
+            // Publish BlockApplied after storage
+            EventMetadata appMeta = EventMetadata.builder()
+                    .origin("node-runtime")
+                    .slot(slot)
+                    .blockNo(blockNumber)
+                    .blockHash(hash)
+                    .build();
+            eventBus.publish(new BlockAppliedEvent(Era.Byron, slot, blockNumber, hash, null), appMeta, PublishOptions.builder().build());
+
+            // Publish TipChanged if tip advanced
+            var _newTipEb = chainState.getTip();
+            if (_newTipEb != null) {
+                EventMetadata tipMeta = EventMetadata.builder()
+                        .origin("node-runtime")
+                        .slot(_newTipEb.getSlot())
+                        .blockNo(_newTipEb.getBlockNumber())
+                        .blockHash(HexUtil.encodeHexString(_newTipEb.getBlockHash()))
+                        .build();
+                eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.TipChangedEvent(
+                        null, null, null,
+                        _newTipEb.getSlot(), _newTipEb.getBlockNumber(), HexUtil.encodeHexString(_newTipEb.getBlockHash())
+                ), tipMeta, PublishOptions.builder().build());
+            }
 
             bodiesReceived.incrementAndGet();
             totalBlocksFetched.incrementAndGet();

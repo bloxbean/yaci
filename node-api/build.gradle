@@ -1,6 +1,7 @@
 dependencies {
     api project(':core')
     api project(':helper')
+    api project(':events-core')
 }
 
 publishing {
