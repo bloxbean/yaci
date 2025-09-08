@@ -52,26 +52,14 @@ public @interface DomainEventListener {
     
     /**
      * Whether to execute this listener asynchronously.
-     * When true, the listener runs on a separate thread pool.
-     * Default is false (synchronous execution).
-     * 
+     * When true, the listener runs off the publisher thread.
+     * Executor selection:
+     * - If a {@link com.bloxbean.cardano.yaci.events.api.SubscriptionOptions} default executor is provided
+     *   during registration, it is used.
+     * - Otherwise, a shared virtual-thread executor is used by default.
+     * When false, the listener runs on the publisher thread.
+     *
      * @return true for async execution, false for sync
      */
     boolean async() default false;
-    
-    /**
-     * Number of concurrent executions allowed (reserved for future use).
-     * Currently always uses 1 for ordered delivery.
-     * 
-     * @return Concurrency level (currently ignored)
-     */
-    int concurrency() default 1;
-    
-    /**
-     * Simple filter expression (reserved for future use).
-     * Planned to support basic filtering like "era=Conway" or "slot>1000000".
-     * 
-     * @return Filter expression (currently ignored)
-     */
-    String filter() default "";
 }

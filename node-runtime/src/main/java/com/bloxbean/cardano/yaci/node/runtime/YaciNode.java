@@ -7,6 +7,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableCon
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.events.api.support.AnnotationListenerRegistrar;
 import com.bloxbean.cardano.yaci.helper.*;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
@@ -1247,6 +1248,19 @@ public class YaciNode implements NodeAPI {
             log.info("Chain state recovery not supported for in-memory storage");
             return false;
         }
+    }
+
+    @Override
+    public void registerListeners(Object... listeners) {
+        var defaultOption = SubscriptionOptions.builder().build();
+        for (Object listener : listeners) {
+            AnnotationListenerRegistrar.register(eventBus, listener, defaultOption);
+        }
+    }
+
+    @Override
+    public void registerListener(Object listener, SubscriptionOptions sbOptions) {
+        AnnotationListenerRegistrar.register(eventBus, listener, sbOptions);
     }
 
     /**

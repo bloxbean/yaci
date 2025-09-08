@@ -40,9 +40,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class SimpleEventBus implements EventBus {
     private static final Logger log = LoggerFactory.getLogger(SimpleEventBus.class);
 
-    // Map of event type to list of subscriptions
+    // Map of event type to list of subscriptions (kept sorted by priority, then registration sequence)
     // Using ConcurrentHashMap for thread-safe type lookup
-    // Using CopyOnWriteArrayList for thread-safe iteration during publish
+    // Using CopyOnWriteArrayList for snapshot-style iteration during publish
     private final ConcurrentMap<Class<?>, CopyOnWriteArrayList<Sub<?>>> subs = new ConcurrentHashMap<>();
     
     // Global shutdown flag to prevent new operations after close
@@ -63,21 +63,36 @@ public final class SimpleEventBus implements EventBus {
         final BlockingQueue<EventContext<E>> queue; // if async
         final AtomicBoolean active = new AtomicBoolean(true);
         final AtomicInteger delivered = new AtomicInteger();
+        final long registrationSeq;
+        final int priority;
 
-        Sub(EventListener<E> l, SubscriptionOptions o) {
+        Sub(EventListener<E> l, SubscriptionOptions o, long registrationSeq) {
             this.listener = Objects.requireNonNull(l);
             this.options = Objects.requireNonNull(o);
             this.executor = o.executor();
             this.queue = (executor != null) ? new ArrayBlockingQueue<>(Math.max(1, o.bufferSize())) : null;
+            this.registrationSeq = registrationSeq;
+            this.priority = o.priority();
         }
     }
+
+    // Monotonic sequence to preserve stable order for equal priorities
+    private final java.util.concurrent.atomic.AtomicLong seq = new java.util.concurrent.atomic.AtomicLong();
 
     @Override
     public <E extends Event> SubscriptionHandle subscribe(Class<E> type, EventListener<E> listener, SubscriptionOptions opts) {
         if (closed.get()) throw new IllegalStateException("EventBus is closed");
         var list = subs.computeIfAbsent(type, k -> new CopyOnWriteArrayList<>());
-        var sub = new Sub<>(listener, opts != null ? opts : SubscriptionOptions.builder().build());
-        list.add(sub);
+        var effective = opts != null ? opts : SubscriptionOptions.builder().build();
+        var sub = new Sub<>(listener, effective, seq.incrementAndGet());
+        // Insert in sorted position: priority asc, then registrationSeq asc (stable)
+        int idx = 0;
+        for (; idx < list.size(); idx++) {
+            Sub<?> ex = list.get(idx);
+            if (ex.priority > sub.priority) break;
+            if (ex.priority == sub.priority && ex.registrationSeq > sub.registrationSeq) break;
+        }
+        list.add(idx, sub);
         if (sub.executor != null) startAsyncLoop(type, sub);
         return new SubscriptionHandle() {
             @Override public void close() { sub.active.set(false); list.remove(sub); }
@@ -170,4 +185,3 @@ public final class SimpleEventBus implements EventBus {
         workers.clear();
     }
 }
-

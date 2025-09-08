@@ -113,6 +113,9 @@ public class YaciNodeProducer {
 
             nodeAPI = new YaciNode(config, runtimeOptions);
             log.info("Yaci Node created successfully");
+
+            //Register listeners
+            //nodeAPI.registerListeners(new Listner1(), new Listener2());
         }
 
         return nodeAPI;
