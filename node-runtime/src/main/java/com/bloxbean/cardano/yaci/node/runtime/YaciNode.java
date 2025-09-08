@@ -287,7 +287,7 @@ public class YaciNode implements NodeAPI {
             }
 
             // Create TxSubmission handler for transaction processing
-            YaciTxSubmissionHandler txSubmissionHandler = new YaciTxSubmissionHandler(memPool);
+            YaciTxSubmissionHandler txSubmissionHandler = new YaciTxSubmissionHandler(memPool, eventBus);
 
             // Create TxSubmission configuration for periodic requests
             TxSubmissionConfig txSubmissionConfig = TxSubmissionConfig.builder()

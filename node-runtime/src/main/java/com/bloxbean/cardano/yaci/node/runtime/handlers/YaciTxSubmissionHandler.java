@@ -4,7 +4,12 @@ import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.events.api.EventMetadata;
+import com.bloxbean.cardano.yaci.events.api.PublishOptions;
+import com.bloxbean.cardano.yaci.events.api.EventBus;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
+import com.bloxbean.cardano.yaci.node.runtime.chain.MemPoolTransaction;
+import com.bloxbean.cardano.yaci.node.runtime.events.MemPoolTransactionReceivedEvent;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashSet;
@@ -23,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class YaciTxSubmissionHandler implements TxSubmissionListener, TxSubmissionHandler {
 
     private final MemPool memPool;
+    private final EventBus eventBus;
     private final Set<String> knownTxIds = ConcurrentHashMap.newKeySet();
     private final Map<String, String> clientConnections = new ConcurrentHashMap<>();
 
@@ -33,8 +39,9 @@ public class YaciTxSubmissionHandler implements TxSubmissionListener, TxSubmissi
     private long txsRejected = 0;
     private long txsProcessed = 0;
 
-    public YaciTxSubmissionHandler(MemPool memPool) {
+    public YaciTxSubmissionHandler(MemPool memPool, EventBus eventBus) {
         this.memPool = memPool;
+        this.eventBus = eventBus;
     }
 
     // TxSubmissionListener implementation (for server-side handling)
@@ -88,8 +95,13 @@ public class YaciTxSubmissionHandler implements TxSubmissionListener, TxSubmissi
                 // Calculate transaction hash
                 String txHash = TransactionUtil.getTxHash(tx.getTx());
 
-                // Add to mempool
-                memPool.addTransaction(tx.getTx());
+                // Add to mempool and publish event
+                MemPoolTransaction mpt = memPool.addTransaction(tx.getTx());
+                if (eventBus != null && mpt != null) {
+                    eventBus.publish(new MemPoolTransactionReceivedEvent(mpt),
+                            EventMetadata.builder().origin("txsubmission").build(),
+                            PublishOptions.builder().build());
+                }
                 txsAccepted++;
 
                 log.info("Transaction added to mempool: {} ({} bytes)", txHash, tx.getTx().length);

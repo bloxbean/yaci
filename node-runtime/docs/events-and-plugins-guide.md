@@ -11,7 +11,7 @@ This guide explains how to use the Yaci Node event system and plugin SPI — bot
   - `node-runtime`: wiring, publication points, example `LoggingPlugin` (ServiceLoader-based).
 
 - Event taxonomy (initial)
-  - Data plane: `BlockReceivedEvent`, `BlockAppliedEvent`, `RollbackEvent`.
+  - Data plane: `BlockReceivedEvent`, `BlockAppliedEvent`, `MemPoolTransactionReceivedEvent`, `RollbackEvent`.
   - Control plane: `SyncStatusChangedEvent`, `TipChangedEvent`.
 
 - Delivery and semantics
@@ -204,6 +204,7 @@ Notes:
   - `TipChangedEvent` (when tip advances)
 - `YaciNode`:
   - `NodeStartedEvent` (startup)
+  - `MemPoolTransactionReceivedEvent` (when a transaction is added to mempool)
   - `RollbackEvent` (on rollback)
   - `SyncStatusChangedEvent` (phase transitions)
 

@@ -16,11 +16,12 @@ public class DefaultMemPool implements MemPool {
     }
 
     @Override
-    public synchronized void addTransaction(byte[] txBytes) {
+    public synchronized MemPoolTransaction addTransaction(byte[] txBytes) {
         var txHash = TransactionUtil.getTxHash(txBytes);
         long txSeqId = cursor.incrementAndGet();
         var memPoolTransaction = new MemPoolTransaction(txSeqId, HexUtil.decodeHexString(txHash), txBytes, TxBodyType.CONWAY);
         memPool.offer(memPoolTransaction);
+        return memPoolTransaction;
     }
 
     @Override
