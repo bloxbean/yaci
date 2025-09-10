@@ -58,6 +58,8 @@ public class LocalTxSubmissionClient extends QueryClient {
                         .txHash(txSubmissionRequest.getTxHash())
                         .accepted(false)
                         .errorCbor(msgRejectTx.getReasonCbor())
+                        .errorMessage(msgRejectTx.getUserFriendlyMessage())
+                        .parsedError(msgRejectTx.getParsedError())
                         .build();
 
                 applyMonoSuccess(txSubmissionRequest, txResult);

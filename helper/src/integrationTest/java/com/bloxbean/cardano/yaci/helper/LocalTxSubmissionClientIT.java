@@ -47,7 +47,8 @@ class LocalTxSubmissionClientIT extends BaseTest {
 
             @Override
             public void txRejected(TxSubmissionRequest txSubmissionRequest, MsgRejectTx msgRejectTx) {
-                System.out.println("Rejected: " + msgRejectTx.getReasonCbor());
+                System.out.println("Rejected (CBOR): " + msgRejectTx.getReasonCbor());
+                System.out.println("Rejected (User-friendly): " + msgRejectTx.getUserFriendlyMessage());
                 countDownLatch.countDown();
             }
         });
