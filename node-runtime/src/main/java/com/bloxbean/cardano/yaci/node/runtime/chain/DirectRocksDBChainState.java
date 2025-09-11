@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbContext;
 import lombok.extern.slf4j.Slf4j;
 import org.rocksdb.*;
 
@@ -18,7 +19,7 @@ import java.util.List;
  * This implementation uses RocksDB directly without any caching layer.
  */
 @Slf4j
-public class DirectRocksDBChainState implements ChainState, AutoCloseable {
+public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.bloxbean.cardano.yaci.node.runtime.db.RocksDbSupplier {
 
     private static final byte[] TIP_KEY = "tip".getBytes(StandardCharsets.UTF_8);
     private static final byte[] HEADER_TIP_KEY = "header_tip".getBytes(StandardCharsets.UTF_8);
@@ -35,6 +36,9 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     private final ColumnFamilyHandle slotToHashHandle;
     // New CF to store EBBs by epoch start absolute slot (slot 0 of each epoch)
     private final ColumnFamilyHandle ebbBySlot0Handle;
+
+    // Name → CF handle registry (includes UTXO CFs)
+    private final java.util.Map<String, ColumnFamilyHandle> cfByName = new java.util.HashMap<>();
 
     static {
         RocksDB.loadLibrary();
@@ -60,7 +64,14 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                     new ColumnFamilyDescriptor("slot_by_number".getBytes()),
                     new ColumnFamilyDescriptor("slot_to_hash".getBytes()),
                     new ColumnFamilyDescriptor("metadata".getBytes()),
-                    new ColumnFamilyDescriptor("ebb_by_slot0".getBytes())
+                    new ColumnFamilyDescriptor("ebb_by_slot0".getBytes()),
+                    // UTXO CFs
+                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_UNSPENT.getBytes()),
+                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_SPENT.getBytes()),
+                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_ADDR.getBytes()),
+                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_BLOCK_DELTA.getBytes()),
+                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_META.getBytes()),
+                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_MMR_NODES.getBytes())
             );
 
             // Open database
@@ -76,11 +87,27 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             metadataHandle = cfHandles.get(6);
             ebbBySlot0Handle = cfHandles.get(7);
 
+            // Populate name → handle map
+            for (int i = 0; i < cfDescriptors.size(); i++) {
+                String name;
+                if (i == 0) {
+                    name = new String(RocksDB.DEFAULT_COLUMN_FAMILY);
+                } else {
+                    name = new String(cfDescriptors.get(i).getName());
+                }
+                cfByName.put(name, cfHandles.get(i));
+            }
+
             log.info("RocksDB initialized at: {}", dbPath);
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize RocksDB", e);
         }
+    }
+
+    @Override
+    public RocksDbContext rocks() {
+        return new RocksDbContext(db, java.util.Collections.unmodifiableMap(cfByName));
     }
 
     @Override

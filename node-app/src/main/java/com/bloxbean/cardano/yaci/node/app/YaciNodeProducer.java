@@ -61,6 +61,26 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.plugins.logging.enabled", defaultValue = "false")
     boolean loggingPluginEnabled;
 
+    // UTXO config (Phase 0 — no-op wiring)
+    @ConfigProperty(name = "yaci.node.utxo.enabled", defaultValue = "true")
+    boolean utxoEnabled;
+    @ConfigProperty(name = "yaci.node.utxo.store", defaultValue = "classic")
+    String utxoStore;
+    @ConfigProperty(name = "yaci.node.utxo.pruneDepth", defaultValue = "2160")
+    int utxoPruneDepth;
+    @ConfigProperty(name = "yaci.node.utxo.rollbackWindow", defaultValue = "4320")
+    int utxoRollbackWindow;
+    @ConfigProperty(name = "yaci.node.utxo.pruneBatchSize", defaultValue = "500")
+    int utxoPruneBatchSize;
+    @ConfigProperty(name = "yaci.node.utxo.index.address_hash", defaultValue = "true")
+    boolean utxoIndexAddressHash;
+    @ConfigProperty(name = "yaci.node.utxo.index.payment_credential", defaultValue = "true")
+    boolean utxoIndexPaymentCred;
+    @ConfigProperty(name = "yaci.node.utxo.indexingStrategy", defaultValue = "both")
+    String utxoIndexingStrategy;
+    @ConfigProperty(name = "yaci.node.utxo.delta.selfContained", defaultValue = "false")
+    boolean utxoDeltaSelfContained;
+
     private NodeAPI nodeAPI;
 
     @Produces
@@ -109,7 +129,19 @@ public class YaciNodeProducer {
             java.util.Map<String, Object> pluginConfig = new java.util.HashMap<>();
             pluginConfig.put("plugins.logging.enabled", loggingPluginEnabled);
             PluginsOptions pluginsOptions = new PluginsOptions(pluginsEnabled, false, java.util.Set.of(), java.util.Set.of(), pluginConfig);
-            RuntimeOptions runtimeOptions = new RuntimeOptions(eventsOptions, pluginsOptions, java.util.Map.of());
+            // Globals: phase-0 UTXO options (no-op until UTXO store is wired)
+            java.util.Map<String, Object> globals = new java.util.HashMap<>();
+            globals.put("yaci.node.utxo.enabled", utxoEnabled);
+            globals.put("yaci.node.utxo.store", utxoStore);
+            globals.put("yaci.node.utxo.pruneDepth", utxoPruneDepth);
+            globals.put("yaci.node.utxo.rollbackWindow", utxoRollbackWindow);
+            globals.put("yaci.node.utxo.pruneBatchSize", utxoPruneBatchSize);
+            globals.put("yaci.node.utxo.index.address_hash", utxoIndexAddressHash);
+            globals.put("yaci.node.utxo.index.payment_credential", utxoIndexPaymentCred);
+            globals.put("yaci.node.utxo.indexingStrategy", utxoIndexingStrategy);
+            globals.put("yaci.node.utxo.delta.selfContained", utxoDeltaSelfContained);
+
+            RuntimeOptions runtimeOptions = new RuntimeOptions(eventsOptions, pluginsOptions, globals);
 
             nodeAPI = new YaciNode(config, runtimeOptions);
             log.info("Yaci Node created successfully");

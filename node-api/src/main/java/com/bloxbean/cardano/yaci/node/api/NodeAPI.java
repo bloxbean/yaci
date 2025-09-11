@@ -7,6 +7,7 @@ import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.node.api.config.NodeConfig;
 import com.bloxbean.cardano.yaci.node.api.listener.NodeEventListener;
 import com.bloxbean.cardano.yaci.node.api.model.NodeStatus;
+import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 
 /**
  * Main interface for Yaci Node operations.
@@ -135,4 +136,10 @@ public interface NodeAPI {
      * @param sbOptions
      */
     void registerListener(Object listener, SubscriptionOptions sbOptions);
+
+    /**
+     * Access the UTXO state if enabled.
+     * Returns null if UTXO is disabled or not initialized.
+     */
+    UtxoState getUtxoState();
 }

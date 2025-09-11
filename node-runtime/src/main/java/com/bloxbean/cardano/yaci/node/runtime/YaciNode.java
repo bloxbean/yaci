@@ -30,6 +30,8 @@ import com.bloxbean.cardano.yaci.events.impl.SimpleEventBus;
 import com.bloxbean.cardano.yaci.events.impl.NoopEventBus;
 import com.bloxbean.cardano.yaci.node.runtime.events.NodeStartedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.plugins.PluginManager;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.ClassicUtxoStore;
+import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 
 import java.time.Duration;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -106,6 +108,7 @@ public class YaciNode implements NodeAPI {
     private final RuntimeOptions runtimeOptions;
     private final EventBus eventBus;
     private PluginManager pluginManager;
+    private ClassicUtxoStore utxoStore;
 
     public YaciNode(YaciNodeConfig config) {
         this(config, RuntimeOptions.defaults());
@@ -150,6 +153,27 @@ public class YaciNode implements NodeAPI {
         if (this.runtimeOptions.plugins().enabled()) {
             pluginManager = new PluginManager(eventBus, scheduler, this.runtimeOptions.plugins().config(), Thread.currentThread().getContextClassLoader());
         }
+
+        // Phase 3: Initialize UTXO store (classic) if enabled and RocksDB is used
+        try {
+            Object enabledOpt = this.runtimeOptions.globals().get("yaci.node.utxo.enabled");
+            boolean utxoEnabled = enabledOpt instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(enabledOpt));
+            Object storeOpt = this.runtimeOptions.globals().getOrDefault("yaci.node.utxo.store", "classic");
+            String storeName = String.valueOf(storeOpt);
+            if (utxoEnabled && "classic".equalsIgnoreCase(storeName) && (chainState instanceof DirectRocksDBChainState rocks)) {
+                this.utxoStore = new ClassicUtxoStore(rocks, eventBus, log, this.runtimeOptions.globals());
+                log.info("ClassicUtxoStore registered with EventBus");
+            } else {
+                log.info("UTXO store not initialized (enabled={}, store={}, rocksdb={})", utxoEnabled, storeName, (chainState instanceof DirectRocksDBChainState));
+            }
+        } catch (Throwable t) {
+            log.warn("Failed to initialize UTXO store: {}", t.toString());
+        }
+    }
+
+    @Override
+    public UtxoState getUtxoState() {
+        return utxoStore;
     }
 
     /**
@@ -1436,18 +1460,28 @@ public class YaciNode implements NodeAPI {
             bodyFetchManager.setSyncPhase(SyncPhase.INTERSECT_PHASE);
         }
 
-        // Reset to steady state after timeout (handles normal post-intersection rollback)
+        // After timeout, exit INTERSECT_PHASE. Choose next phase based on distance to remote tip.
         scheduler.schedule(() -> {
             if (syncPhase == SyncPhase.INTERSECT_PHASE) {
-                syncPhase = SyncPhase.STEADY_STATE;
-                log.info("Auto-transitioned to STEADY_STATE after intersection phase timeout");
+                // Determine distance to remote tip; default to INITIAL_SYNC if unknown/far
+                long distance = Long.MAX_VALUE;
+                try {
+                    if (remoteTip != null && remoteTip.getPoint() != null) {
+                        distance = Math.max(0, remoteTip.getPoint().getSlot() - lastProcessedSlot);
+                    }
+                } catch (Exception ignored) {}
+
+                long nearTipThreshold = 1000; // slots
+                SyncPhase nextPhase = (distance <= nearTipThreshold) ? SyncPhase.STEADY_STATE : SyncPhase.INITIAL_SYNC;
+                syncPhase = nextPhase;
+                log.info("Auto-transitioned to {} after intersection phase timeout (distance to tip: {} slots)", nextPhase, distance == Long.MAX_VALUE ? "unknown" : String.valueOf(distance));
 
                 // Update BodyFetchManager sync phase and resume if needed
                 if (isPipelinedMode && bodyFetchManager != null) {
-                    bodyFetchManager.setSyncPhase(SyncPhase.STEADY_STATE);
+                    bodyFetchManager.setSyncPhase(nextPhase);
                     if (bodyFetchManager.isPaused()) {
                         bodyFetchManager.resume();
-                        log.info("▶️ BodyFetchManager resumed after auto-transition to STEADY_STATE");
+                        log.info("▶️ BodyFetchManager resumed after auto-transition to {}", nextPhase);
                     }
                 }
             }

@@ -42,7 +42,6 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 @Slf4j
 public class BodyFetchManager implements BlockChainDataListener, Runnable {
-
     private final PeerClient peerClient;
     private final ChainState chainState;
     private final EventBus eventBus;
@@ -513,12 +512,10 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             bodiesReceived.incrementAndGet();
             totalBlocksFetched.incrementAndGet();
 
-            // Phase-aware logging: log every block when at tip (STEADY_STATE), otherwise every 100 blocks
+            // Phase-aware logging: log every block at tip; throttle during initial sync
             if (syncPhase == SyncPhase.STEADY_STATE) {
-                // At tip - log every single block
                 log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, block.getEra());
             } else {
-                // During initial sync - only log every 100 blocks for performance
                 if (totalBlocksFetched.get() % 100 == 0) {
                     log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, block.getEra());
                 }
@@ -620,13 +617,10 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             bodiesReceived.incrementAndGet();
             totalBlocksFetched.incrementAndGet();
 
+            // Phase-aware logging for Byron too
             if (syncPhase == SyncPhase.STEADY_STATE) {
-                // At tip - log every single block
-                if (totalBlocksFetched.get() % 100 == 0) {
-                    log.info("📦--  Block: {}, Slot: {} ({})", blockNumber, slot, "Byron");
-                }
+                log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, "Byron");
             } else {
-                // During initial sync - only log every 100 blocks for performance
                 if (totalBlocksFetched.get() % 100 == 0) {
                     log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, "Byron");
                 }
