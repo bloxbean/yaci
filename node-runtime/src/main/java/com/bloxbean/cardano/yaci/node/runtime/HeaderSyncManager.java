@@ -38,6 +38,7 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
 
     private final ChainState chainState;
     private final PeerClient peerClient;
+    private final SyncTipContext syncTipContext;
 
     // Metrics tracking
     private volatile long headersReceived = 0;
@@ -53,14 +54,19 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
     private static final int PROGRESS_LOG_INTERVAL = 1000;
 
     public HeaderSyncManager(PeerClient peerClient, ChainState chainState) {
-        this(peerClient, chainState, 50000); // Default gap threshold of 50,000 blocks
+        this(peerClient, chainState, 50000, null); // Default gap threshold of 50,000 blocks
 //        this(peerClient, chainState, -1); // Disable backpressure by default
     }
 
     public HeaderSyncManager(PeerClient peerClient, ChainState chainState, long maxGapThreshold) {
+        this(peerClient, chainState, maxGapThreshold, null);
+    }
+
+    public HeaderSyncManager(PeerClient peerClient, ChainState chainState, long maxGapThreshold, SyncTipContext syncTipContext) {
         this.peerClient = peerClient;
         this.chainState = chainState;
         this.maxGapThreshold = maxGapThreshold;
+        this.syncTipContext = syncTipContext;
 
         log.info("HeaderSyncManager initialized - ready for header-only synchronization (gap threshold: {} blocks)", maxGapThreshold);
     }
@@ -72,6 +78,7 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
     @Override
     public void rollforward(Tip tip, BlockHeader blockHeader, byte[] originalHeaderBytes) {
         try {
+            if (syncTipContext != null) syncTipContext.update(tip);
             // Validate input parameters
             if (blockHeader == null || originalHeaderBytes == null || originalHeaderBytes.length == 0) {
                 log.warn("Invalid header data received: blockHeader={}, originalHeaderBytes={}",
@@ -126,6 +133,7 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
     @Override
     public void rollforwardByronEra(Tip tip, ByronBlockHead byronBlockHead, byte[] originalHeaderBytes) {
         try {
+            if (syncTipContext != null) syncTipContext.update(tip);
             // Validate input parameters
             if (byronBlockHead == null || originalHeaderBytes == null || originalHeaderBytes.length == 0) {
                 log.warn("Invalid Byron header data received: byronBlockHead={}, originalHeaderBytes={}",
@@ -181,6 +189,7 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
     @Override
     public void rollforwardByronEra(Tip tip, ByronEbHead byronEbHead, byte[] originalHeaderBytes) {
         try {
+            if (syncTipContext != null) syncTipContext.update(tip);
             // Validate input parameters
             if (byronEbHead == null || originalHeaderBytes == null || originalHeaderBytes.length == 0) {
                 log.warn("Invalid Byron EB header data received: byronEbHead={}, originalHeaderBytes={}",
@@ -238,6 +247,7 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
     @Override
     public void intersactFound(Tip tip, Point point) {
         log.info("📄 Header intersection found at: {} (tip: {})", point, tip);
+        if (syncTipContext != null) syncTipContext.update(tip);
         // ChainSyncAgent automatically resumes from this point on reconnection
         // No manual state management needed
     }
@@ -245,6 +255,7 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
     @Override
     public void intersactNotFound(Tip tip) {
         log.warn("📄 Header intersection not found. Tip: {}", tip);
+        if (syncTipContext != null) syncTipContext.update(tip);
         // ChainSyncAgent will handle this scenario
         // This typically results in a rollback to find a common point
     }
@@ -252,6 +263,7 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
     @Override
     public void rollbackward(Tip tip, Point toPoint) {
         log.info("📄 Header rollback requested to: {} (tip: {})", toPoint, tip);
+        if (syncTipContext != null) syncTipContext.update(tip);
         // The actual rollback will be handled by YaciNode.onRollback()
         // which coordinates both header and body rollback
         // ChainSyncAgent automatically adjusts its currentPoint
@@ -260,6 +272,7 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
     @Override
     public void onDisconnect() {
         log.info("📄 Header sync disconnected - will auto-reconnect from last confirmed point");
+        // leave last known tip; do not invalidate to keep best-effort proximity
         // No action needed here - ChainSyncAgent handles reconnection automatically
         // using its internal currentPoint tracking for robust resumption
         log.debug("📄 ChainSyncAgent will automatically resume headers from last confirmed point");

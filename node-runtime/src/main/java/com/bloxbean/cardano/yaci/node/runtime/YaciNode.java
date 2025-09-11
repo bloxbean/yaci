@@ -469,12 +469,14 @@ public class YaciNode implements NodeAPI {
      * Initialize HeaderSyncManager and BodyFetchManager for pipeline mode.
      */
     private void initializePipelineManagers() {
+        // Shared context to propagate latest network tip from headers to bodies
+        SyncTipContext syncTipContext = new SyncTipContext();
         if (headerSyncManager != null) {
             // Reset existing managers
             headerSyncManager.resetMetrics();
         } else {
             // Create new HeaderSyncManager
-            headerSyncManager = new HeaderSyncManager(peerClient, chainState);
+            headerSyncManager = new HeaderSyncManager(peerClient, chainState, 50000, syncTipContext);
             log.info("📋 HeaderSyncManager created");
         }
 
@@ -502,7 +504,8 @@ public class YaciNode implements NodeAPI {
                     gapThreshold,
                     maxBatchSize,
                     500, // 500ms monitoring interval
-                    1000   // tipProximityThreshold - consider "at tip" when within 1000 slots (~16 minutes)
+                    1000,  // tipProximityThreshold - consider "at tip" when within 1000 slots (~16 minutes)
+                    syncTipContext
             );
             log.info("📦 BodyFetchManager created with gapThreshold={}, maxBatchSize={}",
                     gapThreshold, maxBatchSize);
@@ -1203,12 +1206,24 @@ public class YaciNode implements NodeAPI {
         if (isPipelinedMode && syncPhase == SyncPhase.INTERSECT_PHASE &&
             bodyFetchManager != null && bodyFetchManager.isPaused()) {
 
+            // Choose next phase based on distance to remote tip
+            long distance = Long.MAX_VALUE;
+            try {
+                if (remoteTip != null && remoteTip.getPoint() != null) {
+                    distance = Math.max(0, remoteTip.getPoint().getSlot() - lastProcessedSlot);
+                }
+            } catch (Exception ignored) {}
+
+            long nearTipThreshold = 1000; // slots
+            SyncPhase nextPhase = (distance <= nearTipThreshold) ? SyncPhase.STEADY_STATE : SyncPhase.INITIAL_SYNC;
+
             var prev = syncPhase;
-            syncPhase = SyncPhase.STEADY_STATE;
-            bodyFetchManager.setSyncPhase(SyncPhase.STEADY_STATE);
+            syncPhase = nextPhase;
+            bodyFetchManager.setSyncPhase(nextPhase);
             bodyFetchManager.resume();
 
-            log.info("🏃‍♂️ FAST RESUME: Headers flowing - transitioned to STEADY_STATE and resumed BodyFetchManager");
+            log.info("🏃‍♂️ FAST RESUME: Headers flowing - transitioned to {} (distance to tip: {} slots)",
+                    nextPhase, distance == Long.MAX_VALUE ? "unknown" : String.valueOf(distance));
             if (prev != syncPhase) {
                 EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
                 eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.SyncStatusChangedEvent(prev, syncPhase), meta, PublishOptions.builder().build());

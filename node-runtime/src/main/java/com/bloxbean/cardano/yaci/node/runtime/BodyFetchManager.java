@@ -42,6 +42,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 @Slf4j
 public class BodyFetchManager implements BlockChainDataListener, Runnable {
+
     private final PeerClient peerClient;
     private final ChainState chainState;
     private final EventBus eventBus;
@@ -51,6 +52,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     private final int maxBatchSize;
     private final long monitoringIntervalMs;
     private final long tipProximityThreshold;
+    private final SyncTipContext syncTipContext;
 
     // State management
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -83,7 +85,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
      * Create BodyFetchManager with default configuration.
      */
     public BodyFetchManager(PeerClient peerClient, ChainState chainState, EventBus eventBus) {
-        this(peerClient, chainState, eventBus, 10, 100, 500, 10);
+        this(peerClient, chainState, eventBus, 10, 100, 500, 10, null);
     }
 
     /**
@@ -98,6 +100,12 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
      */
     public BodyFetchManager(PeerClient peerClient, ChainState chainState, EventBus eventBus,
                            long gapThreshold, int maxBatchSize, long monitoringIntervalMs, long tipProximityThreshold) {
+        this(peerClient, chainState, eventBus, gapThreshold, maxBatchSize, monitoringIntervalMs, tipProximityThreshold, null);
+    }
+
+    public BodyFetchManager(PeerClient peerClient, ChainState chainState, EventBus eventBus,
+                           long gapThreshold, int maxBatchSize, long monitoringIntervalMs, long tipProximityThreshold,
+                           SyncTipContext syncTipContext) {
         if (peerClient == null) {
             throw new IllegalArgumentException("PeerClient cannot be null");
         }
@@ -124,6 +132,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
         this.maxBatchSize = maxBatchSize;
         this.monitoringIntervalMs = monitoringIntervalMs;
         this.tipProximityThreshold = tipProximityThreshold;
+        this.syncTipContext = syncTipContext;
 
         if (log.isInfoEnabled()) {
             log.info("🏗️ BodyFetchManager created with config: gapThreshold={}, maxBatchSize={}, monitoringInterval={}ms, tipProximityThreshold={}",
@@ -512,13 +521,11 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             bodiesReceived.incrementAndGet();
             totalBlocksFetched.incrementAndGet();
 
-            // Phase-aware logging: log every block at tip; throttle during initial sync
-            if (syncPhase == SyncPhase.STEADY_STATE) {
+            // Distance-aware logging using cached network tip from HeaderSyncManager
+            if (shouldLogEveryBlock(slot)) {
                 log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, block.getEra());
-            } else {
-                if (totalBlocksFetched.get() % 100 == 0) {
-                    log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, block.getEra());
-                }
+            } else if (totalBlocksFetched.get() % 100 == 0) {
+                log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, block.getEra());
             }
 
             if (log.isDebugEnabled() && bodiesReceived.get() % 10 == 0) {
@@ -617,13 +624,10 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             bodiesReceived.incrementAndGet();
             totalBlocksFetched.incrementAndGet();
 
-            // Phase-aware logging for Byron too
-            if (syncPhase == SyncPhase.STEADY_STATE) {
+            if (shouldLogEveryBlock(slot)) {
                 log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, "Byron");
-            } else {
-                if (totalBlocksFetched.get() % 100 == 0) {
-                    log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, "Byron");
-                }
+            } else if (totalBlocksFetched.get() % 100 == 0) {
+                log.info("📦 Block: {}, Slot: {} ({})", blockNumber, slot, "Byron");
             }
 
             if (log.isDebugEnabled()) {
@@ -1140,6 +1144,19 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                      networkTipThreshold);
             log.info("📊 Will log every 100 blocks during initial sync, every block when near tip");
         }
+    }
+
+    // Decide if we should log every block by preferring proximity to the network tip from SyncTipContext.
+    // If the network tip is not available, fall back to syncPhase.
+    private boolean shouldLogEveryBlock(long currentSlot) {
+        if (syncTipContext != null) {
+            long networkSlot = syncTipContext.getNetworkTipSlot();
+            if (networkSlot > 0) {
+                long distance = Math.max(0, networkSlot - currentSlot);
+                return distance <= tipProximityThreshold;
+            }
+        }
+        return syncPhase == SyncPhase.STEADY_STATE;
     }
 
     // Helper methods removed - using HexUtil instead

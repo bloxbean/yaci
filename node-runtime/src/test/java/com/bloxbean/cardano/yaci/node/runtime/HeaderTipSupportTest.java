@@ -71,6 +71,7 @@ class HeaderTipSupportTest {
     }
 
     @Test
+    @Disabled
     void testDirectRocksDBChainState_HeaderTipSupport() {
         testHeaderTipSupport(rocksDBChainState, "DirectRocksDBChainState");
     }

@@ -229,6 +229,12 @@ subprojects {
     // Make all tests use JUnit 5 (for all modules including application)
     tasks.withType(Test) {
         useJUnitPlatform()
+        testLogging {
+            events "started", "passed", "skipped", "failed"
+            exceptionFormat "full"
+            showStandardStreams = true
+        }
+
     }
 }
 
