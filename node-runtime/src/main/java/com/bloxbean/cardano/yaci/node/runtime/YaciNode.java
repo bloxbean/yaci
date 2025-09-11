@@ -1179,12 +1179,24 @@ public class YaciNode implements NodeAPI {
         if (isPipelinedMode && syncPhase == SyncPhase.INTERSECT_PHASE &&
             bodyFetchManager != null && bodyFetchManager.isPaused()) {
 
+            // Choose next phase based on distance to remote tip
+            long distance = Long.MAX_VALUE;
+            try {
+                if (remoteTip != null && remoteTip.getPoint() != null) {
+                    distance = Math.max(0, remoteTip.getPoint().getSlot() - lastProcessedSlot);
+                }
+            } catch (Exception ignored) {}
+
+            long nearTipThreshold = 1000; // slots
+            SyncPhase nextPhase = (distance <= nearTipThreshold) ? SyncPhase.STEADY_STATE : SyncPhase.INITIAL_SYNC;
+
             var prev = syncPhase;
-            syncPhase = SyncPhase.STEADY_STATE;
-            bodyFetchManager.setSyncPhase(SyncPhase.STEADY_STATE);
+            syncPhase = nextPhase;
+            bodyFetchManager.setSyncPhase(nextPhase);
             bodyFetchManager.resume();
 
-            log.info("🏃‍♂️ FAST RESUME: Headers flowing - transitioned to STEADY_STATE and resumed BodyFetchManager");
+            log.info("🏃‍♂️ FAST RESUME: Headers flowing - transitioned to {} (distance to tip: {} slots)",
+                    nextPhase, distance == Long.MAX_VALUE ? "unknown" : String.valueOf(distance));
             if (prev != syncPhase) {
                 EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
                 eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.SyncStatusChangedEvent(prev, syncPhase), meta, PublishOptions.builder().build());
