@@ -14,6 +14,7 @@ import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent;
 import org.rocksdb.*;
 import org.slf4j.Logger;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
@@ -64,8 +65,13 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
         Object strat = config != null ? config.get("yaci.node.utxo.indexingStrategy") : null;
         if (strat != null) {
             String s = String.valueOf(strat);
-            if ("address_hash".equalsIgnoreCase(s)) { addrIdx = true; payCredIdx = false; }
-            else if ("payment_credential".equalsIgnoreCase(s)) { addrIdx = false; payCredIdx = true; }
+            if ("address_hash".equalsIgnoreCase(s)) {
+                addrIdx = true;
+                payCredIdx = false;
+            } else if ("payment_credential".equalsIgnoreCase(s)) {
+                addrIdx = false;
+                payCredIdx = true;
+            }
         }
         this.indexAddressHash = addrIdx;
         this.indexPaymentCred = payCredIdx;
@@ -89,9 +95,18 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
                 while (it.isValid()) {
                     byte[] key = it.key();
                     boolean match = true;
-                    for (int i = 0; i < 28; i++) { if (key[i] != addrKey[i]) { match = false; break; } }
+                    for (int i = 0; i < 28; i++) {
+                        if (key[i] != addrKey[i]) {
+                            match = false;
+                            break;
+                        }
+                    }
                     if (!match) break;
-                    if (skipped > 0) { skipped--; it.next(); continue; }
+                    if (skipped > 0) {
+                        skipped--;
+                        it.next();
+                        continue;
+                    }
                     if (results.size() >= pageSize) break;
                     // suffix: 28 addr | 8 slot | 32 hash | 2 idx
                     int off = 28 + 8;
@@ -143,9 +158,18 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
                 while (it.isValid()) {
                     byte[] key = it.key();
                     boolean match = true;
-                    for (int i = 0; i < 28; i++) { if (key[i] != prefix[i]) { match = false; break; } }
+                    for (int i = 0; i < 28; i++) {
+                        if (key[i] != prefix[i]) {
+                            match = false;
+                            break;
+                        }
+                    }
                     if (!match) break;
-                    if (skipped > 0) { skipped--; it.next(); continue; }
+                    if (skipped > 0) {
+                        skipped--;
+                        it.next();
+                        continue;
+                    }
                     if (results.size() >= pageSize) break;
                     int off = 28 + 8;
                     String txHash = com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(java.util.Arrays.copyOfRange(key, off, off + 32));
@@ -202,7 +226,9 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
     }
 
     @Override
-    public boolean isEnabled() { return enabled; }
+    public boolean isEnabled() {
+        return enabled;
+    }
 
     @DomainEventListener(order = 100)
     public void onBlockApplied(BlockAppliedEvent e) {
@@ -237,19 +263,19 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
                                 byte[] spentVal = com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.serialize(spentMap, true);
                                 batch.put(cfSpent, key, spentVal);
                                 batch.delete(cfUnspent, key);
-                        var stored = UtxoCborCodec.decodeUtxoRecord(prev);
-                        if (indexAddressHash) {
-                            byte[] akey = UtxoKeyUtil.addrHash28(stored.address);
-                            byte[] aIdx = UtxoKeyUtil.addressIndexKey(akey, stored.slot, in.getTransactionId(), in.getIndex());
-                            batch.delete(cfAddr, aIdx);
-                        }
-                        if (indexPaymentCred) {
-                            byte[] pc = UtxoKeyUtil.paymentCred28(stored.address);
-                            if (pc != null) {
-                                byte[] pIdx = UtxoKeyUtil.addressIndexKey(pc, stored.slot, in.getTransactionId(), in.getIndex());
-                                batch.delete(cfAddr, pIdx);
-                            }
-                        }
+                                var stored = UtxoCborCodec.decodeUtxoRecord(prev);
+                                if (indexAddressHash) {
+                                    byte[] akey = UtxoKeyUtil.addrHash28(stored.address);
+                                    byte[] aIdx = UtxoKeyUtil.addressIndexKey(akey, stored.slot, in.getTransactionId(), in.getIndex());
+                                    batch.delete(cfAddr, aIdx);
+                                }
+                                if (indexPaymentCred) {
+                                    byte[] pc = UtxoKeyUtil.paymentCred28(stored.address);
+                                    if (pc != null) {
+                                        byte[] pIdx = UtxoKeyUtil.addressIndexKey(pc, stored.slot, in.getTransactionId(), in.getIndex());
+                                        batch.delete(cfAddr, pIdx);
+                                    }
+                                }
                                 spentRefs.add(new UtxoDeltaCodec.OutRef(in.getTransactionId(), in.getIndex()));
                             }
                         }
@@ -259,12 +285,14 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
                             var out = tx.getOutputs().get(outIdx);
                             java.math.BigInteger lovelace = java.math.BigInteger.ZERO;
                             var amounts = out.getAmounts();
-                            if (amounts != null) for (com.bloxbean.cardano.yaci.core.model.Amount a : amounts) if ("lovelace".equals(a.getUnit())) lovelace = a.getQuantity();
+                            if (amounts != null) for (com.bloxbean.cardano.yaci.core.model.Amount a : amounts)
+                                if ("lovelace".equals(a.getUnit())) lovelace = a.getQuantity();
                             byte[] val = UtxoCborCodec.encodeUtxoRecord(out.getAddress(), lovelace, amounts,
                                     out.getDatumHash(), out.getInlineDatum() != null ? com.bloxbean.cardano.yaci.core.util.HexUtil.decodeHexString(out.getInlineDatum()) : null,
                                     out.getScriptRef(), null, false, slot, blockNo, blockHash);
                             byte[] outKey = UtxoKeyUtil.outpointKey(tx.getTxHash(), outIdx);
                             batch.put(cfUnspent, outKey, val);
+                            //log.info("UTXO created: {}:{}", tx.getTxHash(), outIdx);
                             if (indexAddressHash) {
                                 byte[] addrHash = UtxoKeyUtil.addrHash28(out.getAddress());
                                 byte[] addrIdxKey = UtxoKeyUtil.addressIndexKey(addrHash, slot, tx.getTxHash(), outIdx);
@@ -313,7 +341,8 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
                         var out = tx.getCollateralReturn();
                         java.math.BigInteger lovelace = java.math.BigInteger.ZERO;
                         var amounts = out.getAmounts();
-                        if (amounts != null) for (com.bloxbean.cardano.yaci.core.model.Amount a : amounts) if ("lovelace".equals(a.getUnit())) lovelace = a.getQuantity();
+                        if (amounts != null) for (com.bloxbean.cardano.yaci.core.model.Amount a : amounts)
+                            if ("lovelace".equals(a.getUnit())) lovelace = a.getQuantity();
                         int outIdx = tx.getOutputs() != null ? tx.getOutputs().size() : 0;
                         byte[] val = UtxoCborCodec.encodeUtxoRecord(out.getAddress(), lovelace, amounts,
                                 out.getDatumHash(), out.getInlineDatum() != null ? com.bloxbean.cardano.yaci.core.util.HexUtil.decodeHexString(out.getInlineDatum()) : null,
@@ -419,12 +448,17 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
         }
     }
 
-    @Override public void close() {}
+    @Override
+    public void close() {
+    }
 
     private static int getInt(java.util.Map<String, Object> cfg, String key, int def) {
         Object v = cfg != null ? cfg.get(key) : null;
         if (v instanceof Number n) return n.intValue();
-        if (v != null) try { return Integer.parseInt(String.valueOf(v)); } catch (Exception ignored) {}
+        if (v != null) try {
+            return Integer.parseInt(String.valueOf(v));
+        } catch (Exception ignored) {
+        }
         return def;
     }
 
@@ -456,11 +490,15 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
             it.seekToFirst();
             while (it.isValid() && remaining > 0) {
                 var dec = UtxoDeltaCodec.decode(it.value());
-                if (dec.slot() <= deltaCutoff) { batch.delete(cfDelta, it.key()); remaining--; }
+                if (dec.slot() <= deltaCutoff) {
+                    batch.delete(cfDelta, it.key());
+                    remaining--;
+                }
                 it.next();
             }
             if (remaining != pruneBatchSize) db.write(wo, batch);
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         // Spent by spentSlot
         remaining = pruneBatchSize;
@@ -470,10 +508,14 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
                 Map m = (Map) com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.deserializeOne(it.value());
                 co.nstant.in.cbor.model.DataItem d = m.get(new UnsignedInteger(1));
                 long s = d != null ? com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toLong(d) : 0L;
-                if (s > 0 && s <= spentCutoff) { batch.delete(cfSpent, it.key()); remaining--; }
+                if (s > 0 && s <= spentCutoff) {
+                    batch.delete(cfSpent, it.key());
+                    remaining--;
+                }
                 it.next();
             }
             if (remaining != pruneBatchSize) db.write(wo, batch);
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 }
