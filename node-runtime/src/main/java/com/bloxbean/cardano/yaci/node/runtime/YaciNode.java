@@ -445,12 +445,14 @@ public class YaciNode implements NodeAPI {
      * Initialize HeaderSyncManager and BodyFetchManager for pipeline mode.
      */
     private void initializePipelineManagers() {
+        // Shared context to propagate latest network tip from headers to bodies
+        SyncTipContext syncTipContext = new SyncTipContext();
         if (headerSyncManager != null) {
             // Reset existing managers
             headerSyncManager.resetMetrics();
         } else {
             // Create new HeaderSyncManager
-            headerSyncManager = new HeaderSyncManager(peerClient, chainState);
+            headerSyncManager = new HeaderSyncManager(peerClient, chainState, 50000, syncTipContext);
             log.info("📋 HeaderSyncManager created");
         }
 
@@ -478,7 +480,8 @@ public class YaciNode implements NodeAPI {
                     gapThreshold,
                     maxBatchSize,
                     500, // 500ms monitoring interval
-                    1000   // tipProximityThreshold - consider "at tip" when within 1000 slots (~16 minutes)
+                    1000,  // tipProximityThreshold - consider "at tip" when within 1000 slots (~16 minutes)
+                    syncTipContext
             );
             log.info("📦 BodyFetchManager created with gapThreshold={}, maxBatchSize={}",
                     gapThreshold, maxBatchSize);
