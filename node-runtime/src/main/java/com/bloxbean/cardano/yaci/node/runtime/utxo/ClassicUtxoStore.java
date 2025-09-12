@@ -35,6 +35,7 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
     private final ColumnFamilyHandle cfSpent;
     private final ColumnFamilyHandle cfAddr;
     private final ColumnFamilyHandle cfDelta;
+    private final ColumnFamilyHandle cfMeta;
 
     private final int pruneDepth;
     private final int rollbackWindow;
@@ -55,6 +56,7 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
         this.cfSpent = supplier.rocks().handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_SPENT);
         this.cfAddr = supplier.rocks().handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_ADDR);
         this.cfDelta = supplier.rocks().handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_BLOCK_DELTA);
+        this.cfMeta = supplier.rocks().handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_META);
 
         this.pruneDepth = getInt(config, "yaci.node.utxo.pruneDepth", 2160);
         this.rollbackWindow = getInt(config, "yaci.node.utxo.rollbackWindow", 4320);
@@ -370,10 +372,10 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
             byte[] dval = UtxoDeltaCodec.encode(blockNo, slot, blockHash, createdRefs, spentRefs);
             byte[] dkey = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(blockNo).array();
             batch.put(cfDelta, dkey, dval);
+            // Update meta high-water marks atomically with the block apply
+            batch.put(cfMeta, META_LAST_APPLIED_SLOT, ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(slot).array());
+            batch.put(cfMeta, META_LAST_APPLIED_BLOCK, ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(blockNo).array());
             db.write(wo, batch);
-
-            // Bounded prune
-            prune(slot);
 
             if (log.isDebugEnabled()) {
                 log.debug("UTXO applied: block={} slot={} created={} spent={} era={}",
@@ -452,6 +454,127 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
     public void close() {
     }
 
+    // ---- Prune Scheduler Support ----
+
+    private static final byte[] META_LAST_APPLIED_SLOT = "meta.last_applied_slot".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final byte[] META_LAST_APPLIED_BLOCK = "meta.last_applied_block".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final byte[] META_PRUNE_DELTA_CURSOR = "prune.delta.cursor".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final byte[] META_PRUNE_SPENT_CURSOR = "prune.spent.cursor".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+    /**
+     * Execute one bounded prune pass using persisted cursors, outside the hot apply path.
+     * Uses lastAppliedSlot to compute safe cutoffs.
+     */
+    public void pruneOnce() {
+        if (!enabled) return;
+        long currentSlot = readLastAppliedSlot();
+        if (currentSlot <= 0) return;
+        long deltaCutoff = currentSlot - rollbackWindow;
+        long spentRetentionWindow = Math.max(pruneDepth, rollbackWindow);
+        long spentCutoff = currentSlot - spentRetentionWindow;
+
+        // Deltas CF: sequential keys by block number; stop at cutoff
+        pruneDeltas(deltaCutoff);
+        // Spent CF: key order unrelated to slot; scan in slices across runs
+        pruneSpent(spentCutoff);
+    }
+
+    private long readLastAppliedSlot() {
+        try {
+            byte[] v = db.get(cfMeta, META_LAST_APPLIED_SLOT);
+            if (v == null || v.length != 8) return 0L;
+            return ByteBuffer.wrap(v).order(ByteOrder.BIG_ENDIAN).getLong();
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    private void pruneDeltas(long deltaCutoff) {
+        int remaining = pruneBatchSize;
+        byte[] cursor = null;
+        try { cursor = db.get(cfMeta, META_PRUNE_DELTA_CURSOR); } catch (Exception ignored) {}
+        try (RocksIterator it = db.newIterator(cfDelta); WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+            if (cursor != null) {
+                it.seek(cursor);
+                if (it.isValid() && java.util.Arrays.equals(it.key(), cursor)) it.next();
+            } else {
+                it.seekToFirst();
+            }
+            byte[] lastProcessed = cursor;
+            while (it.isValid() && remaining > 0) {
+                byte[] k = it.key();
+                byte[] v = it.value();
+                var dec = UtxoDeltaCodec.decode(v);
+                if (dec.slot() <= deltaCutoff) {
+                    batch.delete(cfDelta, k);
+                    lastProcessed = k;
+                    remaining--;
+                    it.next();
+                } else {
+                    break;
+                }
+            }
+            if (remaining != pruneBatchSize) {
+                db.write(wo, batch);
+            }
+            // Persist cursor (last processed). If reached end, keep the last key; next run will seek and advance.
+            if (lastProcessed != null) {
+                try (WriteBatch mb = new WriteBatch(); WriteOptions mwo = new WriteOptions()) {
+                    mb.put(cfMeta, META_PRUNE_DELTA_CURSOR, lastProcessed);
+                    db.write(mwo, mb);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void pruneSpent(long spentCutoff) {
+        int remaining = pruneBatchSize;
+        byte[] cursor = null;
+        try { cursor = db.get(cfMeta, META_PRUNE_SPENT_CURSOR); } catch (Exception ignored) {}
+        boolean wrapped = false;
+        try (RocksIterator it = db.newIterator(cfSpent); WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+            if (cursor != null) {
+                it.seek(cursor);
+                if (it.isValid() && java.util.Arrays.equals(it.key(), cursor)) it.next();
+            } else {
+                it.seekToFirst();
+            }
+            byte[] lastProcessed = cursor;
+            while (remaining > 0) {
+                if (!it.isValid()) {
+                    if (wrapped) break; // completed a full pass
+                    // wrap to start and continue
+                    it.seekToFirst();
+                    wrapped = true;
+                    if (!it.isValid()) break;
+                }
+                byte[] k = it.key();
+                byte[] v = it.value();
+                try {
+                    Map m = (Map) com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.deserializeOne(v);
+                    co.nstant.in.cbor.model.DataItem d = m.get(new UnsignedInteger(1));
+                    long s = d != null ? com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toLong(d) : 0L;
+                    if (s > 0 && s <= spentCutoff) {
+                        batch.delete(cfSpent, k);
+                        remaining--;
+                    }
+                } catch (Exception ignore) {}
+                lastProcessed = k;
+                it.next();
+            }
+            if (remaining != pruneBatchSize) {
+                db.write(wo, batch);
+            }
+            // Update cursor. If we wrapped and reached end of pass without progress, clear cursor.
+            try (WriteBatch mb = new WriteBatch(); WriteOptions mwo = new WriteOptions()) {
+                if (lastProcessed != null) mb.put(cfMeta, META_PRUNE_SPENT_CURSOR, lastProcessed);
+                db.write(mwo, mb);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private static int getInt(java.util.Map<String, Object> cfg, String key, int def) {
         Object v = cfg != null ? cfg.get(key) : null;
         if (v instanceof Number n) return n.intValue();
@@ -474,48 +597,5 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
     }
 
 
-    private void prune(long currentSlot) {
-        // Keep spent entries at least as long as deltas to guarantee compact-delta rollback
-        // Effective windows
-        long deltaCutoff = currentSlot - rollbackWindow;
-        long spentRetentionWindow = Math.max(pruneDepth, rollbackWindow);
-        long spentCutoff = currentSlot - spentRetentionWindow;
-        if (rollbackWindow > pruneDepth) {
-            log.debug("UTXO prune windows: spent retained for {} slots (>= rollbackWindow {}), deltas retained for {} slots",
-                    spentRetentionWindow, rollbackWindow, rollbackWindow);
-        }
-        int remaining = pruneBatchSize;
-        // Deltas
-        try (RocksIterator it = db.newIterator(cfDelta); WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
-            it.seekToFirst();
-            while (it.isValid() && remaining > 0) {
-                var dec = UtxoDeltaCodec.decode(it.value());
-                if (dec.slot() <= deltaCutoff) {
-                    batch.delete(cfDelta, it.key());
-                    remaining--;
-                }
-                it.next();
-            }
-            if (remaining != pruneBatchSize) db.write(wo, batch);
-        } catch (Exception ignored) {
-        }
-
-        // Spent by spentSlot
-        remaining = pruneBatchSize;
-        try (RocksIterator it = db.newIterator(cfSpent); WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
-            it.seekToFirst();
-            while (it.isValid() && remaining > 0) {
-                Map m = (Map) com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.deserializeOne(it.value());
-                co.nstant.in.cbor.model.DataItem d = m.get(new UnsignedInteger(1));
-                long s = d != null ? com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toLong(d) : 0L;
-                if (s > 0 && s <= spentCutoff) {
-                    batch.delete(cfSpent, it.key());
-                    remaining--;
-                }
-                it.next();
-            }
-            if (remaining != pruneBatchSize) db.write(wo, batch);
-        } catch (Exception ignored) {
-        }
-    }
+    // ---- end prune support ----
 }
