@@ -31,6 +31,7 @@ import com.bloxbean.cardano.yaci.events.impl.NoopEventBus;
 import com.bloxbean.cardano.yaci.node.runtime.events.NodeStartedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.plugins.PluginManager;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.ClassicUtxoStore;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.PruneService;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 
 import java.time.Duration;
@@ -109,6 +110,7 @@ public class YaciNode implements NodeAPI {
     private final EventBus eventBus;
     private PluginManager pluginManager;
     private ClassicUtxoStore utxoStore;
+    private PruneService utxoPruneService;
 
     public YaciNode(YaciNodeConfig config) {
         this(config, RuntimeOptions.defaults());
@@ -163,6 +165,14 @@ public class YaciNode implements NodeAPI {
             if (utxoEnabled && "classic".equalsIgnoreCase(storeName) && (chainState instanceof DirectRocksDBChainState rocks)) {
                 this.utxoStore = new ClassicUtxoStore(rocks, eventBus, log, this.runtimeOptions.globals());
                 log.info("ClassicUtxoStore registered with EventBus");
+                // Start prune service on virtual-thread scheduler
+                long intervalSec = 5L;
+                Object po = this.runtimeOptions.globals().get("yaci.node.utxo.prune.schedule.seconds");
+                if (po instanceof Number n) intervalSec = Math.max(1L, n.longValue());
+                else if (po != null) try { intervalSec = Math.max(1L, Long.parseLong(String.valueOf(po))); } catch (Exception ignored) {}
+                this.utxoPruneService = new PruneService(this.utxoStore, intervalSec * 1000);
+                this.utxoPruneService.start();
+                log.info("UTXO prune service started (interval={}s)", intervalSec);
             } else {
                 log.info("UTXO store not initialized (enabled={}, store={}, rocksdb={})", utxoEnabled, storeName, (chainState instanceof DirectRocksDBChainState));
             }
@@ -652,6 +662,9 @@ public class YaciNode implements NodeAPI {
             if (chainState instanceof DirectRocksDBChainState) {
                 ((DirectRocksDBChainState) chainState).close();
             }
+
+            // Stop UTXO prune service
+            try { if (utxoPruneService != null) utxoPruneService.close(); } catch (Exception ignored) {}
 
             // Stop plugins and close event bus
             try { if (pluginManager != null) pluginManager.close(); } catch (Exception ignored) {}
