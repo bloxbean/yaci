@@ -2,9 +2,12 @@ package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
 import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.UnsignedInteger;
-import com.bloxbean.cardano.yaci.events.api.DomainEventListener;
-import com.bloxbean.cardano.yaci.events.api.SubscriptionOptions;
-import com.bloxbean.cardano.yaci.events.api.support.AnnotationListenerRegistrar;
+import com.bloxbean.cardano.yaci.core.model.Block;
+import com.bloxbean.cardano.yaci.core.model.Era;
+import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
+import com.bloxbean.cardano.yaci.core.storage.ChainState;
+import com.bloxbean.cardano.yaci.core.storage.ChainTip;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.Outpoint;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.AssetAmount;
@@ -26,7 +29,7 @@ import java.util.Optional;
  * Classic UTXO store backed by RocksDB column families.
  * Listens to BlockAppliedEvent and RollbackEvent, applies compact deltas.
  */
-public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
+public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Prunable, UtxoStatusProvider, AutoCloseable {
     private final RocksDB db;
     private final Logger log;
     private final boolean enabled;
@@ -42,9 +45,25 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
     private final int pruneBatchSize;
     private final boolean indexAddressHash;
     private final boolean indexPaymentCred;
+    private final UtxoProcessor processor;
+    // Metrics
+    private final boolean metricsEnabled;
+    private final java.util.concurrent.ScheduledExecutorService metricsScheduler;
+    private final long rocksSampleMillis;
+    private volatile long lastPruneMs = 0L;
+    private volatile long lastDeltaDeleted = 0L;
+    private volatile long lastSpentDeleted = 0L;
+    private final java.util.ArrayDeque<Long> applyLatencies = new java.util.ArrayDeque<>();
+    private final int applyLatencyWindow = 200;
+    private volatile int lastApplyCreated = 0;
+    private volatile int lastApplySpent = 0;
+    private final java.util.ArrayDeque<Long> applyTimestamps = new java.util.ArrayDeque<>();
+    private final java.util.ArrayDeque<Long> blockSizes = new java.util.ArrayDeque<>();
+    private final int blockSizeWindow = 200;
+    private volatile long lastBlockSize = 0L;
+    private final java.util.concurrent.atomic.AtomicReference<java.util.Map<String, Long>> cfEstimates = new java.util.concurrent.atomic.AtomicReference<>(java.util.Map.of());
 
     public ClassicUtxoStore(RocksDbSupplier supplier,
-                            com.bloxbean.cardano.yaci.events.api.EventBus bus,
                             Logger logger,
                             java.util.Map<String, Object> config) {
         this.db = supplier.rocks().db();
@@ -78,9 +97,19 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
         this.indexAddressHash = addrIdx;
         this.indexPaymentCred = payCredIdx;
 
-        // Register listeners
-        SubscriptionOptions defaults = SubscriptionOptions.builder().build();
-        AnnotationListenerRegistrar.register(bus, this, defaults);
+        this.processor = new ClassicUtxoProcessor(this.db);
+
+        // Metrics setup
+        this.metricsEnabled = getBool(config, "yaci.node.metrics.enabled", true);
+        int sampleSec = getInt(config, "yaci.node.metrics.sample.rocksdb.seconds", 30);
+        this.rocksSampleMillis = Math.max(0, sampleSec) * 1000L;
+        if (metricsEnabled && rocksSampleMillis > 0) {
+            this.metricsScheduler = java.util.concurrent.Executors.newScheduledThreadPool(1, java.lang.Thread.ofVirtual().factory());
+            this.metricsScheduler.scheduleAtFixedRate(this::sampleCfEstimates, rocksSampleMillis, rocksSampleMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } else {
+            this.metricsScheduler = null;
+        }
+
         log.info("ClassicUtxoStore initialized (enabled={})", enabled);
     }
 
@@ -232,15 +261,28 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
         return enabled;
     }
 
-    @DomainEventListener(order = 100)
-    public void onBlockApplied(BlockAppliedEvent e) {
+    @Override
+    public void applyBlock(BlockAppliedEvent e) {
         if (!enabled) return;
         if (e.block() == null) return; // header-only or EBB
-        try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+        long t0 = System.nanoTime();
+        try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions(); UtxoProcessor.ApplyContext ctx = processor.prepare(e, cfUnspent)) {
             long slot = e.slot();
             long blockNo = e.blockNumber();
             String blockHash = e.blockHash();
             var block = e.block();
+            // Capture block body size for metrics
+            try {
+                long bodySize = block.getHeader() != null && block.getHeader().getHeaderBody() != null
+                        ? block.getHeader().getHeaderBody().getBlockBodySize() : 0L;
+                if (metricsEnabled) {
+                    lastBlockSize = bodySize;
+                    synchronized (blockSizes) {
+                        blockSizes.addLast(bodySize);
+                        if (blockSizes.size() > blockSizeWindow) blockSizes.removeFirst();
+                    }
+                }
+            } catch (Throwable ignored) {}
 
             java.util.List<Integer> invList = block.getInvalidTransactions();
             java.util.Set<Integer> invalidIdx = (invList != null)
@@ -257,7 +299,7 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
                     if (tx.getInputs() != null) {
                         for (var in : tx.getInputs()) {
                             byte[] key = UtxoKeyUtil.outpointKey(in.getTransactionId(), in.getIndex());
-                            byte[] prev = db.get(cfUnspent, key);
+                            byte[] prev = ctx.getUnspent(key);
                             if (prev != null) {
                                 Map spentMap = new Map();
                                 spentMap.put(new UnsignedInteger(6), com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.deserializeOne(prev));
@@ -314,7 +356,7 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
                     if (tx.getCollateralInputs() != null) {
                         for (var in : tx.getCollateralInputs()) {
                             byte[] key = UtxoKeyUtil.outpointKey(in.getTransactionId(), in.getIndex());
-                            byte[] prev = db.get(cfUnspent, key);
+                            byte[] prev = ctx.getUnspent(key);
                             if (prev != null) {
                                 Map spentMap = new Map();
                                 spentMap.put(new UnsignedInteger(6), com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.deserializeOne(prev));
@@ -381,13 +423,27 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
                 log.debug("UTXO applied: block={} slot={} created={} spent={} era={}",
                         blockNo, slot, createdRefs.size(), spentRefs.size(), e.era());
             }
+            if (metricsEnabled) {
+                long dtMs = (System.nanoTime() - t0) / 1_000_000L;
+                synchronized (applyLatencies) {
+                    applyLatencies.addLast(dtMs);
+                    if (applyLatencies.size() > applyLatencyWindow) applyLatencies.removeFirst();
+                }
+                lastApplyCreated = createdRefs.size();
+                lastApplySpent = spentRefs.size();
+                long now = System.currentTimeMillis();
+                synchronized (applyTimestamps) {
+                    applyTimestamps.addLast(now);
+                    while (!applyTimestamps.isEmpty() && now - applyTimestamps.peekFirst() > 30_000L) applyTimestamps.removeFirst();
+                }
+            }
         } catch (Exception ex) {
             log.error("UTXO apply failed for block {}: {}", e.blockNumber(), ex.toString());
         }
     }
 
-    @DomainEventListener(order = 100)
-    public void onRollback(RollbackEvent e) {
+    @Override
+    public void rollbackTo(RollbackEvent e) {
         if (!enabled) return;
         long targetSlot = e.target().getSlot();
         try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions(); RocksIterator it = db.newIterator(cfDelta)) {
@@ -452,6 +508,51 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
 
     @Override
     public void close() {
+        if (metricsScheduler != null) metricsScheduler.shutdownNow();
+    }
+
+    @Override
+    public void reconcile(ChainState chainState) {
+        if (!enabled || chainState == null) return;
+        long lastAppliedBlock = 0L;
+        try {
+            byte[] b = db.get(cfMeta, META_LAST_APPLIED_BLOCK);
+            if (b != null && b.length == 8) lastAppliedBlock = ByteBuffer.wrap(b).order(ByteOrder.BIG_ENDIAN).getLong();
+        } catch (Exception ignored) {}
+
+        ChainTip tip = chainState.getTip();
+        if (tip == null) return;
+        long tipBlock = tip.getBlockNumber();
+
+        if (lastAppliedBlock == tipBlock) return; // in sync
+
+        if (lastAppliedBlock > tipBlock) {
+            // Roll back to tip slot (fork safe within rollback window)
+            String hashHex = tip.getBlockHash() != null ? HexUtil.encodeHexString(tip.getBlockHash()) : null;
+            rollbackTo(new com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent(
+                    new com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point(tip.getSlot(), hashHex), true));
+            return;
+        }
+
+        // Forward replay: apply missing blocks using stored bodies
+        for (long bn = lastAppliedBlock + 1; bn <= tipBlock; bn++) {
+            byte[] blockBytes = chainState.getBlockByNumber(bn);
+            if (blockBytes == null) {
+                // Body missing locally; skip and let live sync catch up
+                continue;
+            }
+            Block block;
+            try {
+                block = BlockSerializer.INSTANCE.deserialize(blockBytes);
+            } catch (Throwable t) {
+                // If decode fails, skip this block; live sync will republish later
+                continue;
+            }
+            long slot = block.getHeader().getHeaderBody().getSlot();
+            String blockHash = block.getHeader().getHeaderBody().getBlockHash();
+            Era era = block.getEra();
+            applyBlock(new com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent(era, slot, bn, blockHash, block));
+        }
     }
 
     // ---- Prune Scheduler Support ----
@@ -465,8 +566,10 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
      * Execute one bounded prune pass using persisted cursors, outside the hot apply path.
      * Uses lastAppliedSlot to compute safe cutoffs.
      */
+    @Override
     public void pruneOnce() {
         if (!enabled) return;
+        long t0 = System.nanoTime();
         long currentSlot = readLastAppliedSlot();
         if (currentSlot <= 0) return;
         long deltaCutoff = currentSlot - rollbackWindow;
@@ -474,9 +577,14 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
         long spentCutoff = currentSlot - spentRetentionWindow;
 
         // Deltas CF: sequential keys by block number; stop at cutoff
-        pruneDeltas(deltaCutoff);
+        long dd = pruneDeltasAndCount(deltaCutoff);
         // Spent CF: key order unrelated to slot; scan in slices across runs
-        pruneSpent(spentCutoff);
+        long sd = pruneSpentAndCount(spentCutoff);
+        if (metricsEnabled) {
+            lastPruneMs = (System.nanoTime() - t0) / 1_000_000L;
+            lastDeltaDeleted = dd;
+            lastSpentDeleted = sd;
+        }
     }
 
     private long readLastAppliedSlot() {
@@ -489,10 +597,97 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
         }
     }
 
-    private void pruneDeltas(long deltaCutoff) {
+    public long readLastAppliedBlock() {
+        try {
+            byte[] v = db.get(cfMeta, META_LAST_APPLIED_BLOCK);
+            if (v == null || v.length != 8) return 0L;
+            return ByteBuffer.wrap(v).order(ByteOrder.BIG_ENDIAN).getLong();
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    // ---- UtxoStatusProvider ----
+    @Override public String storeType() { return "classic"; }
+    @Override public int getPruneDepth() { return pruneDepth; }
+    @Override public int getRollbackWindow() { return rollbackWindow; }
+    @Override public int getPruneBatchSize() { return pruneBatchSize; }
+    @Override public long getLastAppliedBlock() { return readLastAppliedBlock(); }
+    @Override public long getLastAppliedSlot() { return readLastAppliedSlot(); }
+    @Override public byte[] getDeltaCursorKey() {
+        try { return db.get(cfMeta, META_PRUNE_DELTA_CURSOR); } catch (Exception e) { return null; }
+    }
+    @Override public byte[] getSpentCursorKey() {
+        try { return db.get(cfMeta, META_PRUNE_SPENT_CURSOR); } catch (Exception e) { return null; }
+    }
+
+    @Override
+    public java.util.Map<String, Object> getMetrics() {
+        if (!metricsEnabled) return java.util.Map.of();
+        java.util.List<Long> snap;
+        synchronized (applyLatencies) { snap = new java.util.ArrayList<>(applyLatencies); }
+        double avg = 0, p95 = 0;
+        if (!snap.isEmpty()) {
+            long sum = 0; for (long v : snap) sum += v; avg = sum * 1.0 / snap.size();
+            java.util.Collections.sort(snap);
+            p95 = snap.get((int)Math.floor(0.95 * (snap.size() - 1)));
+        }
+        long now = System.currentTimeMillis();
+        int within;
+        synchronized (applyTimestamps) {
+            while (!applyTimestamps.isEmpty() && now - applyTimestamps.peekFirst() > 30_000L) applyTimestamps.removeFirst();
+            within = applyTimestamps.size();
+        }
+        double bps = within / 30.0;
+        java.util.Map<String, Object> m = new java.util.HashMap<>();
+        m.put("apply.ms.avg", avg);
+        m.put("apply.ms.p95", p95);
+        m.put("apply.created.last", lastApplyCreated);
+        m.put("apply.spent.last", lastApplySpent);
+        m.put("throughput.blocksPerSec", bps);
+        m.put("prune.ms.last", lastPruneMs);
+        m.put("prune.deltaDeleted.last", lastDeltaDeleted);
+        m.put("prune.spentDeleted.last", lastSpentDeleted);
+        // Block size metrics
+        long bsAvg = 0;
+        java.util.List<Long> bsnap;
+        synchronized (blockSizes) { bsnap = new java.util.ArrayList<>(blockSizes); }
+        if (!bsnap.isEmpty()) {
+            long sum = 0; for (long v : bsnap) sum += v; bsAvg = Math.round(sum * 1.0 / bsnap.size());
+        }
+        m.put("block.size.last", lastBlockSize);
+        m.put("block.size.avg", bsAvg);
+        return m;
+    }
+
+    @Override
+    public java.util.Map<String, Long> getCfEstimates() {
+        return cfEstimates.get();
+    }
+
+    private void sampleCfEstimates() {
+        try {
+            java.util.Map<String, Long> m = new java.util.HashMap<>();
+            m.put("utxo_unspent.estimateNumKeys", parseEstimate(cfUnspent));
+            m.put("utxo_spent.estimateNumKeys", parseEstimate(cfSpent));
+            m.put("utxo_addr.estimateNumKeys", parseEstimate(cfAddr));
+            m.put("utxo_block_delta.estimateNumKeys", parseEstimate(cfDelta));
+            cfEstimates.set(java.util.Collections.unmodifiableMap(m));
+        } catch (Throwable ignored) {}
+    }
+
+    private long parseEstimate(ColumnFamilyHandle cf) {
+        try {
+            String v = db.getProperty(cf, "rocksdb.estimate-num-keys");
+            return Long.parseLong(v.trim());
+        } catch (Exception e) { return -1L; }
+    }
+
+    private long pruneDeltasAndCount(long deltaCutoff) {
         int remaining = pruneBatchSize;
         byte[] cursor = null;
         try { cursor = db.get(cfMeta, META_PRUNE_DELTA_CURSOR); } catch (Exception ignored) {}
+        long deleted = 0L;
         try (RocksIterator it = db.newIterator(cfDelta); WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
             if (cursor != null) {
                 it.seek(cursor);
@@ -509,6 +704,7 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
                     batch.delete(cfDelta, k);
                     lastProcessed = k;
                     remaining--;
+                    deleted++;
                     it.next();
                 } else {
                     break;
@@ -526,13 +722,15 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
             }
         } catch (Exception ignored) {
         }
+        return deleted;
     }
 
-    private void pruneSpent(long spentCutoff) {
+    private long pruneSpentAndCount(long spentCutoff) {
         int remaining = pruneBatchSize;
         byte[] cursor = null;
         try { cursor = db.get(cfMeta, META_PRUNE_SPENT_CURSOR); } catch (Exception ignored) {}
         boolean wrapped = false;
+        long deleted = 0L;
         try (RocksIterator it = db.newIterator(cfSpent); WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
             if (cursor != null) {
                 it.seek(cursor);
@@ -558,6 +756,7 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
                     if (s > 0 && s <= spentCutoff) {
                         batch.delete(cfSpent, k);
                         remaining--;
+                        deleted++;
                     }
                 } catch (Exception ignore) {}
                 lastProcessed = k;
@@ -573,6 +772,7 @@ public final class ClassicUtxoStore implements UtxoState, AutoCloseable {
             }
         } catch (Exception ignored) {
         }
+        return deleted;
     }
 
     private static int getInt(java.util.Map<String, Object> cfg, String key, int def) {

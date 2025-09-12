@@ -9,11 +9,11 @@ import java.util.concurrent.TimeUnit;
  */
 public final class PruneService implements AutoCloseable {
     private final ScheduledExecutorService scheduler;
-    private final ClassicUtxoStore store;
+    private final Prunable prunable;
     private final long intervalMillis;
 
-    public PruneService(ClassicUtxoStore store, long intervalMillis) {
-        this.store = store;
+    public PruneService(Prunable prunable, long intervalMillis) {
+        this.prunable = prunable;
         this.intervalMillis = Math.max(1000L, intervalMillis);
         this.scheduler = java.util.concurrent.Executors.newScheduledThreadPool(1, java.lang.Thread.ofVirtual().factory());
     }
@@ -21,7 +21,7 @@ public final class PruneService implements AutoCloseable {
     public void start() {
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                store.pruneOnce();
+                prunable.pruneOnce();
             } catch (Throwable ignored) { }
         }, intervalMillis, intervalMillis, TimeUnit.MILLISECONDS);
     }

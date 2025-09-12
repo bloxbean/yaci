@@ -32,6 +32,7 @@ import com.bloxbean.cardano.yaci.node.runtime.events.NodeStartedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.plugins.PluginManager;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.ClassicUtxoStore;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.PruneService;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandler;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 
 import java.time.Duration;
@@ -111,6 +112,8 @@ public class YaciNode implements NodeAPI {
     private PluginManager pluginManager;
     private ClassicUtxoStore utxoStore;
     private PruneService utxoPruneService;
+    private UtxoEventHandler utxoEventHandler;
+    private java.util.concurrent.ScheduledFuture<?> utxoLagTask;
 
     public YaciNode(YaciNodeConfig config) {
         this(config, RuntimeOptions.defaults());
@@ -163,8 +166,16 @@ public class YaciNode implements NodeAPI {
             Object storeOpt = this.runtimeOptions.globals().getOrDefault("yaci.node.utxo.store", "classic");
             String storeName = String.valueOf(storeOpt);
             if (utxoEnabled && "classic".equalsIgnoreCase(storeName) && (chainState instanceof DirectRocksDBChainState rocks)) {
-                this.utxoStore = new ClassicUtxoStore(rocks, eventBus, log, this.runtimeOptions.globals());
-                log.info("ClassicUtxoStore registered with EventBus");
+                this.utxoStore = new ClassicUtxoStore(rocks, log, this.runtimeOptions.globals());
+                // Reconcile UTXO with chainstate before subscribing and starting prune
+                try {
+                    this.utxoStore.reconcile(rocks);
+                    log.info("UTXO reconciliation complete at startup");
+                } catch (Throwable t) {
+                    log.warn("UTXO reconciliation error: {}", t.toString());
+                }
+                this.utxoEventHandler = new UtxoEventHandler(eventBus, this.utxoStore);
+                log.info("ClassicUtxoStore initialized; UtxoEventHandler registered with EventBus");
                 // Start prune service on virtual-thread scheduler
                 long intervalSec = 5L;
                 Object po = this.runtimeOptions.globals().get("yaci.node.utxo.prune.schedule.seconds");
@@ -173,6 +184,28 @@ public class YaciNode implements NodeAPI {
                 this.utxoPruneService = new PruneService(this.utxoStore, intervalSec * 1000);
                 this.utxoPruneService.start();
                 log.info("UTXO prune service started (interval={}s)", intervalSec);
+
+                // Schedule UTXO lag metric logging
+                long lagLogSec = 10L;
+                Object lagObj = this.runtimeOptions.globals().get("yaci.node.utxo.metrics.lag.logSeconds");
+                if (lagObj instanceof Number n) lagLogSec = Math.max(1L, n.longValue());
+                else if (lagObj != null) try { lagLogSec = Math.max(1L, Long.parseLong(String.valueOf(lagObj))); } catch (Exception ignored) {}
+                final long failIfAbove = parseLong(this.runtimeOptions.globals().get("yaci.node.utxo.lag.failIfAbove"), -1L);
+                this.utxoLagTask = scheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        long lastApplied = this.utxoStore.readLastAppliedBlock();
+                        var tip = chainState.getTip();
+                        long tipBlock = tip != null ? tip.getBlockNumber() : 0L;
+                        long lag = Math.max(0L, tipBlock - lastApplied);
+
+                        if (lag > 0)
+                            log.info("metric utxo.lag.blocks={}", lag);
+
+                        if (failIfAbove > 0 && lag > failIfAbove) {
+                            log.warn("UTXO lag {} blocks exceeds configured threshold {}", lag, failIfAbove);
+                        }
+                    } catch (Throwable ignored) {}
+                }, lagLogSec, lagLogSec, java.util.concurrent.TimeUnit.SECONDS);
             } else {
                 log.info("UTXO store not initialized (enabled={}, store={}, rocksdb={})", utxoEnabled, storeName, (chainState instanceof DirectRocksDBChainState));
             }
@@ -665,9 +698,11 @@ public class YaciNode implements NodeAPI {
 
             // Stop UTXO prune service
             try { if (utxoPruneService != null) utxoPruneService.close(); } catch (Exception ignored) {}
+            try { if (utxoLagTask != null) utxoLagTask.cancel(true); } catch (Exception ignored) {}
 
             // Stop plugins and close event bus
             try { if (pluginManager != null) pluginManager.close(); } catch (Exception ignored) {}
+            try { if (utxoEventHandler != null) utxoEventHandler.close(); } catch (Exception ignored) {}
             try { eventBus.close(); } catch (Exception ignored) {}
 
             log.info("Yaci Node stopped");
@@ -1696,4 +1731,11 @@ public class YaciNode implements NodeAPI {
     }
     */
 
+    private static long parseLong(Object obj, long def) {
+        if (obj instanceof Number n) return n.longValue();
+        if (obj != null) {
+            try { return Long.parseLong(String.valueOf(obj)); } catch (Exception ignored) {}
+        }
+        return def;
+    }
 }

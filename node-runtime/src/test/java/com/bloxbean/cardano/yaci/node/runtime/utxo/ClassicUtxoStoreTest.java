@@ -42,7 +42,9 @@ class ClassicUtxoStoreTest {
         cfg.put("yaci.node.utxo.pruneDepth", 3);
         cfg.put("yaci.node.utxo.rollbackWindow", 4);
         cfg.put("yaci.node.utxo.pruneBatchSize", 100);
-        store = new ClassicUtxoStore(chain, bus, log, cfg);
+        store = new ClassicUtxoStore(chain, log, cfg);
+        // register handler
+        new UtxoEventHandler(bus, store);
     }
 
     @AfterEach

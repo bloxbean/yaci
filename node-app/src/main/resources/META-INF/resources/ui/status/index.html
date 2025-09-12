@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yaci Node Status</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = { darkMode: 'media' };
+    </script>
+    <style>
+      html, body { height: 100%; }
+      #bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+    <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
+  </head>
+  <body class="h-full bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+    <canvas id="bg"></canvas>
+    <div class="relative z-10 container mx-auto px-4 py-6">
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-semibold tracking-tight">Yaci Node Status</h1>
+        <div class="flex items-center gap-3 text-sm">
+          <span id="updatedAt" class="text-slate-500 dark:text-slate-400">—</span>
+          <span id="reqMs" class="px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200">— ms</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-800/60 backdrop-blur p-4">
+          <div class="font-medium mb-2">Chain Tip</div>
+          <div class="space-y-1 text-sm">
+            <div>Block: <span id="tipBlock" class="mono">-</span></div>
+            <div>Slot: <span id="tipSlot" class="mono">-</span></div>
+            <div>Hash: <span id="tipHash" class="mono break-all">-</span></div>
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-800/60 backdrop-blur p-4">
+          <div class="font-medium mb-2">UTXO</div>
+          <div class="space-y-1 text-sm">
+            <div>Enabled: <span id="utxoEnabled" class="px-2 py-0.5 rounded-full text-xs">-</span></div>
+            <div>Store: <span id="utxoStore" class="mono">-</span></div>
+            <div>Last Applied: <span id="lastApplied" class="mono">-</span></div>
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-800/60 backdrop-blur p-4">
+          <div class="font-medium mb-2">Lag</div>
+          <div id="lag" class="text-3xl font-bold">-</div>
+          <canvas id="lagChart" class="mt-2 w-full" style="height: 120px"></canvas>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-800/60 backdrop-blur p-4 md:col-span-2 xl:col-span-1">
+          <div class="font-medium mb-2">Prune</div>
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div>Depth: <span id="pruneDepth" class="mono">-</span></div>
+            <div>RollbackWindow: <span id="rollbackWindow" class="mono">-</span></div>
+            <div>BatchSize: <span id="pruneBatch" class="mono">-</span></div>
+            <div>Delta Cursor: <span id="deltaCursor" class="mono break-all">-</span></div>
+            <div>Spent Cursor: <span id="spentCursor" class="mono break-all">-</span></div>
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-800/60 backdrop-blur p-4">
+          <div class="font-medium mb-2">Apply Latency</div>
+          <div class="text-sm">avg: <span id="applyAvg" class="mono">-</span> ms &nbsp; p95: <span id="applyP95" class="mono">-</span> ms</div>
+          <div class="text-sm mt-1">created: <span id="applyCreated" class="mono">-</span> &nbsp; spent: <span id="applySpent" class="mono">-</span></div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-800/60 backdrop-blur p-4">
+          <div class="font-medium mb-2">Throughput</div>
+          <div class="text-sm">blocks/sec: <span id="bps" class="mono">-</span></div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-800/60 backdrop-blur p-4">
+          <div class="font-medium mb-2">Block Size</div>
+          <div class="text-sm">last: <span id="blockSizeLast" class="mono">-</span> B</div>
+          <div class="text-sm">avg: <span id="blockSizeAvg" class="mono">-</span> B</div>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-800/60 backdrop-blur p-4 md:col-span-2">
+          <div class="font-medium mb-2">CF Estimates (sampled)</div>
+          <pre id="cfEstimates" class="mono text-xs whitespace-pre-wrap">-</pre>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // --------- Three.js subtle animated background ----------
+      (function(){
+        const params = new URLSearchParams(location.search);
+        const noanim = params.get('noanim') === '1';
+        const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (noanim || reduce) return; // respect reduce motion
+        const canvas = document.getElementById('bg');
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8));
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(55, 2, 0.1, 100);
+        camera.position.set(0, 0, 6);
+        const g = new THREE.IcosahedronGeometry(2.4, 1);
+        const m = new THREE.MeshBasicMaterial({ color: 0x3b82f6, wireframe: true, opacity: 0.18, transparent: true });
+        const mesh = new THREE.Mesh(g, m);
+        scene.add(mesh);
+        const resize = () => {
+          const w = window.innerWidth, h = window.innerHeight;
+          renderer.setSize(w, h, false);
+          camera.aspect = w / h; camera.updateProjectionMatrix();
+        };
+        resize();
+        window.addEventListener('resize', resize);
+        let raf;
+        const animate = (t) => {
+          mesh.rotation.x += 0.0008 * (16.7);
+          mesh.rotation.y += 0.0012 * (16.7);
+          renderer.render(scene, camera);
+          raf = requestAnimationFrame(animate);
+        };
+        raf = requestAnimationFrame(animate);
+        window.addEventListener('blur', ()=> cancelAnimationFrame(raf), { once: false });
+        window.addEventListener('focus', ()=> { if (!reduce && !noanim) raf = requestAnimationFrame(animate); });
+      })();
+
+      // --------- Status fetching & UI binding ----------
+      const lagHistory = [];
+      const maxPoints = 50;
+
+      function drawLag() {
+        const c = document.getElementById('lagChart');
+        const ctx = c.getContext('2d');
+        const w = c.width = c.clientWidth;
+        const h = c.height = 120;
+        ctx.clearRect(0,0,w,h);
+        if (lagHistory.length < 2) return;
+        const max = Math.max(...lagHistory, 1);
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        lagHistory.forEach((v, i) => {
+          const x = (i / (maxPoints - 1)) * (w-8) + 4;
+          const y = h - (v / max) * (h-20) - 10;
+          if (i === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+        });
+        ctx.stroke();
+      }
+
+      async function fetchStatus() {
+        const t0 = performance.now();
+        try {
+          const res = await fetch('/api/v1/status');
+          const t1 = performance.now();
+          document.getElementById('reqMs').textContent = `${Math.round(t1 - t0)} ms`;
+          const data = await res.json();
+          const chain = data.chain || {}; const utxo = data.utxo || {}; const cf = data.cfEstimates || {};
+          document.getElementById('tipBlock').textContent = chain.blockNumber ?? '-';
+          document.getElementById('tipSlot').textContent = chain.slot ?? '-';
+          document.getElementById('tipHash').textContent = chain.blockHash ?? '-';
+          const enabled = !!utxo.enabled;
+          const enabledEl = document.getElementById('utxoEnabled');
+          enabledEl.textContent = enabled ? 'ENABLED' : 'DISABLED';
+          enabledEl.className = `px-2 py-0.5 rounded-full text-xs ${enabled ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200'}`;
+          document.getElementById('utxoStore').textContent = utxo.store ?? '-';
+          document.getElementById('lastApplied').textContent = `${utxo.lastAppliedBlock ?? '-'} / ${utxo.lastAppliedSlot ?? '-'}`;
+          const lag = utxo.lagBlocks ?? 0;
+          document.getElementById('lag').textContent = lag;
+          lagHistory.push(lag); if (lagHistory.length > maxPoints) lagHistory.shift(); drawLag();
+          const pr = utxo.prune || {};
+          document.getElementById('pruneDepth').textContent = pr.pruneDepth ?? '-';
+          document.getElementById('rollbackWindow').textContent = pr.rollbackWindow ?? '-';
+          document.getElementById('pruneBatch').textContent = pr.pruneBatchSize ?? '-';
+          document.getElementById('deltaCursor').textContent = pr.deltaCursorKey ?? '-';
+          document.getElementById('spentCursor').textContent = pr.spentCursorKey ?? '-';
+          const mx = utxo.metrics || {};
+          document.getElementById('applyAvg').textContent = (mx['apply.ms.avg']?.toFixed?.(2)) ?? (mx['apply.ms.avg'] ?? '-');
+          document.getElementById('applyP95').textContent = (mx['apply.ms.p95']?.toFixed?.(2)) ?? (mx['apply.ms.p95'] ?? '-');
+          document.getElementById('applyCreated').textContent = mx['apply.created.last'] ?? '-';
+          document.getElementById('applySpent').textContent = mx['apply.spent.last'] ?? '-';
+          document.getElementById('bps').textContent = (mx['throughput.blocksPerSec']?.toFixed?.(2)) ?? (mx['throughput.blocksPerSec'] ?? '-');
+          document.getElementById('blockSizeLast').textContent = mx['block.size.last'] ?? '-';
+          document.getElementById('blockSizeAvg').textContent = mx['block.size.avg'] ?? '-';
+          const est = utxo.cfEstimates || {};
+          document.getElementById('cfEstimates').textContent = Object.entries(est).map(([k,v]) => `${k}: ${v}`).join('\n') || '-';
+          document.getElementById('updatedAt').textContent = new Date().toLocaleTimeString();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      fetchStatus();
+      setInterval(fetchStatus, 5000);
+    </script>
+  </body>
+  </html>

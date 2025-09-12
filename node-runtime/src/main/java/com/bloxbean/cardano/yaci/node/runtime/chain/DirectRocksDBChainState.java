@@ -48,12 +48,48 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
         this.dbPath = dbPath;
 
         try {
-            // Configure RocksDB
+            // Determine if tuning is enabled (system property or env override)
+            final boolean tuningEnabled = isRocksTuningEnabled();
+            // Select write behavior (mutually exclusive when enabled)
+            boolean pipelined = getBool("yaci.node.rocksdb.pipelined_write", "YACI_ROCKSDB_PIPELINED_WRITE", true);
+            boolean atomic = getBool("yaci.node.rocksdb.atomic_flush", "YACI_ROCKSDB_ATOMIC_FLUSH", false);
+            if (pipelined && atomic) {
+                // Prefer pipelined for throughput unless explicitly disabled
+                log.warn("atomic_flush is incompatible with enable_pipelined_write. Preferring pipelined_write; atomic_flush will be disabled.");
+                atomic = false;
+            }
+
+            // Configure RocksDB (global)
+            final int cores = Math.max(2, Runtime.getRuntime().availableProcessors());
             final DBOptions dbOptions = new DBOptions()
                     .setCreateIfMissing(true)
                     .setCreateMissingColumnFamilies(true)
-                    .setMaxOpenFiles(100)
+                    .setMaxOpenFiles(256)
                     .setKeepLogFileNum(5);
+            if (tuningEnabled) {
+                dbOptions
+                        .setAllowConcurrentMemtableWrite(true)
+                        .setIncreaseParallelism(cores);
+                if (pipelined) dbOptions.setEnablePipelinedWrite(true);
+                if (atomic) dbOptions.setAtomicFlush(true);
+            }
+
+            // UTXO CF-specific options (only when tuning enabled)
+            ColumnFamilyOptions utxoPointLookup = null;
+            ColumnFamilyOptions utxoAddrPrefix = null;
+            ColumnFamilyOptions utxoDeltaOpts = null;
+            if (tuningEnabled) {
+                utxoPointLookup = buildPointLookupCfOptions(); // utxo_unspent, utxo_spent
+                utxoAddrPrefix = buildPrefixScanCfOptions(28); // utxo_addr
+                utxoDeltaOpts = buildSequentialCfOptions();    // utxo_block_delta
+
+                // Log effective CF tuning plan for visibility
+                log.info("RocksDB CF tuning: utxo_unspent/utxo_spent => point-lookup (ZSTD, bloom≈10bpk, whole-key, pin L0, partitioned filters)");
+                log.info("RocksDB CF tuning: utxo_addr => prefix-scan (ZSTD, prefixExtractor=28, memtablePrefixBloom≈0.10, bloom≈10bpk, pin L0, partitioned filters)");
+                log.info("RocksDB CF tuning: utxo_block_delta => sequential (ZSTD)");
+            } else {
+                log.info("RocksDB tuning disabled via flag; using defaults for CF options");
+            }
 
             // Column family descriptors
             final List<ColumnFamilyDescriptor> cfDescriptors = Arrays.asList(
@@ -65,11 +101,19 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
                     new ColumnFamilyDescriptor("slot_to_hash".getBytes()),
                     new ColumnFamilyDescriptor("metadata".getBytes()),
                     new ColumnFamilyDescriptor("ebb_by_slot0".getBytes()),
-                    // UTXO CFs
-                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_UNSPENT.getBytes()),
-                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_SPENT.getBytes()),
-                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_ADDR.getBytes()),
-                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_BLOCK_DELTA.getBytes()),
+                    // UTXO CFs (tuned or defaults)
+                    new ColumnFamilyDescriptor(
+                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_UNSPENT.getBytes(),
+                            tuningEnabled ? utxoPointLookup : new ColumnFamilyOptions()),
+                    new ColumnFamilyDescriptor(
+                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_SPENT.getBytes(),
+                            tuningEnabled ? utxoPointLookup : new ColumnFamilyOptions()),
+                    new ColumnFamilyDescriptor(
+                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_ADDR.getBytes(),
+                            tuningEnabled ? utxoAddrPrefix : new ColumnFamilyOptions()),
+                    new ColumnFamilyDescriptor(
+                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_BLOCK_DELTA.getBytes(),
+                            tuningEnabled ? utxoDeltaOpts : new ColumnFamilyOptions()),
                     new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_META.getBytes()),
                     new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_MMR_NODES.getBytes())
             );
@@ -98,11 +142,76 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
                 cfByName.put(name, cfHandles.get(i));
             }
 
-            log.info("RocksDB initialized at: {}", dbPath);
+            log.info("RocksDB initialized at: {} (tuningEnabled={}, pipelinedWrite={}, atomicFlush={}, parallelism={})",
+                    dbPath, tuningEnabled, pipelined && tuningEnabled, atomic && tuningEnabled, cores);
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize RocksDB", e);
         }
+    }
+
+    private static boolean isRocksTuningEnabled() {
+        try {
+            String prop = System.getProperty("yaci.node.rocksdb.tuning.enabled");
+            if (prop != null) return !"false".equalsIgnoreCase(prop);
+            String env = System.getenv("YACI_ROCKSDB_TUNING_ENABLED");
+            if (env != null) return !"false".equalsIgnoreCase(env);
+        } catch (Throwable ignored) {}
+        return true; // default enabled
+    }
+
+    private static boolean getBool(String sysProp, String envVar, boolean defVal) {
+        try {
+            String prop = System.getProperty(sysProp);
+            if (prop != null) return Boolean.parseBoolean(prop);
+            String env = System.getenv(envVar);
+            if (env != null) return Boolean.parseBoolean(env);
+        } catch (Throwable ignored) {}
+        return defVal;
+    }
+
+    private static ColumnFamilyOptions buildPointLookupCfOptions() {
+        ColumnFamilyOptions opts = new ColumnFamilyOptions();
+        opts.setCompressionType(CompressionType.ZSTD_COMPRESSION);
+        BlockBasedTableConfig table = new BlockBasedTableConfig();
+        table.setFilterPolicy(new BloomFilter(10, false)); // ~10 bits/key
+        table.setWholeKeyFiltering(true);
+        table.setPinL0FilterAndIndexBlocksInCache(true);
+        table.setPartitionFilters(true);
+        opts.setTableFormatConfig(table);
+        return opts;
+    }
+
+    private static ColumnFamilyOptions buildPrefixScanCfOptions(int prefixLen) {
+        ColumnFamilyOptions opts = new ColumnFamilyOptions();
+        opts.setCompressionType(CompressionType.ZSTD_COMPRESSION);
+        // Try to set a fixed prefix extractor if available in this RocksJava version
+        try {
+            Class<?> stClazz = Class.forName("org.rocksdb.SliceTransform");
+            java.lang.reflect.Method factory = stClazz.getMethod("createFixedPrefix", int.class);
+            Object st = factory.invoke(null, prefixLen);
+            java.lang.reflect.Method setter = ColumnFamilyOptions.class.getMethod("setPrefixExtractor", stClazz);
+            setter.invoke(opts, st);
+        } catch (Throwable t) {
+            // Prefix extractor not available; continue without it (bloom still helps)
+            log.warn("RocksDB SliceTransform fixed prefix not available; proceeding without prefix extractor");
+        }
+        opts.setMemtablePrefixBloomSizeRatio(0.10);
+        BlockBasedTableConfig table = new BlockBasedTableConfig();
+        table.setFilterPolicy(new BloomFilter(10, false));
+        table.setWholeKeyFiltering(false);
+        table.setPinL0FilterAndIndexBlocksInCache(true);
+        table.setPartitionFilters(true);
+        opts.setTableFormatConfig(table);
+        return opts;
+    }
+
+    private static ColumnFamilyOptions buildSequentialCfOptions() {
+        ColumnFamilyOptions opts = new ColumnFamilyOptions();
+        opts.setCompressionType(CompressionType.ZSTD_COMPRESSION);
+        BlockBasedTableConfig table = new BlockBasedTableConfig();
+        opts.setTableFormatConfig(table);
+        return opts;
     }
 
     @Override
