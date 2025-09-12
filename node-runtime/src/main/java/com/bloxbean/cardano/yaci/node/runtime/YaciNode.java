@@ -113,6 +113,7 @@ public class YaciNode implements NodeAPI {
     private ClassicUtxoStore utxoStore;
     private PruneService utxoPruneService;
     private UtxoEventHandler utxoEventHandler;
+    private com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync utxoEventHandlerAsync;
     private java.util.concurrent.ScheduledFuture<?> utxoLagTask;
 
     public YaciNode(YaciNodeConfig config) {
@@ -174,8 +175,16 @@ public class YaciNode implements NodeAPI {
                 } catch (Throwable t) {
                     log.warn("UTXO reconciliation error: {}", t.toString());
                 }
-                this.utxoEventHandler = new UtxoEventHandler(eventBus, this.utxoStore);
-                log.info("ClassicUtxoStore initialized; UtxoEventHandler registered with EventBus");
+                boolean applyAsync = false;
+                Object asyncOpt = this.runtimeOptions.globals().get("yaci.node.utxo.applyAsync");
+                if (asyncOpt instanceof Boolean b) applyAsync = b; else if (asyncOpt != null) try { applyAsync = Boolean.parseBoolean(String.valueOf(asyncOpt)); } catch (Exception ignored) {}
+                if (applyAsync) {
+                    this.utxoEventHandlerAsync = new com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync(eventBus, this.utxoStore);
+                    log.info("ClassicUtxoStore initialized; UtxoEventHandlerAsync registered with EventBus (applyAsync=true)");
+                } else {
+                    this.utxoEventHandler = new UtxoEventHandler(eventBus, this.utxoStore);
+                    log.info("ClassicUtxoStore initialized; UtxoEventHandler registered with EventBus");
+                }
                 // Start prune service on virtual-thread scheduler
                 long intervalSec = 5L;
                 Object po = this.runtimeOptions.globals().get("yaci.node.utxo.prune.schedule.seconds");
@@ -703,6 +712,7 @@ public class YaciNode implements NodeAPI {
             // Stop plugins and close event bus
             try { if (pluginManager != null) pluginManager.close(); } catch (Exception ignored) {}
             try { if (utxoEventHandler != null) utxoEventHandler.close(); } catch (Exception ignored) {}
+            try { if (utxoEventHandlerAsync != null) utxoEventHandlerAsync.close(); } catch (Exception ignored) {}
             try { eventBus.close(); } catch (Exception ignored) {}
 
             log.info("Yaci Node stopped");

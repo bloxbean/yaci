@@ -80,6 +80,8 @@ public class YaciNodeProducer {
     String utxoIndexingStrategy;
     @ConfigProperty(name = "yaci.node.utxo.delta.selfContained", defaultValue = "false")
     boolean utxoDeltaSelfContained;
+    @ConfigProperty(name = "yaci.node.utxo.applyAsync", defaultValue = "false")
+    boolean utxoApplyAsync;
 
     private NodeAPI nodeAPI;
 
@@ -140,6 +142,7 @@ public class YaciNodeProducer {
             globals.put("yaci.node.utxo.index.payment_credential", utxoIndexPaymentCred);
             globals.put("yaci.node.utxo.indexingStrategy", utxoIndexingStrategy);
             globals.put("yaci.node.utxo.delta.selfContained", utxoDeltaSelfContained);
+            globals.put("yaci.node.utxo.applyAsync", utxoApplyAsync);
 
             RuntimeOptions runtimeOptions = new RuntimeOptions(eventsOptions, pluginsOptions, globals);
 

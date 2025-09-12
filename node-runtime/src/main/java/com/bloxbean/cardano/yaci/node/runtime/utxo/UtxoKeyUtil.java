@@ -1,5 +1,7 @@
 package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
+import com.bloxbean.cardano.client.address.Address;
+import com.bloxbean.cardano.client.address.AddressProvider;
 import com.bloxbean.cardano.client.address.util.AddressUtil;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -40,27 +42,17 @@ final class UtxoKeyUtil {
 
     static byte[] paymentCred28(String bech32OrHex) {
         try {
-            byte[] raw = AddressUtil.addressToBytes(bech32OrHex);
-            if (raw == null || raw.length < 29) return null;
-            int header = raw[0] & 0xff;
-            int type = (header >> 4) & 0x0f;
-            // Shelley address types where first credential is payment cred
-            switch (type) {
-                case 0: // base addr keyhash/keyhash
-                case 1: // base addr scripthash/keyhash
-                case 2: // base addr keyhash/scripthash
-                case 3: // base addr scripthash/scripthash
-                case 4: // pointer addr keyhash
-                case 5: // pointer addr scripthash
-                case 6: // enterprise addr keyhash
-                case 7: // enterprise addr scripthash
-                    byte[] cred = new byte[28];
-                    System.arraycopy(raw, 1, cred, 0, 28);
-                    return cred;
-                default:
-                    // Byron addr or reward addr (not UTXO) — fallback
-                    return null;
+            // Try as bech32 string first
+            Address addr;
+            try {
+                addr = new Address(bech32OrHex);
+            } catch (Exception e) {
+                // Fallback to hex-encoded bytes
+                byte[] raw;
+                try { raw = HexUtil.decodeHexString(bech32OrHex); } catch (Exception ex) { return null; }
+                addr = new Address(raw);
             }
+            return AddressProvider.getPaymentCredentialHash(addr).orElse(null);
         } catch (Exception e) {
             return null;
         }

@@ -242,8 +242,8 @@ class ClassicUtxoStoreTest {
 
     Amount lovelaceAmount(long lovelace) {
         return Amount.builder()
-                        .policyId(LOVELACE)
-                        .quantity(BigInteger.valueOf(lovelace))
+                .unit(LOVELACE)
+                .quantity(BigInteger.valueOf(lovelace))
                 .build();
     }
 }
