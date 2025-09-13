@@ -230,7 +230,8 @@ subprojects {
     tasks.withType(Test) {
         useJUnitPlatform()
         testLogging {
-            events "started", "passed", "skipped", "failed"
+//            events "started", "passed", "skipped", "failed"
+            events "failed"
             exceptionFormat "full"
             showStandardStreams = true
         }

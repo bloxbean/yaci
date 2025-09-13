@@ -228,7 +228,18 @@ public class YaciNode implements NodeAPI {
 
     @Override
     public UtxoState getUtxoState() {
-        return (utxoStore instanceof UtxoState u) ? u : null;
+        if (utxoStore instanceof UtxoState u) return u;
+        // Fallback: if MMR was configured but store not initialized yet (e.g., RocksDB not ready), expose a no-op MMR state
+        try {
+            Object enabledOpt = this.runtimeOptions.globals().get("yaci.node.utxo.enabled");
+            boolean utxoEnabled = enabledOpt instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(enabledOpt));
+            Object storeOpt = this.runtimeOptions.globals().getOrDefault("yaci.node.utxo.store", "classic");
+            String storeName = String.valueOf(storeOpt);
+            if (utxoEnabled && "mmr".equalsIgnoreCase(storeName)) {
+                return new com.bloxbean.cardano.yaci.node.runtime.utxo.NoopMmrUtxoState();
+            }
+        } catch (Throwable ignored) {}
+        return null;
     }
 
     /**

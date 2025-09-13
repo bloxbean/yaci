@@ -502,6 +502,8 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                     .blockHash(hash)
                     .build();
             eventBus.publish(new BlockAppliedEvent(era, slot, blockNumber, hash, block), appMeta, PublishOptions.builder().build());
+            // Also publish Byron/Shelley specific applied event equivalents where needed
+            // For Shelley+ we rely on BlockAppliedEvent only
 
             // Publish TipChanged if tip advanced
             var _newTip = chainState.getTip();
@@ -605,6 +607,8 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                     .blockHash(hash)
                     .build();
             eventBus.publish(new BlockAppliedEvent(Era.Byron, slot, blockNumber, hash, null), appMeta, PublishOptions.builder().build());
+            // Publish a ByronMainBlockAppliedEvent with full Byron block for specialized consumers
+            eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.ByronMainBlockAppliedEvent(slot, blockNumber, hash, byronBlock), appMeta, PublishOptions.builder().build());
 
             // Publish TipChanged if tip advanced
             var _newTipByron = chainState.getTip();
@@ -709,6 +713,8 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                     .blockHash(hash)
                     .build();
             eventBus.publish(new BlockAppliedEvent(Era.Byron, slot, blockNumber, hash, null), appMeta, PublishOptions.builder().build());
+            // Publish a ByronEbBlockAppliedEvent for EB blocks
+            eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.ByronEbBlockAppliedEvent(slot, blockNumber, hash, byronEbBlock), appMeta, PublishOptions.builder().build());
 
             // Publish TipChanged if tip advanced
             var _newTipEb = chainState.getTip();

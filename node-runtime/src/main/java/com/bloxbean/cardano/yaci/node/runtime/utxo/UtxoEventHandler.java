@@ -5,6 +5,7 @@ import com.bloxbean.cardano.yaci.events.api.support.AnnotationListenerRegistrar;
 import com.bloxbean.cardano.yaci.events.api.DomainEventListener;
 import com.bloxbean.cardano.yaci.events.api.EventBus;
 import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.runtime.events.ByronMainBlockAppliedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent;
 
 /**
@@ -23,7 +24,10 @@ public final class UtxoEventHandler implements AutoCloseable {
 
     @DomainEventListener(order = 100)
     public void onBlockApplied(BlockAppliedEvent e) {
-        if (writer != null && writer.isEnabled()) writer.applyBlock(e);
+        if (writer == null || !writer.isEnabled()) return;
+        if (e.block() == null) return; // Byron handled separately
+        var n = UtxoTxNormalizer.fromShelley(e.era(), e.slot(), e.blockNumber(), e.blockHash(), e.block());
+        writer.apply(n);
     }
 
     @DomainEventListener(order = 100)
@@ -31,9 +35,15 @@ public final class UtxoEventHandler implements AutoCloseable {
         if (writer != null && writer.isEnabled()) writer.rollbackTo(e);
     }
 
+    @DomainEventListener(order = 100)
+    public void onByronMainApplied(ByronMainBlockAppliedEvent e) {
+        if (writer == null || !writer.isEnabled()) return;
+        var n = UtxoTxNormalizer.fromByron(e.slot(), e.blockNumber(), e.blockHash(), e.block());
+        writer.apply(n);
+    }
+
     @Override
     public void close() {
         if (handles != null) handles.forEach(h -> { try { h.close(); } catch (Exception ignored) {} });
     }
 }
-

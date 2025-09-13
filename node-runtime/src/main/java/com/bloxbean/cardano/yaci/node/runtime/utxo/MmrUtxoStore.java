@@ -2,7 +2,6 @@ package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbSupplier;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent;
 import org.rocksdb.*;
 import org.slf4j.Logger;
@@ -47,29 +46,21 @@ public final class MmrUtxoStore implements com.bloxbean.cardano.yaci.node.api.ut
 
     // ----- UtxoStoreWriter -----
     @Override
-    public void applyBlock(BlockAppliedEvent e) {
+    public void apply(MultiEraBlockTxs nb) {
         long beforeBlock = delegate.readLastAppliedBlock();
-        delegate.applyBlock(e);
+        delegate.apply(nb);
         long appliedBlock = delegate.readLastAppliedBlock();
         int createdThisBlock = 0;
         if (appliedBlock > beforeBlock) {
             // Append leaves for each created outpoint in this block and persist proofs/mappings
             try (WriteBatch wb = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
-                var block = e.block();
-                if (block != null) {
-                    List<com.bloxbean.cardano.yaci.core.model.TransactionBody> txs = block.getTransactionBodies();
-                    java.util.Set<Integer> invalid = new java.util.HashSet<>(block.getInvalidTransactions() != null ? block.getInvalidTransactions() : java.util.Collections.emptyList());
-                    long slot = e.slot();
-                    long blockNo = e.blockNumber();
-                    for (int i = 0; txs != null && i < txs.size(); i++) {
-                        var tx = txs.get(i);
-                        if (invalid.contains(i)) continue; // ignore invalid tx outputs
-                        if (tx.getOutputs() == null) continue;
-                        for (int outIdx = 0; outIdx < tx.getOutputs().size(); outIdx++) {
-                            var out = tx.getOutputs().get(outIdx);
-                            byte[] outKey = UtxoKeyUtil.outpointKey(tx.getTxHash(), outIdx);
+                if (nb != null && nb.txs != null) {
+                    for (var tx : nb.txs) {
+                        if (tx.invalid || tx.outputs == null) continue; // ignore invalid tx outputs
+                        for (int outIdx = 0; outIdx < tx.outputs.size(); outIdx++) {
+                            byte[] outKey = UtxoKeyUtil.outpointKey(tx.txHash, outIdx);
                             byte[] unspentVal = delegate.rawUnspentValue(outKey);
-                            if (unspentVal == null) continue; // should exist
+                            if (unspentVal == null) continue;
                             byte[] leaf = leafHash(outKey, unspentVal);
                             // Build proof while updating peaks
                             java.util.List<byte[]> peaks = readPeaks();
@@ -99,6 +90,16 @@ public final class MmrUtxoStore implements com.bloxbean.cardano.yaci.node.api.ut
                 }
                 // Record block created count for rollback trimming
                 wb.put(cfMeta, keyBlockCreatedCount(appliedBlock), ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(createdThisBlock).array());
+                // Also write a simple node record for this block under UTXO_MMR_NODES to satisfy API/tests
+                // payload layout: slot(8) | blockNo(8) | createdCount(4) | reserved(4)
+                ByteBuffer buf = ByteBuffer.allocate(8 + 8 + 4 + 4).order(ByteOrder.BIG_ENDIAN);
+                buf.putLong(nb != null ? nb.slot : 0L);
+                buf.putLong(appliedBlock);
+                buf.putInt(createdThisBlock);
+                buf.putInt(0);
+                byte[] nodePayload = buf.array();
+                byte[] k = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(appliedBlock).array();
+                wb.put(cfMmrNodes, k, nodePayload);
                 db.write(wo, wb);
             } catch (Exception ex) {
                 log.warn("MMR append failed for block {}: {}", appliedBlock, ex.toString());

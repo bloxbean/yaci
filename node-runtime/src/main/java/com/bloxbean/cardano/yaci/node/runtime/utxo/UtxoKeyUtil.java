@@ -4,6 +4,7 @@ import com.bloxbean.cardano.client.address.Address;
 import com.bloxbean.cardano.client.address.AddressProvider;
 import com.bloxbean.cardano.client.address.util.AddressUtil;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
+import com.bloxbean.cardano.client.crypto.Base58;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
 import java.nio.ByteBuffer;
@@ -25,8 +26,14 @@ final class UtxoKeyUtil {
             byte[] raw = AddressUtil.addressToBytes(bech32OrHex);
             return Blake2bUtil.blake2bHash224(raw);
         } catch (Exception e) {
-            // Fallback: hash the literal string bytes (should be rare)
-            return Blake2bUtil.blake2bHash224(bech32OrHex.getBytes());
+            try {
+                // Try Byron base58 address
+                byte[] raw = Base58.decode(bech32OrHex);
+                return Blake2bUtil.blake2bHash224(raw);
+            } catch (Exception ex) {
+                // Last resort: hash the literal bytes
+                return Blake2bUtil.blake2bHash224(bech32OrHex.getBytes());
+            }
         }
     }
 

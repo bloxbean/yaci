@@ -1,7 +1,5 @@
 package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
-import com.bloxbean.cardano.yaci.core.model.TransactionBody;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
 
@@ -18,30 +16,15 @@ final class ClassicUtxoProcessor implements UtxoProcessor {
     }
 
     @Override
-    public ApplyContext prepare(BlockAppliedEvent event, ColumnFamilyHandle cfUnspent) {
-        if (event.block() == null) return k -> null;
-        var block = event.block();
-        List<TransactionBody> txs = block.getTransactionBodies();
-        if (txs == null || txs.isEmpty()) return k -> null;
-
-        // Collect outpoint keys for inputs of valid txs and collateral inputs of invalid txs
-        Set<Integer> invalidIdx = new HashSet<>();
-        if (block.getInvalidTransactions() != null) invalidIdx.addAll(block.getInvalidTransactions());
-
+    public ApplyContext prepare(MultiEraBlockTxs blockTxs, ColumnFamilyHandle cfUnspent) {
+        if (blockTxs == null || blockTxs.txs == null || blockTxs.txs.isEmpty()) return k -> null;
         List<byte[]> keys = new ArrayList<>();
-        for (int i = 0; i < txs.size(); i++) {
-            var tx = txs.get(i);
-            boolean invalid = invalidIdx.contains(i);
-            if (!invalid) {
-                if (tx.getInputs() != null) for (var in : tx.getInputs()) {
-                    byte[] key = UtxoKeyUtil.outpointKey(in.getTransactionId(), in.getIndex());
-                    keys.add(key);
-                }
-            } else {
-                if (tx.getCollateralInputs() != null) for (var in : tx.getCollateralInputs()) {
-                    byte[] key = UtxoKeyUtil.outpointKey(in.getTransactionId(), in.getIndex());
-                    keys.add(key);
-                }
+        for (MultiEraTx tx : blockTxs.txs) {
+            if (!tx.invalid && tx.inputs != null) {
+                for (MultiEraInput in : tx.inputs) keys.add(UtxoKeyUtil.outpointKey(in.txHash, in.index));
+            }
+            if (tx.invalid && tx.collateralInputs != null) {
+                for (MultiEraInput in : tx.collateralInputs) keys.add(UtxoKeyUtil.outpointKey(in.txHash, in.index));
             }
         }
 
