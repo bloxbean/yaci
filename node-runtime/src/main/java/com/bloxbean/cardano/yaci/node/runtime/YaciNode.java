@@ -110,7 +110,7 @@ public class YaciNode implements NodeAPI {
     private final RuntimeOptions runtimeOptions;
     private final EventBus eventBus;
     private PluginManager pluginManager;
-    private ClassicUtxoStore utxoStore;
+    private com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStoreWriter utxoStore;
     private PruneService utxoPruneService;
     private UtxoEventHandler utxoEventHandler;
     private com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync utxoEventHandlerAsync;
@@ -166,8 +166,8 @@ public class YaciNode implements NodeAPI {
             boolean utxoEnabled = enabledOpt instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(enabledOpt));
             Object storeOpt = this.runtimeOptions.globals().getOrDefault("yaci.node.utxo.store", "classic");
             String storeName = String.valueOf(storeOpt);
-            if (utxoEnabled && "classic".equalsIgnoreCase(storeName) && (chainState instanceof DirectRocksDBChainState rocks)) {
-                this.utxoStore = new ClassicUtxoStore(rocks, log, this.runtimeOptions.globals());
+            if (utxoEnabled && (chainState instanceof DirectRocksDBChainState rocks)) {
+                this.utxoStore = com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStoreFactory.create(rocks, log, this.runtimeOptions.globals());
                 // Reconcile UTXO with chainstate before subscribing and starting prune
                 try {
                     this.utxoStore.reconcile(rocks);
@@ -180,17 +180,19 @@ public class YaciNode implements NodeAPI {
                 if (asyncOpt instanceof Boolean b) applyAsync = b; else if (asyncOpt != null) try { applyAsync = Boolean.parseBoolean(String.valueOf(asyncOpt)); } catch (Exception ignored) {}
                 if (applyAsync) {
                     this.utxoEventHandlerAsync = new com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync(eventBus, this.utxoStore);
-                    log.info("ClassicUtxoStore initialized; UtxoEventHandlerAsync registered with EventBus (applyAsync=true)");
+                    log.info("UTXO store initialized ({}); UtxoEventHandlerAsync registered (applyAsync=true)",
+                            (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp) ? sp.storeType() : "?");
                 } else {
                     this.utxoEventHandler = new UtxoEventHandler(eventBus, this.utxoStore);
-                    log.info("ClassicUtxoStore initialized; UtxoEventHandler registered with EventBus");
+                    log.info("UTXO store initialized ({}); UtxoEventHandler registered",
+                            (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp) ? sp.storeType() : "?");
                 }
                 // Start prune service on virtual-thread scheduler
                 long intervalSec = 5L;
                 Object po = this.runtimeOptions.globals().get("yaci.node.utxo.prune.schedule.seconds");
                 if (po instanceof Number n) intervalSec = Math.max(1L, n.longValue());
                 else if (po != null) try { intervalSec = Math.max(1L, Long.parseLong(String.valueOf(po))); } catch (Exception ignored) {}
-                this.utxoPruneService = new PruneService(this.utxoStore, intervalSec * 1000);
+                this.utxoPruneService = new PruneService((com.bloxbean.cardano.yaci.node.runtime.utxo.Prunable) this.utxoStore, intervalSec * 1000);
                 this.utxoPruneService.start();
                 log.info("UTXO prune service started (interval={}s)", intervalSec);
 
@@ -202,7 +204,8 @@ public class YaciNode implements NodeAPI {
                 final long failIfAbove = parseLong(this.runtimeOptions.globals().get("yaci.node.utxo.lag.failIfAbove"), -1L);
                 this.utxoLagTask = scheduler.scheduleAtFixedRate(() -> {
                     try {
-                        long lastApplied = this.utxoStore.readLastAppliedBlock();
+                        long lastApplied = (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp)
+                                ? sp.getLastAppliedBlock() : 0L;
                         var tip = chainState.getTip();
                         long tipBlock = tip != null ? tip.getBlockNumber() : 0L;
                         long lag = Math.max(0L, tipBlock - lastApplied);
@@ -225,7 +228,7 @@ public class YaciNode implements NodeAPI {
 
     @Override
     public UtxoState getUtxoState() {
-        return utxoStore;
+        return (utxoStore instanceof UtxoState u) ? u : null;
     }
 
     /**

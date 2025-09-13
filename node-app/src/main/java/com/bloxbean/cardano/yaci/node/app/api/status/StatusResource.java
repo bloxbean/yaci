@@ -63,6 +63,12 @@ public class StatusResource {
         if (u instanceof UtxoStatusProvider sp) {
             utxo.put("metrics", sp.getMetrics());
             utxo.put("cfEstimates", sp.getCfEstimates());
+            if (u instanceof com.bloxbean.cardano.yaci.node.api.utxo.UtxoMmrState mmr) {
+                Map<String, Object> mmrMap = new HashMap<>();
+                mmrMap.put("leafCount", mmr.getMmrLeafCount());
+                mmrMap.put("root", mmr.getMmrRootHex());
+                utxo.put("mmr", mmrMap);
+            }
         }
 
         Map<String, Object> cfEstimates = new HashMap<>();

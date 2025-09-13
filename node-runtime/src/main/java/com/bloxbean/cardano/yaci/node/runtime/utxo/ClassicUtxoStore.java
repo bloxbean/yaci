@@ -683,6 +683,9 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         } catch (Exception e) { return -1L; }
     }
 
+    // package-private raw accessor for MMR backend
+    byte[] rawUnspentValue(byte[] outpointKey) throws Exception { return db.get(cfUnspent, outpointKey); }
+
     private long pruneDeltasAndCount(long deltaCutoff) {
         int remaining = pruneBatchSize;
         byte[] cursor = null;
