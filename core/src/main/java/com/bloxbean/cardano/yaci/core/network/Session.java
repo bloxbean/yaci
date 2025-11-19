@@ -18,19 +18,45 @@ class Session implements Disposable {
     private final SocketAddress socketAddress;
     private final Bootstrap clientBootstrap;
     private Channel activeChannel;
-    private final AtomicBoolean shouldReconnect; //Not used currently
+    private final AtomicBoolean shouldReconnect;
     private final HandshakeAgent handshakeAgent;
     private final Agent[] agents;
+    private final NodeClientConfig config;
 
     private SessionListener sessionListener;
 
-    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, HandshakeAgent handshakeAgent, Agent[] agents) {
+    /**
+     * Constructor with NodeClientConfig for configurable connection behavior.
+     *
+     * @param socketAddress the socket address to connect to
+     * @param clientBootstrap the Netty bootstrap
+     * @param config the connection configuration
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, NodeClientConfig config,
+                   HandshakeAgent handshakeAgent, Agent[] agents) {
         this.socketAddress = socketAddress;
         this.clientBootstrap = clientBootstrap;
-        this.shouldReconnect = new AtomicBoolean(true);
+        this.config = config != null ? config : NodeClientConfig.defaultConfig();
+        this.shouldReconnect = new AtomicBoolean(this.config.isAutoReconnect());
 
         this.handshakeAgent = handshakeAgent;
         this.agents = agents;
+    }
+
+    /**
+     * Constructor with default configuration (for backward compatibility).
+     *
+     * @param socketAddress the socket address to connect to
+     * @param clientBootstrap the Netty bootstrap
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     * @deprecated Use {@link #Session(SocketAddress, Bootstrap, NodeClientConfig, HandshakeAgent, Agent[])} instead
+     */
+    @Deprecated
+    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, HandshakeAgent handshakeAgent, Agent[] agents) {
+        this(socketAddress, clientBootstrap, NodeClientConfig.defaultConfig(), handshakeAgent, agents);
     }
 
     public void setSessionListener(SessionListener sessionListener) {
@@ -134,6 +160,7 @@ class Session implements Disposable {
     }
 
     private boolean showConnectionLog() {
-        return log.isDebugEnabled() || (handshakeAgent != null && !handshakeAgent.isSuppressConnectionInfoLog());
+        return config.isEnableConnectionLogging() &&
+                (log.isDebugEnabled() || (handshakeAgent != null && !handshakeAgent.isSuppressConnectionInfoLog()));
     }
 }

@@ -21,9 +21,28 @@ import java.net.SocketAddress;
 public class UnixSocketNodeClient extends NodeClient {
     private String nodeSocketFile;
 
-    public UnixSocketNodeClient(String nodeSocketFile, HandshakeAgent handshakeAgent, Agent... agents) {
-        super(handshakeAgent, agents);
+    /**
+     * Constructor with NodeClientConfig for configurable connection behavior.
+     *
+     * @param nodeSocketFile the path to the Unix domain socket
+     * @param config the connection configuration
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public UnixSocketNodeClient(String nodeSocketFile, NodeClientConfig config, HandshakeAgent handshakeAgent, Agent... agents) {
+        super(config, handshakeAgent, agents);
         this.nodeSocketFile = nodeSocketFile;
+    }
+
+    /**
+     * Constructor with default configuration (for backward compatibility).
+     *
+     * @param nodeSocketFile the path to the Unix domain socket
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public UnixSocketNodeClient(String nodeSocketFile, HandshakeAgent handshakeAgent, Agent... agents) {
+        this(nodeSocketFile, NodeClientConfig.defaultConfig(), handshakeAgent, agents);
     }
 
     @Override

@@ -1,9 +1,11 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.network.NodeClient;
+import com.bloxbean.cardano.yaci.core.network.NodeClientConfig;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.N2NVersionData;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
@@ -16,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -29,6 +32,8 @@ public class PeerDiscovery extends ReactiveFetcher<List<PeerAddress>> {
     private VersionTable versionTable;
     private final String peerRequestKey = "PEER_REQUEST";
     private int requestAmount = PeerSharingAgent.DEFAULT_REQUEST_AMOUNT;
+
+    private AcceptVersion acceptVersion;
 
     public PeerDiscovery(String host, int port, long protocolMagic) {
         this(host, port, protocolMagic, PeerSharingAgent.DEFAULT_REQUEST_AMOUNT);
@@ -74,8 +79,11 @@ public class PeerDiscovery extends ReactiveFetcher<List<PeerAddress>> {
                     if (versionData.getPeerSharing() == 0) {
                         log.warn("Peer sharing is disabled on remote node {}:{}", host, port);
                     }
+
+                    acceptVersion = handshakeAgent.getProtocolVersion();
                 } else {
                     log.warn("Could not determine peer sharing support for {}:{}", host, port);
+                    acceptVersion = null;
                 }
 
                 peerSharingAgent.sendNextMessage();
@@ -87,7 +95,13 @@ public class PeerDiscovery extends ReactiveFetcher<List<PeerAddress>> {
             }
         });
 
-        nodeClient = new TCPNodeClient(host, port, handshakeAgent, peerSharingAgent);
+        // Disable auto-reconnect for peer discovery - this is a short-lived connection
+        // If connection fails, we want to fail fast rather than retry indefinitely
+        NodeClientConfig config = NodeClientConfig.builder()
+                .autoReconnect(false)
+                .build();
+
+        nodeClient = new TCPNodeClient(host, port, config, handshakeAgent, peerSharingAgent);
     }
 
     @Override
@@ -179,5 +193,9 @@ public class PeerDiscovery extends ReactiveFetcher<List<PeerAddress>> {
 
     public int getPort() {
         return port;
+    }
+
+    public Optional<AcceptVersion> getAcceptVersion() {
+        return Optional.ofNullable(acceptVersion);
     }
 }

@@ -66,7 +66,6 @@ public class PeerDiscoveryIT extends BaseTest {
                 assertNotNull(peer.getAddress());
                 assertTrue(peer.getPort() > 0 && peer.getPort() <= 65535);
             });
-
         } finally {
             peerDiscovery.shutdown();
         }
@@ -212,6 +211,51 @@ public class PeerDiscoveryIT extends BaseTest {
                     assertEquals(com.bloxbean.cardano.yaci.core.protocol.peersharing.messages.PeerAddressType.IPv6,
                         peer.getType(), "IPv6 address should have IPv6 type");
                 }
+            }
+
+        } finally {
+            peerDiscovery.shutdown();
+        }
+    }
+
+    @Test
+    public void testGetAcceptVersionInfo() {
+        PeerDiscovery peerDiscovery = new PeerDiscovery(
+            Constants.PREPROD_PUBLIC_RELAY_ADDR,
+            Constants.PREPROD_PUBLIC_RELAY_PORT,
+            Constants.PREPROD_PROTOCOL_MAGIC, 5);
+
+        try {
+            // Discover peers to trigger handshake
+            Mono<List<PeerAddress>> peersMono = peerDiscovery.discover();
+            peersMono.block(Duration.ofSeconds(30));
+
+            // Verify we got version information after successful handshake
+            assertTrue(peerDiscovery.getAcceptVersion().isPresent(),
+                "Should have version info after successful handshake");
+
+            var acceptVersion = peerDiscovery.getAcceptVersion().get();
+            assertNotNull(acceptVersion.getVersionNumber(),
+                "Version number should not be null");
+            assertNotNull(acceptVersion.getVersionData(),
+                "Version data should not be null");
+
+            System.out.println("\n=== Protocol Version Information ===");
+            System.out.println("Protocol Version Number: " + acceptVersion.getVersionNumber());
+
+            // If it's N2N version data, extract additional details
+            if (acceptVersion.getVersionData() instanceof com.bloxbean.cardano.yaci.core.protocol.handshake.messages.N2NVersionData) {
+                var versionData = (com.bloxbean.cardano.yaci.core.protocol.handshake.messages.N2NVersionData) acceptVersion.getVersionData();
+
+                System.out.println("Network Magic: " + versionData.getNetworkMagic());
+                System.out.println("Initiator Only Mode: " + versionData.getInitiatorOnlyDiffusionMode());
+                System.out.println("Peer Sharing Enabled: " + (versionData.getPeerSharing() != 0));
+                System.out.println("Query Support: " + versionData.getQuery());
+                System.out.println("====================================\n");
+
+                // Validate the network magic matches what we expect
+                assertEquals(Constants.PREPROD_PROTOCOL_MAGIC, versionData.getNetworkMagic(),
+                    "Network magic should match preprod");
             }
 
         } finally {
