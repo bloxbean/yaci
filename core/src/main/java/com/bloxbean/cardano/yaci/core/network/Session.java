@@ -69,15 +69,21 @@ class Session implements Disposable {
     public Disposable start() throws InterruptedException {
         //Create a new connectFuture
         ChannelFuture connectFuture = null;
-        while (connectFuture == null && shouldReconnect.get()) {
+        // Always try to connect at least once, then retry only if shouldReconnect is true
+        do {
             try {
                 connectFuture = clientBootstrap.connect(socketAddress).sync();
             } catch (Exception e) {
                 log.error("Connection failed", e);
-                Thread.sleep(8000);
-                log.debug("Trying to reconnect !!!");
+                if (shouldReconnect.get()) {
+                    Thread.sleep(config.getInitialRetryDelayMs());
+                    log.debug("Trying to reconnect !!!");
+                } else {
+                    // If auto-reconnect is disabled, fail fast
+                    throw e;
+                }
             }
-        }
+        } while (connectFuture == null && shouldReconnect.get());
 
         handshakeAgent.reset();
         for (Agent agent: agents) {
