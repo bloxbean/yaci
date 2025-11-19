@@ -111,6 +111,16 @@ public abstract class NodeClient {
         return session != null;
     }
 
+    /**
+     * Get the current NodeClientConfig.
+     * This is primarily for use by subclasses to access configuration options.
+     *
+     * @return the current configuration
+     */
+    protected NodeClientConfig getConfig() {
+        return config;
+    }
+
     public void shutdown() {
         if (showConnectionLog())
             log.info("Shutdown connection !!!");

@@ -32,20 +32,57 @@ public class PeerDiscovery extends ReactiveFetcher<List<PeerAddress>> {
     private VersionTable versionTable;
     private final String peerRequestKey = "PEER_REQUEST";
     private int requestAmount = PeerSharingAgent.DEFAULT_REQUEST_AMOUNT;
+    private NodeClientConfig nodeClientConfig;
 
     private AcceptVersion acceptVersion;
 
+    /**
+     * Constructor with default settings optimized for peer discovery.
+     * Uses 10-second connection timeout and disables auto-reconnect for fast failure.
+     */
     public PeerDiscovery(String host, int port, long protocolMagic) {
         this(host, port, protocolMagic, PeerSharingAgent.DEFAULT_REQUEST_AMOUNT);
     }
 
+    /**
+     * Constructor with custom request amount and default connection settings.
+     * Uses 10-second connection timeout and disables auto-reconnect for fast failure.
+     */
     public PeerDiscovery(String host, int port, long protocolMagic, int requestAmount) {
+        this(host, port, protocolMagic, requestAmount, createDefaultPeerDiscoveryConfig());
+    }
+
+    /**
+     * Constructor with full control over connection behavior via NodeClientConfig.
+     * This allows customization of connection timeout, auto-reconnect, retry attempts, etc.
+     *
+     * @param host the host to connect to
+     * @param port the port to connect to
+     * @param protocolMagic the protocol magic (network identifier)
+     * @param requestAmount the number of peers to request
+     * @param nodeClientConfig the connection configuration
+     */
+    public PeerDiscovery(String host, int port, long protocolMagic, int requestAmount, NodeClientConfig nodeClientConfig) {
         this.host = host;
         this.port = port;
         this.protocolMagic = protocolMagic;
         this.requestAmount = Math.min(Math.max(requestAmount, 1), PeerSharingAgent.MAX_REQUEST_AMOUNT);
+        this.nodeClientConfig = nodeClientConfig;
         this.versionTable = N2NVersionTableConstant.v11AndAbove(protocolMagic, false, 1, false);
         init();
+    }
+
+    /**
+     * Creates default NodeClientConfig optimized for peer discovery:
+     * - Auto-reconnect disabled (fail fast)
+     * - 10-second connection timeout (faster than default 30s)
+     * - Connection logging enabled
+     */
+    private static NodeClientConfig createDefaultPeerDiscoveryConfig() {
+        return NodeClientConfig.builder()
+                .autoReconnect(false)
+                .connectionTimeoutMs(10000)  // 10 seconds for peer discovery
+                .build();
     }
 
     private void init() {
@@ -95,13 +132,8 @@ public class PeerDiscovery extends ReactiveFetcher<List<PeerAddress>> {
             }
         });
 
-        // Disable auto-reconnect for peer discovery - this is a short-lived connection
-        // If connection fails, we want to fail fast rather than retry indefinitely
-        NodeClientConfig config = NodeClientConfig.builder()
-                .autoReconnect(false)
-                .build();
-
-        nodeClient = new TCPNodeClient(host, port, config, handshakeAgent, peerSharingAgent);
+        // Use the configured NodeClientConfig (optimized for peer discovery by default)
+        nodeClient = new TCPNodeClient(host, port, nodeClientConfig, handshakeAgent, peerSharingAgent);
     }
 
     @Override

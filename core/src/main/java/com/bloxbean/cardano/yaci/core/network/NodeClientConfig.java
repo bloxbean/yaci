@@ -52,6 +52,17 @@ public class NodeClientConfig {
     private final boolean enableConnectionLogging = true;
 
     /**
+     * Connection timeout in milliseconds for establishing TCP connections.
+     * This configures Netty's CONNECT_TIMEOUT_MILLIS option.
+     * Default: 30000ms (30 seconds)
+     *
+     * For short-lived connections like peer discovery, consider using a lower value (e.g., 10000ms).
+     * For long-running connections, the default is appropriate.
+     */
+    @Builder.Default
+    private final int connectionTimeoutMs = 30000;
+
+    /**
      * Creates a default configuration with backward-compatible settings.
      * This is equivalent to calling {@code NodeClientConfig.builder().build()}
      *

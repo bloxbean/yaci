@@ -16,6 +16,7 @@ class NodeClientConfigTest {
         assertEquals(8000, config.getInitialRetryDelayMs(), "Default retry delay should be 8000ms");
         assertEquals(Integer.MAX_VALUE, config.getMaxRetryAttempts(), "Default max retry attempts should be unlimited");
         assertTrue(config.isEnableConnectionLogging(), "Connection logging should be enabled by default");
+        assertEquals(30000, config.getConnectionTimeoutMs(), "Default connection timeout should be 30000ms");
     }
 
     @Test
@@ -198,5 +199,43 @@ class NodeClientConfigTest {
         assertFalse(config.isEnableConnectionLogging(), "Connection logging should be disabled");
         // Other fields should have defaults
         assertTrue(config.isAutoReconnect());
+    }
+
+    @Test
+    void testCustomConnectionTimeout() {
+        NodeClientConfig config = NodeClientConfig.builder()
+                .connectionTimeoutMs(10000)
+                .build();
+
+        assertEquals(10000, config.getConnectionTimeoutMs(), "Connection timeout should be 10000ms");
+        // Other fields should have defaults
+        assertTrue(config.isAutoReconnect());
+        assertEquals(8000, config.getInitialRetryDelayMs());
+    }
+
+    @Test
+    void testPeerDiscoveryOptimizedConfig() {
+        // Test configuration optimized for peer discovery
+        NodeClientConfig config = NodeClientConfig.builder()
+                .autoReconnect(false)
+                .connectionTimeoutMs(10000)  // Faster timeout
+                .build();
+
+        assertFalse(config.isAutoReconnect(), "Auto-reconnect should be disabled for peer discovery");
+        assertEquals(10000, config.getConnectionTimeoutMs(), "Should use faster 10-second timeout");
+    }
+
+    @Test
+    void testConnectionTimeoutInToBuilder() {
+        NodeClientConfig original = NodeClientConfig.builder()
+                .connectionTimeoutMs(5000)
+                .build();
+
+        NodeClientConfig modified = original.toBuilder()
+                .connectionTimeoutMs(15000)
+                .build();
+
+        assertEquals(5000, original.getConnectionTimeoutMs(), "Original should be unchanged");
+        assertEquals(15000, modified.getConnectionTimeoutMs(), "Modified should have new timeout");
     }
 }

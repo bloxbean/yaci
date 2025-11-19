@@ -67,5 +67,6 @@ public class TCPNodeClient extends NodeClient {
     protected void configureChannel(Bootstrap bootstrap) {
         bootstrap.option(ChannelOption.SO_KEEPALIVE, true);
         bootstrap.option(ChannelOption.TCP_NODELAY, true);
+        bootstrap.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, getConfig().getConnectionTimeoutMs());
     }
 }
