@@ -12,10 +12,7 @@ and interact with it in a variety of ways. With Yaci's simple APIs, you can list
 previous blocks, query information from a local node, monitor the local mempool, and submit transactions to a local node.
 
 **Latest Release :**
-- [0.3.8](https://github.com/bloxbean/yaci/releases/tag/v0.3.8)
-
-**Latest Beta :**
-- [0.4.0-beta5](https://github.com/bloxbean/yaci/releases/tag/v0.4.0-beta5)
+- [0.4.0](https://github.com/bloxbean/yaci/releases/tag/v0.4.0)
 
 **Development Branch:** main
 
