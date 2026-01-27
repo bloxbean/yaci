@@ -22,19 +22,38 @@ public abstract class NodeClient {
     private Agent[] agents;
     private EventLoopGroup workerGroup;
     private Session session;
+    protected NodeClientConfig config;
 
     public NodeClient() {
 
     }
 
-    public NodeClient(HandshakeAgent handshakeAgent, Agent... agents) {
+    /**
+     * Constructor with NodeClientConfig for configurable connection behavior.
+     *
+     * @param config the connection configuration
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public NodeClient(NodeClientConfig config, HandshakeAgent handshakeAgent, Agent... agents) {
         this.sessionListener = new SessionListenerAdapter();
+        this.config = config != null ? config : NodeClientConfig.defaultConfig();
 
         this.handshakeAgent = handshakeAgent;
         this.agents = agents;
         this.workerGroup = configureEventLoopGroup();
 
         attachHandshakeListener();
+    }
+
+    /**
+     * Constructor with default configuration (for backward compatibility).
+     *
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public NodeClient(HandshakeAgent handshakeAgent, Agent... agents) {
+        this(NodeClientConfig.defaultConfig(), handshakeAgent, agents);
     }
 
     private void attachHandshakeListener() {
@@ -80,7 +99,7 @@ public abstract class NodeClient {
 
             SocketAddress socketAddress = createSocketAddress();
 
-            session = new Session(socketAddress, b, handshakeAgent, agents);
+            session = new Session(socketAddress, b, config, handshakeAgent, agents);
             session.setSessionListener(sessionListener);
             session.start();
         } catch (Exception e) {
@@ -90,6 +109,16 @@ public abstract class NodeClient {
 
     public boolean isRunning() {
         return session != null;
+    }
+
+    /**
+     * Get the current NodeClientConfig.
+     * This is primarily for use by subclasses to access configuration options.
+     *
+     * @return the current configuration
+     */
+    protected NodeClientConfig getConfig() {
+        return config;
     }
 
     public void shutdown() {
@@ -190,6 +219,7 @@ public abstract class NodeClient {
     }
 
     private boolean showConnectionLog() {
-        return log.isDebugEnabled() || (handshakeAgent != null && !handshakeAgent.isSuppressConnectionInfoLog());
+        return (config != null && config.isEnableConnectionLogging()) &&
+                (log.isDebugEnabled() || (handshakeAgent != null && !handshakeAgent.isSuppressConnectionInfoLog()));
     }
 }

@@ -14,7 +14,7 @@ import static com.bloxbean.cardano.yaci.core.protocol.peersharing.PeerSharingSta
 public class PeerSharingAgent extends Agent<PeerSharingAgentListener> {
     public static final int DEFAULT_REQUEST_AMOUNT = 10;
     public static final int MAX_REQUEST_AMOUNT = 100;
-    public static final long RESPONSE_TIMEOUT_MS = 30000; // 30 seconds
+    public static final long RESPONSE_TIMEOUT_MS = 5000;
 
     private boolean shutDown;
     private Queue<MsgShareRequest> requestQueue;
