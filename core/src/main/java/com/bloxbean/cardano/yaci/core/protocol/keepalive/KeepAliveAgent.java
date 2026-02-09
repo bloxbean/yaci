@@ -25,7 +25,7 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
     }
     public KeepAliveAgent(boolean isClient) {
         super(isClient);
-        this.currenState = Client;
+        this.currentState = Client;
         this.reqQueue = new ConcurrentLinkedQueue<>();
     }
 
@@ -36,7 +36,7 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
 
     @Override
     public boolean isDone() {
-        return currenState == Done;
+        return currentState == Done;
     }
 
     @Override
@@ -44,7 +44,7 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
         if (shutDown)
             return new MsgDone();
 
-        switch ((KeepAliveState)currenState) {
+        switch ((KeepAliveState)currentState) {
             case Client:
                 if (reqQueue.peek() != null) {
                     return reqQueue.poll();
@@ -84,7 +84,7 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
 
     @Override
     public void reset() {
-        this.currenState = Client;
+        this.currentState = Client;
         reqQueue.clear();
     }
 

@@ -37,7 +37,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
     }
     public BlockfetchAgent(boolean isClient) {
         super(isClient);
-        this.currenState = Idle;
+        this.currentState = Idle;
 
         this.startTime = System.currentTimeMillis();
     }
@@ -52,7 +52,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
         if (shutDown)
             return new ClientDone();
 
-        switch ((BlockfetchState) currenState) {
+        switch ((BlockfetchState) currentState) {
             case Idle:
                 if (from != null && to != null) {
                     return new RequestRange(from, to);
@@ -178,7 +178,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
 
     @Override
     public boolean isDone() {
-        return currenState == BlockfetchState.Done;
+        return currentState == BlockfetchState.Done;
     }
 
     public void shutdown() {
@@ -188,7 +188,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
 
     @Override
     public void reset() {
-        this.currenState = Idle;
+        this.currentState = Idle;
     }
 
     public void resetPoints(Point from, Point to) {

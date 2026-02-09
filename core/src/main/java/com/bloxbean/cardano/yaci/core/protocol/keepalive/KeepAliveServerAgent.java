@@ -21,7 +21,7 @@ public class KeepAliveServerAgent extends Agent<KeepAliveListener> {
 
     public KeepAliveServerAgent() {
         super(false); // This is a server agent
-        this.currenState = Client;
+        this.currentState = Client;
     }
 
     @Override
@@ -31,7 +31,7 @@ public class KeepAliveServerAgent extends Agent<KeepAliveListener> {
 
     @Override
     public boolean isDone() {
-        return currenState == Done;
+        return currentState == Done;
     }
 
     @Override
@@ -83,7 +83,7 @@ public class KeepAliveServerAgent extends Agent<KeepAliveListener> {
 
     private void handleDone() {
         log.debug("Received Done message, transitioning to Done state");
-        this.currenState = Done;
+        this.currentState = Done;
         this.pendingResponse = new MsgDone();
     }
 
@@ -94,7 +94,7 @@ public class KeepAliveServerAgent extends Agent<KeepAliveListener> {
 
     @Override
     public void reset() {
-        this.currenState = Server;
+        this.currentState = Server;
         this.pendingResponse = null;
     }
 }

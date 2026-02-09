@@ -29,7 +29,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
     public TxSubmissionAgent(boolean isClient) {
         super(isClient);
-        this.currenState = TxSubmissionState.Init;
+        this.currentState = TxSubmissionState.Init;
         this.txs = new ConcurrentLinkedQueue<>();
         this.pendingTxIds = new ConcurrentLinkedQueue<>();
         this.requestedTxIds = new ConcurrentLinkedQueue<>();
@@ -42,7 +42,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
     @Override
 public Message buildNextMessage() {
-        switch ((TxSubmissionState) currenState) {
+        switch ((TxSubmissionState) currentState) {
             case Init:
                 return new Init();
             case TxIdsNonBlocking:
@@ -179,7 +179,7 @@ public Message buildNextMessage() {
             return;
         }
         txs.add(TxSubmissionRequest.builder().txHash(txHash).txnBytes(txBytes).txBodyType(txBodyType).build());
-        if (TxSubmissionState.TxIdsBlocking.equals(currenState)) {
+        if (TxSubmissionState.TxIdsBlocking.equals(currentState)) {
             addTxToQueue(new TxId(txBodyType.getEra(), HexUtil.decodeHexString(txHash)));
             this.sendNextMessage();
         }
@@ -191,7 +191,7 @@ public Message buildNextMessage() {
 
     @Override
     public boolean isDone() {
-        return this.currenState == TxSubmissionState.Done;
+        return this.currentState == TxSubmissionState.Done;
     }
 
     @Override
@@ -199,6 +199,6 @@ public Message buildNextMessage() {
         txs.clear();
         pendingTxIds.clear();
         requestedTxIds.clear();
-        this.currenState = TxSubmissionState.Init;
+        this.currentState = TxSubmissionState.Init;
     }
 }

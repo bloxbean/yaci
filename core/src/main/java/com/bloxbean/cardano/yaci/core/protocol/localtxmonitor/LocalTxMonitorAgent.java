@@ -23,7 +23,7 @@ public class LocalTxMonitorAgent extends Agent<LocalTxMonitorListener> {
     }
     public LocalTxMonitorAgent(boolean isClient) {
         super(isClient);
-        this.currenState = Idle;
+        this.currentState = Idle;
         this.acquiredCommands = new ConcurrentLinkedQueue<>();
         this.pendingQueryQueue = new ConcurrentLinkedQueue<>();
     }
@@ -35,18 +35,18 @@ public class LocalTxMonitorAgent extends Agent<LocalTxMonitorListener> {
 
     @Override
     public boolean isDone() {
-        return currenState == LocalTxMonitorState.Done;
+        return currentState == LocalTxMonitorState.Done;
     }
 
     @Override
     protected Message buildNextMessage() {
-        if (shutDown && currenState == Idle) {
+        if (shutDown && currentState == Idle) {
             if (log.isDebugEnabled())
                 log.debug("Shutdown flag set. MsgDone()");
             return new MsgDone();
         }
 
-        switch ((LocalTxMonitorState) currenState) {
+        switch ((LocalTxMonitorState) currentState) {
             case Idle:
             case Acquired:
                 Message peekMsg = acquiredCommands.peek();
@@ -130,35 +130,35 @@ public class LocalTxMonitorAgent extends Agent<LocalTxMonitorListener> {
 
     public MsgAwaitAcquire awaitAcquire() {
         MsgAwaitAcquire awaitAcquire = new MsgAwaitAcquire();
-        this.currenState.verifyMessageType(awaitAcquire);
+        this.currentState.verifyMessageType(awaitAcquire);
         acquiredCommands.add(awaitAcquire);
         return awaitAcquire;
     }
 
     public MsgRelease release() {
         MsgRelease msgRelease = new MsgRelease();
-        this.currenState.verifyMessageType(msgRelease);
+        this.currentState.verifyMessageType(msgRelease);
         acquiredCommands.add(msgRelease);
         return msgRelease;
     }
 
     public MsgHasTx hasTx(String txId) {
         MsgHasTx msgHasTx = new MsgHasTx(txId);
-        this.currenState.verifyMessageType(msgHasTx);
+        this.currentState.verifyMessageType(msgHasTx);
         acquiredCommands.add(msgHasTx);
         return msgHasTx;
     }
 
     public MsgNextTx nextTx() {
         MsgNextTx msgNextTx = new MsgNextTx();
-        this.currenState.verifyMessageType(msgNextTx);
+        this.currentState.verifyMessageType(msgNextTx);
         acquiredCommands.add(msgNextTx);
         return msgNextTx;
     }
 
     public MsgGetSizes getSizeAndCapacity() {
         MsgGetSizes msgGetSizes = new MsgGetSizes();
-        this.currenState.verifyMessageType(msgGetSizes);
+        this.currentState.verifyMessageType(msgGetSizes);
         acquiredCommands.add(msgGetSizes);
         return msgGetSizes;
     }
@@ -166,7 +166,7 @@ public class LocalTxMonitorAgent extends Agent<LocalTxMonitorListener> {
     //TODO -- check
     @Override
     public void reset() {
-        this.currenState = Idle;
+        this.currentState = Idle;
         acquiredCommands.clear();
         pendingQueryQueue.clear();
     }

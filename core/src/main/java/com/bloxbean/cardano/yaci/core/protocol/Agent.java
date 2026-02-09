@@ -11,9 +11,9 @@ import java.util.List;
 
 @Slf4j
 public abstract class Agent<T extends AgentListener> {
-    protected State currenState;
+    protected State currentState;
     private Instant instant;
-    private Channel channel;
+    private volatile Channel channel;
     private final List<T> agentListeners = new ArrayList<>();
     private AcceptVersion acceptVersion;
 
@@ -23,7 +23,7 @@ public abstract class Agent<T extends AgentListener> {
         this.isClient = isClient;
     }
 
-    public void setChannel(Channel channel) {
+    public synchronized void setChannel(Channel channel) {
         if (this.channel != null && this.channel.isActive())
             log.warn("An active channel is already attached to this agent");
 
@@ -31,32 +31,32 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     public void sendRequest(Message message) {
-        if (currenState.hasAgency(isClient)) {
+        if (currentState.hasAgency(isClient)) {
             if (log.isDebugEnabled())
                 log.debug("Agency = true----------- Move to next state: agent for protocol id : " + this.getProtocolId());
-            State oldState = currenState;
-            currenState = currenState.nextState(message);
+            State oldState = currentState;
+            currentState = currentState.nextState(message);
             if (log.isDebugEnabled())
-                log.debug("Next state: " + currenState + " for protocol id: " + this.getProtocolId());
+                log.debug("Next state: " + currentState + " for protocol id: " + this.getProtocolId());
             // Log state transition for ChainSync
             if (this.getProtocolId() == 3 && log.isDebugEnabled()) {
                 log.debug("Blockfetch state transition after sending {}: {} -> {}",
-                        message.getClass().getSimpleName(), oldState, currenState);
+                        message.getClass().getSimpleName(), oldState, currentState);
             }
         }
     }
 
     public Message deserializeResponse(byte[] bytes) {
-        return this.currenState.handleInbound(bytes);
+        return this.currentState.handleInbound(bytes);
     }
 
     public synchronized void receiveResponse(Message message) {
-        State oldState = currenState;
-        currenState = currenState.nextState(message);
+        State oldState = currentState;
+        currentState = currentState.nextState(message);
 
         processResponse(message);
         //Notify
-        getAgentListeners().forEach(agentListener -> agentListener.onStateUpdate(oldState, currenState));
+        getAgentListeners().forEach(agentListener -> agentListener.onStateUpdate(oldState, currentState));
     }
 
     public void sendNextMessage() {
@@ -74,7 +74,8 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     protected void writeMessage(Message message, Runnable onSuccess) {
-        if (channel == null || !channel.isActive()) {
+        Channel ch = this.channel; // volatile read, captured once
+        if (ch == null || !ch.isActive()) {
             log.warn("Cannot write message: channel is null or inactive");
             return;
         }
@@ -104,15 +105,15 @@ public abstract class Agent<T extends AgentListener> {
         // Handle large payloads with automatic segmentation
         if (payload.length > 65535) {
             log.info("Large payload detected ({} bytes) - using mux-level segmentation", payload.length);
-            writeSegmentedMessage(protocolWithFlag, payload, onSuccess);
+            writeSegmentedMessage(ch, protocolWithFlag, payload, onSuccess);
             return;
         }
 
         // Normal single segment message
-        writeSingleSegment(protocolWithFlag, payload, onSuccess);
+        writeSingleSegment(ch, protocolWithFlag, payload, onSuccess);
     }
 
-    private void writeSingleSegment(int protocolWithFlag, byte[] payload, Runnable onSuccess) {
+    private void writeSingleSegment(Channel ch, int protocolWithFlag, byte[] payload, Runnable onSuccess) {
         int elapseTime = calculateElapsedTime();
 
         Segment segment = Segment.builder()
@@ -122,8 +123,8 @@ public abstract class Agent<T extends AgentListener> {
                 .build();
 
         // Synchronize on channel to prevent concurrent writes from different agents
-        synchronized (channel) {
-            channel.writeAndFlush(segment).addListener(future -> {
+        synchronized (ch) {
+            ch.writeAndFlush(segment).addListener(future -> {
                 if (future.isSuccess()) {
                     if (onSuccess != null) onSuccess.run();
                 } else {
@@ -133,13 +134,13 @@ public abstract class Agent<T extends AgentListener> {
         }
     }
 
-    private void writeSegmentedMessage(int protocolWithFlag, byte[] payload, Runnable onSuccess) {
+    private void writeSegmentedMessage(Channel ch, int protocolWithFlag, byte[] payload, Runnable onSuccess) {
         final int MAX_SEGMENT_SIZE = 65535;
         final int totalSegments = (payload.length + MAX_SEGMENT_SIZE - 1) / MAX_SEGMENT_SIZE;
 
         log.info("Segmenting large message: {} bytes into {} segments", payload.length, totalSegments);
 
-        synchronized (channel) {
+        synchronized (ch) {
             for (int i = 0; i < totalSegments; i++) {
                 int offset = i * MAX_SEGMENT_SIZE;
                 int segmentSize = Math.min(MAX_SEGMENT_SIZE, payload.length - offset);
@@ -160,7 +161,7 @@ public abstract class Agent<T extends AgentListener> {
 
                 log.debug("Sending segment {}/{} - {} bytes", segmentIndex + 1, totalSegments, segmentSize);
 
-                channel.writeAndFlush(segment).addListener(future -> {
+                ch.writeAndFlush(segment).addListener(future -> {
                     if (future.isSuccess()) {
                         if (isLastSegment && onSuccess != null) {
                             onSuccess.run();
@@ -189,7 +190,7 @@ public abstract class Agent<T extends AgentListener> {
 
 
     public final boolean hasAgency() {
-        return currenState.hasAgency(isClient);
+        return currentState.hasAgency(isClient);
     }
 
     protected final boolean isClient() {
@@ -263,7 +264,7 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     public State getCurrentState() {
-        return currenState;
+        return currentState;
     }
 
     public void onChannelWritabilityChanged(Channel channel) {
