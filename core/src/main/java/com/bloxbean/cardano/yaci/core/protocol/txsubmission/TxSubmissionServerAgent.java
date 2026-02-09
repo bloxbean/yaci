@@ -48,10 +48,10 @@ public class TxSubmissionServerAgent extends Agent<TxSubmissionListener> {
     public TxSubmissionServerAgent(TxSubmissionConfig config) {
         super(false); // Server agent
         this.config = config;
-        this.currenState = TxSubmissionState.Init;
+        this.currentState = TxSubmissionState.Init;
 
         log.info("" +
-                "", currenState);
+                "", currentState);
     }
 
     @Override
@@ -65,9 +65,9 @@ public class TxSubmissionServerAgent extends Agent<TxSubmissionListener> {
         // Only send messages when we have agency and want to request something
 
         log.debug("TxSubmissionServerAgent.buildNextMessage() called - state: {}, hasAgency: {}, pendingRequest: {}",
-                 currenState, hasAgency(), pendingRequest != null ? pendingRequest.getClass().getSimpleName() : "null");
+                 currentState, hasAgency(), pendingRequest != null ? pendingRequest.getClass().getSimpleName() : "null");
 
-        switch ((TxSubmissionState) currenState) {
+        switch ((TxSubmissionState) currentState) {
             case Idle:
                 // In Idle state, server has agency and could send RequestTxIds or RequestTxs
                 if (pendingRequest != null) {
@@ -97,7 +97,7 @@ public class TxSubmissionServerAgent extends Agent<TxSubmissionListener> {
                 return null;
             default:
                 // In other states, client has agency so we don't send messages
-                log.trace("TxSubmissionServerAgent: Client has agency in state {}", currenState);
+                log.trace("TxSubmissionServerAgent: Client has agency in state {}", currentState);
                 return null;
         }
     }
@@ -106,7 +106,7 @@ public class TxSubmissionServerAgent extends Agent<TxSubmissionListener> {
     public void processResponse(Message message) {
         if (message == null) return;
 
-        log.debug("Processing message: {} in state: {}", message.getClass().getSimpleName(), currenState);
+        log.debug("Processing message: {} in state: {}", message.getClass().getSimpleName(), currentState);
 
         if (message instanceof Init) {
             handleInit();
@@ -206,8 +206,8 @@ public class TxSubmissionServerAgent extends Agent<TxSubmissionListener> {
      * @param blocking Must be true for this implementation
      */
     private void requestTxIds(short ackTxIds, short reqTxIds, boolean blocking) {
-        if (currenState != TxSubmissionState.Idle) {
-            log.warn("Cannot request tx IDs in state: {}", currenState);
+        if (currentState != TxSubmissionState.Idle) {
+            log.warn("Cannot request tx IDs in state: {}", currentState);
             return;
         }
 
@@ -240,8 +240,8 @@ public class TxSubmissionServerAgent extends Agent<TxSubmissionListener> {
      * @param txIds List of transaction IDs to request
      */
     private void requestTxs(List<TxId> txIds) {
-        if (currenState != TxSubmissionState.Idle) {
-            log.warn("Cannot request txs in state: {}", currenState);
+        if (currentState != TxSubmissionState.Idle) {
+            log.warn("Cannot request txs in state: {}", currentState);
             return;
         }
 
@@ -264,7 +264,7 @@ public class TxSubmissionServerAgent extends Agent<TxSubmissionListener> {
 
     @Override
     public boolean isDone() {
-        return this.currenState == TxSubmissionState.Done;
+        return this.currentState == TxSubmissionState.Done;
     }
 
     @Override
@@ -273,7 +273,7 @@ public class TxSubmissionServerAgent extends Agent<TxSubmissionListener> {
         seenTxIds.clear();
         pendingAcknowledgments.set(0);
         pendingRequest = null;
-        this.currenState = TxSubmissionState.Init;
+        this.currentState = TxSubmissionState.Init;
         log.debug("TxSubmissionServerAgent reset");
     }
 

@@ -1,8 +1,8 @@
 package com.bloxbean.cardano.yaci.node.runtime.chain;
 
 public interface MemPool {
-    // Add a transaction to the mempool
-    void addTransaction(byte[] txBytes);
+    // Add a transaction to the mempool and return the created mempool transaction
+    MemPoolTransaction addTransaction(byte[] txBytes);
 
     // Get the next transaction to process (FIFO)
     MemPoolTransaction getNextTransaction();
@@ -18,4 +18,3 @@ public interface MemPool {
 
 
 }
-

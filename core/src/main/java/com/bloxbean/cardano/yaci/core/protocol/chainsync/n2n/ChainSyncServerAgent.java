@@ -33,7 +33,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     public ChainSyncServerAgent(ChainState chainState) {
         super(false); // This is a server agent
         this.chainState = chainState;
-        this.currenState = ChainSyncState.Idle;
+        this.currentState = ChainSyncState.Idle;
     }
 
     @Override
@@ -49,13 +49,13 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
             // Don't update state here - it will be updated in Agent.sendRequest
             if (log.isDebugEnabled()) {
                 log.debug("ChainSyncServerAgent.buildNextMessage() - Sending: {} in state: {} (hasAgency: {})",
-                         response.getClass().getSimpleName(), currenState, hasAgency());
+                         response.getClass().getSimpleName(), currentState, hasAgency());
             }
             return response;
         } else if (!pendingResponses.isEmpty()) {
             // We have a pending response but don't have agency - this is a protocol violation
             log.warn("ChainSyncServerAgent: Attempted to send {} but server doesn't have agency in state {}. Client has agency: {}",
-                     pendingResponses.peek().getClass().getSimpleName(), currenState, !hasAgency());
+                     pendingResponses.peek().getClass().getSimpleName(), currentState, !hasAgency());
             // Don't send the message - wait for proper state
         }
         return null;
@@ -68,7 +68,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
         // Don't update state here - it's already updated in Agent.receiveResponse
         if (log.isDebugEnabled()) {
             log.debug("ChainSyncServerAgent.processResponse() - Received: {} in state: {} (hasAgency: {})",
-                     message.getClass().getSimpleName(), currenState, hasAgency());
+                     message.getClass().getSimpleName(), currentState, hasAgency());
         }
 
         if (message instanceof FindIntersect) {
@@ -82,7 +82,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
         // Log state after handling message
         if (log.isDebugEnabled()) {
             log.debug("ChainSyncServerAgent.processResponse() - After handling: state={}, hasAgency={}, pendingResponse={}",
-                     currenState, hasAgency(), pendingResponses.isEmpty() ? "null" : pendingResponses.peek().getClass().getSimpleName());
+                     currentState, hasAgency(), pendingResponses.isEmpty() ? "null" : pendingResponses.peek().getClass().getSimpleName());
         }
     }
 
@@ -360,7 +360,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
     @Override
     public boolean isDone() {
-        return this.currenState == ChainSyncState.Done;
+        return this.currentState == ChainSyncState.Done;
     }
 
     /**
@@ -573,7 +573,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
      * Get current state for debugging
      */
     public State getCurrentState() {
-        return currenState;
+        return currentState;
     }
 
     /**
@@ -649,7 +649,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
     @Override
     public void reset() {
-        this.currenState = ChainSyncState.Idle;
+        this.currentState = ChainSyncState.Idle;
         this.intersectedPoint = null;
         this.pendingResponses.clear();
         this.lastSentPoint = null;

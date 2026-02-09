@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.node.api;
 
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
+import com.bloxbean.cardano.yaci.events.api.SubscriptionOptions;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.node.api.config.NodeConfig;
 import com.bloxbean.cardano.yaci.node.api.listener.NodeEventListener;
@@ -94,21 +95,37 @@ class NodeAPITest {
         public NodeConfig getConfig() {
             return null; // Simple implementation
         }
+
+        @Override
+        public boolean recoverChainState() {
+            // For test stub, assume no corruption detected
+            return false;
+        }
+
+        @Override
+        public void registerListeners(Object... listeners) {
+
+        }
+
+        @Override
+        public void registerListener(Object listener, SubscriptionOptions sbOptions) {
+
+        }
     }
 
     @Test
     void nodeAPI_shouldImplementAllRequiredMethods() {
         NodeAPI nodeAPI = new TestNodeAPI();
-        
+
         // Test initial state
         assertThat(nodeAPI.isRunning()).isFalse();
         assertThat(nodeAPI.isSyncing()).isFalse();
         assertThat(nodeAPI.isServerRunning()).isFalse();
-        
+
         // Test lifecycle
         nodeAPI.start();
         assertThat(nodeAPI.isRunning()).isTrue();
-        
+
         nodeAPI.stop();
         assertThat(nodeAPI.isRunning()).isFalse();
         assertThat(nodeAPI.isSyncing()).isFalse();
@@ -118,14 +135,14 @@ class NodeAPITest {
     @Test
     void nodeAPI_shouldProvideStatus() {
         NodeAPI nodeAPI = new TestNodeAPI();
-        
+
         NodeStatus status = nodeAPI.getStatus();
         assertThat(status).isNotNull();
         assertThat(status.isRunning()).isFalse();
         assertThat(status.isSyncing()).isFalse();
         assertThat(status.isServerRunning()).isFalse();
         assertThat(status.getTimestamp()).isGreaterThan(0);
-        
+
         nodeAPI.start();
         status = nodeAPI.getStatus();
         assertThat(status.isRunning()).isTrue();
@@ -134,11 +151,11 @@ class NodeAPITest {
     @Test
     void nodeAPI_shouldSupportListenerManagement() {
         NodeAPI nodeAPI = new TestNodeAPI();
-        
+
         // Create test listeners
         BlockChainDataListener blockchainListener = new BlockChainDataListener() {};
         NodeEventListener nodeListener = new NodeEventListener() {};
-        
+
         // Test that listener methods can be called without errors
         assertThatCode(() -> {
             nodeAPI.addBlockChainDataListener(blockchainListener);
@@ -151,13 +168,13 @@ class NodeAPITest {
     @Test
     void nodeAPI_shouldProvideAccessToChainStateAndConfig() {
         NodeAPI nodeAPI = new TestNodeAPI();
-        
+
         // Test that methods exist and can be called
         assertThatCode(() -> {
             ChainState chainState = nodeAPI.getChainState();
             ChainTip localTip = nodeAPI.getLocalTip();
             NodeConfig config = nodeAPI.getConfig();
-            
+
             // In our test implementation, these return null, which is fine for interface testing
             assertThat(chainState).isNull();
             assertThat(localTip).isNull();

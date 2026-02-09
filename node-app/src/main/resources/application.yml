@@ -41,9 +41,15 @@ quarkus:
 
 # Yaci Node Configuration
 yaci:
+  events:
+    enabled: true
+  plugins:
+    enabled: true
+    logging:
+      enabled: false
   node:
     # Network configuration (preprod, mainnet)
-    network: preprod
+    network: mainnet
 
     # Auto-start configuration
     auto-sync-start: true  # Set to true to automatically start syncing on application startup
@@ -52,9 +58,9 @@ yaci:
     client:
       enabled: true
     remote:
-      host: preprod-node.play.dev.cardano.org
+      host: backbone.cardano.iog.io
       port: 3001
-      protocol-magic: 1
+      protocol-magic: 764824073
 
     # Server configuration (for serving other clients)
     server:
@@ -72,6 +78,12 @@ yaci:
     log:
       level: DEBUG
   yaci:
+    events:
+      enabled: true
+    plugins:
+      enabled: true
+      logging:
+        enabled: false
     node:
       auto-sync-start: true  # Auto-start in development for convenience
       storage:
@@ -82,6 +94,12 @@ yaci:
     log:
       level: INFO
   yaci:
+    events:
+      enabled: true
+    plugins:
+      enabled: false
+      logging:
+        enabled: false
     node:
       auto-sync-start: false  # Don't auto-start during tests
       storage:
@@ -93,6 +111,12 @@ yaci:
     log:
       level: INFO
   yaci:
+    events:
+      enabled: true
+    plugins:
+      enabled: true
+      logging:
+        enabled: false
     node:
       auto-sync-start: true  # Manual control in production
       storage:

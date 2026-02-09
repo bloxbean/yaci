@@ -236,6 +236,11 @@ public class ServerIntegrationTest {
         }
 
         @Override
+        public boolean hasBlock(byte[] blockHash) {
+            return false; // Not needed for this test
+        }
+
+        @Override
         public void storeBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
 
         }
@@ -288,9 +293,19 @@ public class ServerIntegrationTest {
         }
 
         @Override
+        public Point findNextBlockHeader(Point currentPoint) {
+            return null;
+        }
+
+        @Override
         public List<Point> findBlocksInRange(Point from, Point to) {
             // Simple implementation for test
             return new ArrayList<>();
+        }
+
+        @Override
+        public Point findLastPointAfterNBlocks(Point from, long batchSize) {
+            return null;
         }
 
         @Override
@@ -309,6 +324,11 @@ public class ServerIntegrationTest {
         }
 
         @Override
+        public Point getFirstBlock() {
+            return null;
+        }
+
+        @Override
         public Long getBlockNumberBySlot(Long slot) {
             if (slot == 1000) return 1L;
             if (slot == 2000) return 2L;
@@ -323,6 +343,11 @@ public class ServerIntegrationTest {
 
         @Override
         public ChainTip getTip() {
+            return new ChainTip(3000, HexUtil.decodeHexString(block3Hash), 3);
+        }
+
+        @Override
+        public ChainTip getHeaderTip() {
             return new ChainTip(3000, HexUtil.decodeHexString(block3Hash), 3);
         }
 

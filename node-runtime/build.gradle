@@ -14,6 +14,9 @@ dependencies {
     implementation libs.cardano.client.core
 
     testImplementation libs.project.reactor.test
+
+    // Generate @DomainEventListener bindings at build time
+    annotationProcessor project(':events-processor')
 }
 
 java {

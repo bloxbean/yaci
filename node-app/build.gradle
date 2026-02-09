@@ -22,6 +22,11 @@ dependencies {
         exclude group: 'io.netty', module: 'netty-all'
     }
 
+    implementation("com.google.auto.service:auto-service:1.1.1")
+
+    annotationProcessor(project(':events-processor'))
+    annotationProcessor "com.google.auto.service:auto-service:1.1.1"
+
     testImplementation 'io.quarkus:quarkus-junit5'
     testImplementation 'io.rest-assured:rest-assured'
 }

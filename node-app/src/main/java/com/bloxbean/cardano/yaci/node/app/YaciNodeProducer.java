@@ -2,6 +2,10 @@ package com.bloxbean.cardano.yaci.node.app;
 
 import com.bloxbean.cardano.yaci.node.api.NodeAPI;
 import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
+import com.bloxbean.cardano.yaci.node.api.config.RuntimeOptions;
+import com.bloxbean.cardano.yaci.node.api.config.PluginsOptions;
+import com.bloxbean.cardano.yaci.events.api.config.EventsOptions;
+import com.bloxbean.cardano.yaci.events.api.SubscriptionOptions;
 import com.bloxbean.cardano.yaci.node.runtime.YaciNode;
 import io.quarkus.runtime.Shutdown;
 import io.quarkus.runtime.Startup;
@@ -19,7 +23,7 @@ public class YaciNodeProducer {
 
     private static final Logger log = LoggerFactory.getLogger(YaciNodeProducer.class);
 
-    @ConfigProperty(name = "yaci.node.network", defaultValue = "preprod")
+    @ConfigProperty(name = "yaci.node.network", defaultValue = "mainnet")
     String network;
 
     @ConfigProperty(name = "yaci.node.remote.host", defaultValue = "localhost")
@@ -48,6 +52,14 @@ public class YaciNodeProducer {
 
     @ConfigProperty(name = "yaci.node.auto-sync-start", defaultValue = "false")
     boolean autoSyncStart;
+
+    // Event/Plugin toggles
+    @ConfigProperty(name = "yaci.events.enabled", defaultValue = "true")
+    boolean eventsEnabled;
+    @ConfigProperty(name = "yaci.plugins.enabled", defaultValue = "true")
+    boolean pluginsEnabled;
+    @ConfigProperty(name = "yaci.plugins.logging.enabled", defaultValue = "false")
+    boolean loggingPluginEnabled;
 
     private NodeAPI nodeAPI;
 
@@ -92,8 +104,18 @@ public class YaciNodeProducer {
             // Validate configuration
             config.validate();
 
-            nodeAPI = new YaciNode(config);
+            // Build explicit runtime options (no System properties)
+            EventsOptions eventsOptions = new EventsOptions(eventsEnabled, 8192, SubscriptionOptions.Overflow.BLOCK);
+            java.util.Map<String, Object> pluginConfig = new java.util.HashMap<>();
+            pluginConfig.put("plugins.logging.enabled", loggingPluginEnabled);
+            PluginsOptions pluginsOptions = new PluginsOptions(pluginsEnabled, false, java.util.Set.of(), java.util.Set.of(), pluginConfig);
+            RuntimeOptions runtimeOptions = new RuntimeOptions(eventsOptions, pluginsOptions, java.util.Map.of());
+
+            nodeAPI = new YaciNode(config, runtimeOptions);
             log.info("Yaci Node created successfully");
+
+            //Register listeners
+            //nodeAPI.registerListeners(new Listner1(), new Listener2());
         }
 
         return nodeAPI;

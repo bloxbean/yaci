@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.util.OSUtil;
 import io.netty.bootstrap.Bootstrap;
+import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.EpollDomainSocketChannel;
 import io.netty.channel.epoll.EpollEventLoopGroup;
@@ -21,9 +22,28 @@ import java.net.SocketAddress;
 public class UnixSocketNodeClient extends NodeClient {
     private String nodeSocketFile;
 
-    public UnixSocketNodeClient(String nodeSocketFile, HandshakeAgent handshakeAgent, Agent... agents) {
-        super(handshakeAgent, agents);
+    /**
+     * Constructor with NodeClientConfig for configurable connection behavior.
+     *
+     * @param nodeSocketFile the path to the Unix domain socket
+     * @param config the connection configuration
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public UnixSocketNodeClient(String nodeSocketFile, NodeClientConfig config, HandshakeAgent handshakeAgent, Agent... agents) {
+        super(config, handshakeAgent, agents);
         this.nodeSocketFile = nodeSocketFile;
+    }
+
+    /**
+     * Constructor with default configuration (for backward compatibility).
+     *
+     * @param nodeSocketFile the path to the Unix domain socket
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public UnixSocketNodeClient(String nodeSocketFile, HandshakeAgent handshakeAgent, Agent... agents) {
+        this(nodeSocketFile, NodeClientConfig.defaultConfig(), handshakeAgent, agents);
     }
 
     @Override
@@ -49,6 +69,6 @@ public class UnixSocketNodeClient extends NodeClient {
 
     @Override
     protected void configureChannel(Bootstrap bootstrap) {
-
+        bootstrap.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, getConfig().getConnectionTimeoutMs());
     }
 }

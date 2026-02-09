@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -100,7 +101,7 @@ public class PeerSharingSerializers {
                     array.add(new UnsignedInteger(0));
 
                     // Convert 4 bytes to word32
-                    ByteBuffer buffer = ByteBuffer.wrap(addressBytes);
+                    ByteBuffer buffer = ByteBuffer.wrap(addressBytes).order(ByteOrder.LITTLE_ENDIAN);
                     long ipv4AsLong = buffer.getInt() & 0xFFFFFFFFL; // Convert to unsigned
                     array.add(new UnsignedInteger(ipv4AsLong));
 
@@ -111,7 +112,7 @@ public class PeerSharingSerializers {
                     array.add(new UnsignedInteger(1));
 
                     // Convert 16 bytes to 4 word32s
-                    ByteBuffer buffer = ByteBuffer.wrap(addressBytes);
+                    ByteBuffer buffer = ByteBuffer.wrap(addressBytes).order(ByteOrder.LITTLE_ENDIAN);
                     for (int i = 0; i < 4; i++) {
                         long word32 = buffer.getInt() & 0xFFFFFFFFL; // Convert to unsigned
                         array.add(new UnsignedInteger(word32));
@@ -136,7 +137,7 @@ public class PeerSharingSerializers {
                 int port = ((UnsignedInteger) dataItemList.get(2)).getValue().intValue();
 
                 // Convert word32 back to IPv4 address
-                byte[] addressBytes = ByteBuffer.allocate(4).putInt((int) ipv4Long).array();
+                byte[] addressBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt((int) ipv4Long).array();
                 try {
                     InetAddress inetAddress = InetAddress.getByAddress(addressBytes);
                     return PeerAddress.ipv4(inetAddress.getHostAddress(), port);
@@ -146,7 +147,7 @@ public class PeerSharingSerializers {
 
             } else if (type == 1) { // IPv6
                 byte[] addressBytes = new byte[16];
-                ByteBuffer buffer = ByteBuffer.wrap(addressBytes);
+                ByteBuffer buffer = ByteBuffer.wrap(addressBytes).order(ByteOrder.LITTLE_ENDIAN);
 
                 // Convert 4 word32s back to 16 bytes
                 for (int i = 1; i <= 4; i++) {
@@ -154,7 +155,11 @@ public class PeerSharingSerializers {
                     buffer.putInt((int) word32);
                 }
 
-                int port = ((UnsignedInteger) dataItemList.get(5)).getValue().intValue();
+                // Handle both V11-12 (8 elements) and V13+ (6 elements) formats
+                // V11-12: [type, addr1-4, flowInfo, scopeId, port] - port at index 7
+                // V13+:   [type, addr1-4, port] - port at index 5
+                int portIndex = dataItemList.size() == 8 ? 7 : 5;
+                int port = ((UnsignedInteger) dataItemList.get(portIndex)).getValue().intValue();
 
                 try {
                     InetAddress inetAddress = InetAddress.getByAddress(addressBytes);

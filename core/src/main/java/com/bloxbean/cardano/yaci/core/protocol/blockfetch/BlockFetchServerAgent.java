@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
 
+import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.*;
@@ -31,7 +32,7 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
     public BlockFetchServerAgent(ChainState chainState) {
         super(false);
         this.chainState = chainState;
-        this.currenState = BlockfetchState.Idle;
+        this.currentState = BlockfetchState.Idle;
         this.requestQueue = new ArrayBlockingQueue<>(MAX_QUEUE_SIZE);
         this.executor = Executors.newSingleThreadExecutor();
     }
@@ -45,10 +46,10 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
     @Override
     public void sendRequest(Message message) {
         //DON'T call super.sendRequest() here, as we want to manage state transitions manually in the agent
-        log.debug("BlockFetch sending message: {} in state: {}", message.getClass().getSimpleName(), currenState);
+        log.debug("BlockFetch sending message: {} in state: {}", message.getClass().getSimpleName(), currentState);
 
         if (log.isDebugEnabled()) {
-            log.debug("BlockFetch state after sending {}: {}", message.getClass().getSimpleName(), currenState);
+            log.debug("BlockFetch state after sending {}: {}", message.getClass().getSimpleName(), currentState);
         }
     }
 
@@ -59,7 +60,7 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
         // But we need to manage state transitions manually for proper async loading
 
         if (log.isDebugEnabled()) {
-            log.debug("BlockFetch received message: {} in state: {}", message.getClass().getSimpleName(), currenState);
+            log.debug("BlockFetch received message: {} in state: {}", message.getClass().getSimpleName(), currentState);
         }
 
         // Process the message without automatic state transitions
@@ -67,7 +68,7 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
 
         // Notify listeners about the message (but don't change state)
         getAgentListeners().forEach(listener ->
-                listener.onStateUpdate(currenState, currenState));
+                listener.onStateUpdate(currentState, currentState));
     }
 
     @Override
@@ -111,13 +112,31 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
             List<Point> range = chainState.findBlocksInRange(request.getFrom(), request.getTo());
 
             if (range.isEmpty()) {
-                log.warn("Missing block(s) in range. Sending MsgNoBlocks.");
+                log.warn("No blocks found in requested range {} → {}. Sending NoBlocks.", from, to);
                 sendToClient(new NoBlocks());
                 processNext();
                 return;
             }
 
-            // Send StartBatch
+            if (YaciConfig.INSTANCE.isBlockFetchCheckRangeExists()) {
+                // Preflight availability check (existence-only) to avoid mid-batch failures
+                for (Point point : range) {
+                    byte[] hash = HexUtil.decodeHexString(point.getHash());
+                    boolean exists = false;
+                    try {
+                        exists = chainState.hasBlock(hash);
+                    } catch (Exception ignored) {
+                    }
+                    if (!exists) {
+                        log.warn("Requested range contains missing body at {}. Sending NoBlocks.", point);
+                        sendToClient(new NoBlocks());
+                        processNext();
+                        return;
+                    }
+                }
+            }
+
+            // All bodies available: send batch
             sendToClient(new StartBatch());
 
             counter.incrementAndGet();
@@ -126,6 +145,7 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
                 byte[] blockHash = HexUtil.decodeHexString(point.getHash());
                 byte[] blockBody = chainState.getBlock(blockHash);
 
+                //TODO -- Checking again here. Verify if it breaks protocol
                 if (blockBody == null) {
                     log.error("Block missing after availability check. Point: {}", point);
                     sendToClient(new NoBlocks());
@@ -155,7 +175,7 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
                 log.debug("Message size: {} bytes", message.serialize().length);
             }
             writeMessage(message, null);
-            currenState = currenState.nextState(message);
+            currentState = currentState.nextState(message);
         } else {
             log.warn("Channel not writable. Queuing: {}", message.getClass().getSimpleName());
             pendingMessages.add(message);
@@ -207,12 +227,12 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
 
     @Override
     public boolean isDone() {
-        return currenState == BlockfetchState.Done;
+        return currentState == BlockfetchState.Done;
     }
 
     @Override
     public void reset() {
-        this.currenState = BlockfetchState.Idle;
+        this.currentState = BlockfetchState.Idle;
         requestQueue.clear();
         pendingMessages.clear();
 

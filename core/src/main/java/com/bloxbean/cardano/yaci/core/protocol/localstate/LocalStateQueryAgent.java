@@ -28,7 +28,7 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
     }
     public LocalStateQueryAgent(boolean isClient) {
         super(isClient);
-        this.currenState = Idle;
+        this.currentState = Idle;
 
         acquiredCommands = new ConcurrentLinkedQueue<>();
         pendingQueryCommands = new ConcurrentLinkedQueue<>();
@@ -41,18 +41,18 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     @Override
     public boolean isDone() {
-        return currenState == LocalStateQueryState.Done;
+        return currentState == LocalStateQueryState.Done;
     }
 
     @Override
     protected Message buildNextMessage() {
-        if (shutDown && currenState == LocalTxMonitorState.Idle) {
+        if (shutDown && currentState == LocalTxMonitorState.Idle) {
             if (log.isDebugEnabled())
                 log.debug("Shutdown flag set. MsgDone()");
             return new MsgDone();
         }
 
-        switch ((LocalStateQueryState) currenState) {
+        switch ((LocalStateQueryState) currentState) {
             case Idle:
             case Acquired:
                 Message peekMsg = acquiredCommands.peek();
@@ -138,7 +138,7 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     public MsgQuery query(Query query) {
         MsgQuery msgQuery = new MsgQuery(query, getProtocolVersion());
-        this.currenState.verifyMessageType(msgQuery);
+        this.currentState.verifyMessageType(msgQuery);
 
         acquiredCommands.add(msgQuery);
         return msgQuery;
@@ -146,7 +146,7 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     public MsgReAcquire reAcquire(Point point) {
         MsgReAcquire msgReAcquire = new MsgReAcquire(point);
-        this.currenState.verifyMessageType(msgReAcquire);
+        this.currentState.verifyMessageType(msgReAcquire);
 
         this.point = point;
         acquiredCommands.add(msgReAcquire);
@@ -159,7 +159,7 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     public MsgAcquire acquire(Point point) {
         MsgAcquire msgAcquire = new MsgAcquire(point);
-        this.currenState.verifyMessageType(msgAcquire);
+        this.currentState.verifyMessageType(msgAcquire);
 
         this.point = point;
         acquiredCommands.add(msgAcquire);
@@ -168,7 +168,7 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     public MsgRelease release() {
         MsgRelease msgRelease = new MsgRelease();
-        this.currenState.verifyMessageType(msgRelease);
+        this.currentState.verifyMessageType(msgRelease);
 
         acquiredCommands.add(msgRelease);
         return msgRelease;
@@ -176,7 +176,7 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
 
     @Override
     public void reset() {
-        this.currenState = Idle;
+        this.currentState = Idle;
         acquiredCommands.clear();
         pendingQueryCommands.clear();
     }

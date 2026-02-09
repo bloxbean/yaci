@@ -123,7 +123,7 @@ public class ChainSyncServerAgentDebugTest {
     // Helper to get current state via reflection (since it's protected)
     private State getCurrentState() {
         try {
-            java.lang.reflect.Field field = serverAgent.getClass().getSuperclass().getDeclaredField("currenState");
+            java.lang.reflect.Field field = serverAgent.getClass().getSuperclass().getDeclaredField("currentState");
             field.setAccessible(true);
             return (State) field.get(serverAgent);
         } catch (Exception e) {

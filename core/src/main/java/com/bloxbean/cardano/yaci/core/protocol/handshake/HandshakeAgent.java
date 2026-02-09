@@ -25,7 +25,7 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     public HandshakeAgent(VersionTable versionTable, boolean isClient) {
         super(isClient);
         this.versionTable = versionTable;
-        this.currenState = Propose;
+        this.currentState = Propose;
     }
 
     @Override
@@ -35,7 +35,7 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
 
     @Override
     public Message buildNextMessage() {
-        switch ((HandshkeState)currenState) {
+        switch ((HandshkeState)currentState) {
             case Propose:
                 return new ProposedVersions(versionTable); //TODO
             case Confirm:
@@ -113,11 +113,11 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
 
     @Override
     public boolean isDone() {
-        return currenState == HandshkeState.Done;
+        return currentState == HandshkeState.Done;
     }
 
     public void reset() {
-        this.currenState = Propose;
+        this.currentState = Propose;
     }
 
     public void setSuppressConnectionInfoLog(boolean suppressConnectionInfoLog) {

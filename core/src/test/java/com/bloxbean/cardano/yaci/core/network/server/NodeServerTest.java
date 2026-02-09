@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.network.server;
 
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
@@ -75,6 +76,11 @@ public class NodeServerTest {
         }
 
         @Override
+        public boolean hasBlock(byte[] blockHash) {
+            return false; // Test implementation
+        }
+
+        @Override
         public void storeBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
 
         }
@@ -100,8 +106,18 @@ public class NodeServerTest {
         }
 
         @Override
+        public ChainTip getHeaderTip() {
+            return null;
+        }
+
+        @Override
         public com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point findNextBlock(com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point currentPoint) {
             return null; // Test implementation
+        }
+
+        @Override
+        public Point findNextBlockHeader(Point currentPoint) {
+            return null;
         }
 
         @Override
@@ -110,8 +126,18 @@ public class NodeServerTest {
         }
 
         @Override
+        public Point findLastPointAfterNBlocks(Point from, long batchSize) {
+            return null;
+        }
+
+        @Override
         public boolean hasPoint(com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point point) {
             return false; // Test implementation
+        }
+
+        @Override
+        public Point getFirstBlock() {
+            return null;
         }
 
         @Override

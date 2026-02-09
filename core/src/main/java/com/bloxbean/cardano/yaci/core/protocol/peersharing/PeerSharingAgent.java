@@ -14,7 +14,7 @@ import static com.bloxbean.cardano.yaci.core.protocol.peersharing.PeerSharingSta
 public class PeerSharingAgent extends Agent<PeerSharingAgentListener> {
     public static final int DEFAULT_REQUEST_AMOUNT = 10;
     public static final int MAX_REQUEST_AMOUNT = 100;
-    public static final long RESPONSE_TIMEOUT_MS = 30000; // 30 seconds
+    public static final long RESPONSE_TIMEOUT_MS = 5000;
 
     private boolean shutDown;
     private Queue<MsgShareRequest> requestQueue;
@@ -27,7 +27,7 @@ public class PeerSharingAgent extends Agent<PeerSharingAgentListener> {
 
     public PeerSharingAgent(boolean isClient) {
         super(isClient);
-        this.currenState = StIdle;
+        this.currentState = StIdle;
         this.requestQueue = new ConcurrentLinkedQueue<>();
     }
 
@@ -38,7 +38,7 @@ public class PeerSharingAgent extends Agent<PeerSharingAgentListener> {
 
     @Override
     public boolean isDone() {
-        return currenState == StDone;
+        return currentState == StDone;
     }
 
     @Override
@@ -47,9 +47,9 @@ public class PeerSharingAgent extends Agent<PeerSharingAgentListener> {
             return new MsgDone();
         }
 
-        log.debug("Current state: {}, hasAgency: {}", currenState, currenState.hasAgency(true));
+        log.debug("Current state: {}, hasAgency: {}", currentState, currentState.hasAgency(true));
 
-        switch ((PeerSharingState) currenState) {
+        switch ((PeerSharingState) currentState) {
             case StIdle:
                 if (!requestQueue.isEmpty()) {
                     MsgShareRequest request = requestQueue.poll();
@@ -129,7 +129,7 @@ public class PeerSharingAgent extends Agent<PeerSharingAgentListener> {
 
     @Override
     public void reset() {
-        this.currenState = StIdle;
+        this.currentState = StIdle;
         this.shutDown = false;
         requestQueue.clear();
     }
