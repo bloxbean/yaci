@@ -30,6 +30,10 @@ import com.bloxbean.cardano.yaci.events.impl.SimpleEventBus;
 import com.bloxbean.cardano.yaci.events.impl.NoopEventBus;
 import com.bloxbean.cardano.yaci.node.runtime.events.NodeStartedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.plugins.PluginManager;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.ClassicUtxoStore;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.PruneService;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandler;
+import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 
 import java.time.Duration;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -106,6 +110,11 @@ public class YaciNode implements NodeAPI {
     private final RuntimeOptions runtimeOptions;
     private final EventBus eventBus;
     private PluginManager pluginManager;
+    private com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStoreWriter utxoStore;
+    private PruneService utxoPruneService;
+    private UtxoEventHandler utxoEventHandler;
+    private com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync utxoEventHandlerAsync;
+    private java.util.concurrent.ScheduledFuture<?> utxoLagTask;
 
     public YaciNode(YaciNodeConfig config) {
         this(config, RuntimeOptions.defaults());
@@ -150,6 +159,76 @@ public class YaciNode implements NodeAPI {
         if (this.runtimeOptions.plugins().enabled()) {
             pluginManager = new PluginManager(eventBus, scheduler, this.runtimeOptions.plugins().config(), Thread.currentThread().getContextClassLoader());
         }
+
+        // Phase 3: Initialize UTXO store (classic) if enabled and RocksDB is used
+        try {
+            Object enabledOpt = this.runtimeOptions.globals().get("yaci.node.utxo.enabled");
+            boolean utxoEnabled = enabledOpt instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(enabledOpt));
+            Object storeOpt = this.runtimeOptions.globals().getOrDefault("yaci.node.utxo.store", "classic");
+            String storeName = String.valueOf(storeOpt);
+            if (utxoEnabled && (chainState instanceof DirectRocksDBChainState rocks)) {
+                this.utxoStore = com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStoreFactory.create(rocks, log, this.runtimeOptions.globals());
+                // Reconcile UTXO with chainstate before subscribing and starting prune
+                try {
+                    this.utxoStore.reconcile(rocks);
+                    log.info("UTXO reconciliation complete at startup");
+                } catch (Throwable t) {
+                    log.warn("UTXO reconciliation error: {}", t.toString());
+                }
+                boolean applyAsync = false;
+                Object asyncOpt = this.runtimeOptions.globals().get("yaci.node.utxo.applyAsync");
+                if (asyncOpt instanceof Boolean b) applyAsync = b; else if (asyncOpt != null) try { applyAsync = Boolean.parseBoolean(String.valueOf(asyncOpt)); } catch (Exception ignored) {}
+                if (applyAsync) {
+                    this.utxoEventHandlerAsync = new com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync(eventBus, this.utxoStore);
+                    log.info("UTXO store initialized ({}); UtxoEventHandlerAsync registered (applyAsync=true)",
+                            (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp) ? sp.storeType() : "?");
+                } else {
+                    this.utxoEventHandler = new UtxoEventHandler(eventBus, this.utxoStore);
+                    log.info("UTXO store initialized ({}); UtxoEventHandler registered",
+                            (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp) ? sp.storeType() : "?");
+                }
+                // Start prune service on virtual-thread scheduler
+                long intervalSec = 5L;
+                Object po = this.runtimeOptions.globals().get("yaci.node.utxo.prune.schedule.seconds");
+                if (po instanceof Number n) intervalSec = Math.max(1L, n.longValue());
+                else if (po != null) try { intervalSec = Math.max(1L, Long.parseLong(String.valueOf(po))); } catch (Exception ignored) {}
+                this.utxoPruneService = new PruneService((com.bloxbean.cardano.yaci.node.runtime.utxo.Prunable) this.utxoStore, intervalSec * 1000);
+                this.utxoPruneService.start();
+                log.info("UTXO prune service started (interval={}s)", intervalSec);
+
+                // Schedule UTXO lag metric logging
+                long lagLogSec = 10L;
+                Object lagObj = this.runtimeOptions.globals().get("yaci.node.utxo.metrics.lag.logSeconds");
+                if (lagObj instanceof Number n) lagLogSec = Math.max(1L, n.longValue());
+                else if (lagObj != null) try { lagLogSec = Math.max(1L, Long.parseLong(String.valueOf(lagObj))); } catch (Exception ignored) {}
+                final long failIfAbove = parseLong(this.runtimeOptions.globals().get("yaci.node.utxo.lag.failIfAbove"), -1L);
+                this.utxoLagTask = scheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        long lastApplied = (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp)
+                                ? sp.getLastAppliedBlock() : 0L;
+                        var tip = chainState.getTip();
+                        long tipBlock = tip != null ? tip.getBlockNumber() : 0L;
+                        long lag = Math.max(0L, tipBlock - lastApplied);
+
+                        if (lag > 0)
+                            log.info("metric utxo.lag.blocks={}", lag);
+
+                        if (failIfAbove > 0 && lag > failIfAbove) {
+                            log.warn("UTXO lag {} blocks exceeds configured threshold {}", lag, failIfAbove);
+                        }
+                    } catch (Throwable ignored) {}
+                }, lagLogSec, lagLogSec, java.util.concurrent.TimeUnit.SECONDS);
+            } else {
+                log.info("UTXO store not initialized (enabled={}, store={}, rocksdb={})", utxoEnabled, storeName, (chainState instanceof DirectRocksDBChainState));
+            }
+        } catch (Throwable t) {
+            log.warn("Failed to initialize UTXO store: {}", t.toString());
+        }
+    }
+
+    @Override
+    public UtxoState getUtxoState() {
+        return (utxoStore instanceof UtxoState u) ? u : null;
     }
 
     /**
@@ -629,8 +708,14 @@ public class YaciNode implements NodeAPI {
                 ((DirectRocksDBChainState) chainState).close();
             }
 
+            // Stop UTXO prune service
+            try { if (utxoPruneService != null) utxoPruneService.close(); } catch (Exception ignored) {}
+            try { if (utxoLagTask != null) utxoLagTask.cancel(true); } catch (Exception ignored) {}
+
             // Stop plugins and close event bus
             try { if (pluginManager != null) pluginManager.close(); } catch (Exception ignored) {}
+            try { if (utxoEventHandler != null) utxoEventHandler.close(); } catch (Exception ignored) {}
+            try { if (utxoEventHandlerAsync != null) utxoEventHandlerAsync.close(); } catch (Exception ignored) {}
             try { eventBus.close(); } catch (Exception ignored) {}
 
             log.info("Yaci Node stopped");
@@ -1451,18 +1536,28 @@ public class YaciNode implements NodeAPI {
             bodyFetchManager.setSyncPhase(SyncPhase.INTERSECT_PHASE);
         }
 
-        // Reset to steady state after timeout (handles normal post-intersection rollback)
+        // After timeout, exit INTERSECT_PHASE. Choose next phase based on distance to remote tip.
         scheduler.schedule(() -> {
             if (syncPhase == SyncPhase.INTERSECT_PHASE) {
-                syncPhase = SyncPhase.STEADY_STATE;
-                log.info("Auto-transitioned to STEADY_STATE after intersection phase timeout");
+                // Determine distance to remote tip; default to INITIAL_SYNC if unknown/far
+                long distance = Long.MAX_VALUE;
+                try {
+                    if (remoteTip != null && remoteTip.getPoint() != null) {
+                        distance = Math.max(0, remoteTip.getPoint().getSlot() - lastProcessedSlot);
+                    }
+                } catch (Exception ignored) {}
+
+                long nearTipThreshold = 1000; // slots
+                SyncPhase nextPhase = (distance <= nearTipThreshold) ? SyncPhase.STEADY_STATE : SyncPhase.INITIAL_SYNC;
+                syncPhase = nextPhase;
+                log.info("Auto-transitioned to {} after intersection phase timeout (distance to tip: {} slots)", nextPhase, distance == Long.MAX_VALUE ? "unknown" : String.valueOf(distance));
 
                 // Update BodyFetchManager sync phase and resume if needed
                 if (isPipelinedMode && bodyFetchManager != null) {
-                    bodyFetchManager.setSyncPhase(SyncPhase.STEADY_STATE);
+                    bodyFetchManager.setSyncPhase(nextPhase);
                     if (bodyFetchManager.isPaused()) {
                         bodyFetchManager.resume();
-                        log.info("▶️ BodyFetchManager resumed after auto-transition to STEADY_STATE");
+                        log.info("▶️ BodyFetchManager resumed after auto-transition to {}", nextPhase);
                     }
                 }
             }
@@ -1649,4 +1744,11 @@ public class YaciNode implements NodeAPI {
     }
     */
 
+    private static long parseLong(Object obj, long def) {
+        if (obj instanceof Number n) return n.longValue();
+        if (obj != null) {
+            try { return Long.parseLong(String.valueOf(obj)); } catch (Exception ignored) {}
+        }
+        return def;
+    }
 }

@@ -111,6 +111,11 @@ class NodeAPITest {
         public void registerListener(Object listener, SubscriptionOptions sbOptions) {
 
         }
+
+        @Override
+        public com.bloxbean.cardano.yaci.node.api.utxo.UtxoState getUtxoState() {
+            return null; // Simple implementation
+        }
     }
 
     @Test
