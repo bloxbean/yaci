@@ -21,10 +21,31 @@ public class TCPNodeClient extends NodeClient {
     private String host;
     private int port;
 
-    public TCPNodeClient(String host, int port, HandshakeAgent handshakeAgent, Agent... agents) {
-        super(handshakeAgent, agents);
+    /**
+     * Constructor with NodeClientConfig for configurable connection behavior.
+     *
+     * @param host the host to connect to
+     * @param port the port to connect to
+     * @param config the connection configuration
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public TCPNodeClient(String host, int port, NodeClientConfig config, HandshakeAgent handshakeAgent, Agent... agents) {
+        super(config, handshakeAgent, agents);
         this.host = host;
         this.port = port;
+    }
+
+    /**
+     * Constructor with default configuration (for backward compatibility).
+     *
+     * @param host the host to connect to
+     * @param port the port to connect to
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public TCPNodeClient(String host, int port, HandshakeAgent handshakeAgent, Agent... agents) {
+        this(host, port, NodeClientConfig.defaultConfig(), handshakeAgent, agents);
     }
 
     @Override
@@ -46,5 +67,6 @@ public class TCPNodeClient extends NodeClient {
     protected void configureChannel(Bootstrap bootstrap) {
         bootstrap.option(ChannelOption.SO_KEEPALIVE, true);
         bootstrap.option(ChannelOption.TCP_NODELAY, true);
+        bootstrap.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, getConfig().getConnectionTimeoutMs());
     }
 }
