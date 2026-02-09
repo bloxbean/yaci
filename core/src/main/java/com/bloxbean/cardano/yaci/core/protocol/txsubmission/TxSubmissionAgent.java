@@ -5,6 +5,7 @@ import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.model.TxSubmissionRequest;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Optional;
@@ -17,14 +18,18 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     /**
      * Is the queue of TX received from client
      */
-    private final ConcurrentLinkedQueue<String> pendingTxIds;
+    private final ConcurrentLinkedQueue<TxId> pendingTxIds;
     /**
      * It's the temporary list of TX ids requested from Server
      */
-    private final ConcurrentLinkedQueue<String> requestedTxIds;
+    private final ConcurrentLinkedQueue<TxId> requestedTxIds;
 
     public TxSubmissionAgent() {
-        this.currenState = TxSubmissionState.Init;
+        this(true);
+    }
+    public TxSubmissionAgent(boolean isClient) {
+        super(isClient);
+        this.currentState = TxSubmissionState.Init;
         this.txs = new ConcurrentLinkedQueue<>();
         this.pendingTxIds = new ConcurrentLinkedQueue<>();
         this.requestedTxIds = new ConcurrentLinkedQueue<>();
@@ -36,8 +41,8 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     @Override
-    public Message buildNextMessage() {
-        switch ((TxSubmissionState) currenState) {
+public Message buildNextMessage() {
+        switch ((TxSubmissionState) currentState) {
             case Init:
                 return new Init();
             case TxIdsNonBlocking:
@@ -50,12 +55,12 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         }
     }
 
-    private Optional<TxSubmissionRequest> findTxIdAndHash(String id) {
-        return txs.stream().filter(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(id)).findAny();
+    private Optional<TxSubmissionRequest> findTxIdAndHash(TxId txId) {
+        return txs.stream().filter(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(HexUtil.encodeHexString(txId.getTxId()))).findAny();
     }
 
-    private Optional<TxSubmissionRequest> removeTxIdAndHash(String id) {
-        var txIdAndHashOpt = txs.stream().filter(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(id)).findAny();
+    private Optional<TxSubmissionRequest> removeTxIdAndHash(TxId txId) {
+        var txIdAndHashOpt = txs.stream().filter(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(txId)).findAny();
         txIdAndHashOpt.ifPresent(txs::remove);
         return txIdAndHashOpt;
     }
@@ -67,7 +72,9 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
             pendingTxIds
                     .stream()
                     .flatMap(id -> findTxIdAndHash(id).stream())
-                    .forEach(txSubmissionRequest -> replyTxIds.addTxId(txSubmissionRequest.getTxHash(), txSubmissionRequest.getTxnBytes().length));
+                    .forEach(txSubmissionRequest ->
+                            replyTxIds.addTxId(txSubmissionRequest.getTxBodyType().getEra(), txSubmissionRequest.getTxHash(), txSubmissionRequest.getTxnBytes().length)
+                    );
             if (log.isDebugEnabled())
                 log.debug("TxIds: {}", replyTxIds.getTxIdAndSizeMap().size());
             return replyTxIds;
@@ -80,7 +87,9 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
             return new ReplyTxs();
 
         ReplyTxs replyTxs = new ReplyTxs();
-        requestedTxIds.forEach(txId -> findTxIdAndHash(txId).ifPresent(txSubmissionRequest -> replyTxs.addTx(txSubmissionRequest.getTxnBytes())));
+        requestedTxIds.forEach(txId -> findTxIdAndHash(txId).ifPresent(txSubmissionRequest ->
+                replyTxs.addTx(new Tx(txSubmissionRequest.getTxBodyType().getEra(), txSubmissionRequest.getTxnBytes()))
+        ));
 
         if (log.isDebugEnabled())
             log.debug("Txs: {}", replyTxs.getTxns().size());
@@ -134,8 +143,8 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         var txToAdd = numTxToAdd - pendingTxIds.size();
         if (!txs.isEmpty()) {
             txs.stream()
-                    .map(TxSubmissionRequest::getTxHash)
-                    .filter(txHash -> !pendingTxIds.contains(txHash))
+                    .map(tx -> new TxId(tx.getTxBodyType().getEra(), tx.getTxnBytes()))
+                    .filter(txId -> !pendingTxIds.contains(txId))
                     .limit(txToAdd)
                     .forEach(pendingTxIds::add);
         } else {
@@ -144,9 +153,9 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         }
     }
 
-    private void addTxToQueue(String txHash) {
-        if (!pendingTxIds.contains(txHash)) {
-            pendingTxIds.add(txHash);
+    private void addTxToQueue(TxId txId) {
+        if (!pendingTxIds.contains(txId)) {
+            pendingTxIds.add(txId);
         }
     }
 
@@ -170,8 +179,8 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
             return;
         }
         txs.add(TxSubmissionRequest.builder().txHash(txHash).txnBytes(txBytes).txBodyType(txBodyType).build());
-        if (TxSubmissionState.TxIdsBlocking.equals(currenState)) {
-            addTxToQueue(txHash);
+        if (TxSubmissionState.TxIdsBlocking.equals(currentState)) {
+            addTxToQueue(new TxId(txBodyType.getEra(), HexUtil.decodeHexString(txHash)));
             this.sendNextMessage();
         }
     }
@@ -182,7 +191,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
 
     @Override
     public boolean isDone() {
-        return this.currenState == TxSubmissionState.Done;
+        return this.currentState == TxSubmissionState.Done;
     }
 
     @Override
@@ -190,6 +199,6 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
         txs.clear();
         pendingTxIds.clear();
         requestedTxIds.clear();
-        this.currenState = TxSubmissionState.Init;
+        this.currentState = TxSubmissionState.Init;
     }
 }

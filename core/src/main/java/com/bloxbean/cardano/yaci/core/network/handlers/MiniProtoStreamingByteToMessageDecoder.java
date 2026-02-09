@@ -50,7 +50,11 @@ public class MiniProtoStreamingByteToMessageDecoder
             }
 
             ProtocolChannel protocolChannel = getProtocolChannel(protocol);
-            byte[] bytes = protocolChannel.getBytes();
+            if (protocolChannel == null) {
+                protocolChannel = new ProtocolChannel();
+                protocolChannelMap.put(protocol, protocolChannel);
+            }
+            byte[] bytes = protocolChannel != null? protocolChannel.getBytes(): new byte[0];
 
             bytes = BytesUtil.merge(bytes, payload);
             try {
@@ -110,7 +114,6 @@ public class MiniProtoStreamingByteToMessageDecoder
                     } else
                         bytes = new byte[0];
                 }
-
                 protocolChannel.setBytes(bytes);
                 in.markReaderIndex();
                 return;

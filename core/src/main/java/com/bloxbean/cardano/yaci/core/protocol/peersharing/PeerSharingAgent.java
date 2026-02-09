@@ -22,7 +22,12 @@ public class PeerSharingAgent extends Agent<PeerSharingAgentListener> {
     private long lastRequestTime = 0;
 
     public PeerSharingAgent() {
-        this.currenState = StIdle;
+        this(true);
+    }
+
+    public PeerSharingAgent(boolean isClient) {
+        super(isClient);
+        this.currentState = StIdle;
         this.requestQueue = new ConcurrentLinkedQueue<>();
     }
 
@@ -33,7 +38,7 @@ public class PeerSharingAgent extends Agent<PeerSharingAgentListener> {
 
     @Override
     public boolean isDone() {
-        return currenState == StDone;
+        return currentState == StDone;
     }
 
     @Override
@@ -42,9 +47,9 @@ public class PeerSharingAgent extends Agent<PeerSharingAgentListener> {
             return new MsgDone();
         }
 
-        log.debug("Current state: {}, hasAgency: {}", currenState, currenState.hasAgency());
+        log.debug("Current state: {}, hasAgency: {}", currentState, currentState.hasAgency(true));
 
-        switch ((PeerSharingState) currenState) {
+        switch ((PeerSharingState) currentState) {
             case StIdle:
                 if (!requestQueue.isEmpty()) {
                     MsgShareRequest request = requestQueue.poll();
@@ -124,7 +129,7 @@ public class PeerSharingAgent extends Agent<PeerSharingAgentListener> {
 
     @Override
     public void reset() {
-        this.currenState = StIdle;
+        this.currentState = StIdle;
         this.shutDown = false;
         requestQueue.clear();
     }
