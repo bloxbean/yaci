@@ -7,12 +7,14 @@ on:
       - develop
       - develop*
       - release*
+      - next
   pull_request:
     branches:
       - main
       - develop
       - develop*
       - release*
+      - next
 
 jobs:
   commit-build:
