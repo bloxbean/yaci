@@ -21,6 +21,10 @@ public class KeepAliveAgent extends Agent<KeepAliveListener> {
     private Queue<MsgKeepAlive> reqQueue;
 
     public KeepAliveAgent() {
+        this(true);
+    }
+    public KeepAliveAgent(boolean isClient) {
+        super(isClient);
         this.currenState = Client;
         this.reqQueue = new ConcurrentLinkedQueue<>();
     }
