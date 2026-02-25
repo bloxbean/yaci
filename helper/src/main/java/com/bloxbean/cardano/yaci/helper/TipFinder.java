@@ -16,6 +16,7 @@ import com.bloxbean.cardano.yaci.helper.api.ReactiveFetcher;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.util.function.Consumer;
 
 /**
@@ -80,7 +81,7 @@ public class TipFinder extends ReactiveFetcher<Tip> {
      * @param host           Cardano node host
      * @param port           Cardano node port
      * @param wellKnownPoint a well known point
-     * @param versionTable   network protocol magic
+     * @param versionTable   version table for handshake (e.g. from N2NVersionTableConstant)
      */
     public TipFinder(String host, int port, Point wellKnownPoint, VersionTable versionTable) {
         this.host = host;
@@ -111,7 +112,7 @@ public class TipFinder extends ReactiveFetcher<Tip> {
      * @param host Cardano node host
      * @param port Cardano node port
      * @param wellKnownPoint a well known point
-     * @param versionTable network protocol magic
+     * @param versionTable version table for handshake (e.g. from N2NVersionTableConstant)
      * @param nodeClientConfig connection configuration
      */
     public TipFinder(String host, int port, Point wellKnownPoint, VersionTable versionTable, NodeClientConfig nodeClientConfig) {
@@ -228,10 +229,10 @@ public class TipFinder extends ReactiveFetcher<Tip> {
     public static void main(String[] args) {
         Point point = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
         TipFinder tipFinder = new TipFinder("192.168.0.228", 6000, point, Constants.MAINNET_PROTOCOL_MAGIC);
-        tipFinder.start(tip -> {
+        Tip tip = tipFinder.find().block(Duration.ofSeconds(30));
+        if (tip != null) {
             System.out.println("Tip found >>>> " + tip);
-        });
-
+        }
         tipFinder.shutdown();
     }
 }
