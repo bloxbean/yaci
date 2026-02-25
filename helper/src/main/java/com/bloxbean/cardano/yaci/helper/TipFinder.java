@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
+import com.bloxbean.cardano.yaci.core.network.NodeClientConfig;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
@@ -87,10 +88,46 @@ public class TipFinder extends ReactiveFetcher<Tip> {
         this.wellKnownPoint = wellKnownPoint;
         this.versionTable = versionTable;
 
-        init();
+        init(NodeClientConfig.defaultConfig());
     }
 
+    /**
+     * Construct TipFinder with custom connection configuration (timeout, auto-reconnect, etc.).
+     * Use this for short-lived connections when you need fast failure on unreachable peers.
+     *
+     * @param host Cardano node host
+     * @param port Cardano node port
+     * @param wellKnownPoint a well known point
+     * @param protocolMagic network protocol magic
+     * @param nodeClientConfig connection configuration
+     */
+    public TipFinder(String host, int port, Point wellKnownPoint, long protocolMagic, NodeClientConfig nodeClientConfig) {
+        this(host, port, wellKnownPoint, N2NVersionTableConstant.v4AndAbove(protocolMagic), nodeClientConfig);
+    }
+
+    /**
+     * Construct TipFinder with custom connection configuration.
+     *
+     * @param host Cardano node host
+     * @param port Cardano node port
+     * @param wellKnownPoint a well known point
+     * @param versionTable network protocol magic
+     * @param nodeClientConfig connection configuration
+     */
+    public TipFinder(String host, int port, Point wellKnownPoint, VersionTable versionTable, NodeClientConfig nodeClientConfig) {
+        this.host = host;
+        this.port = port;
+        this.wellKnownPoint = wellKnownPoint;
+        this.versionTable = versionTable;
+
+        init(nodeClientConfig);
+    }    
+
     private void init() {
+        init(NodeClientConfig.defaultConfig());
+    }
+
+    private void init(NodeClientConfig nodeClientConfig) {
         handshakeAgent = new HandshakeAgent(versionTable);
         this.chainSyncAgent = new ChainsyncAgent(new Point[]{wellKnownPoint});
 
@@ -108,7 +145,7 @@ public class TipFinder extends ReactiveFetcher<Tip> {
             }
         });
 
-        this.n2NClient = new TCPNodeClient(host, port, handshakeAgent, chainSyncAgent);
+        this.n2NClient = new TCPNodeClient(host, port, nodeClientConfig, handshakeAgent, chainSyncAgent);
     }
 
     /**
