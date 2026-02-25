@@ -121,10 +121,6 @@ public class TipFinder extends ReactiveFetcher<Tip> {
         this.versionTable = versionTable;
 
         init(nodeClientConfig);
-    }    
-
-    private void init() {
-        init(NodeClientConfig.defaultConfig());
     }
 
     private void init(NodeClientConfig nodeClientConfig) {
