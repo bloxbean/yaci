@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
+import com.bloxbean.cardano.yaci.core.network.NodeClientConfig;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListener;
@@ -15,6 +16,7 @@ import com.bloxbean.cardano.yaci.helper.api.ReactiveFetcher;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.util.function.Consumer;
 
 /**
@@ -79,7 +81,7 @@ public class TipFinder extends ReactiveFetcher<Tip> {
      * @param host           Cardano node host
      * @param port           Cardano node port
      * @param wellKnownPoint a well known point
-     * @param versionTable   network protocol magic
+     * @param versionTable   version table for handshake (e.g. from N2NVersionTableConstant)
      */
     public TipFinder(String host, int port, Point wellKnownPoint, VersionTable versionTable) {
         this.host = host;
@@ -87,10 +89,42 @@ public class TipFinder extends ReactiveFetcher<Tip> {
         this.wellKnownPoint = wellKnownPoint;
         this.versionTable = versionTable;
 
-        init();
+        init(NodeClientConfig.defaultConfig());
     }
 
-    private void init() {
+    /**
+     * Construct TipFinder with custom connection configuration (timeout, auto-reconnect, etc.).
+     * Use this for short-lived connections when you need fast failure on unreachable peers.
+     *
+     * @param host Cardano node host
+     * @param port Cardano node port
+     * @param wellKnownPoint a well known point
+     * @param protocolMagic network protocol magic
+     * @param nodeClientConfig connection configuration
+     */
+    public TipFinder(String host, int port, Point wellKnownPoint, long protocolMagic, NodeClientConfig nodeClientConfig) {
+        this(host, port, wellKnownPoint, N2NVersionTableConstant.v4AndAbove(protocolMagic), nodeClientConfig);
+    }
+
+    /**
+     * Construct TipFinder with custom connection configuration.
+     *
+     * @param host Cardano node host
+     * @param port Cardano node port
+     * @param wellKnownPoint a well known point
+     * @param versionTable version table for handshake (e.g. from N2NVersionTableConstant)
+     * @param nodeClientConfig connection configuration
+     */
+    public TipFinder(String host, int port, Point wellKnownPoint, VersionTable versionTable, NodeClientConfig nodeClientConfig) {
+        this.host = host;
+        this.port = port;
+        this.wellKnownPoint = wellKnownPoint;
+        this.versionTable = versionTable;
+
+        init(nodeClientConfig);
+    }
+
+    private void init(NodeClientConfig nodeClientConfig) {
         handshakeAgent = new HandshakeAgent(versionTable);
         this.chainSyncAgent = new ChainsyncAgent(new Point[]{wellKnownPoint});
 
@@ -108,7 +142,7 @@ public class TipFinder extends ReactiveFetcher<Tip> {
             }
         });
 
-        this.n2NClient = new TCPNodeClient(host, port, handshakeAgent, chainSyncAgent);
+        this.n2NClient = new TCPNodeClient(host, port, nodeClientConfig, handshakeAgent, chainSyncAgent);
     }
 
     /**
@@ -195,10 +229,10 @@ public class TipFinder extends ReactiveFetcher<Tip> {
     public static void main(String[] args) {
         Point point = new Point(16588737, "4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a");
         TipFinder tipFinder = new TipFinder("192.168.0.228", 6000, point, Constants.MAINNET_PROTOCOL_MAGIC);
-        tipFinder.start(tip -> {
+        Tip tip = tipFinder.find().block(Duration.ofSeconds(30));
+        if (tip != null) {
             System.out.println("Tip found >>>> " + tip);
-        });
-
+        }
         tipFinder.shutdown();
     }
 }
