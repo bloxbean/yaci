@@ -123,6 +123,15 @@ public interface NodeAPI {
     boolean recoverChainState();
 
     /**
+     * Submit a transaction to the node's mempool.
+     * In block producer mode, the transaction will be included in a future block.
+     *
+     * @param txCbor the complete transaction CBOR bytes
+     * @return the transaction hash as a hex string
+     */
+    String submitTransaction(byte[] txCbor);
+
+    /**
      * Register multiple event listeners at once.
      * Each listener object will be scanned for annotated event handler methods.
      *
@@ -142,4 +151,12 @@ public interface NodeAPI {
      * Returns null if UTXO is disabled or not initialized.
      */
     UtxoState getUtxoState();
+
+    /**
+     * Get the protocol parameters JSON string.
+     * Only available when block producer mode is enabled and a protocol parameters file is configured.
+     *
+     * @return protocol parameters as a JSON string, or null if not available
+     */
+    String getProtocolParameters();
 }

@@ -29,6 +29,7 @@ public class YaciTxSubmissionHandler implements TxSubmissionListener, TxSubmissi
 
     private final MemPool memPool;
     private final EventBus eventBus;
+    private final boolean blockProducerMode;
     private final Set<String> knownTxIds = ConcurrentHashMap.newKeySet();
     private final Map<String, String> clientConnections = new ConcurrentHashMap<>();
 
@@ -40,8 +41,13 @@ public class YaciTxSubmissionHandler implements TxSubmissionListener, TxSubmissi
     private long txsProcessed = 0;
 
     public YaciTxSubmissionHandler(MemPool memPool, EventBus eventBus) {
+        this(memPool, eventBus, false);
+    }
+
+    public YaciTxSubmissionHandler(MemPool memPool, EventBus eventBus, boolean blockProducerMode) {
         this.memPool = memPool;
         this.eventBus = eventBus;
+        this.blockProducerMode = blockProducerMode;
     }
 
     // TxSubmissionListener implementation (for server-side handling)
@@ -115,8 +121,10 @@ public class YaciTxSubmissionHandler implements TxSubmissionListener, TxSubmissi
             }
         }
 
-        // Simulate transaction processing by consuming from mempool
-        simulateTransactionProcessing();
+        // In block producer mode, leave txs in mempool for block inclusion
+        if (!blockProducerMode) {
+            simulateTransactionProcessing();
+        }
     }
 
     // TxSubmissionHandler implementation

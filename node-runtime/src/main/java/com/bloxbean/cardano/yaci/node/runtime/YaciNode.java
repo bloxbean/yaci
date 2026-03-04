@@ -22,8 +22,11 @@ import com.bloxbean.cardano.yaci.node.runtime.chain.InMemoryChainState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.BlockProducer;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
 import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
+import com.bloxbean.cardano.yaci.node.runtime.events.MemPoolTransactionReceivedEvent;
 import lombok.extern.slf4j.Slf4j;
 import com.bloxbean.cardano.yaci.events.api.*;
 import com.bloxbean.cardano.yaci.events.impl.SimpleEventBus;
@@ -86,6 +89,10 @@ public class YaciNode implements NodeAPI {
 
     // MemPool for transaction handling
     private final MemPool memPool;
+
+    // Block producer (devnet mode)
+    private BlockProducer blockProducer;
+    private GenesisConfig genesisConfig;
 
     // Status tracking
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
@@ -306,6 +313,11 @@ public class YaciNode implements NodeAPI {
                 startServer();
             }
 
+            // Start block producer if enabled (after server so we can notify)
+            if (config.isEnableBlockProducer()) {
+                startBlockProducer();
+            }
+
             // Validate chain state before starting sync
             if (config.isEnableClient()) {
                 validateChainState();
@@ -359,14 +371,17 @@ public class YaciNode implements NodeAPI {
                 } catch (Exception e) {
                     log.warn("Error checking first block", e);
                 }
+            } else if (config.isEnableBlockProducer()) {
+                log.info("Server starting with empty chain state — block producer will create genesis block");
             } else {
-                log.error("❌ CRITICAL: Server starting with empty chain state (no tip)");
-                log.error("❌ Real Cardano nodes will not connect to an empty server");
-                log.error("❌ Yaci Node must sync some blockchain data first before serving");
+                log.error("CRITICAL: Server starting with empty chain state (no tip)");
+                log.error("Real Cardano nodes will not connect to an empty server");
+                log.error("Yaci Node must sync some blockchain data first before serving");
             }
 
             // Create TxSubmission handler for transaction processing
-            YaciTxSubmissionHandler txSubmissionHandler = new YaciTxSubmissionHandler(memPool, eventBus);
+            YaciTxSubmissionHandler txSubmissionHandler = new YaciTxSubmissionHandler(
+                    memPool, eventBus, config.isEnableBlockProducer());
 
             // Create TxSubmission configuration for periodic requests
             TxSubmissionConfig txSubmissionConfig = TxSubmissionConfig.builder()
@@ -405,6 +420,43 @@ public class YaciNode implements NodeAPI {
             log.error("Failed to start NodeServer", e);
             throw new RuntimeException("Failed to start server", e);
         }
+    }
+
+    /**
+     * Start the block producer for devnet mode
+     */
+    private void startBlockProducer() {
+        log.info("Starting block producer (devnet mode)...");
+
+        genesisConfig = GenesisConfig.load(
+                config.getGenesisFundsFile(),
+                config.getProtocolParametersFile());
+
+        blockProducer = new BlockProducer(
+                chainState, memPool, nodeServer, eventBus, scheduler,
+                config.getBlockTimeMillis(),
+                config.isLazyBlockProduction(),
+                config.getGenesisTimestamp(),
+                config.getSlotLengthMillis(),
+                genesisConfig);
+        blockProducer.start();
+        log.info("Block producer started");
+    }
+
+    @Override
+    public String submitTransaction(byte[] txCbor) {
+        var mpt = memPool.addTransaction(txCbor);
+        if (eventBus != null && mpt != null) {
+            eventBus.publish(new MemPoolTransactionReceivedEvent(mpt),
+                    EventMetadata.builder().origin("rest-api").build(),
+                    PublishOptions.builder().build());
+        }
+        return HexUtil.encodeHexString(mpt.txHash());
+    }
+
+    @Override
+    public String getProtocolParameters() {
+        return genesisConfig != null ? genesisConfig.getProtocolParameters() : null;
     }
 
     /**
@@ -682,6 +734,11 @@ public class YaciNode implements NodeAPI {
                     log.warn("Error stopping peerClient", e);
                 }
                 isSyncing.set(false);
+            }
+
+            // Stop block producer
+            if (blockProducer != null && blockProducer.isRunning()) {
+                blockProducer.stop();
             }
 
             // Stop server
@@ -1493,6 +1550,13 @@ public class YaciNode implements NodeAPI {
             log.info("   └─ Port: {}", serverPort);
             log.info("   └─ Running: {}", isServerRunning() ? "YES" : "NO");
             log.info("   └─ Protocol magic: {}", protocolMagic);
+        }
+
+        // Block producer status
+        if (config.isEnableBlockProducer()) {
+            log.info("BLOCK PRODUCER: ENABLED (devnet)");
+            log.info("   Block interval: {}ms", config.getBlockTimeMillis());
+            log.info("   Lazy mode: {}", config.isLazyBlockProduction());
         }
 
         // Chain state status

@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.node.app;
 
 import com.bloxbean.cardano.yaci.node.api.NodeAPI;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -78,6 +79,38 @@ public class YaciNodeResource {
     @Path("/config")
     public Response getConfig() {
         return Response.ok(nodeAPI.getConfig()).build();
+    }
+
+    @POST
+    @Path("/tx/submit")
+    @Consumes(MediaType.APPLICATION_OCTET_STREAM)
+    public Response submitTransaction(byte[] txCbor) {
+        if (txCbor == null || txCbor.length == 0) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Transaction CBOR bytes required"))
+                    .build();
+        }
+
+        try {
+            String txHash = nodeAPI.submitTransaction(txCbor);
+            return Response.accepted(Map.of("txHash", txHash)).build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(Map.of("error", "Failed to submit transaction: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @GET
+    @Path("/protocol-params")
+    public Response getProtocolParameters() {
+        String params = nodeAPI.getProtocolParameters();
+        if (params == null) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Protocol parameters not available"))
+                    .build();
+        }
+        return Response.ok(params).build();
     }
 
     @POST

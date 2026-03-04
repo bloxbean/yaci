@@ -12,6 +12,7 @@ dependencies {
     implementation libs.reload4j
 
     implementation libs.cardano.client.core
+    implementation libs.jackson.databind
 
     testImplementation libs.project.reactor.test
 

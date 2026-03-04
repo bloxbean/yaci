@@ -40,6 +40,14 @@ yaci:
     storage:
       rocksdb: true
       path: "./chainstate"
+    block-producer:
+      enabled: false
+      block-time-millis: 2000
+      lazy: false
+      genesis-timestamp: 0
+      slot-length-millis: 1000
+      genesis-funds-file:
+      protocol-parameters-file:
 
 "%native":
   quarkus:

@@ -44,6 +44,15 @@ public class YaciNodeConfig implements NodeConfig {
     private long syncStartSlot;
     private String syncStartBlockHash;
 
+    // Block producer configuration (devnet mode)
+    private boolean enableBlockProducer;
+    private int blockTimeMillis;
+    private boolean lazyBlockProduction;
+    private long genesisTimestamp;
+    private int slotLengthMillis;
+    private String genesisFundsFile;       // Path to JSON: {hexAddr: lovelace, ...}
+    private String protocolParametersFile; // Path to protocol params JSON
+
     // Implement NodeConfig interface
     @Override
     public boolean isClientEnabled() {
@@ -156,6 +165,37 @@ public class YaciNodeConfig implements NodeConfig {
     }
 
     /**
+     * Create a default configuration for a standalone devnet with block production.
+     * No upstream node needed — produces its own blocks.
+     */
+    public static YaciNodeConfig devnetDefault(int serverPort) {
+        return YaciNodeConfig.builder()
+                .remoteHost(null)
+                .remotePort(0)
+                .protocolMagic(42) // Custom devnet magic
+                .serverPort(serverPort)
+                .enableServer(true)
+                .enableClient(false)
+                .enableBlockProducer(true)
+                .blockTimeMillis(2000)
+                .lazyBlockProduction(false)
+                .genesisTimestamp(0)
+                .slotLengthMillis(1000)
+                .useRocksDB(false)
+                .rocksDBPath(null)
+                .fullSyncThreshold(0)
+                .enablePipelinedSync(false)
+                .headerPipelineDepth(0)
+                .bodyBatchSize(0)
+                .maxParallelBodies(0)
+                .enableSelectiveBodyFetch(false)
+                .selectiveBodyFetchRatio(0)
+                .enableMonitoring(false)
+                .monitoringPort(8080)
+                .build();
+    }
+
+    /**
      * Create a configuration for performance testing with pipeline toggle
      */
     public static YaciNodeConfig performanceTestConfig(String remoteHost, int remotePort, long protocolMagic,
@@ -227,8 +267,23 @@ public class YaciNodeConfig implements NodeConfig {
             }
         }
 
-        if (!enableClient && !enableServer) {
-            throw new IllegalArgumentException("At least one of client or server must be enabled");
+        if (!enableClient && !enableServer && !enableBlockProducer) {
+            throw new IllegalArgumentException("At least one of client, server, or block producer must be enabled");
+        }
+
+        if (enableBlockProducer) {
+            if (enableClient) {
+                throw new IllegalArgumentException("Block producer mode cannot be used with client mode");
+            }
+            if (!enableServer) {
+                throw new IllegalArgumentException("Block producer mode requires server to be enabled");
+            }
+            if (blockTimeMillis <= 0) {
+                blockTimeMillis = 2000;
+            }
+            if (slotLengthMillis <= 0) {
+                slotLengthMillis = 1000;
+            }
         }
 
         if (useRocksDB && (rocksDBPath == null || rocksDBPath.trim().isEmpty())) {

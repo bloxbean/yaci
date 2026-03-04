@@ -118,7 +118,7 @@ class YaciNodeConfigTest {
         
         assertThatThrownBy(config::validate)
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("At least one of client or server must be enabled");
+                .hasMessageContaining("At least one of client, server, or block producer must be enabled");
     }
 
     @Test

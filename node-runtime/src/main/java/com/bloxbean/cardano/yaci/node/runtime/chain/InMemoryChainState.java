@@ -15,18 +15,24 @@ import java.util.concurrent.ConcurrentSkipListMap;
 
 @Slf4j
 public class InMemoryChainState implements ChainState {
-    private Map<byte[], byte[]> blockStore = new ConcurrentHashMap<>();
-    private Map<byte[], byte[]> blockHeaderStore = new ConcurrentHashMap<>();
+    // Use hex string keys instead of byte[] to ensure proper equals/hashCode behavior
+    private Map<String, byte[]> blockStore = new ConcurrentHashMap<>();
+    private Map<String, byte[]> blockHeaderStore = new ConcurrentHashMap<>();
     private Map<Long, byte[]> blockHashByNumber = new ConcurrentHashMap<>();
     private ConcurrentSkipListMap<Long, Long> blockNumberBySlot = new ConcurrentSkipListMap<>();
+
+    private static String toHex(byte[] bytes) {
+        return HexUtil.encodeHexString(bytes);
+    }
 
     private ChainTip tip;
     private ChainTip headerTip;
 
     @Override
     public void storeBlock(byte[] blockHash, Long blockNumber, Long slot, byte[] block) {
-        blockStore.put(blockHash, block);
-        blockHeaderStore.put(blockHash, block);
+        String key = toHex(blockHash);
+        blockStore.put(key, block);
+        blockHeaderStore.put(key, block);
         blockHashByNumber.put(blockNumber, blockHash);
         blockNumberBySlot.put(slot, blockNumber);
         tip = new ChainTip(slot, blockHash, blockNumber);
@@ -34,30 +40,30 @@ public class InMemoryChainState implements ChainState {
 
     @Override
     public byte[] getBlock(byte[] blockHash) {
-        return blockStore.get(blockHash);
+        return blockStore.get(toHex(blockHash));
     }
 
     @Override
     public boolean hasBlock(byte[] blockHash) {
-        return blockStore.containsKey(blockHash);
+        return blockStore.containsKey(toHex(blockHash));
     }
 
     @Override
     public void storeBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
-        blockHeaderStore.put(blockHash, blockHeader);
+        blockHeaderStore.put(toHex(blockHash), blockHeader);
         headerTip = new ChainTip(slot, blockHash, blockNumber);
     }
 
     @Override
     public byte[] getBlockHeader(byte[] blockHash) {
-        return blockHeaderStore.get(blockHash);
+        return blockHeaderStore.get(toHex(blockHash));
     }
 
     @Override
     public byte[] getBlockByNumber(Long number) {
         byte[] blockHash = blockHashByNumber.get(number);
         if (blockHash != null) {
-            return blockStore.get(blockHash);
+            return blockStore.get(toHex(blockHash));
         }
         return null;
     }
@@ -68,8 +74,9 @@ public class InMemoryChainState implements ChainState {
         blockNumberBySlot.tailMap(slot, false).forEach((blockSlot, blockNumber) -> {
             byte[] blockHash = blockHashByNumber.get(blockNumber);
             if (blockHash != null) {
-                blockStore.remove(blockHash);
-                blockHeaderStore.remove(blockHash);
+                String key = toHex(blockHash);
+                blockStore.remove(key);
+                blockHeaderStore.remove(key);
                 blockHashByNumber.remove(blockNumber);
             }
         });
@@ -92,7 +99,7 @@ public class InMemoryChainState implements ChainState {
     public byte[] getBlockHeaderByNumber(Long blockNumber) {
         byte[] blockHash = blockHashByNumber.get(blockNumber);
         if (blockHash != null) {
-            return blockHeaderStore.get(blockHash);
+            return blockHeaderStore.get(toHex(blockHash));
         }
         return null;
     }
@@ -245,8 +252,8 @@ public class InMemoryChainState implements ChainState {
         }
 
         try {
-            byte[] blockHash = HexUtil.decodeHexString(point.getHash());
-            return blockStore.containsKey(blockHash) || blockHeaderStore.containsKey(blockHash);
+            String key = point.getHash();
+            return blockStore.containsKey(key) || blockHeaderStore.containsKey(key);
         } catch (Exception e) {
             return false;
         }
