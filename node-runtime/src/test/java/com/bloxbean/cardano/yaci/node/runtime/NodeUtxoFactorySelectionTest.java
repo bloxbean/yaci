@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class NodeUtxoFactorySelectionTest {
     @Test
-    void factorySelectsMmrBackend() throws Exception {
+    void factoryCreatesDefaultBackend() throws Exception {
         File temp = Files.createTempDirectory("yaci-node-factory-test").toFile();
         try {
             YaciNodeConfig cfg = YaciNodeConfig.builder()
@@ -31,7 +31,6 @@ class NodeUtxoFactorySelectionTest {
 
             var globals = new HashMap<String, Object>();
             globals.put("yaci.node.utxo.enabled", true);
-            globals.put("yaci.node.utxo.store", "mmr");
             RuntimeOptions rt = new RuntimeOptions(new EventsOptions(true, 1024, SubscriptionOptions.Overflow.BLOCK),
                     com.bloxbean.cardano.yaci.node.api.config.PluginsOptions.defaults(), globals);
 
@@ -40,7 +39,7 @@ class NodeUtxoFactorySelectionTest {
             assertNotNull(utxo);
             assertTrue(utxo.isEnabled());
             assertTrue(utxo instanceof UtxoStatusProvider);
-            assertEquals("mmr", ((UtxoStatusProvider) utxo).storeType());
+            assertEquals("default", ((UtxoStatusProvider) utxo).storeType());
         } finally {
             deleteRecursively(temp);
         }

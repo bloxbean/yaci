@@ -114,8 +114,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
                     new ColumnFamilyDescriptor(
                             com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_BLOCK_DELTA.getBytes(),
                             tuningEnabled ? utxoDeltaOpts : new ColumnFamilyOptions()),
-                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_META.getBytes()),
-                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_MMR_NODES.getBytes())
+                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_META.getBytes())
             );
 
             // Open database
@@ -156,7 +155,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
             if (prop != null) return !"false".equalsIgnoreCase(prop);
             String env = System.getenv("YACI_ROCKSDB_TUNING_ENABLED");
             if (env != null) return !"false".equalsIgnoreCase(env);
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {
+        }
         return true; // default enabled
     }
 
@@ -166,7 +166,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
             if (prop != null) return Boolean.parseBoolean(prop);
             String env = System.getenv(envVar);
             if (env != null) return Boolean.parseBoolean(env);
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {
+        }
         return defVal;
     }
 
@@ -227,9 +228,9 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
                 byte[] previousBlock = getBlockByNumber(blockNumber - 1);
                 if (previousBlock == null) {
                     String errorMsg = String.format(
-                        "🚨 CONTINUITY VIOLATION: Cannot store block #%d - previous block #%d is missing! " +
-                        "This would create gaps in chainstate. slot=%d, hash=%s",
-                        blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
+                            "🚨 CONTINUITY VIOLATION: Cannot store block #%d - previous block #%d is missing! " +
+                                    "This would create gaps in chainstate. slot=%d, hash=%s",
+                            blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
                     log.error(errorMsg);
 
                     System.exit(1);
@@ -250,15 +251,15 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
                 boolean isEbbAtThisSlot = ebbHashAtSlot0 != null && Arrays.equals(ebbHashAtSlot0, blockHash);
                 if (!isEbbAtThisSlot) {
                     log.warn("🚨 FORK MISMATCH: Block #{} at slot {} has different hash than main header! Expected(main): {}, Got: {} - SKIPPING",
-                             blockNumber, slot,
-                             HexUtil.encodeHexString(expectedHash),
-                             HexUtil.encodeHexString(blockHash));
+                            blockNumber, slot,
+                            HexUtil.encodeHexString(expectedHash),
+                            HexUtil.encodeHexString(blockHash));
                     return; // Skip storing mismatched non-EBB block to prevent index corruption
                 }
                 // It's an EBB body at the epoch boundary; proceed to store body keyed by hash only.
                 if (log.isDebugEnabled()) {
                     log.debug("EBB body store allowed at slot {} (hash {}), main header maps to {}",
-                              slot, HexUtil.encodeHexString(blockHash), HexUtil.encodeHexString(expectedHash));
+                            slot, HexUtil.encodeHexString(blockHash), HexUtil.encodeHexString(expectedHash));
                 }
             }
 
@@ -317,9 +318,9 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
                 byte[] previousHeader = getBlockHeaderByNumber(blockNumber - 1);
                 if (previousHeader == null) {
                     String errorMsg = String.format(
-                        "🚨 HEADER CONTINUITY VIOLATION: Cannot store header #%d - previous header #%d is missing! " +
-                        "This would create gaps in header chainstate. slot=%d, hash=%s",
-                        blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
+                            "🚨 HEADER CONTINUITY VIOLATION: Cannot store header #%d - previous header #%d is missing! " +
+                                    "This would create gaps in header chainstate. slot=%d, hash=%s",
+                            blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
                     log.error(errorMsg);
 
                     // Throw exception to stop sync and prevent gaps
@@ -452,7 +453,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
             if (bodyTip == null || slot > bodyTip.getSlot()) {
                 // Header-only rollback: common during restart when starting from header_tip
                 log.info("Header-only rollback to slot {} (body tip at {})",
-                         slot, bodyTip != null ? bodyTip.getSlot() : "null");
+                        slot, bodyTip != null ? bodyTip.getSlot() : "null");
                 performHeaderOnlyRollback(slot, rollbackBlockNumber, rollbackHash, headerTip);
             } else {
                 // Full rollback: real chain reorganization affecting both headers and bodies
@@ -523,7 +524,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
             db.write(new WriteOptions(), batch);
 
             log.info("Header-only rollback completed: deleted {} headers, new header_tip at slot {}",
-                     headersDeleted, slot);
+                    headersDeleted, slot);
 
         } finally {
             batch.close();
@@ -535,12 +536,12 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
      * This is the traditional rollback used when the network has a real chain reorg.
      */
     private void performFullRollback(Long slot, long rollbackBlockNumber, byte[] rollbackHash,
-                                    ChainTip bodyTip, ChainTip headerTip) throws RocksDBException {
+                                     ChainTip bodyTip, ChainTip headerTip) throws RocksDBException {
 
         // Determine the highest block number to clean up
         long maxBlockToDelete = Math.max(
-            bodyTip != null ? bodyTip.getBlockNumber() : 0,
-            headerTip != null ? headerTip.getBlockNumber() : 0
+                bodyTip != null ? bodyTip.getBlockNumber() : 0,
+                headerTip != null ? headerTip.getBlockNumber() : 0
         );
 
         if (maxBlockToDelete <= rollbackBlockNumber) {
@@ -548,15 +549,15 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
 
             // CHECK TIP ALIGNMENT: Ensure header and body tips have same hash
             if (headerTip != null && bodyTip != null &&
-                !Arrays.equals(headerTip.getBlockHash(), bodyTip.getBlockHash())) {
+                    !Arrays.equals(headerTip.getBlockHash(), bodyTip.getBlockHash())) {
 
                 log.warn("🚨 TIP MISMATCH DETECTED: Header tip and body tip have different hashes!");
                 log.warn("Header tip: block #{} slot {} hash {}",
-                         headerTip.getBlockNumber(), headerTip.getSlot(),
-                         HexUtil.encodeHexString(headerTip.getBlockHash()));
+                        headerTip.getBlockNumber(), headerTip.getSlot(),
+                        HexUtil.encodeHexString(headerTip.getBlockHash()));
                 log.warn("Body tip: block #{} slot {} hash {}",
-                         bodyTip.getBlockNumber(), bodyTip.getSlot(),
-                         HexUtil.encodeHexString(bodyTip.getBlockHash()));
+                        bodyTip.getBlockNumber(), bodyTip.getSlot(),
+                        HexUtil.encodeHexString(bodyTip.getBlockHash()));
 
                 // Find the last block where header and body hashes match
                 long alignedBlockNumber = findLastAlignedBlock(rollbackBlockNumber);
@@ -648,7 +649,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
             db.write(new WriteOptions(), batch);
 
             log.warn("Full rollback completed: to slot={}, deleted {} slots, {} blocks, {} headers",
-                     slot, slotsDeleted, blocksDeleted, headersDeleted);
+                    slot, slotsDeleted, blocksDeleted, headersDeleted);
 
         } finally {
             batch.close();
@@ -702,15 +703,27 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
                 mainIter.seek(longToBytes(slotC));
                 while (mainIter.isValid()) {
                     long s = bytesToLong(mainIter.key());
-                    if (s < slotC) { mainIter.next(); continue; }
-                    if (s == slotC && hashC != null && HexUtil.encodeHexString(mainIter.value()).equals(hashC)) { mainIter.next(); continue; }
+                    if (s < slotC) {
+                        mainIter.next();
+                        continue;
+                    }
+                    if (s == slotC && hashC != null && HexUtil.encodeHexString(mainIter.value()).equals(hashC)) {
+                        mainIter.next();
+                        continue;
+                    }
                     break;
                 }
                 ebbIter.seek(longToBytes(slotC));
                 while (ebbIter.isValid()) {
                     long s = bytesToLong(ebbIter.key());
-                    if (s < slotC) { ebbIter.next(); continue; }
-                    if (s == slotC && hashC != null && HexUtil.encodeHexString(ebbIter.value()).equals(hashC)) { ebbIter.next(); continue; }
+                    if (s < slotC) {
+                        ebbIter.next();
+                        continue;
+                    }
+                    if (s == slotC && hashC != null && HexUtil.encodeHexString(ebbIter.value()).equals(hashC)) {
+                        ebbIter.next();
+                        continue;
+                    }
                     break;
                 }
 
@@ -926,7 +939,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
     /**
      * Recover from corrupted chain state by finding the last valid continuous point
      * and removing all data after that point.
-     *
+     * <p>
      * This method:
      * 1. Computes last continuous header/body block numbers up to their tips
      * 2. Removes all data after the recovery point
@@ -1172,11 +1185,11 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
         // Update tip if this is a newer block OR same slot with higher block number (fork handling)
         ChainTip currentTip = getTip();
         if (currentTip == null || slot > currentTip.getSlot() ||
-            (slot.equals(currentTip.getSlot()) && blockNumber > currentTip.getBlockNumber())) {
+                (slot.equals(currentTip.getSlot()) && blockNumber > currentTip.getBlockNumber())) {
             ChainTip newTip = new ChainTip(slot, blockHash, blockNumber);
             batch.put(metadataHandle, TIP_KEY, serializeChainTip(newTip));
             log.debug("Updated tip: slot={}, blockNumber={} (fork handling: same-slot={})",
-                     slot, blockNumber, currentTip != null && slot.equals(currentTip.getSlot()));
+                    slot, blockNumber, currentTip != null && slot.equals(currentTip.getSlot()));
         } else if (currentTip != null && slot.equals(currentTip.getSlot()) && blockNumber.equals(currentTip.getBlockNumber())) {
             // Same slot, same block number but potentially different hash (fork scenario)
             if (!Arrays.equals(blockHash, currentTip.getBlockHash())) {

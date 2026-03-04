@@ -68,8 +68,6 @@ public class YaciNodeProducer {
     // UTXO config
     @ConfigProperty(name = "yaci.node.utxo.enabled", defaultValue = "true")
     boolean utxoEnabled;
-    @ConfigProperty(name = "yaci.node.utxo.store", defaultValue = "classic")
-    String utxoStore;
     @ConfigProperty(name = "yaci.node.utxo.pruneDepth", defaultValue = "2160")
     int utxoPruneDepth;
     @ConfigProperty(name = "yaci.node.utxo.rollbackWindow", defaultValue = "4320")
@@ -179,7 +177,6 @@ public class YaciNodeProducer {
         // Globals: UTXO options
         Map<String, Object> globals = new HashMap<>();
         globals.put("yaci.node.utxo.enabled", utxoEnabled);
-        globals.put("yaci.node.utxo.store", utxoStore);
         globals.put("yaci.node.utxo.pruneDepth", utxoPruneDepth);
         globals.put("yaci.node.utxo.rollbackWindow", utxoRollbackWindow);
         globals.put("yaci.node.utxo.pruneBatchSize", utxoPruneBatchSize);

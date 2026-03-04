@@ -33,7 +33,6 @@ import com.bloxbean.cardano.yaci.events.impl.SimpleEventBus;
 import com.bloxbean.cardano.yaci.events.impl.NoopEventBus;
 import com.bloxbean.cardano.yaci.node.runtime.events.NodeStartedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.plugins.PluginManager;
-import com.bloxbean.cardano.yaci.node.runtime.utxo.ClassicUtxoStore;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.PruneService;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandler;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
@@ -167,12 +166,10 @@ public class YaciNode implements NodeAPI {
             pluginManager = new PluginManager(eventBus, scheduler, this.runtimeOptions.plugins().config(), Thread.currentThread().getContextClassLoader());
         }
 
-        // Phase 3: Initialize UTXO store (classic) if enabled and RocksDB is used
+        // Phase 3: Initialize UTXO store if enabled and RocksDB is used
         try {
             Object enabledOpt = this.runtimeOptions.globals().get("yaci.node.utxo.enabled");
             boolean utxoEnabled = enabledOpt instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(enabledOpt));
-            Object storeOpt = this.runtimeOptions.globals().getOrDefault("yaci.node.utxo.store", "classic");
-            String storeName = String.valueOf(storeOpt);
             if (utxoEnabled && (chainState instanceof DirectRocksDBChainState rocks)) {
                 this.utxoStore = com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStoreFactory.create(rocks, log, this.runtimeOptions.globals());
                 // Reconcile UTXO with chainstate before subscribing and starting prune
@@ -226,7 +223,7 @@ public class YaciNode implements NodeAPI {
                     } catch (Throwable ignored) {}
                 }, lagLogSec, lagLogSec, java.util.concurrent.TimeUnit.SECONDS);
             } else {
-                log.info("UTXO store not initialized (enabled={}, store={}, rocksdb={})", utxoEnabled, storeName, (chainState instanceof DirectRocksDBChainState));
+                log.info("UTXO store not initialized (enabled={}, rocksdb={})", utxoEnabled, (chainState instanceof DirectRocksDBChainState));
             }
         } catch (Throwable t) {
             log.warn("Failed to initialize UTXO store: {}", t.toString());

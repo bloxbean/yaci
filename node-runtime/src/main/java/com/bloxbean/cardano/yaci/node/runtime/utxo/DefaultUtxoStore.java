@@ -26,10 +26,10 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Classic UTXO store backed by RocksDB column families.
+ * Default UTXO store backed by RocksDB column families.
  * Listens to BlockAppliedEvent and RollbackEvent, applies compact deltas.
  */
-public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Prunable, UtxoStatusProvider, AutoCloseable {
+public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Prunable, UtxoStatusProvider, AutoCloseable {
     private final RocksDB db;
     private final Logger log;
     private final boolean enabled;
@@ -63,7 +63,7 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     private volatile long lastBlockSize = 0L;
     private final java.util.concurrent.atomic.AtomicReference<java.util.Map<String, Long>> cfEstimates = new java.util.concurrent.atomic.AtomicReference<>(java.util.Map.of());
 
-    public ClassicUtxoStore(RocksDbSupplier supplier,
+    public DefaultUtxoStore(RocksDbSupplier supplier,
                             Logger logger,
                             java.util.Map<String, Object> config) {
         this.db = supplier.rocks().db();
@@ -97,7 +97,7 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         this.indexAddressHash = addrIdx;
         this.indexPaymentCred = payCredIdx;
 
-        this.processor = new ClassicUtxoProcessor(this.db);
+        this.processor = new DefaultUtxoProcessor(this.db);
 
         // Metrics setup
         this.metricsEnabled = getBool(config, "yaci.node.metrics.enabled", true);
@@ -110,7 +110,7 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
             this.metricsScheduler = null;
         }
 
-        log.info("ClassicUtxoStore initialized (enabled={})", enabled);
+        log.info("DefaultUtxoStore initialized (enabled={})", enabled);
     }
 
     @Override
@@ -282,7 +282,8 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                         if (blockSizes.size() > blockSizeWindow) blockSizes.removeFirst();
                     }
                 }
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {
+            }
 
             java.util.List<Integer> invList = block.getInvalidTransactions();
             java.util.Set<Integer> invalidIdx = (invList != null)
@@ -434,7 +435,8 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                 long now = System.currentTimeMillis();
                 synchronized (applyTimestamps) {
                     applyTimestamps.addLast(now);
-                    while (!applyTimestamps.isEmpty() && now - applyTimestamps.peekFirst() > 30_000L) applyTimestamps.removeFirst();
+                    while (!applyTimestamps.isEmpty() && now - applyTimestamps.peekFirst() > 30_000L)
+                        applyTimestamps.removeFirst();
                 }
             }
         } catch (Exception ex) {
@@ -518,7 +520,8 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         try {
             byte[] b = db.get(cfMeta, META_LAST_APPLIED_BLOCK);
             if (b != null && b.length == 8) lastAppliedBlock = ByteBuffer.wrap(b).order(ByteOrder.BIG_ENDIAN).getLong();
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         ChainTip tip = chainState.getTip();
         if (tip == null) return;
@@ -608,34 +611,74 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     }
 
     // ---- UtxoStatusProvider ----
-    @Override public String storeType() { return "classic"; }
-    @Override public int getPruneDepth() { return pruneDepth; }
-    @Override public int getRollbackWindow() { return rollbackWindow; }
-    @Override public int getPruneBatchSize() { return pruneBatchSize; }
-    @Override public long getLastAppliedBlock() { return readLastAppliedBlock(); }
-    @Override public long getLastAppliedSlot() { return readLastAppliedSlot(); }
-    @Override public byte[] getDeltaCursorKey() {
-        try { return db.get(cfMeta, META_PRUNE_DELTA_CURSOR); } catch (Exception e) { return null; }
+    @Override
+    public String storeType() {
+        return "default";
     }
-    @Override public byte[] getSpentCursorKey() {
-        try { return db.get(cfMeta, META_PRUNE_SPENT_CURSOR); } catch (Exception e) { return null; }
+
+    @Override
+    public int getPruneDepth() {
+        return pruneDepth;
+    }
+
+    @Override
+    public int getRollbackWindow() {
+        return rollbackWindow;
+    }
+
+    @Override
+    public int getPruneBatchSize() {
+        return pruneBatchSize;
+    }
+
+    @Override
+    public long getLastAppliedBlock() {
+        return readLastAppliedBlock();
+    }
+
+    @Override
+    public long getLastAppliedSlot() {
+        return readLastAppliedSlot();
+    }
+
+    @Override
+    public byte[] getDeltaCursorKey() {
+        try {
+            return db.get(cfMeta, META_PRUNE_DELTA_CURSOR);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    @Override
+    public byte[] getSpentCursorKey() {
+        try {
+            return db.get(cfMeta, META_PRUNE_SPENT_CURSOR);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Override
     public java.util.Map<String, Object> getMetrics() {
         if (!metricsEnabled) return java.util.Map.of();
         java.util.List<Long> snap;
-        synchronized (applyLatencies) { snap = new java.util.ArrayList<>(applyLatencies); }
+        synchronized (applyLatencies) {
+            snap = new java.util.ArrayList<>(applyLatencies);
+        }
         double avg = 0, p95 = 0;
         if (!snap.isEmpty()) {
-            long sum = 0; for (long v : snap) sum += v; avg = sum * 1.0 / snap.size();
+            long sum = 0;
+            for (long v : snap) sum += v;
+            avg = sum * 1.0 / snap.size();
             java.util.Collections.sort(snap);
-            p95 = snap.get((int)Math.floor(0.95 * (snap.size() - 1)));
+            p95 = snap.get((int) Math.floor(0.95 * (snap.size() - 1)));
         }
         long now = System.currentTimeMillis();
         int within;
         synchronized (applyTimestamps) {
-            while (!applyTimestamps.isEmpty() && now - applyTimestamps.peekFirst() > 30_000L) applyTimestamps.removeFirst();
+            while (!applyTimestamps.isEmpty() && now - applyTimestamps.peekFirst() > 30_000L)
+                applyTimestamps.removeFirst();
             within = applyTimestamps.size();
         }
         double bps = within / 30.0;
@@ -651,9 +694,13 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         // Block size metrics
         long bsAvg = 0;
         java.util.List<Long> bsnap;
-        synchronized (blockSizes) { bsnap = new java.util.ArrayList<>(blockSizes); }
+        synchronized (blockSizes) {
+            bsnap = new java.util.ArrayList<>(blockSizes);
+        }
         if (!bsnap.isEmpty()) {
-            long sum = 0; for (long v : bsnap) sum += v; bsAvg = Math.round(sum * 1.0 / bsnap.size());
+            long sum = 0;
+            for (long v : bsnap) sum += v;
+            bsAvg = Math.round(sum * 1.0 / bsnap.size());
         }
         m.put("block.size.last", lastBlockSize);
         m.put("block.size.avg", bsAvg);
@@ -673,23 +720,31 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
             m.put("utxo_addr.estimateNumKeys", parseEstimate(cfAddr));
             m.put("utxo_block_delta.estimateNumKeys", parseEstimate(cfDelta));
             cfEstimates.set(java.util.Collections.unmodifiableMap(m));
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {
+        }
     }
 
     private long parseEstimate(ColumnFamilyHandle cf) {
         try {
             String v = db.getProperty(cf, "rocksdb.estimate-num-keys");
             return Long.parseLong(v.trim());
-        } catch (Exception e) { return -1L; }
+        } catch (Exception e) {
+            return -1L;
+        }
     }
 
-    // package-private raw accessor for MMR backend
-    byte[] rawUnspentValue(byte[] outpointKey) throws Exception { return db.get(cfUnspent, outpointKey); }
+    // package-private raw accessor for unspent values
+    byte[] rawUnspentValue(byte[] outpointKey) throws Exception {
+        return db.get(cfUnspent, outpointKey);
+    }
 
     private long pruneDeltasAndCount(long deltaCutoff) {
         int remaining = pruneBatchSize;
         byte[] cursor = null;
-        try { cursor = db.get(cfMeta, META_PRUNE_DELTA_CURSOR); } catch (Exception ignored) {}
+        try {
+            cursor = db.get(cfMeta, META_PRUNE_DELTA_CURSOR);
+        } catch (Exception ignored) {
+        }
         long deleted = 0L;
         try (RocksIterator it = db.newIterator(cfDelta); WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
             if (cursor != null) {
@@ -731,7 +786,10 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     private long pruneSpentAndCount(long spentCutoff) {
         int remaining = pruneBatchSize;
         byte[] cursor = null;
-        try { cursor = db.get(cfMeta, META_PRUNE_SPENT_CURSOR); } catch (Exception ignored) {}
+        try {
+            cursor = db.get(cfMeta, META_PRUNE_SPENT_CURSOR);
+        } catch (Exception ignored) {
+        }
         boolean wrapped = false;
         long deleted = 0L;
         try (RocksIterator it = db.newIterator(cfSpent); WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
@@ -761,7 +819,8 @@ public final class ClassicUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                         remaining--;
                         deleted++;
                     }
-                } catch (Exception ignore) {}
+                } catch (Exception ignore) {
+                }
                 lastProcessed = k;
                 it.next();
             }

@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class UtxoAsyncReconcileTest {
     private File tempDir;
     private DirectRocksDBChainState chain;
-    private ClassicUtxoStore store;
+    private DefaultUtxoStore store;
 
     @BeforeEach
     void setup() throws Exception {
@@ -41,7 +41,7 @@ class UtxoAsyncReconcileTest {
         cfg.put("yaci.node.utxo.pruneDepth", 3);
         cfg.put("yaci.node.utxo.rollbackWindow", 4);
         cfg.put("yaci.node.utxo.pruneBatchSize", 100);
-        store = new ClassicUtxoStore(chain, log, cfg);
+        store = new DefaultUtxoStore(chain, log, cfg);
     }
 
     @AfterEach
@@ -60,8 +60,8 @@ class UtxoAsyncReconcileTest {
 
     private static com.bloxbean.cardano.yaci.core.model.Amount lovelaceAmount(long v) {
         return com.bloxbean.cardano.yaci.core.model.Amount.builder()
-                .policyId(LOVELACE)
-                .quantity(new BigInteger(String.valueOf(v)))
+                .unit(LOVELACE)
+                .quantity(BigInteger.valueOf(v))
                 .build();
     }
 
@@ -86,10 +86,10 @@ class UtxoAsyncReconcileTest {
             Block b2 = Block.builder().era(Era.Babbage).transactionBodies(List.of(tx2)).invalidTransactions(Collections.emptyList()).build();
 
             // Publish quickly; processing will happen on single worker
-            bus.publish(new BlockAppliedEvent(Era.Babbage, 10, 1, "h1".repeat(32), b1),
-                    EventMetadata.builder().origin("test").slot(10).blockNo(1).blockHash("h1".repeat(32)).build(), PublishOptions.builder().build());
-            bus.publish(new BlockAppliedEvent(Era.Babbage, 11, 2, "h2".repeat(32), b2),
-                    EventMetadata.builder().origin("test").slot(11).blockNo(2).blockHash("h2".repeat(32)).build(), PublishOptions.builder().build());
+            bus.publish(new BlockAppliedEvent(Era.Babbage, 10, 1, "e1".repeat(32), b1),
+                    EventMetadata.builder().origin("test").slot(10).blockNo(1).blockHash("e1".repeat(32)).build(), PublishOptions.builder().build());
+            bus.publish(new BlockAppliedEvent(Era.Babbage, 11, 2, "e2".repeat(32), b2),
+                    EventMetadata.builder().origin("test").slot(11).blockNo(2).blockHash("e2".repeat(32)).build(), PublishOptions.builder().build());
 
             // Wait until lastAppliedBlock reaches 2
             long deadline = System.currentTimeMillis() + 5000;

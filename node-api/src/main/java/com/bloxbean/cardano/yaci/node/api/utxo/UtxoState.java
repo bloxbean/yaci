@@ -8,7 +8,7 @@ import java.util.Optional;
 
 /**
  * Public interface for UTXO storage and queries.
- * Implementations live in node-runtime (e.g., Classic, MMR).
+ * Implementations live in node-runtime (e.g., DefaultUtxoStore).
  */
 public interface UtxoState {
 

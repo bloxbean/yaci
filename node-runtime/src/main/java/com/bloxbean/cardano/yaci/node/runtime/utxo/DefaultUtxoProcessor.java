@@ -10,10 +10,10 @@ import java.util.*;
 /**
  * Simple processor that batches unspent lookups for inputs/collaterals using MultiGet.
  */
-final class ClassicUtxoProcessor implements UtxoProcessor {
+final class DefaultUtxoProcessor implements UtxoProcessor {
     private final RocksDB db;
 
-    ClassicUtxoProcessor(RocksDB db) {
+    DefaultUtxoProcessor(RocksDB db) {
         this.db = db;
     }
 
@@ -45,7 +45,7 @@ final class ClassicUtxoProcessor implements UtxoProcessor {
             }
         }
 
-        Map<ByteArrayWrapper, byte[]> cache = new HashMap<>((int)(keys.size() * 1.5));
+        Map<ByteArrayWrapper, byte[]> cache = new HashMap<>((int) (keys.size() * 1.5));
         if (!keys.isEmpty()) {
             try {
                 // Use multiGetAsList with repeated CF handle matching the keys list size
@@ -57,22 +57,39 @@ final class ClassicUtxoProcessor implements UtxoProcessor {
                 }
             } catch (Throwable t) {
                 for (byte[] k : keys) {
-                    try { cache.put(new ByteArrayWrapper(k), db.get(cfUnspent, k)); }
-                    catch (Exception ignored) {}
+                    try {
+                        cache.put(new ByteArrayWrapper(k), db.get(cfUnspent, k));
+                    } catch (Exception ignored) {
+                    }
                 }
             }
         }
 
         return new ApplyContext() {
-            @Override public byte[] getUnspent(byte[] outpointKey) { return cache.get(new ByteArrayWrapper(outpointKey)); }
+            @Override
+            public byte[] getUnspent(byte[] outpointKey) {
+                return cache.get(new ByteArrayWrapper(outpointKey));
+            }
         };
     }
 
     private static final class ByteArrayWrapper {
         private final byte[] b;
         private final int h;
-        ByteArrayWrapper(byte[] b) { this.b = b; this.h = Arrays.hashCode(b); }
-        @Override public boolean equals(Object o) { return (o instanceof ByteArrayWrapper w) && Arrays.equals(b, w.b); }
-        @Override public int hashCode() { return h; }
+
+        ByteArrayWrapper(byte[] b) {
+            this.b = b;
+            this.h = Arrays.hashCode(b);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return (o instanceof ByteArrayWrapper w) && Arrays.equals(b, w.b);
+        }
+
+        @Override
+        public int hashCode() {
+            return h;
+        }
     }
 }

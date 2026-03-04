@@ -25,10 +25,10 @@ import java.util.*;
 import static com.bloxbean.cardano.yaci.core.util.Constants.LOVELACE;
 import static org.junit.jupiter.api.Assertions.*;
 
-class ClassicUtxoStoreTest {
+class DefaultUtxoStoreTest {
     private File tempDir;
     private DirectRocksDBChainState chain;
-    private ClassicUtxoStore store;
+    private DefaultUtxoStore store;
     private EventBus bus;
 
     @BeforeEach
@@ -36,13 +36,13 @@ class ClassicUtxoStoreTest {
         tempDir = Files.createTempDirectory("yaci-utxo-test").toFile();
         chain = new DirectRocksDBChainState(tempDir.getAbsolutePath());
         bus = new SimpleEventBus();
-        Logger log = LoggerFactory.getLogger(ClassicUtxoStoreTest.class);
+        Logger log = LoggerFactory.getLogger(DefaultUtxoStoreTest.class);
         Map<String, Object> cfg = new HashMap<>();
         cfg.put("yaci.node.utxo.enabled", true);
         cfg.put("yaci.node.utxo.pruneDepth", 3);
         cfg.put("yaci.node.utxo.rollbackWindow", 4);
         cfg.put("yaci.node.utxo.pruneBatchSize", 100);
-        store = new ClassicUtxoStore(chain, log, cfg);
+        store = new DefaultUtxoStore(chain, log, cfg);
         // register handler
         new UtxoEventHandler(bus, store);
     }
@@ -194,7 +194,7 @@ class ClassicUtxoStoreTest {
             publishBlock(12 + i, 3 + i, "dd".repeat(32), empty);
         }
 
-        publishRollback(11);
+        publishRollback(10);
         var list = store.getUtxosByAddress(addr, 1, 10);
         assertFalse(list.isEmpty());
     }
