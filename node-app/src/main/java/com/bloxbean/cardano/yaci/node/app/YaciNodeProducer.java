@@ -65,6 +65,50 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.plugins.logging.enabled", defaultValue = "false")
     boolean pluginsLoggingEnabled;
 
+    // UTXO config
+    @ConfigProperty(name = "yaci.node.utxo.enabled", defaultValue = "true")
+    boolean utxoEnabled;
+    @ConfigProperty(name = "yaci.node.utxo.store", defaultValue = "classic")
+    String utxoStore;
+    @ConfigProperty(name = "yaci.node.utxo.pruneDepth", defaultValue = "2160")
+    int utxoPruneDepth;
+    @ConfigProperty(name = "yaci.node.utxo.rollbackWindow", defaultValue = "4320")
+    int utxoRollbackWindow;
+    @ConfigProperty(name = "yaci.node.utxo.pruneBatchSize", defaultValue = "500")
+    int utxoPruneBatchSize;
+    @ConfigProperty(name = "yaci.node.utxo.index.address_hash", defaultValue = "true")
+    boolean utxoIndexAddressHash;
+    @ConfigProperty(name = "yaci.node.utxo.index.payment_credential", defaultValue = "true")
+    boolean utxoIndexPaymentCred;
+    @ConfigProperty(name = "yaci.node.utxo.indexingStrategy", defaultValue = "both")
+    String utxoIndexingStrategy;
+    @ConfigProperty(name = "yaci.node.utxo.delta.selfContained", defaultValue = "false")
+    boolean utxoDeltaSelfContained;
+    @ConfigProperty(name = "yaci.node.utxo.applyAsync", defaultValue = "false")
+    boolean utxoApplyAsync;
+
+    // Block producer config
+    @ConfigProperty(name = "yaci.node.block-producer.enabled", defaultValue = "false")
+    boolean blockProducerEnabled;
+
+    @ConfigProperty(name = "yaci.node.block-producer.block-time-millis", defaultValue = "2000")
+    int blockTimeMillis;
+
+    @ConfigProperty(name = "yaci.node.block-producer.lazy", defaultValue = "false")
+    boolean blockProducerLazy;
+
+    @ConfigProperty(name = "yaci.node.block-producer.genesis-timestamp", defaultValue = "0")
+    long genesisTimestamp;
+
+    @ConfigProperty(name = "yaci.node.block-producer.slot-length-millis", defaultValue = "1000")
+    int slotLengthMillis;
+
+    @ConfigProperty(name = "yaci.node.block-producer.genesis-funds-file")
+    java.util.Optional<String> genesisFundsFile;
+
+    @ConfigProperty(name = "yaci.node.block-producer.protocol-parameters-file")
+    java.util.Optional<String> protocolParametersFile;
+
     private final ClassLoader pluginClassLoader;
     private NodeAPI nodeAPI;
 
@@ -111,6 +155,13 @@ public class YaciNodeProducer {
                 .selectiveBodyFetchRatio(yaciConfig.getSelectiveBodyFetchRatio())
                 .enableMonitoring(yaciConfig.isEnableMonitoring())
                 .monitoringPort(yaciConfig.getMonitoringPort())
+                .enableBlockProducer(blockProducerEnabled)
+                .blockTimeMillis(blockTimeMillis)
+                .lazyBlockProduction(blockProducerLazy)
+                .genesisTimestamp(genesisTimestamp)
+                .slotLengthMillis(slotLengthMillis)
+                .genesisFundsFile(genesisFundsFile.orElse(null))
+                .protocolParametersFile(protocolParametersFile.orElse(null))
                 .build();
 
         // Validate configuration
@@ -124,7 +175,21 @@ public class YaciNodeProducer {
         pluginConfigMap.put("plugins.logging.enabled", pluginsLoggingEnabled);
         PluginsOptions pluginsOptions = new PluginsOptions(
                 pluginsEnabled, false, Set.of(), Set.of(), pluginConfigMap);
-        RuntimeOptions runtimeOptions = new RuntimeOptions(eventsOptions, pluginsOptions, Map.of());
+
+        // Globals: UTXO options
+        Map<String, Object> globals = new HashMap<>();
+        globals.put("yaci.node.utxo.enabled", utxoEnabled);
+        globals.put("yaci.node.utxo.store", utxoStore);
+        globals.put("yaci.node.utxo.pruneDepth", utxoPruneDepth);
+        globals.put("yaci.node.utxo.rollbackWindow", utxoRollbackWindow);
+        globals.put("yaci.node.utxo.pruneBatchSize", utxoPruneBatchSize);
+        globals.put("yaci.node.utxo.index.address_hash", utxoIndexAddressHash);
+        globals.put("yaci.node.utxo.index.payment_credential", utxoIndexPaymentCred);
+        globals.put("yaci.node.utxo.indexingStrategy", utxoIndexingStrategy);
+        globals.put("yaci.node.utxo.delta.selfContained", utxoDeltaSelfContained);
+        globals.put("yaci.node.utxo.applyAsync", utxoApplyAsync);
+
+        RuntimeOptions runtimeOptions = new RuntimeOptions(eventsOptions, pluginsOptions, globals);
 
         // Set plugin classloader on thread context so PluginManager picks it up
         Thread.currentThread().setContextClassLoader(pluginClassLoader);
