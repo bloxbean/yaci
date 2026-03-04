@@ -1,23 +1,26 @@
 package com.bloxbean.cardano.yaci.node.app;
 
-import com.bloxbean.cardano.yaci.node.api.NodeAPI;
-import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
-import com.bloxbean.cardano.yaci.node.api.config.RuntimeOptions;
-import com.bloxbean.cardano.yaci.node.api.config.PluginsOptions;
-import com.bloxbean.cardano.yaci.events.api.config.EventsOptions;
 import com.bloxbean.cardano.yaci.events.api.SubscriptionOptions;
+import com.bloxbean.cardano.yaci.events.api.config.EventsOptions;
+import com.bloxbean.cardano.yaci.node.api.NodeAPI;
+import com.bloxbean.cardano.yaci.node.api.config.PluginsOptions;
+import com.bloxbean.cardano.yaci.node.api.config.RuntimeOptions;
+import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
 import com.bloxbean.cardano.yaci.node.runtime.YaciNode;
-import io.quarkus.runtime.Shutdown;
-import io.quarkus.runtime.Startup;
+import io.quarkus.runtime.ShutdownEvent;
+import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Named;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * CDI Producer for NodeAPI instance
- */
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+
 @ApplicationScoped
 public class YaciNodeProducer {
 
@@ -26,13 +29,13 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.network", defaultValue = "mainnet")
     String network;
 
-    @ConfigProperty(name = "yaci.node.remote.host", defaultValue = "localhost")
+    @ConfigProperty(name = "yaci.node.remote.host", defaultValue = "backbone.cardano.iog.io")
     String remoteHost;
 
-    @ConfigProperty(name = "yaci.node.remote.port", defaultValue = "32000")
+    @ConfigProperty(name = "yaci.node.remote.port", defaultValue = "3001")
     int remotePort;
 
-    @ConfigProperty(name = "yaci.node.remote.protocol-magic", defaultValue = "1")
+    @ConfigProperty(name = "yaci.node.remote.protocol-magic", defaultValue = "764824073")
     long protocolMagic;
 
     @ConfigProperty(name = "yaci.node.server.port", defaultValue = "13337")
@@ -47,82 +50,92 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.storage.rocksdb", defaultValue = "true")
     boolean useRocksDB;
 
-    @ConfigProperty(name = "yaci.node.storage.path", defaultValue = "./yaci-data")
+    @ConfigProperty(name = "yaci.node.storage.path", defaultValue = "./chainstate")
     String storagePath;
 
     @ConfigProperty(name = "yaci.node.auto-sync-start", defaultValue = "false")
     boolean autoSyncStart;
 
-    // Event/Plugin toggles
     @ConfigProperty(name = "yaci.events.enabled", defaultValue = "true")
     boolean eventsEnabled;
+
     @ConfigProperty(name = "yaci.plugins.enabled", defaultValue = "true")
     boolean pluginsEnabled;
-    @ConfigProperty(name = "yaci.plugins.logging.enabled", defaultValue = "false")
-    boolean loggingPluginEnabled;
 
+    @ConfigProperty(name = "yaci.plugins.logging.enabled", defaultValue = "false")
+    boolean pluginsLoggingEnabled;
+
+    private final ClassLoader pluginClassLoader;
     private NodeAPI nodeAPI;
+
+    public YaciNodeProducer(@Named("pluginClassLoader") ClassLoader pluginClassLoader) {
+        this.pluginClassLoader = pluginClassLoader;
+    }
 
     @Produces
     @ApplicationScoped
     public NodeAPI createNodeAPI() {
-        if (nodeAPI == null) {
-            log.info("Creating Yaci Node with network: {}", network);
-
-            YaciNodeConfig config;
-            switch (network.toLowerCase()) {
-                case "mainnet":
-                    config = YaciNodeConfig.mainnetDefault();
-                    break;
-                case "preprod":
-                default:
-                    config = YaciNodeConfig.preprodDefault();
-                    break;
-            }
-
-            // Override with configuration properties
-            config = YaciNodeConfig.builder()
-                    .enableClient(clientEnabled)
-                    .enableServer(serverEnabled)
-                    .remoteHost(remoteHost)
-                    .remotePort(remotePort)
-                    .serverPort(serverPort)
-                    .protocolMagic(protocolMagic)
-                    .useRocksDB(useRocksDB)
-                    .rocksDBPath(storagePath)
-                    .fullSyncThreshold(config.getFullSyncThreshold())
-                    .enablePipelinedSync(config.isEnablePipelinedSync())
-                    .headerPipelineDepth(config.getHeaderPipelineDepth())
-                    .bodyBatchSize(config.getBodyBatchSize())
-                    .maxParallelBodies(config.getMaxParallelBodies())
-                    .enableSelectiveBodyFetch(config.isEnableSelectiveBodyFetch())
-                    .selectiveBodyFetchRatio(config.getSelectiveBodyFetchRatio())
-                    .enableMonitoring(config.isEnableMonitoring())
-                    .monitoringPort(config.getMonitoringPort())
-                    .build();
-
-            // Validate configuration
-            config.validate();
-
-            // Build explicit runtime options (no System properties)
-            EventsOptions eventsOptions = new EventsOptions(eventsEnabled, 8192, SubscriptionOptions.Overflow.BLOCK);
-            java.util.Map<String, Object> pluginConfig = new java.util.HashMap<>();
-            pluginConfig.put("plugins.logging.enabled", loggingPluginEnabled);
-            PluginsOptions pluginsOptions = new PluginsOptions(pluginsEnabled, false, java.util.Set.of(), java.util.Set.of(), pluginConfig);
-            RuntimeOptions runtimeOptions = new RuntimeOptions(eventsOptions, pluginsOptions, java.util.Map.of());
-
-            nodeAPI = new YaciNode(config, runtimeOptions);
-            log.info("Yaci Node created successfully");
-
-            //Register listeners
-            //nodeAPI.registerListeners(new Listner1(), new Listener2());
+        if (nodeAPI != null) {
+            return nodeAPI;
         }
+
+        log.info("Creating Yaci Node with network: {}", network);
+
+        YaciNodeConfig yaciConfig;
+        switch (network.toLowerCase()) {
+            case "mainnet":
+                yaciConfig = YaciNodeConfig.mainnetDefault();
+                break;
+            case "preprod":
+            default:
+                yaciConfig = YaciNodeConfig.preprodDefault();
+                break;
+        }
+
+        // Override with configuration properties
+        yaciConfig = YaciNodeConfig.builder()
+                .enableClient(clientEnabled)
+                .enableServer(serverEnabled)
+                .remoteHost(remoteHost)
+                .remotePort(remotePort)
+                .serverPort(serverPort)
+                .protocolMagic(protocolMagic)
+                .useRocksDB(useRocksDB)
+                .rocksDBPath(storagePath)
+                .fullSyncThreshold(yaciConfig.getFullSyncThreshold())
+                .enablePipelinedSync(yaciConfig.isEnablePipelinedSync())
+                .headerPipelineDepth(yaciConfig.getHeaderPipelineDepth())
+                .bodyBatchSize(yaciConfig.getBodyBatchSize())
+                .maxParallelBodies(yaciConfig.getMaxParallelBodies())
+                .enableSelectiveBodyFetch(yaciConfig.isEnableSelectiveBodyFetch())
+                .selectiveBodyFetchRatio(yaciConfig.getSelectiveBodyFetchRatio())
+                .enableMonitoring(yaciConfig.isEnableMonitoring())
+                .monitoringPort(yaciConfig.getMonitoringPort())
+                .build();
+
+        // Validate configuration
+        yaciConfig.validate();
+
+        // Build runtime options
+        EventsOptions eventsOptions = new EventsOptions(
+                eventsEnabled, 8192, SubscriptionOptions.Overflow.BLOCK);
+
+        Map<String, Object> pluginConfigMap = new HashMap<>();
+        pluginConfigMap.put("plugins.logging.enabled", pluginsLoggingEnabled);
+        PluginsOptions pluginsOptions = new PluginsOptions(
+                pluginsEnabled, false, Set.of(), Set.of(), pluginConfigMap);
+        RuntimeOptions runtimeOptions = new RuntimeOptions(eventsOptions, pluginsOptions, Map.of());
+
+        // Set plugin classloader on thread context so PluginManager picks it up
+        Thread.currentThread().setContextClassLoader(pluginClassLoader);
+
+        nodeAPI = new YaciNode(yaciConfig, runtimeOptions);
+        log.info("Yaci Node created successfully");
 
         return nodeAPI;
     }
 
-    @Startup
-    void onStartup() {
+    void onStart(@Observes StartupEvent event) {
         log.info("Yaci Node Application starting up...");
         log.info("Auto-sync-start enabled: {}", autoSyncStart);
 
@@ -131,20 +144,19 @@ public class YaciNodeProducer {
                 log.info("Auto-starting Yaci Node synchronization...");
                 NodeAPI node = createNodeAPI();
                 node.start();
-                log.info("✅ Yaci Node started automatically and syncing with {} network", network);
-                log.info("🌐 REST API available at http://localhost:8080/api/v1/node/ for manual control");
+                log.info("Yaci Node started automatically and syncing with {} network", network);
+                log.info("REST API available at http://localhost:8080/api/v1/node/ for manual control");
             } catch (Exception e) {
-                log.error("❌ Failed to auto-start Yaci Node: {}", e.getMessage());
-                log.info("💡 You can still start manually via: curl -X POST http://localhost:8080/api/v1/node/start");
+                log.error("Failed to auto-start Yaci Node: {}", e.getMessage());
+                log.info("You can still start manually via: curl -X POST http://localhost:8080/api/v1/node/start");
             }
         } else {
-            log.info("💡 Auto-sync is disabled. Start manually via: curl -X POST http://localhost:8080/api/v1/node/start");
-            log.info("🌐 REST API available at http://localhost:8080/api/v1/node/");
+            log.info("Auto-sync is disabled. Start manually via: curl -X POST http://localhost:8080/api/v1/node/start");
+            log.info("REST API available at http://localhost:8080/api/v1/node/");
         }
     }
 
-    @Shutdown
-    void onShutdown() {
+    void onStop(@Observes ShutdownEvent event) {
         log.info("Yaci Node Application shutting down...");
         if (nodeAPI != null && nodeAPI.isRunning()) {
             log.info("Stopping Yaci Node...");

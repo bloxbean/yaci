@@ -8,9 +8,6 @@ import org.eclipse.microprofile.health.HealthCheck;
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.eclipse.microprofile.health.Readiness;
 
-/**
- * Health check for the Yaci Node
- */
 @Readiness
 @ApplicationScoped
 public class YaciNodeHealthCheck implements HealthCheck {
@@ -23,18 +20,14 @@ public class YaciNodeHealthCheck implements HealthCheck {
         try {
             NodeStatus status = nodeAPI.getStatus();
 
-            // Consider the node healthy if it's either:
-            // 1. Running and not having any critical errors
-            // 2. Stopped (which is a valid state)
             boolean isHealthy = status.getStatusMessage() == null ||
-                               !status.getStatusMessage().toLowerCase().contains("error");
+                    !status.getStatusMessage().toLowerCase().contains("error");
 
             if (isHealthy) {
                 return HealthCheckResponse.up("yaci-node");
             } else {
                 return HealthCheckResponse.down("yaci-node");
             }
-
         } catch (Exception e) {
             return HealthCheckResponse.down("yaci-node");
         }

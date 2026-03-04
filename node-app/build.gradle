@@ -4,7 +4,6 @@ plugins {
 }
 
 dependencies {
-//    implementation enforcedPlatform("io.quarkus.platform:quarkus-bom:3.15.1")
     implementation enforcedPlatform("${quarkusPlatformGroupId}:${quarkusPlatformArtifactId}:${quarkusPlatformVersion}")
 
     // Quarkus dependencies
@@ -14,7 +13,7 @@ dependencies {
     implementation 'io.quarkus:quarkus-config-yaml'
     implementation 'io.quarkus:quarkus-smallrye-health'
 
-    // Yaci Node dependencies - exclude netty to use Quarkus version
+    // Yaci Node dependencies
     implementation(project(':node-api')) {
         exclude group: 'io.netty', module: 'netty-all'
     }

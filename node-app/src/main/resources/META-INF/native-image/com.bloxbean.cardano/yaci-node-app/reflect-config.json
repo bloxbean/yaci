@@ -307,6 +307,17 @@
     "allDeclaredConstructors": true
   },
   {
+    "name": "com.bloxbean.cardano.yaci.node.api.plugin.NodePlugin",
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.runtime.plugins.LoggingPlugin",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
     "name": "sun.misc.Unsafe",
     "fields": [
       { "name": "theUnsafe" }
