@@ -98,99 +98,35 @@ class ConwayErrorParser {
                 TxSubmissionError child = inner != null ? parseUtxoFailure(inner) : unknownError(ERA, "UTXO", tag, di);
                 return wrapError(ERA, "UTXOW", "UtxoFailure", tag, "UTXO failure", Collections.singletonList(child));
             }
-            case 1: { // InvalidWitnessesUTXOW
-                List<String> witnesses = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(ERA, "UTXOW", "InvalidWitnessesUTXOW", tag, "Invalid witnesses", detail("witnesses", witnesses));
+            default: {
+                // Tags 1-9: common witness errors (shared with Shelley)
+                TxSubmissionError witness = parseCommonUtxowWitnessError(ERA, tag, items);
+                if (witness != null) return witness;
+                // Tags 10-15: common script/datum errors
+                TxSubmissionError script = parseCommonUtxowScriptError(ERA, tag, items);
+                if (script != null) return script;
+                // Conway-specific UTXOW tags 16-18
+                switch (tag) {
+                    case 16: { // MalformedScriptWitnesses
+                        List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
+                        return leafError(ERA, "UTXOW", "MalformedScriptWitnesses", tag,
+                                "Malformed script witnesses", detail("scriptHashes", hashes));
+                    }
+                    case 17: { // MalformedReferenceScripts
+                        List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
+                        return leafError(ERA, "UTXOW", "MalformedReferenceScripts", tag,
+                                "Malformed reference scripts", detail("scriptHashes", hashes));
+                    }
+                    case 18: { // ScriptIntegrityHashMismatch
+                        String expected = items.size() > 1 ? serializeToHex(items.get(1)) : "";
+                        String actual = items.size() > 2 ? serializeToHex(items.get(2)) : "";
+                        return leafError(ERA, "UTXOW", "ScriptIntegrityHashMismatch", tag,
+                                "Script integrity hash mismatch", detail("expected", expected, "actual", actual));
+                    }
+                    default:
+                        return unknownError(ERA, "UTXOW", tag, di);
+                }
             }
-            case 2: { // MissingVKeyWitnessesUTXOW
-                List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(ERA, "UTXOW", "MissingVKeyWitnessesUTXOW", tag,
-                        "Missing verification key witnesses: " + hashes.size() + " key(s)", detail("keyHashes", hashes));
-            }
-            case 3: { // MissingScriptWitnessesUTXOW
-                List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(ERA, "UTXOW", "MissingScriptWitnessesUTXOW", tag,
-                        "Missing script witnesses", detail("scriptHashes", hashes));
-            }
-            case 4: { // ScriptWitnessNotValidatingUTXOW
-                List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(ERA, "UTXOW", "ScriptWitnessNotValidatingUTXOW", tag,
-                        "Script witness not validating", detail("scriptHashes", hashes));
-            }
-            case 5: { // MissingTxBodyMetadataHash
-                String hash = items.size() > 1 ? toHexSafe(items.get(1)) : "";
-                return leafError(ERA, "UTXOW", "MissingTxBodyMetadataHash", tag,
-                        "Missing tx body metadata hash", detail("hash", hash));
-            }
-            case 6: { // MissingTxMetadata
-                String hash = items.size() > 1 ? toHexSafe(items.get(1)) : "";
-                return leafError(ERA, "UTXOW", "MissingTxMetadata", tag,
-                        "Missing tx metadata", detail("hash", hash));
-            }
-            case 7: { // ConflictingMetadataHash
-                String expected = items.size() > 1 ? toHexSafe(items.get(1)) : "";
-                String actual = items.size() > 2 ? toHexSafe(items.get(2)) : "";
-                return leafError(ERA, "UTXOW", "ConflictingMetadataHash", tag,
-                        "Conflicting metadata hash", detail("expected", expected, "actual", actual));
-            }
-            case 8: // InvalidMetadata
-                return leafError(ERA, "UTXOW", "InvalidMetadata", tag, "Invalid metadata");
-            case 9: { // ExtraneousScriptWitnessesUTXOW
-                List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(ERA, "UTXOW", "ExtraneousScriptWitnessesUTXOW", tag,
-                        "Extraneous script witnesses", detail("scriptHashes", hashes));
-            }
-            case 10: { // MissingRedeemers
-                String raw = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                return leafError(ERA, "UTXOW", "MissingRedeemers", tag,
-                        "Missing redeemers", detail("redeemers", raw));
-            }
-            case 11: { // MissingRequiredDatums
-                String required = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                String provided = items.size() > 2 ? serializeToHex(items.get(2)) : "";
-                return leafError(ERA, "UTXOW", "MissingRequiredDatums", tag,
-                        "Missing required datums", detail("required", required, "provided", provided));
-            }
-            case 12: { // NotAllowedSupplementalDatums
-                String notAllowed = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                String acceptable = items.size() > 2 ? serializeToHex(items.get(2)) : "";
-                return leafError(ERA, "UTXOW", "NotAllowedSupplementalDatums", tag,
-                        "Supplemental datums not allowed", detail("notAllowed", notAllowed, "acceptable", acceptable));
-            }
-            case 13: { // PPViewHashesDontMatch
-                String expected = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                String actual = items.size() > 2 ? serializeToHex(items.get(2)) : "";
-                return leafError(ERA, "UTXOW", "PPViewHashesDontMatch", tag,
-                        "Protocol parameter view hashes don't match", detail("expected", expected, "actual", actual));
-            }
-            case 14: { // UnspendableUTxONoDatumHash
-                List<String> inputs = items.size() > 1 ? extractTxInputList(items.get(1)) : Collections.emptyList();
-                return leafError(ERA, "UTXOW", "UnspendableUTxONoDatumHash", tag,
-                        "Unspendable UTxO (no datum hash)", detail("txInputs", inputs));
-            }
-            case 15: { // ExtraRedeemers
-                String raw = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                return leafError(ERA, "UTXOW", "ExtraRedeemers", tag,
-                        "Extra redeemers", detail("redeemers", raw));
-            }
-            case 16: { // MalformedScriptWitnesses
-                List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(ERA, "UTXOW", "MalformedScriptWitnesses", tag,
-                        "Malformed script witnesses", detail("scriptHashes", hashes));
-            }
-            case 17: { // MalformedReferenceScripts
-                List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(ERA, "UTXOW", "MalformedReferenceScripts", tag,
-                        "Malformed reference scripts", detail("scriptHashes", hashes));
-            }
-            case 18: { // ScriptIntegrityHashMismatch
-                String expected = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                String actual = items.size() > 2 ? serializeToHex(items.get(2)) : "";
-                return leafError(ERA, "UTXOW", "ScriptIntegrityHashMismatch", tag,
-                        "Script integrity hash mismatch", detail("expected", expected, "actual", actual));
-            }
-            default:
-                return unknownError(ERA, "UTXOW", tag, di);
         }
     }
 
@@ -211,123 +147,28 @@ class ConwayErrorParser {
                 TxSubmissionError child = inner != null ? parseUtxosFailure(inner) : unknownError(ERA, "UTXOS", tag, di);
                 return wrapError(ERA, "UTXO", "UtxosFailure", tag, "UTXOS failure", Collections.singletonList(child));
             }
-            case 1: { // BadInputsUTxO
-                List<String> inputs = items.size() > 1 ? extractTxInputList(items.get(1)) : Collections.emptyList();
-                return leafError(ERA, "UTXO", "BadInputsUTxO", tag, "Bad inputs (UTxOs not found)", detail("inputs", inputs));
+            default: {
+                // Tags 1-20: common UTXO errors (shared with Alonzo)
+                TxSubmissionError common = parseCommonUtxoError(ERA, tag, items);
+                if (common != null) return common;
+                // Conway-specific UTXO tags 21-22
+                switch (tag) {
+                    case 21: { // NonDisjointRefInputs
+                        List<String> inputs = items.size() > 1 ? extractTxInputList(items.get(1)) : Collections.emptyList();
+                        return leafError(ERA, "UTXO", "NonDisjointRefInputs", tag,
+                                "Reference inputs overlap with regular inputs", detail("inputs", inputs));
+                    }
+                    case 22: { // TotalCollateralMismatch
+                        long declared = items.size() > 1 ? toLongSafe(items.get(1)) : -1;
+                        long computed = items.size() > 2 ? toLongSafe(items.get(2)) : -1;
+                        return leafError(ERA, "UTXO", "TotalCollateralMismatch", tag,
+                                "Total collateral mismatch: declared " + declared + ", computed " + computed,
+                                detail("declared", declared, "computed", computed));
+                    }
+                    default:
+                        return unknownError(ERA, "UTXO", tag, di);
+                }
             }
-            case 2: { // OutsideValidityIntervalUTxO
-                // payload: [validityInterval, currentSlot]
-                String interval = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                long currentSlot = items.size() > 2 ? toLongSafe(items.get(2)) : -1;
-                Map<String, Object> d = detail("validityInterval", interval, "currentSlot", currentSlot);
-                return leafError(ERA, "UTXO", "OutsideValidityIntervalUTxO", tag,
-                        "Transaction outside validity interval (current slot: " + currentSlot + ")", d);
-            }
-            case 3: { // MaxTxSizeUTxO
-                long actualSize = items.size() > 1 ? toLongSafe(items.get(1)) : -1;
-                long maxSize = items.size() > 2 ? toLongSafe(items.get(2)) : -1;
-                Map<String, Object> d = detail("actualSize", actualSize, "maxSize", maxSize);
-                return leafError(ERA, "UTXO", "MaxTxSizeUTxO", tag,
-                        "Transaction size too large: actual " + actualSize + ", max " + maxSize, d);
-            }
-            case 4: // InputSetEmptyUTxO
-                return leafError(ERA, "UTXO", "InputSetEmptyUTxO", tag, "Transaction has no inputs");
-            case 5: { // FeeTooSmallUTxO
-                long minimumFee = items.size() > 1 ? toLongSafe(items.get(1)) : -1;
-                long actualFee = items.size() > 2 ? toLongSafe(items.get(2)) : -1;
-                Map<String, Object> d = detail("minimumFee", minimumFee, "actualFee", actualFee);
-                return leafError(ERA, "UTXO", "FeeTooSmallUTxO", tag,
-                        "Fee too small: minimum " + minimumFee + ", actual " + actualFee, d);
-            }
-            case 6: { // ValueNotConservedUTxO
-                String consumed = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                String produced = items.size() > 2 ? serializeToHex(items.get(2)) : "";
-                return leafError(ERA, "UTXO", "ValueNotConservedUTxO", tag,
-                        "Value not conserved", detail("consumed", consumed, "produced", produced));
-            }
-            case 7: { // OutputTooSmallUTxO
-                String outputs = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                return leafError(ERA, "UTXO", "OutputTooSmallUTxO", tag,
-                        "Output too small (below minimum ADA)", detail("outputs", outputs));
-            }
-            case 8: { // WrongNetwork
-                String expectedNetwork = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                String addresses = items.size() > 2 ? serializeToHex(items.get(2)) : "";
-                return leafError(ERA, "UTXO", "WrongNetwork", tag,
-                        "Wrong network in output address", detail("expectedNetwork", expectedNetwork, "addresses", addresses));
-            }
-            case 9: { // WrongNetworkWithdrawal
-                String expectedNetwork = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                String accounts = items.size() > 2 ? serializeToHex(items.get(2)) : "";
-                return leafError(ERA, "UTXO", "WrongNetworkWithdrawal", tag,
-                        "Wrong network in withdrawal address", detail("expectedNetwork", expectedNetwork, "accounts", accounts));
-            }
-            case 10: { // OutputBootAddrAttrsTooBig
-                String outputs = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                return leafError(ERA, "UTXO", "OutputBootAddrAttrsTooBig", tag,
-                        "Byron address attributes too big", detail("outputs", outputs));
-            }
-            case 11: // TriesToForgeADA
-                return leafError(ERA, "UTXO", "TriesToForgeADA", tag, "Transaction tries to forge ADA");
-            case 12: { // OutputTooBigUTxO
-                String outputs = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                return leafError(ERA, "UTXO", "OutputTooBigUTxO", tag,
-                        "Output too big (exceeds max value size)", detail("outputs", outputs));
-            }
-            case 13: { // InsufficientCollateral
-                long required = items.size() > 1 ? toLongSafe(items.get(1)) : -1;
-                long provided = items.size() > 2 ? toLongSafe(items.get(2)) : -1;
-                Map<String, Object> d = detail("required", required, "provided", provided);
-                return leafError(ERA, "UTXO", "InsufficientCollateral", tag,
-                        "Insufficient collateral: required " + required + ", provided " + provided, d);
-            }
-            case 14: { // ScriptsNotPaidUTxO
-                String utxos = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                return leafError(ERA, "UTXO", "ScriptsNotPaidUTxO", tag,
-                        "Scripts not paid", detail("utxos", utxos));
-            }
-            case 15: { // ExUnitsTooBigUTxO
-                String maxUnits = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                String actualUnits = items.size() > 2 ? serializeToHex(items.get(2)) : "";
-                return leafError(ERA, "UTXO", "ExUnitsTooBigUTxO", tag,
-                        "Execution units too big", detail("maxUnits", maxUnits, "actualUnits", actualUnits));
-            }
-            case 16: // CollateralContainsNonADA
-                return leafError(ERA, "UTXO", "CollateralContainsNonADA", tag, "Collateral contains non-ADA");
-            case 17: { // WrongNetworkInTxBody
-                String expected = items.size() > 1 ? serializeToHex(items.get(1)) : "";
-                String actual = items.size() > 2 ? serializeToHex(items.get(2)) : "";
-                return leafError(ERA, "UTXO", "WrongNetworkInTxBody", tag,
-                        "Wrong network in tx body", detail("expected", expected, "actual", actual));
-            }
-            case 18: { // OutsideForecast
-                long slot = items.size() > 1 ? toLongSafe(items.get(1)) : -1;
-                return leafError(ERA, "UTXO", "OutsideForecast", tag,
-                        "Validity interval outside forecast (slot " + slot + ")", detail("slot", slot));
-            }
-            case 19: { // TooManyCollateralInputs
-                long max = items.size() > 1 ? toLongSafe(items.get(1)) : -1;
-                long actual = items.size() > 2 ? toLongSafe(items.get(2)) : -1;
-                Map<String, Object> d = detail("max", max, "actual", actual);
-                return leafError(ERA, "UTXO", "TooManyCollateralInputs", tag,
-                        "Too many collateral inputs: max " + max + ", actual " + actual, d);
-            }
-            case 20: // NoCollateralInputs
-                return leafError(ERA, "UTXO", "NoCollateralInputs", tag, "No collateral inputs");
-            case 21: { // NonDisjointRefInputs
-                List<String> inputs = items.size() > 1 ? extractTxInputList(items.get(1)) : Collections.emptyList();
-                return leafError(ERA, "UTXO", "NonDisjointRefInputs", tag,
-                        "Reference inputs overlap with regular inputs", detail("inputs", inputs));
-            }
-            case 22: { // TotalCollateralMismatch
-                long declared = items.size() > 1 ? toLongSafe(items.get(1)) : -1;
-                long computed = items.size() > 2 ? toLongSafe(items.get(2)) : -1;
-                Map<String, Object> d = detail("declared", declared, "computed", computed);
-                return leafError(ERA, "UTXO", "TotalCollateralMismatch", tag,
-                        "Total collateral mismatch: declared " + declared + ", computed " + computed, d);
-            }
-            default:
-                return unknownError(ERA, "UTXO", tag, di);
         }
     }
 

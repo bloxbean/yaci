@@ -65,51 +65,12 @@ class ShelleyErrorParser {
                 TxSubmissionError child = inner != null ? parseUtxoFailure(era, inner) : unknownError(era, "UTXO", tag, di);
                 return wrapError(era, "UTXOW", "UtxoFailure", tag, "UTXO failure", Collections.singletonList(child));
             }
-            case 1: { // InvalidWitnessesUTXOW
-                List<String> witnesses = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(era, "UTXOW", "InvalidWitnessesUTXOW", tag,
-                        "Invalid witnesses", detail("witnesses", witnesses));
-            }
-            case 2: { // MissingVKeyWitnessesUTXOW
-                List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(era, "UTXOW", "MissingVKeyWitnessesUTXOW", tag,
-                        "Missing verification key witnesses: " + hashes.size() + " key(s)", detail("keyHashes", hashes));
-            }
-            case 3: { // MissingScriptWitnessesUTXOW
-                List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(era, "UTXOW", "MissingScriptWitnessesUTXOW", tag,
-                        "Missing script witnesses", detail("scriptHashes", hashes));
-            }
-            case 4: { // ScriptWitnessNotValidatingUTXOW
-                List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(era, "UTXOW", "ScriptWitnessNotValidatingUTXOW", tag,
-                        "Script witness not validating", detail("scriptHashes", hashes));
-            }
-            case 5: { // MissingTxBodyMetadataHash
-                String hash = items.size() > 1 ? toHexSafe(items.get(1)) : "";
-                return leafError(era, "UTXOW", "MissingTxBodyMetadataHash", tag,
-                        "Missing tx body metadata hash", detail("hash", hash));
-            }
-            case 6: { // MissingTxMetadata
-                String hash = items.size() > 1 ? toHexSafe(items.get(1)) : "";
-                return leafError(era, "UTXOW", "MissingTxMetadata", tag,
-                        "Missing tx metadata", detail("hash", hash));
-            }
-            case 7: { // ConflictingMetadataHash
-                String expected = items.size() > 1 ? toHexSafe(items.get(1)) : "";
-                String actual = items.size() > 2 ? toHexSafe(items.get(2)) : "";
-                return leafError(era, "UTXOW", "ConflictingMetadataHash", tag,
-                        "Conflicting metadata hash", detail("expected", expected, "actual", actual));
-            }
-            case 8: // InvalidMetadata
-                return leafError(era, "UTXOW", "InvalidMetadata", tag, "Invalid metadata");
-            case 9: { // ExtraneousScriptWitnessesUTXOW
-                List<String> hashes = items.size() > 1 ? extractHashList(items.get(1)) : Collections.emptyList();
-                return leafError(era, "UTXOW", "ExtraneousScriptWitnessesUTXOW", tag,
-                        "Extraneous script witnesses", detail("scriptHashes", hashes));
-            }
-            default:
+            default: {
+                // Tags 1-9: common witness errors (shared with Conway)
+                TxSubmissionError common = parseCommonUtxowWitnessError(era, tag, items);
+                if (common != null) return common;
                 return unknownError(era, "UTXOW", tag, di);
+            }
         }
     }
 
