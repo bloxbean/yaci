@@ -6,7 +6,14 @@ import com.bloxbean.cardano.yaci.node.api.NodeAPI;
 import com.bloxbean.cardano.yaci.node.api.config.PluginsOptions;
 import com.bloxbean.cardano.yaci.node.api.config.RuntimeOptions;
 import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
+import com.bloxbean.cardano.client.common.model.SlotConfig;
+import com.bloxbean.cardano.client.common.model.SlotConfigs;
+import com.bloxbean.cardano.yaci.core.common.Constants;
+import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.runtime.YaciNode;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper;
+import com.bloxbean.cardano.yaci.node.scalusbridge.ScalusTransactionValidatorFactory;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -101,10 +108,17 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.block-producer.slot-length-millis", defaultValue = "1000")
     int slotLengthMillis;
 
-    @ConfigProperty(name = "yaci.node.block-producer.genesis-funds-file")
-    java.util.Optional<String> genesisFundsFile;
+    @ConfigProperty(name = "yaci.node.block-producer.tx-evaluation", defaultValue = "true")
+    boolean txEvaluationEnabled;
 
-    @ConfigProperty(name = "yaci.node.block-producer.protocol-parameters-file")
+    // Genesis config (shared between devnet and relay modes)
+    @ConfigProperty(name = "yaci.node.genesis.shelley-genesis-file")
+    java.util.Optional<String> shelleyGenesisFile;
+
+    @ConfigProperty(name = "yaci.node.genesis.byron-genesis-file")
+    java.util.Optional<String> byronGenesisFile;
+
+    @ConfigProperty(name = "yaci.node.genesis.protocol-parameters-file")
     java.util.Optional<String> protocolParametersFile;
 
     private final ClassLoader pluginClassLoader;
@@ -158,7 +172,8 @@ public class YaciNodeProducer {
                 .lazyBlockProduction(blockProducerLazy)
                 .genesisTimestamp(genesisTimestamp)
                 .slotLengthMillis(slotLengthMillis)
-                .genesisFundsFile(genesisFundsFile.orElse(null))
+                .shelleyGenesisFile(shelleyGenesisFile.orElse(null))
+                .byronGenesisFile(byronGenesisFile.orElse(null))
                 .protocolParametersFile(protocolParametersFile.orElse(null))
                 .build();
 
@@ -185,6 +200,7 @@ public class YaciNodeProducer {
         globals.put("yaci.node.utxo.indexingStrategy", utxoIndexingStrategy);
         globals.put("yaci.node.utxo.delta.selfContained", utxoDeltaSelfContained);
         globals.put("yaci.node.utxo.applyAsync", utxoApplyAsync);
+        globals.put("yaci.node.tx-evaluation.enabled", txEvaluationEnabled);
 
         RuntimeOptions runtimeOptions = new RuntimeOptions(eventsOptions, pluginsOptions, globals);
 
@@ -193,6 +209,11 @@ public class YaciNodeProducer {
 
         nodeAPI = new YaciNode(yaciConfig, runtimeOptions);
         log.info("Yaci Node created successfully");
+
+        // Initialize transaction evaluator if enabled
+        if (txEvaluationEnabled && blockProducerEnabled) {
+            initTransactionEvaluator((YaciNode) nodeAPI, yaciConfig);
+        }
 
         return nodeAPI;
     }
@@ -215,6 +236,55 @@ public class YaciNodeProducer {
         } else {
             log.info("Auto-sync is disabled. Start manually via: curl -X POST http://localhost:8080/api/v1/node/start");
             log.info("REST API available at http://localhost:8080/api/v1/node/");
+        }
+    }
+
+    /**
+     * Initialize the Scalus-based transaction evaluator and inject it into the node.
+     */
+    private void initTransactionEvaluator(YaciNode yaciNode, YaciNodeConfig yaciConfig) {
+        try {
+            GenesisConfig genesis = GenesisConfig.load(
+                    yaciConfig.getShelleyGenesisFile(),
+                    yaciConfig.getByronGenesisFile(),
+                    yaciConfig.getProtocolParametersFile());
+
+            if (genesis == null || !genesis.hasProtocolParameters()) {
+                log.info("Transaction evaluation not available: no protocol parameters");
+                return;
+            }
+
+            com.bloxbean.cardano.client.api.model.ProtocolParams pp =
+                    ProtocolParamsMapper.fromNodeProtocolParam(genesis.getProtocolParameters());
+
+            long magic = yaciConfig.getProtocolMagic();
+            SlotConfig slotConfig;
+            //TODO -- We should be able to derive slot config from genesis data instead of hardcoding for mainnet/preprod/preview
+            // Only gap is how to determine zero slot which depends on shelley start slot.
+            if (magic == Constants.MAINNET_PROTOCOL_MAGIC) {
+                slotConfig = SlotConfigs.mainnet();
+            } else if (magic == Constants.PREPROD_PROTOCOL_MAGIC) {
+                slotConfig = SlotConfigs.preprod();
+            } else if (magic == Constants.PREVIEW_PROTOCOL_MAGIC) {
+                slotConfig = SlotConfigs.preview();
+            } else {
+                long genesisTs = yaciConfig.getGenesisTimestamp() > 0
+                        ? yaciConfig.getGenesisTimestamp()
+                        : genesis.getSystemStartEpochMillis() > 0
+                                ? genesis.getSystemStartEpochMillis()
+                                : System.currentTimeMillis();
+                slotConfig = new SlotConfig(yaciConfig.getSlotLengthMillis(), 0, genesisTs);
+            }
+
+            int networkId = magic == Constants.MAINNET_PROTOCOL_MAGIC ? 1 : 0;
+
+            TransactionValidator evaluator =
+                    ScalusTransactionValidatorFactory.create(pp, slotConfig, networkId);
+            yaciNode.setTransactionEvaluator(evaluator);
+
+            log.info("Transaction evaluator initialized (networkId={})", networkId);
+        } catch (Exception e) {
+            log.warn("Failed to initialize transaction evaluator: {}", e.getMessage());
         }
     }
 

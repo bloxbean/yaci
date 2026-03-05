@@ -50,8 +50,14 @@ public class YaciNodeConfig implements NodeConfig {
     private boolean lazyBlockProduction;
     private long genesisTimestamp;
     private int slotLengthMillis;
-    private String genesisFundsFile;       // Path to JSON: {hexAddr: lovelace, ...}
+    private String shelleyGenesisFile;     // Path to shelley-genesis.json
+    private String byronGenesisFile;       // Path to byron-genesis.json (optional, for relay mode)
     private String protocolParametersFile; // Path to protocol params JSON
+    private boolean txEvaluationEnabled;   // Enable ledger rule validation for submitted transactions
+
+    // Genesis-derived configuration
+    @Builder.Default
+    private long epochLength = 432000;     // Slots per epoch (from shelley-genesis.json epochLength)
 
     // Implement NodeConfig interface
     @Override

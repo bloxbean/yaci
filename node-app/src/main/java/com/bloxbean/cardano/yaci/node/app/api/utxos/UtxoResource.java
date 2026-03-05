@@ -28,7 +28,8 @@ public class UtxoResource {
     @Path("/addresses/{address}/utxos")
     public Response getUtxosByAddress(@PathParam("address") String address,
                                       @QueryParam("page") @DefaultValue("1") int page,
-                                      @QueryParam("limit") @DefaultValue("20") int limit,
+                                      @QueryParam("count") @DefaultValue("20") int count,
+                                      @QueryParam("order") @DefaultValue("asc") String order,
                                       @QueryParam("use_payment_credential") @DefaultValue("false") boolean usePaymentCredential) {
         UtxoState u = utxo();
         if (u == null || !u.isEnabled()) {
@@ -36,11 +37,11 @@ public class UtxoResource {
                     .entity("{\"error\":\"UTXO state disabled\"}")
                     .build();
         }
-        if (limit <= 0) limit = 20;
+        if (count <= 0) count = 20;
         if (page < 1) page = 1;
         var list = usePaymentCredential
-                ? u.getUtxosByPaymentCredential(address, page, limit)
-                : u.getUtxosByAddress(address, page, limit);
+                ? u.getUtxosByPaymentCredential(address, page, count)
+                : u.getUtxosByAddress(address, page, count);
         List<UtxoDto> body = UtxoDtoMapper.toDtoList(list);
         return Response.ok(body).build();
     }
@@ -64,16 +65,17 @@ public class UtxoResource {
     @Path("/credentials/{paymentCredential}/utxos")
     public Response getUtxosByPaymentCredential(@PathParam("paymentCredential") String paymentCredential,
                                                 @QueryParam("page") @DefaultValue("1") int page,
-                                                @QueryParam("limit") @DefaultValue("20") int limit) {
+                                                @QueryParam("count") @DefaultValue("20") int count,
+                                                @QueryParam("order") @DefaultValue("asc") String order) {
         UtxoState u = utxo();
         if (u == null || !u.isEnabled()) {
             return Response.status(Response.Status.SERVICE_UNAVAILABLE)
                     .entity("{\"error\":\"UTXO state disabled\"}")
                     .build();
         }
-        if (limit <= 0) limit = 20;
+        if (count <= 0) count = 20;
         if (page < 1) page = 1;
-        var list = u.getUtxosByPaymentCredential(paymentCredential, page, limit);
+        var list = u.getUtxosByPaymentCredential(paymentCredential, page, count);
         List<UtxoDto> body = UtxoDtoMapper.toDtoList(list);
         return Response.ok(body).build();
 }

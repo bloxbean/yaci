@@ -22,10 +22,18 @@ import com.bloxbean.cardano.yaci.node.runtime.chain.InMemoryChainState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
+import com.bloxbean.cardano.yaci.node.runtime.chain.MempoolEvictionPolicy;
+import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMempoolEvictionPolicy;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.BlockProducer;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.DevnetBlockBuilder;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationService;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationException;
+import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
+import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.events.MemPoolTransactionReceivedEvent;
 import lombok.extern.slf4j.Slf4j;
 import com.bloxbean.cardano.yaci.events.api.*;
@@ -92,6 +100,10 @@ public class YaciNode implements NodeAPI {
     // Block producer (devnet mode)
     private BlockProducer blockProducer;
     private GenesisConfig genesisConfig;
+    private long resolvedGenesisTimestamp;
+    private TransactionValidationService transactionEvaluator;
+    private YaciTxSubmissionHandler txSubmissionHandler;
+    private MempoolEvictionPolicy mempoolEvictionPolicy;
 
     // Status tracking
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
@@ -315,6 +327,15 @@ public class YaciNode implements NodeAPI {
                 startBlockProducer();
             }
 
+            // Initialize mempool eviction policy — evict on block confirmation, TTL, and size cap
+            initMempoolEvictionPolicy();
+
+            // Pre-populate genesis UTXOs for relay mode (when not in block-producer mode)
+            if (!config.isEnableBlockProducer() && config.getShelleyGenesisFile() != null
+                    && chainState.getTip() == null) {
+                initializeGenesisUtxos();
+            }
+
             // Validate chain state before starting sync
             if (config.isEnableClient()) {
                 validateChainState();
@@ -377,7 +398,7 @@ public class YaciNode implements NodeAPI {
             }
 
             // Create TxSubmission handler for transaction processing
-            YaciTxSubmissionHandler txSubmissionHandler = new YaciTxSubmissionHandler(
+            txSubmissionHandler = new YaciTxSubmissionHandler(
                     memPool, eventBus, config.isEnableBlockProducer());
 
             // Create TxSubmission configuration for periodic requests
@@ -426,22 +447,157 @@ public class YaciNode implements NodeAPI {
         log.info("Starting block producer (devnet mode)...");
 
         genesisConfig = GenesisConfig.load(
-                config.getGenesisFundsFile(),
+                config.getShelleyGenesisFile(),
+                config.getByronGenesisFile(),
                 config.getProtocolParametersFile());
+
+        // Propagate epoch length from genesis to config so REST layer can use it
+        if (genesisConfig.getShelleyGenesisData() != null
+                && genesisConfig.getShelleyGenesisData().epochLength() > 0) {
+            config.setEpochLength(genesisConfig.getShelleyGenesisData().epochLength());
+        }
+
+        boolean freshStart = chainState.getTip() == null;
+
+        // Resolve genesis timestamp: persist on fresh start, read back on restart
+        resolvedGenesisTimestamp = genesisConfig.resolveAndPersistGenesisTimestamp(
+                config.getGenesisTimestamp(), freshStart, config.getShelleyGenesisFile());
 
         blockProducer = new BlockProducer(
                 chainState, memPool, nodeServer, eventBus, scheduler,
                 config.getBlockTimeMillis(),
                 config.isLazyBlockProduction(),
-                config.getGenesisTimestamp(),
+                resolvedGenesisTimestamp,
                 config.getSlotLengthMillis(),
-                genesisConfig);
+                genesisConfig,
+                transactionEvaluator,
+                getUtxoState());
         blockProducer.start();
+
+        // Store genesis UTXOs directly in UTXO store using blake2b(address) tx hash convention.
+        // Only on fresh start (not restart) — genesis block was just produced above.
+        if (freshStart && genesisConfig.hasInitialFunds() && utxoStore != null) {
+            var tip = chainState.getTip();
+            String blockHash = tip != null ? HexUtil.encodeHexString(tip.getBlockHash()) : "";
+            long slot = tip != null ? tip.getSlot() : 0;
+            utxoStore.storeGenesisUtxos(genesisConfig.getInitialFunds(),
+                    config.getProtocolMagic(), slot, 0, blockHash);
+        }
+
         log.info("Block producer started");
+    }
+
+    /**
+     * Initialize the mempool eviction policy. Subscribes to BlockAppliedEvent for
+     * block-confirmation eviction, and schedules periodic TTL/size-cap checks.
+     */
+    private void initMempoolEvictionPolicy() {
+        long maxAgeMillis = 30 * 60 * 1000L; // 30 minutes
+        int maxSize = 10_000;
+
+        mempoolEvictionPolicy = new DefaultMempoolEvictionPolicy(memPool, maxAgeMillis, maxSize);
+
+        // Subscribe to BlockAppliedEvent for block-confirmation eviction
+        eventBus.subscribe(BlockAppliedEvent.class, ctx -> {
+            mempoolEvictionPolicy.onBlockApplied(ctx.event());
+        }, SubscriptionOptions.builder().build());
+
+        // Schedule periodic TTL/size-cap checks every 30 seconds
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                mempoolEvictionPolicy.onPeriodicCheck();
+            } catch (Exception e) {
+                log.debug("Error in mempool periodic eviction check: {}", e.getMessage());
+            }
+        }, 30, 30, TimeUnit.SECONDS);
+
+        log.info("Mempool eviction policy initialized (maxAge=30min, maxSize={})", maxSize);
+    }
+
+    /**
+     * Set the transaction evaluator. Called externally (e.g. from node-app)
+     * to inject a concrete evaluator implementation.
+     *
+     */
+    public long getResolvedGenesisTimestamp() {
+        return resolvedGenesisTimestamp;
+    }
+
+    public void setTransactionEvaluator(TransactionValidator evaluator) {
+        if (evaluator == null || getUtxoState() == null) {
+            log.info("Transaction evaluation not available: evaluator={}, utxoState={}",
+                    evaluator != null ? "provided" : "null",
+                    getUtxoState() != null ? "available" : "null");
+            return;
+        }
+
+        this.transactionEvaluator = new TransactionValidationService(evaluator, getUtxoState());
+
+        // Wire evaluator to N2N TxSubmission handler if available
+        if (txSubmissionHandler != null) {
+            txSubmissionHandler.setTransactionEvaluator(this.transactionEvaluator);
+        }
+
+        log.info("Transaction evaluator set");
+    }
+
+    /**
+     * Pre-populate genesis UTXOs for relay mode.
+     * Stores an empty genesis block and writes UTXOs directly to the UTXO store
+     * using tx_hash = blake2b(address) convention (matching yaci-store and wallets).
+     */
+    private void initializeGenesisUtxos() {
+        log.info("Initializing genesis UTXOs from genesis files...");
+
+        genesisConfig = GenesisConfig.load(
+                config.getShelleyGenesisFile(),
+                config.getByronGenesisFile(),
+                config.getProtocolParametersFile());
+
+        // Propagate epoch length from genesis to config so REST layer can use it
+        if (genesisConfig.getShelleyGenesisData() != null
+                && genesisConfig.getShelleyGenesisData().epochLength() > 0) {
+            config.setEpochLength(genesisConfig.getShelleyGenesisData().epochLength());
+        }
+
+        boolean hasFunds = genesisConfig.hasInitialFunds() || genesisConfig.hasByronBalances();
+
+        if (hasFunds) {
+            // Build an empty genesis block (block 0) — no embedded transactions
+            var blockBuilder = new DevnetBlockBuilder();
+            var genesisBlock = blockBuilder.buildBlock(0, 0, null, java.util.List.of());
+            chainState.storeBlock(genesisBlock.blockHash(), 0L, 0L, genesisBlock.blockCbor());
+            chainState.storeBlockHeader(genesisBlock.blockHash(), 0L, 0L, genesisBlock.wrappedHeaderCbor());
+            String blockHash = HexUtil.encodeHexString(genesisBlock.blockHash());
+
+            // Store genesis UTXOs directly in UTXO store with blake2b(address) tx hashes
+            if (utxoStore != null) {
+                if (genesisConfig.hasInitialFunds()) {
+                    utxoStore.storeGenesisUtxos(genesisConfig.getInitialFunds(),
+                            config.getProtocolMagic(), 0, 0, blockHash);
+                }
+                if (genesisConfig.hasByronBalances()) {
+                    utxoStore.storeGenesisUtxos(genesisConfig.getByronBalances(),
+                            config.getProtocolMagic(), 0, 0, blockHash);
+                }
+            }
+
+            log.info("Genesis block stored with {} shelley + {} byron fund entries (UTXOs in UTXO store)",
+                    genesisConfig.getInitialFunds().size(),
+                    genesisConfig.getByronBalances().size());
+        } else {
+            log.info("No genesis funds found in genesis files");
+        }
     }
 
     @Override
     public String submitTransaction(byte[] txCbor) {
+        if (transactionEvaluator != null) {
+            var result = transactionEvaluator.validate(txCbor);
+            if (!result.valid()) {
+                throw new TransactionValidationException(result);
+            }
+        }
         var mpt = memPool.addTransaction(txCbor);
         if (eventBus != null && mpt != null) {
             eventBus.publish(new MemPoolTransactionReceivedEvent(mpt),

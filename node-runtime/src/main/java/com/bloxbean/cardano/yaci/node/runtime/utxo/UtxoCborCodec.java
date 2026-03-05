@@ -61,8 +61,32 @@ final class UtxoCborCodec {
         return CborSerializationUtil.serialize(map, true);
     }
 
+    /**
+     * Unwrap the original UTXO record bytes from a spent record.
+     * Spent records are CBOR maps with key 6 = original UTXO, key 1 = spent slot.
+     */
+    static byte[] unwrapSpentUtxo(byte[] spentRecordBytes) {
+        Map m = (Map) CborSerializationUtil.deserializeOne(spentRecordBytes);
+        DataItem di = m.get(new UnsignedInteger(6));
+        return CborSerializationUtil.serialize(di, true);
+    }
+
+    /**
+     * Unwrap and decode the original UTXO directly from a spent record,
+     * avoiding a serialize-then-deserialize round trip.
+     */
+    static StoredUtxo decodeSpentUtxoRecord(byte[] spentRecordBytes) {
+        Map m = (Map) CborSerializationUtil.deserializeOne(spentRecordBytes);
+        DataItem di = m.get(new UnsignedInteger(6));
+        return decodeUtxoRecordFromDataItem((Map) di);
+    }
+
     static StoredUtxo decodeUtxoRecord(byte[] bytes) {
         Map map = (Map) CborSerializationUtil.deserializeOne(bytes);
+        return decodeUtxoRecordFromDataItem(map);
+    }
+
+    private static StoredUtxo decodeUtxoRecordFromDataItem(Map map) {
         String address = new String(((ByteString) map.get(new UnsignedInteger(0))).getBytes());
         BigInteger lovelace = CborSerializationUtil.toBigInteger(map.get(new UnsignedInteger(1)));
         // Assets

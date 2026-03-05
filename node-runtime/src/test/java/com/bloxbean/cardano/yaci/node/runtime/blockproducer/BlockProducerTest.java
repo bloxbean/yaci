@@ -156,40 +156,50 @@ class BlockProducerTest {
     }
 
     @Test
-    void start_withGenesisFunds_producesGenesisBlockWithTransactions() {
-        java.util.Map<String, Long> funds = new java.util.LinkedHashMap<>();
-        funds.put("60" + "aa".repeat(28), 10_000_000_000L);
-        funds.put("60" + "bb".repeat(28), 5_000_000_000L);
-        GenesisConfig genesisConfig = GenesisConfig.load(null, null);
+    void start_withGenesisFunds_producesEmptyGenesisBlock() {
+        GenesisConfig genesisConfig;
 
-        // Use a temp file to test funds loading
+        // Write a shelley-genesis.json format temp file with initialFunds
         try {
-            java.io.File tempFile = java.io.File.createTempFile("genesis-funds", ".json");
+            java.io.File tempFile = java.io.File.createTempFile("shelley-genesis", ".json");
             tempFile.deleteOnExit();
+            java.util.Map<String, Object> genesis = new java.util.LinkedHashMap<>();
+            java.util.Map<String, Long> funds = new java.util.LinkedHashMap<>();
+            funds.put("60" + "aa".repeat(28), 10_000_000_000L);
+            funds.put("60" + "bb".repeat(28), 5_000_000_000L);
+            genesis.put("initialFunds", funds);
+            genesis.put("networkMagic", 42);
+            genesis.put("epochLength", 600);
+            genesis.put("slotLength", 1);
+            genesis.put("systemStart", "2024-01-01T00:00:00Z");
+            genesis.put("maxLovelaceSupply", 45000000000000000L);
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            mapper.writeValue(tempFile, funds);
+            mapper.writeValue(tempFile, genesis);
 
-            genesisConfig = GenesisConfig.load(tempFile.getAbsolutePath(), null);
+            genesisConfig = GenesisConfig.load(tempFile.getAbsolutePath(), null, null);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+
+        assertThat(genesisConfig.hasInitialFunds()).isTrue();
+        assertThat(genesisConfig.getInitialFunds()).hasSize(2);
 
         blockProducer = new BlockProducer(
                 chainState, memPool, null, new NoopEventBus(), scheduler,
                 2000, false, System.currentTimeMillis(), 1000, genesisConfig);
         blockProducer.start();
 
-        // Genesis block should exist
+        // Genesis block should exist but be empty (no transactions)
+        // Genesis UTXOs are stored directly in UTXO store by YaciNode, not embedded in block
         ChainTip tip = chainState.getTip();
         assertNotNull(tip);
         assertEquals(0, tip.getBlockNumber());
 
-        // Verify the genesis block contains transactions by deserializing
         byte[] blockCbor = chainState.getBlock(tip.getBlockHash());
         assertNotNull(blockCbor);
         com.bloxbean.cardano.yaci.core.model.Block block =
                 com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer.INSTANCE.deserialize(blockCbor);
-        assertThat(block.getTransactionBodies()).hasSize(1); // 2 addresses < 100, so 1 tx
+        assertThat(block.getTransactionBodies()).isEmpty();
     }
 
     private BlockProducer createBlockProducer(int blockTimeMillis, boolean lazy) {

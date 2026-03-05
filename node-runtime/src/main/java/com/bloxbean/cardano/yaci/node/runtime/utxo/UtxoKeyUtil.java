@@ -58,6 +58,14 @@ final class UtxoKeyUtil {
         }
     }
 
+    static boolean prefixMatches(byte[] key, byte[] prefix, int len) {
+        if (key.length < len) return false;
+        for (int i = 0; i < len; i++) {
+            if (key[i] != prefix[i]) return false;
+        }
+        return true;
+    }
+
     static byte[] hex28(String hex) {
         if (hex == null) return null;
         byte[] bytes;

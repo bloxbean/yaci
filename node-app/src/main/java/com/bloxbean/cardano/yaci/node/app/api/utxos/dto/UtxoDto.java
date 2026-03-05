@@ -1,25 +1,21 @@
 package com.bloxbean.cardano.yaci.node.app.api.utxos.dto;
 
-import com.bloxbean.cardano.yaci.node.api.utxo.model.AssetAmount;
-import com.bloxbean.cardano.yaci.node.api.utxo.model.Outpoint;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.math.BigInteger;
 import java.util.List;
 
 /**
- * REST DTO for UTXO responses with hex-encoded byte fields.
+ * UTXO DTO matching Yaci Store's response format.
  */
 public record UtxoDto(
-        Outpoint outpoint,
+        @JsonProperty("tx_hash") String txHash,
+        @JsonProperty("output_index") int outputIndex,
         String address,
-        BigInteger lovelace,
-        List<AssetAmount> assets,
-        String datumHash,
-        String inlineDatum, // hex string or null
-        String referenceScriptHash,
-        boolean collateralReturn,
-        long slot,
-        long blockNumber,
-        String blockHash
+        List<AmountDto> amount,
+        @JsonProperty("data_hash") String dataHash,
+        @JsonProperty("inline_datum") String inlineDatum,
+        @JsonProperty("reference_script_hash") String referenceScriptHash,
+        int epoch,
+        @JsonProperty("block_number") long blockNumber,
+        @JsonProperty("block_time") long blockTime
 ) {}
-

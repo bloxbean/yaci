@@ -38,6 +38,22 @@ public interface UtxoState {
     }
 
     /**
+     * Return all outputs (spent and unspent) for a given transaction hash.
+     * Used by tx-utxos endpoint to resolve transaction outputs.
+     */
+    default List<Utxo> getOutputsByTxHash(String txHash) {
+        return List.of();
+    }
+
+    /**
+     * Look up a UTXO by outpoint across both spent and unspent stores.
+     * Returns the UTXO if found in either, or empty if not found.
+     */
+    default Optional<Utxo> getUtxoSpentOrUnspent(Outpoint outpoint) {
+        return getUtxo(outpoint);
+    }
+
+    /**
      * Whether UTXO state is enabled and actively maintained.
      */
     boolean isEnabled();

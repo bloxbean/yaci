@@ -26,28 +26,31 @@ yaci:
     logging:
       enabled: false
   node:
-    network: mainnet
+    network: preprod
     auto-sync-start: true
     client:
       enabled: true
     remote:
-      host: backbone.cardano.iog.io
-      port: 3001
-      protocol-magic: 764824073
+      host: preprod-node.world.dev.cardano.org
+      port: 30000
+      protocol-magic: 1
     server:
       enabled: true
       port: 13337
     storage:
       rocksdb: true
       path: "./chainstate"
+    genesis:
+      shelley-genesis-file:
+      byron-genesis-file:
+      protocol-parameters-file:
     block-producer:
       enabled: false
       block-time-millis: 2000
       lazy: false
       genesis-timestamp: 0
       slot-length-millis: 1000
-      genesis-funds-file:
-      protocol-parameters-file:
+      tx-evaluation: true
 
 "%native":
   quarkus:
@@ -56,6 +59,25 @@ yaci:
         enabled: false
     native:
       enabled: true
+
+"%devnet":
+  yaci:
+    node:
+      network: devnet
+      auto-sync-start: true
+      client:
+        enabled: false
+      remote:
+        protocol-magic: 42
+      genesis:
+        shelley-genesis-file: config/devnet/shelley-genesis.json
+        protocol-parameters-file: config/protocol-param.json
+      block-producer:
+        enabled: true
+        block-time-millis: 1000
+        lazy: false
+        genesis-timestamp: 0
+        slot-length-millis: 1000
 
 "%test":
   yaci:

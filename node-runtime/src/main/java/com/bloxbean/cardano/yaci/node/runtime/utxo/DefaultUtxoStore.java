@@ -5,6 +5,7 @@ import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
+import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -125,14 +126,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                 List<Utxo> results = new ArrayList<>();
                 while (it.isValid()) {
                     byte[] key = it.key();
-                    boolean match = true;
-                    for (int i = 0; i < 28; i++) {
-                        if (key[i] != addrKey[i]) {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (!match) break;
+                    if (!UtxoKeyUtil.prefixMatches(key, addrKey, 28)) break;
                     if (skipped > 0) {
                         skipped--;
                         it.next();
@@ -146,19 +140,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                     byte[] ukey = UtxoKeyUtil.outpointKey(txHash, idx);
                     byte[] val = db.get(cfUnspent, ukey);
                     if (val != null) {
-                        var stored = UtxoCborCodec.decodeUtxoRecord(val);
-                        List<AssetAmount> amts = new ArrayList<>();
-                        if (stored.assets != null) {
-                            for (com.bloxbean.cardano.yaci.core.model.Amount a : stored.assets) {
-                                if (a.getPolicyId() == null) continue;
-                                String nameHex = a.getAssetNameBytes() != null ? com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(a.getAssetNameBytes()) : null;
-                                amts.add(new AssetAmount(a.getPolicyId(), nameHex, a.getQuantity()));
-                            }
-                        }
-                        Utxo dto = new Utxo(new Outpoint(txHash, idx), stored.address, stored.lovelace,
-                                amts, stored.datumHash, stored.inlineDatum, null,
-                                stored.collateralReturn, stored.slot, stored.blockNumber, stored.blockHash);
-                        results.add(dto);
+                        results.add(decodeStoredToUtxo(val, new Outpoint(txHash, idx)));
                     }
                     it.next();
                 }
@@ -188,14 +170,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                 List<Utxo> results = new ArrayList<>();
                 while (it.isValid()) {
                     byte[] key = it.key();
-                    boolean match = true;
-                    for (int i = 0; i < 28; i++) {
-                        if (key[i] != prefix[i]) {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (!match) break;
+                    if (!UtxoKeyUtil.prefixMatches(key, prefix, 28)) break;
                     if (skipped > 0) {
                         skipped--;
                         it.next();
@@ -208,19 +183,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                     byte[] ukey = UtxoKeyUtil.outpointKey(txHash, idx);
                     byte[] val = db.get(cfUnspent, ukey);
                     if (val != null) {
-                        var stored = UtxoCborCodec.decodeUtxoRecord(val);
-                        List<AssetAmount> amts = new ArrayList<>();
-                        if (stored.assets != null) {
-                            for (com.bloxbean.cardano.yaci.core.model.Amount a : stored.assets) {
-                                if (a.getPolicyId() == null) continue;
-                                String nameHex = a.getAssetNameBytes() != null ? com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(a.getAssetNameBytes()) : null;
-                                amts.add(new AssetAmount(a.getPolicyId(), nameHex, a.getQuantity()));
-                            }
-                        }
-                        Utxo dto = new Utxo(new Outpoint(txHash, idx), stored.address, stored.lovelace,
-                                amts, stored.datumHash, stored.inlineDatum, null,
-                                stored.collateralReturn, stored.slot, stored.blockNumber, stored.blockHash);
-                        results.add(dto);
+                        results.add(decodeStoredToUtxo(val, new Outpoint(txHash, idx)));
                     }
                     it.next();
                 }
@@ -238,22 +201,86 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
             byte[] key = UtxoKeyUtil.outpointKey(outpoint.txHash(), outpoint.index());
             byte[] val = db.get(cfUnspent, key);
             if (val == null) return Optional.empty();
-            var stored = UtxoCborCodec.decodeUtxoRecord(val);
-            List<AssetAmount> amts = new ArrayList<>();
-            if (stored.assets != null) {
-                for (com.bloxbean.cardano.yaci.core.model.Amount a : stored.assets) {
-                    if (a.getPolicyId() == null) continue;
-                    String nameHex = a.getAssetNameBytes() != null ? com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(a.getAssetNameBytes()) : null;
-                    amts.add(new AssetAmount(a.getPolicyId(), nameHex, a.getQuantity()));
-                }
-            }
-            Utxo dto = new Utxo(outpoint, stored.address, stored.lovelace,
-                    amts, stored.datumHash, stored.inlineDatum, null,
-                    stored.collateralReturn, stored.slot, stored.blockNumber, stored.blockHash);
-            return Optional.of(dto);
+            return Optional.of(decodeStoredToUtxo(val, outpoint));
         } catch (Exception e) {
             return Optional.empty();
         }
+    }
+
+    @Override
+    public List<Utxo> getOutputsByTxHash(String txHash) {
+        if (!enabled || txHash == null) return List.of();
+        try {
+            byte[] hashBytes = HexUtil.decodeHexString(txHash);
+            if (hashBytes.length != 32) return List.of();
+            List<Utxo> results = new ArrayList<>();
+            // Scan cfUnspent with txHash prefix
+            scanCfForTxHash(cfUnspent, hashBytes, txHash, results, false);
+            // Scan cfSpent with txHash prefix (unwrap original UTXO from key 6)
+            scanCfForTxHash(cfSpent, hashBytes, txHash, results, true);
+            return results;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    @Override
+    public Optional<Utxo> getUtxoSpentOrUnspent(Outpoint outpoint) {
+        if (!enabled) return Optional.empty();
+        try {
+            byte[] key = UtxoKeyUtil.outpointKey(outpoint.txHash(), outpoint.index());
+            byte[] val = db.get(cfUnspent, key);
+            if (val != null) {
+                return Optional.of(decodeStoredToUtxo(val, outpoint));
+            }
+            val = db.get(cfSpent, key);
+            if (val != null) {
+                return Optional.of(decodeSpentToUtxo(val, outpoint));
+            }
+            return Optional.empty();
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
+    private void scanCfForTxHash(ColumnFamilyHandle cf, byte[] hashPrefix, String txHashHex,
+                                  List<Utxo> results, boolean isSpent) {
+        try (RocksIterator it = db.newIterator(cf)) {
+            it.seek(hashPrefix);
+            while (it.isValid()) {
+                byte[] key = it.key();
+                // Key format: txHash(32) + index(2) = 34 bytes
+                if (key.length < 34) { it.next(); continue; }
+                if (!UtxoKeyUtil.prefixMatches(key, hashPrefix, 32)) break;
+                int idx = ByteBuffer.wrap(key, 32, 2).order(ByteOrder.BIG_ENDIAN).getShort() & 0xffff;
+                Outpoint outpoint = new Outpoint(txHashHex, idx);
+                byte[] val = it.value();
+                results.add(isSpent ? decodeSpentToUtxo(val, outpoint) : decodeStoredToUtxo(val, outpoint));
+                it.next();
+            }
+        }
+    }
+
+    private Utxo decodeStoredToUtxo(byte[] val, Outpoint outpoint) {
+        return storedToUtxo(UtxoCborCodec.decodeUtxoRecord(val), outpoint);
+    }
+
+    private Utxo decodeSpentToUtxo(byte[] spentVal, Outpoint outpoint) {
+        return storedToUtxo(UtxoCborCodec.decodeSpentUtxoRecord(spentVal), outpoint);
+    }
+
+    private Utxo storedToUtxo(UtxoCborCodec.StoredUtxo stored, Outpoint outpoint) {
+        List<AssetAmount> amts = new ArrayList<>();
+        if (stored.assets != null) {
+            for (com.bloxbean.cardano.yaci.core.model.Amount a : stored.assets) {
+                if (a.getPolicyId() == null) continue;
+                String nameHex = a.getAssetNameBytes() != null ? HexUtil.encodeHexString(a.getAssetNameBytes()) : null;
+                amts.add(new AssetAmount(a.getPolicyId(), nameHex, a.getQuantity()));
+            }
+        }
+        return new Utxo(outpoint, stored.address, stored.lovelace,
+                amts, stored.datumHash, stored.inlineDatum, null,
+                stored.collateralReturn, stored.slot, stored.blockNumber, stored.blockHash);
     }
 
     @Override
@@ -445,6 +472,65 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     }
 
     @Override
+    public void storeGenesisUtxos(java.util.Map<String, Long> shelleyFunds, long networkMagic,
+                                  long slot, long blockNumber, String blockHash) {
+        if (!enabled || shelleyFunds == null || shelleyFunds.isEmpty()) return;
+
+        boolean isMainnet = (networkMagic == Constants.MAINNET_PROTOCOL_MAGIC);
+        String addrPrefix = isMainnet ? "addr" : "addr_test";
+        int stored = 0;
+
+        try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+            for (var entry : shelleyFunds.entrySet()) {
+                String hexAddr = entry.getKey();
+                long lovelace = entry.getValue();
+
+                // Derive genesis tx hash: blake2b-256(address_hex_bytes) — matches yaci-store convention
+                byte[] addrBytes = HexUtil.decodeHexString(hexAddr);
+                String txHash = HexUtil.encodeHexString(
+                        com.bloxbean.cardano.client.crypto.Blake2bUtil.blake2bHash256(addrBytes));
+                int outputIndex = 0;
+
+                // Convert hex address to bech32
+                String bech32Addr;
+                try {
+                    bech32Addr = new com.bloxbean.cardano.client.address.Address(addrPrefix, addrBytes).toBech32();
+                } catch (Exception e) {
+                    log.warn("Could not convert genesis address to bech32: {}", hexAddr);
+                    bech32Addr = hexAddr; // fallback to hex
+                }
+
+                // Encode UTXO record
+                byte[] val = UtxoCborCodec.encodeUtxoRecord(
+                        bech32Addr, java.math.BigInteger.valueOf(lovelace),
+                        null, null, null, null, null, false,
+                        slot, blockNumber, blockHash);
+                byte[] outKey = UtxoKeyUtil.outpointKey(txHash, outputIndex);
+                batch.put(cfUnspent, outKey, val);
+
+                // Address index
+                if (indexAddressHash) {
+                    byte[] addrHash = UtxoKeyUtil.addrHash28(bech32Addr);
+                    byte[] addrIdxKey = UtxoKeyUtil.addressIndexKey(addrHash, slot, txHash, outputIndex);
+                    batch.put(cfAddr, addrIdxKey, new byte[0]);
+                }
+                if (indexPaymentCred) {
+                    byte[] pc = UtxoKeyUtil.paymentCred28(bech32Addr);
+                    if (pc != null) {
+                        byte[] pIdx = UtxoKeyUtil.addressIndexKey(pc, slot, txHash, outputIndex);
+                        batch.put(cfAddr, pIdx, new byte[0]);
+                    }
+                }
+                stored++;
+            }
+            db.write(wo, batch);
+            log.info("Stored {} genesis UTXOs (tx_hash = blake2b(address), outputIndex=0)", stored);
+        } catch (Exception ex) {
+            log.error("Failed to store genesis UTXOs: {}", ex.toString());
+        }
+    }
+
+    @Override
     public void rollbackTo(RollbackEvent e) {
         if (!enabled) return;
         long targetSlot = e.target().getSlot();
@@ -479,9 +565,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                     byte[] okey = UtxoKeyUtil.outpointKey(r.txHash(), r.index());
                     byte[] sval = db.get(cfSpent, okey);
                     if (sval != null) {
-                        Map m = (Map) com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.deserializeOne(sval);
-                        co.nstant.in.cbor.model.DataItem di = m.get(new UnsignedInteger(6));
-                        byte[] unspentVal = com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.serialize(di, true);
+                        byte[] unspentVal = UtxoCborCodec.unwrapSpentUtxo(sval);
                         batch.put(cfUnspent, okey, unspentVal);
                         var stored = UtxoCborCodec.decodeUtxoRecord(unspentVal);
                         if (indexAddressHash) {

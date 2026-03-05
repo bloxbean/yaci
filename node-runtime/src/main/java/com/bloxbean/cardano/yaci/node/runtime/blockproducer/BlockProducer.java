@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.node.runtime.blockproducer;
 
+import com.bloxbean.cardano.yaci.node.ledgerrules.ValidationResult;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
@@ -10,6 +11,7 @@ import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.events.api.EventBus;
 import com.bloxbean.cardano.yaci.events.api.EventMetadata;
 import com.bloxbean.cardano.yaci.events.api.PublishOptions;
+import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPoolTransaction;
 import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
@@ -43,6 +45,10 @@ public class BlockProducer {
     private final int slotLengthMillis;
     private final GenesisConfig genesisConfig;
 
+    // Optional: transaction evaluator for block-time validation
+    private final TransactionValidationService transactionEvaluator;
+    private final UtxoState utxoState;
+
     private ScheduledFuture<?> scheduledTask;
     private long nextBlockNumber;
     private byte[] prevBlockHash;
@@ -53,6 +59,18 @@ public class BlockProducer {
                          int blockTimeMillis, boolean lazy,
                          long genesisTimestamp, int slotLengthMillis,
                          GenesisConfig genesisConfig) {
+        this(chainState, memPool, nodeServer, eventBus, scheduler,
+                blockTimeMillis, lazy, genesisTimestamp, slotLengthMillis,
+                genesisConfig, null, null);
+    }
+
+    public BlockProducer(ChainState chainState, MemPool memPool, NodeServer nodeServer,
+                         EventBus eventBus, ScheduledExecutorService scheduler,
+                         int blockTimeMillis, boolean lazy,
+                         long genesisTimestamp, int slotLengthMillis,
+                         GenesisConfig genesisConfig,
+                         TransactionValidationService transactionEvaluator,
+                         UtxoState utxoState) {
         this.chainState = chainState;
         this.memPool = memPool;
         this.nodeServer = nodeServer;
@@ -61,9 +79,14 @@ public class BlockProducer {
         this.blockBuilder = new DevnetBlockBuilder();
         this.blockTimeMillis = blockTimeMillis;
         this.lazy = lazy;
-        this.genesisTimestamp = genesisTimestamp > 0 ? genesisTimestamp : System.currentTimeMillis();
+        if (genesisTimestamp <= 0) {
+            throw new IllegalArgumentException("genesisTimestamp must be > 0, got: " + genesisTimestamp);
+        }
+        this.genesisTimestamp = genesisTimestamp;
         this.slotLengthMillis = slotLengthMillis;
         this.genesisConfig = genesisConfig;
+        this.transactionEvaluator = transactionEvaluator;
+        this.utxoState = utxoState;
     }
 
     /**
@@ -120,28 +143,28 @@ public class BlockProducer {
     }
 
     /**
-     * Produce a genesis block (block 0). If genesis funds are configured,
-     * the block contains transactions distributing initial ADA.
+     * Produce an empty genesis block (block 0).
+     * Genesis UTXOs are NOT embedded as transactions; they are stored directly
+     * in the UTXO store using tx_hash = blake2b(address) to match the Cardano
+     * protocol convention used by yaci-store and wallets.
      */
     private void produceGenesisBlock() {
         long slot = calculateCurrentSlot();
 
-        List<byte[]> genesisTxs = List.of();
         if (genesisConfig != null && genesisConfig.hasInitialFunds()) {
-            genesisTxs = GenesisTxBuilder.buildGenesisTransactions(genesisConfig.getInitialFunds());
-            log.info("Genesis block will include {} transaction(s) distributing funds to {} addresses",
-                    genesisTxs.size(), genesisConfig.getInitialFunds().size());
+            log.info("Genesis funds ({} addresses) will be stored directly in UTXO store (not embedded in block)",
+                    genesisConfig.getInitialFunds().size());
         }
 
-        var result = blockBuilder.buildBlock(0, slot, null, genesisTxs);
+        var result = blockBuilder.buildBlock(0, slot, null, List.of());
         storeBlock(result);
         nextBlockNumber = 1;
         prevBlockHash = result.blockHash();
 
-        log.info("Genesis block produced: slot={}, txs={}, hash={}",
-                slot, genesisTxs.size(), HexUtil.encodeHexString(result.blockHash()));
+        log.info("Genesis block produced: slot={}, hash={}",
+                slot, HexUtil.encodeHexString(result.blockHash()));
 
-        publishEvent(result, genesisTxs.size());
+        publishEvent(result, 0);
         notifyServer();
     }
 
@@ -166,22 +189,42 @@ public class BlockProducer {
         nextBlockNumber++;
         prevBlockHash = result.blockHash();
 
-        if (log.isDebugEnabled() || !txList.isEmpty()) {
-            log.info("Block #{} produced: slot={}, txs={}, hash={}",
-                    producedBlockNumber, slot, txList.size(),
-                    HexUtil.encodeHexString(result.blockHash()));
-        }
+        log.info("Block #{} produced: slot={}, txs={}",
+                producedBlockNumber, slot, txList.size());
 
         publishEvent(result, txList.size());
         notifyServer();
     }
 
     private List<byte[]> drainMempool() {
+        if (transactionEvaluator == null || utxoState == null) {
+            // No evaluator — backwards-compatible: accept all
+            List<byte[]> txList = new ArrayList<>();
+            while (!memPool.isEmpty()) {
+                MemPoolTransaction mpt = memPool.getNextTransaction();
+                if (mpt == null) break;
+                txList.add(mpt.txBytes());
+            }
+            return txList;
+        }
+
+        // Validate each tx with spent-tracking overlay
+        BlockBuildUtxoOverlay overlay = new BlockBuildUtxoOverlay(utxoState);
         List<byte[]> txList = new ArrayList<>();
         while (!memPool.isEmpty()) {
             MemPoolTransaction mpt = memPool.getNextTransaction();
             if (mpt == null) break;
-            txList.add(mpt.txBytes());
+
+            ValidationResult result = transactionEvaluator.validate(
+                    mpt.txBytes(), overlay.resolver());
+            if (result.valid()) {
+                txList.add(mpt.txBytes());
+                overlay.markSpent(mpt.txBytes());
+            } else {
+                String txHashHex = HexUtil.encodeHexString(mpt.txHash());
+                String errorMsg = result.firstErrorMessage("unknown error");
+                log.warn("Dropping invalid tx {} during block production: {}", txHashHex, errorMsg);
+            }
         }
         return txList;
     }
