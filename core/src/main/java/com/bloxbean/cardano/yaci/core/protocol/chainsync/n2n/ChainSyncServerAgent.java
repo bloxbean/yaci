@@ -14,8 +14,8 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.LinkedList;
 import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * ChainSync Server Agent - Handles client requests for chain synchronization
@@ -25,10 +25,10 @@ import java.util.Queue;
 public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
     private final ChainState chainState;
-    private Point intersectedPoint;
-    private Queue<Message> pendingResponses = new LinkedList<>(); // Queue for pipelined responses
-    private Point lastSentPoint; // Track the last point sent to client
-    private boolean clientAtTip; // Flag to track if client is at tip
+    private volatile Point intersectedPoint;
+    private final Queue<Message> pendingResponses = new ConcurrentLinkedQueue<>(); // Thread-safe queue for pipelined responses
+    private volatile Point lastSentPoint; // Track the last point sent to client
+    private volatile boolean clientAtTip; // Flag to track if client is at tip
 
     public ChainSyncServerAgent(ChainState chainState) {
         super(false); // This is a server agent
@@ -591,7 +591,10 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
      * This method can be called externally when new blocks arrive
      */
     public void notifyNewBlock(Point newBlockPoint) {
-        if (clientAtTip && hasAgency()) {
+        synchronized (this) {
+            if (!clientAtTip || !hasAgency()) {
+                return;
+            }
             log.info("Notifying client about new block: {}", newBlockPoint);
             // Client is waiting at tip and we have agency - send the new block
             try {
@@ -600,10 +603,6 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
                 if (blockHeaderBytes != null) {
                     Tip tip = createTipFromChainTip(currentTip);
-
-                    // Create RollForward message directly from stored wrapped header bytes
-//                    byte[] rollForwardBytes = createRollForwardMessage(blockHeaderBytes, tip);
-//                    RollForward rollForward = RollForwardSerializer.INSTANCE.deserialize(rollForwardBytes);
 
                     RollForward rollForward = new RollForward(null, null, null, tip, blockHeaderBytes);
 
@@ -700,32 +699,23 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 return;
             }
 
-            log.debug("ChainSyncServerAgent: Client is at tip and we have agency, checking for new blocks");
-
-            // Get current tip from chain state
-            ChainTip currentTip = chainState.getTip();
-            if (currentTip == null) {
-                log.debug("ChainSyncServerAgent: No tip available, cannot notify about new blocks");
+            // Find next sequential block after lastSentPoint (not tip!)
+            Point lastSent = lastSentPoint; // volatile read once
+            if (lastSent == null) {
+                log.debug("ChainSyncServerAgent: No last sent point, cannot determine next block");
                 return;
             }
 
-            // Create point from current tip
-            Point currentTipPoint = new Point(currentTip.getSlot(),
-                                             HexUtil.encodeHexString(currentTip.getBlockHash()));
-
-            // Check if this is actually a new block (not the same as last sent)
-            if (lastSentPoint != null &&
-                lastSentPoint.getSlot() == currentTipPoint.getSlot() &&
-                lastSentPoint.getHash().equals(currentTipPoint.getHash())) {
-                log.debug("ChainSyncServerAgent: Tip hasn't changed, no new block to send");
+            Point nextBlock = findNextBlockAfterPoint(lastSent);
+            if (nextBlock == null) {
+                log.debug("ChainSyncServerAgent: No next block after last sent point");
                 return;
             }
 
-            log.info("ChainSyncServerAgent: New block available at tip: slot={}, hash={}",
-                    currentTipPoint.getSlot(), currentTipPoint.getHash());
+            log.info("ChainSyncServerAgent: New block available: slot={}, hash={} (after lastSent slot={})",
+                    nextBlock.getSlot(), nextBlock.getHash(), lastSent.getSlot());
 
-            // Use existing notifyNewBlock method
-            notifyNewBlock(currentTipPoint);
+            notifyNewBlock(nextBlock);
 
         } catch (Exception e) {
             log.error("ChainSyncServerAgent: Error handling new data notification", e);
