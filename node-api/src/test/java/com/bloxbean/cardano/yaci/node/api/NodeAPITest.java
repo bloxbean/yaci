@@ -126,6 +126,11 @@ class NodeAPITest {
         public String getProtocolParameters() {
             return null;
         }
+
+        @Override
+        public void rollbackTo(long targetSlot) {
+            // no-op for test
+        }
     }
 
     @Test

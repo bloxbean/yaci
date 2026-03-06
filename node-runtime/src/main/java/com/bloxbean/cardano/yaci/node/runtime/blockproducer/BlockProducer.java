@@ -143,6 +143,20 @@ public class BlockProducer {
     }
 
     /**
+     * Reset block producer state to resume from the current chain tip.
+     * Called after an external rollback to sync nextBlockNumber/prevBlockHash.
+     */
+    public void resetToChainTip() {
+        ChainTip tip = chainState.getTip();
+        if (tip != null) {
+            this.nextBlockNumber = tip.getBlockNumber() + 1;
+            this.prevBlockHash = tip.getBlockHash();
+            log.info("Block producer reset to chain tip: block={}, slot={}",
+                    tip.getBlockNumber(), tip.getSlot());
+        }
+    }
+
+    /**
      * Produce an empty genesis block (block 0).
      * Genesis UTXOs are NOT embedded as transactions; they are stored directly
      * in the UTXO store using tx_hash = blake2b(address) to match the Cardano

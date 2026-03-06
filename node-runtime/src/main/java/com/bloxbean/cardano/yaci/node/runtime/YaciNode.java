@@ -612,6 +612,84 @@ public class YaciNode implements NodeAPI {
         return genesisConfig != null ? genesisConfig.getProtocolParameters() : null;
     }
 
+    @Override
+    public void rollbackTo(long targetSlot) {
+        if (blockProducer == null) {
+            throw new IllegalStateException("Rollback is only supported when block producer is enabled");
+        }
+
+        ChainTip currentTip = chainState.getTip();
+        if (currentTip == null) {
+            throw new IllegalStateException("No chain tip available - chain is empty");
+        }
+
+        if (targetSlot < 0) {
+            throw new IllegalArgumentException("Target slot must be >= 0, got: " + targetSlot);
+        }
+
+        if (targetSlot >= currentTip.getSlot()) {
+            throw new IllegalArgumentException("Target slot " + targetSlot
+                    + " must be less than current tip slot " + currentTip.getSlot());
+        }
+
+        log.info("API-triggered rollback: target slot={}, current tip slot={}, block={}",
+                targetSlot, currentTip.getSlot(), currentTip.getBlockNumber());
+
+        // 1. Stop block producer
+        boolean wasRunning = blockProducer.isRunning();
+        if (wasRunning) {
+            blockProducer.stop();
+        }
+
+        try {
+            // 2. Rollback chain state (removes blocks/headers after target slot)
+            chainState.rollbackTo(targetSlot);
+
+            // 3. Get new tip after rollback for the Point
+            ChainTip newTip = chainState.getTip();
+            Point rollbackPoint;
+            if (newTip != null) {
+                rollbackPoint = new Point(newTip.getSlot(), HexUtil.encodeHexString(newTip.getBlockHash()));
+            } else {
+                rollbackPoint = new Point(targetSlot, "0000000000000000000000000000000000000000000000000000000000000000");
+            }
+
+            // 4. Publish RollbackEvent (isReal=true so UTXO deltas get unwound)
+            try {
+                EventMetadata meta = EventMetadata.builder().origin("api-rollback").build();
+                eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent(rollbackPoint, true),
+                        meta, PublishOptions.builder().build());
+            } catch (Exception ex) {
+                log.warn("RollbackEvent publish failed: {}", ex.toString());
+            }
+
+            // 5. Notify server (ChainSyncServerAgent sends Rollbackward to connected clients)
+            if (isServerRunning.get() && nodeServer != null) {
+                try {
+                    nodeServer.notifyNewDataAvailable();
+                    log.info("Notified server agents about API-triggered rollback");
+                } catch (Exception e) {
+                    log.warn("Error notifying server agents about rollback", e);
+                }
+            }
+
+            // 6. Reset block producer to resume from new tip
+            blockProducer.resetToChainTip();
+
+            // Update last known tip
+            lastKnownChainTip = chainState.getTip();
+
+            log.info("API-triggered rollback complete: new tip slot={}, block={}",
+                    newTip != null ? newTip.getSlot() : "null",
+                    newTip != null ? newTip.getBlockNumber() : "null");
+        } finally {
+            // 7. Resume block producer
+            if (wasRunning) {
+                blockProducer.start();
+            }
+        }
+    }
+
     /**
      * Start the client sync component using either pipelined or sequential sync
      */

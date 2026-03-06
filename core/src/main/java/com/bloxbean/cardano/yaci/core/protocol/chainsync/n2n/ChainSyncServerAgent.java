@@ -420,6 +420,9 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 log.info("ChainSyncServerAgent: Enqueued Rollbackward message to point: slot={}, new tip: slot={}",
                         rollbackPoint.getSlot(), tip.getPoint().getSlot());
 
+                // Send the message immediately
+                sendNextMessage();
+
                 // Notify listeners
                 final Point finalRollbackPoint = rollbackPoint;
                 getAgentListeners().forEach(listener -> {
@@ -664,20 +667,24 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     @Override
     public void onNewDataAvailable() {
         try {
-            // Check for rollback scenarios first
-            if (lastSentPoint != null && !clientAtTip) {
-                // Check if our last sent point is still valid in chain
-                if (!chainState.hasPoint(lastSentPoint)) {
+            // Check for rollback scenarios first - regardless of clientAtTip state
+            if (lastSentPoint != null && hasAgency()) {
+                if (shouldRollback()) {
                     log.info("ChainSyncServerAgent: Detected chain rollback - last sent point no longer valid");
+                    handleRollback();
+                    return;
+                }
 
-                    if (hasAgency()) {
-                        // Use existing rollback handling
-                        if (shouldRollback()) {
-                            handleRollback();
-                            return;
-                        }
-                    } else {
-                        log.debug("ChainSyncServerAgent: Rollback detected but don't have agency to notify client");
+                // Also detect rollback by tip slot going backwards
+                ChainTip currentTip = chainState.getTip();
+                if (currentTip != null) {
+                    Point currentTipPoint = new Point(currentTip.getSlot(),
+                            HexUtil.encodeHexString(currentTip.getBlockHash()));
+                    if (currentTipPoint.getSlot() < lastSentPoint.getSlot()) {
+                        log.info("ChainSyncServerAgent: Chain reorganization detected - current tip slot {} is before last sent slot {}",
+                                currentTipPoint.getSlot(), lastSentPoint.getSlot());
+                        handleRollback();
+                        return;
                     }
                 }
             }
@@ -693,7 +700,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 return;
             }
 
-            log.debug("ChainSyncServerAgent: Client is at tip and we have agency, checking for new blocks or rollbacks");
+            log.debug("ChainSyncServerAgent: Client is at tip and we have agency, checking for new blocks");
 
             // Get current tip from chain state
             ChainTip currentTip = chainState.getTip();
@@ -711,14 +718,6 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 lastSentPoint.getSlot() == currentTipPoint.getSlot() &&
                 lastSentPoint.getHash().equals(currentTipPoint.getHash())) {
                 log.debug("ChainSyncServerAgent: Tip hasn't changed, no new block to send");
-                return;
-            }
-
-            // Check if we need to rollback (tip moved backwards)
-            if (lastSentPoint != null && currentTipPoint.getSlot() < lastSentPoint.getSlot()) {
-                log.info("ChainSyncServerAgent: Chain reorganization detected - current tip slot {} is before last sent slot {}",
-                        currentTipPoint.getSlot(), lastSentPoint.getSlot());
-                handleRollback();
                 return;
             }
 

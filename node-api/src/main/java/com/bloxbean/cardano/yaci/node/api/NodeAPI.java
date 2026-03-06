@@ -159,4 +159,15 @@ public interface NodeAPI {
      * @return protocol parameters as a JSON string, or null if not available
      */
     String getProtocolParameters();
+
+    /**
+     * Trigger a controlled rollback in devnet mode.
+     * Rolls back chain state to the given slot, publishes RollbackEvent,
+     * and notifies connected clients via n2n protocol.
+     *
+     * @param targetSlot the slot to roll back to
+     * @throws IllegalStateException if block producer is not enabled
+     * @throws IllegalArgumentException if target slot is invalid
+     */
+    void rollbackTo(long targetSlot);
 }
