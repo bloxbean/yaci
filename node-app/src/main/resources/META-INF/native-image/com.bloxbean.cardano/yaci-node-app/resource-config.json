@@ -3,8 +3,8 @@
     "includes": [
       {"pattern": "application\\.yml"},
       {"pattern": "application\\.properties"},
+      {"pattern": "microprofile-config\\.properties"},
       {"pattern": "META-INF/services/.*"},
-      {"pattern": "META-INF/microprofile-config\\.properties"},
       {"pattern": "META-INF/maven/.*"},
       {"pattern": "org/rocksdb/.*"},
       {"pattern": "librocksdbjni-.*\\.jnilib"},

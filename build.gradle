@@ -10,6 +10,12 @@ plugins {
 repositories {
     mavenCentral()
     mavenLocal()
+    maven {
+        url = uri("https://central.sonatype.com/repository/maven-snapshots")
+        content {
+            snapshotsOnly()
+        }
+    }
 }
 
 compileJava {
@@ -108,9 +114,11 @@ if (project.version.endsWith("-SNAPSHOT")) {
     version = "${project.version}".replace("-SNAPSHOT", "-${commit_id}-SNAPSHOT")
 }
 
+def nonLibraryModules = ['node-app', 'scalus-bridge'] as Set
+
 subprojects {
-    // Skip most configuration for application module (Quarkus handles it)
-    if (project.name != 'node-app') {
+    // Skip most configuration for application modules (Quarkus/Scala handle their own builds)
+    if (!(project.name in nonLibraryModules)) {
         apply plugin: 'java-library'
         apply plugin: 'maven-publish'
         apply plugin: 'signing'
@@ -131,7 +139,7 @@ subprojects {
     }
 
     // Only configure library-specific settings for non-application modules
-    if (project.name != 'node-app') {
+    if (!(project.name in nonLibraryModules)) {
         dependencies {
             api libs.slf4j.api
 

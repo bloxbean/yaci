@@ -103,6 +103,11 @@ class NodeAPITest {
         }
 
         @Override
+        public String submitTransaction(byte[] txCbor) {
+            return "dummy-hash";
+        }
+
+        @Override
         public void registerListeners(Object... listeners) {
 
         }
@@ -110,6 +115,21 @@ class NodeAPITest {
         @Override
         public void registerListener(Object listener, SubscriptionOptions sbOptions) {
 
+        }
+
+        @Override
+        public com.bloxbean.cardano.yaci.node.api.utxo.UtxoState getUtxoState() {
+            return null;
+        }
+
+        @Override
+        public String getProtocolParameters() {
+            return null;
+        }
+
+        @Override
+        public void rollbackTo(long targetSlot) {
+            // no-op for test
         }
     }
 

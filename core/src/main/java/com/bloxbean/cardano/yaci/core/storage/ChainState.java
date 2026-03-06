@@ -61,6 +61,12 @@ public interface ChainState {
      */
     Long getBlockNumberBySlot(Long slot);
 
+    /**
+     * Get slot number for a given block number.
+     * Returns null if no block exists with the given number.
+     */
+    Long getSlotByBlockNumber(Long blockNumber);
+
     void rollbackTo(Long slot);
 
     ChainTip getTip();

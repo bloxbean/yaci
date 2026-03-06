@@ -7,6 +7,7 @@ import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.node.api.config.NodeConfig;
 import com.bloxbean.cardano.yaci.node.api.listener.NodeEventListener;
 import com.bloxbean.cardano.yaci.node.api.model.NodeStatus;
+import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 
 /**
  * Main interface for Yaci Node operations.
@@ -122,6 +123,15 @@ public interface NodeAPI {
     boolean recoverChainState();
 
     /**
+     * Submit a transaction to the node's mempool.
+     * In block producer mode, the transaction will be included in a future block.
+     *
+     * @param txCbor the complete transaction CBOR bytes
+     * @return the transaction hash as a hex string
+     */
+    String submitTransaction(byte[] txCbor);
+
+    /**
      * Register multiple event listeners at once.
      * Each listener object will be scanned for annotated event handler methods.
      *
@@ -135,4 +145,29 @@ public interface NodeAPI {
      * @param sbOptions
      */
     void registerListener(Object listener, SubscriptionOptions sbOptions);
+
+    /**
+     * Access the UTXO state if enabled.
+     * Returns null if UTXO is disabled or not initialized.
+     */
+    UtxoState getUtxoState();
+
+    /**
+     * Get the protocol parameters JSON string.
+     * Only available when block producer mode is enabled and a protocol parameters file is configured.
+     *
+     * @return protocol parameters as a JSON string, or null if not available
+     */
+    String getProtocolParameters();
+
+    /**
+     * Trigger a controlled rollback in devnet mode.
+     * Rolls back chain state to the given slot, publishes RollbackEvent,
+     * and notifies connected clients via n2n protocol.
+     *
+     * @param targetSlot the slot to roll back to
+     * @throws IllegalStateException if block producer is not enabled
+     * @throws IllegalArgumentException if target slot is invalid
+     */
+    void rollbackTo(long targetSlot);
 }

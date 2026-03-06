@@ -117,6 +117,11 @@ public class ServerAgentTest {
         }
 
         @Override
+        public Long getSlotByBlockNumber(Long blockNumber) {
+            return null;
+        }
+
+        @Override
         public void rollbackTo(Long slot) {
 
         }

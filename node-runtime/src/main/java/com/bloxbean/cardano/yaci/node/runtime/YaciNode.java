@@ -22,14 +22,28 @@ import com.bloxbean.cardano.yaci.node.runtime.chain.InMemoryChainState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
+import com.bloxbean.cardano.yaci.node.runtime.chain.MempoolEvictionPolicy;
+import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMempoolEvictionPolicy;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.BlockProducer;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.DevnetBlockBuilder;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationService;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationException;
+import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
+import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.runtime.events.MemPoolTransactionReceivedEvent;
 import lombok.extern.slf4j.Slf4j;
 import com.bloxbean.cardano.yaci.events.api.*;
 import com.bloxbean.cardano.yaci.events.impl.SimpleEventBus;
 import com.bloxbean.cardano.yaci.events.impl.NoopEventBus;
 import com.bloxbean.cardano.yaci.node.runtime.events.NodeStartedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.plugins.PluginManager;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.PruneService;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandler;
+import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 
 import java.time.Duration;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -83,6 +97,14 @@ public class YaciNode implements NodeAPI {
     // MemPool for transaction handling
     private final MemPool memPool;
 
+    // Block producer (devnet mode)
+    private BlockProducer blockProducer;
+    private GenesisConfig genesisConfig;
+    private long resolvedGenesisTimestamp;
+    private TransactionValidationService transactionEvaluator;
+    private YaciTxSubmissionHandler txSubmissionHandler;
+    private MempoolEvictionPolicy mempoolEvictionPolicy;
+
     // Status tracking
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private final AtomicBoolean isSyncing = new AtomicBoolean(false);
@@ -106,6 +128,11 @@ public class YaciNode implements NodeAPI {
     private final RuntimeOptions runtimeOptions;
     private final EventBus eventBus;
     private PluginManager pluginManager;
+    private com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStoreWriter utxoStore;
+    private PruneService utxoPruneService;
+    private UtxoEventHandler utxoEventHandler;
+    private com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync utxoEventHandlerAsync;
+    private java.util.concurrent.ScheduledFuture<?> utxoLagTask;
 
     public YaciNode(YaciNodeConfig config) {
         this(config, RuntimeOptions.defaults());
@@ -150,6 +177,74 @@ public class YaciNode implements NodeAPI {
         if (this.runtimeOptions.plugins().enabled()) {
             pluginManager = new PluginManager(eventBus, scheduler, this.runtimeOptions.plugins().config(), Thread.currentThread().getContextClassLoader());
         }
+
+        // Phase 3: Initialize UTXO store if enabled and RocksDB is used
+        try {
+            Object enabledOpt = this.runtimeOptions.globals().get("yaci.node.utxo.enabled");
+            boolean utxoEnabled = enabledOpt instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(enabledOpt));
+            if (utxoEnabled && (chainState instanceof DirectRocksDBChainState rocks)) {
+                this.utxoStore = com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStoreFactory.create(rocks, log, this.runtimeOptions.globals());
+                // Reconcile UTXO with chainstate before subscribing and starting prune
+                try {
+                    this.utxoStore.reconcile(rocks);
+                    log.info("UTXO reconciliation complete at startup");
+                } catch (Throwable t) {
+                    log.warn("UTXO reconciliation error: {}", t.toString());
+                }
+                boolean applyAsync = false;
+                Object asyncOpt = this.runtimeOptions.globals().get("yaci.node.utxo.applyAsync");
+                if (asyncOpt instanceof Boolean b) applyAsync = b; else if (asyncOpt != null) try { applyAsync = Boolean.parseBoolean(String.valueOf(asyncOpt)); } catch (Exception ignored) {}
+                if (applyAsync) {
+                    this.utxoEventHandlerAsync = new com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync(eventBus, this.utxoStore);
+                    log.info("UTXO store initialized ({}); UtxoEventHandlerAsync registered (applyAsync=true)",
+                            (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp) ? sp.storeType() : "?");
+                } else {
+                    this.utxoEventHandler = new UtxoEventHandler(eventBus, this.utxoStore);
+                    log.info("UTXO store initialized ({}); UtxoEventHandler registered",
+                            (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp) ? sp.storeType() : "?");
+                }
+                // Start prune service on virtual-thread scheduler
+                long intervalSec = 5L;
+                Object po = this.runtimeOptions.globals().get("yaci.node.utxo.prune.schedule.seconds");
+                if (po instanceof Number n) intervalSec = Math.max(1L, n.longValue());
+                else if (po != null) try { intervalSec = Math.max(1L, Long.parseLong(String.valueOf(po))); } catch (Exception ignored) {}
+                this.utxoPruneService = new PruneService((com.bloxbean.cardano.yaci.node.runtime.utxo.Prunable) this.utxoStore, intervalSec * 1000);
+                this.utxoPruneService.start();
+                log.info("UTXO prune service started (interval={}s)", intervalSec);
+
+                // Schedule UTXO lag metric logging
+                long lagLogSec = 10L;
+                Object lagObj = this.runtimeOptions.globals().get("yaci.node.utxo.metrics.lag.logSeconds");
+                if (lagObj instanceof Number n) lagLogSec = Math.max(1L, n.longValue());
+                else if (lagObj != null) try { lagLogSec = Math.max(1L, Long.parseLong(String.valueOf(lagObj))); } catch (Exception ignored) {}
+                final long failIfAbove = parseLong(this.runtimeOptions.globals().get("yaci.node.utxo.lag.failIfAbove"), -1L);
+                this.utxoLagTask = scheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        long lastApplied = (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp)
+                                ? sp.getLastAppliedBlock() : 0L;
+                        var tip = chainState.getTip();
+                        long tipBlock = tip != null ? tip.getBlockNumber() : 0L;
+                        long lag = Math.max(0L, tipBlock - lastApplied);
+
+                        if (lag > 0)
+                            log.info("metric utxo.lag.blocks={}", lag);
+
+                        if (failIfAbove > 0 && lag > failIfAbove) {
+                            log.warn("UTXO lag {} blocks exceeds configured threshold {}", lag, failIfAbove);
+                        }
+                    } catch (Throwable ignored) {}
+                }, lagLogSec, lagLogSec, java.util.concurrent.TimeUnit.SECONDS);
+            } else {
+                log.info("UTXO store not initialized (enabled={}, rocksdb={})", utxoEnabled, (chainState instanceof DirectRocksDBChainState));
+            }
+        } catch (Throwable t) {
+            log.warn("Failed to initialize UTXO store: {}", t.toString());
+        }
+    }
+
+    @Override
+    public UtxoState getUtxoState() {
+        return (utxoStore instanceof UtxoState u) ? u : null;
     }
 
     /**
@@ -227,6 +322,20 @@ public class YaciNode implements NodeAPI {
                 startServer();
             }
 
+            // Start block producer if enabled (after server so we can notify)
+            if (config.isEnableBlockProducer()) {
+                startBlockProducer();
+            }
+
+            // Initialize mempool eviction policy — evict on block confirmation, TTL, and size cap
+            initMempoolEvictionPolicy();
+
+            // Pre-populate genesis UTXOs for relay mode (when not in block-producer mode)
+            if (!config.isEnableBlockProducer() && config.getShelleyGenesisFile() != null
+                    && chainState.getTip() == null) {
+                initializeGenesisUtxos();
+            }
+
             // Validate chain state before starting sync
             if (config.isEnableClient()) {
                 validateChainState();
@@ -280,14 +389,17 @@ public class YaciNode implements NodeAPI {
                 } catch (Exception e) {
                     log.warn("Error checking first block", e);
                 }
+            } else if (config.isEnableBlockProducer()) {
+                log.info("Server starting with empty chain state — block producer will create genesis block");
             } else {
-                log.error("❌ CRITICAL: Server starting with empty chain state (no tip)");
-                log.error("❌ Real Cardano nodes will not connect to an empty server");
-                log.error("❌ Yaci Node must sync some blockchain data first before serving");
+                log.error("CRITICAL: Server starting with empty chain state (no tip)");
+                log.error("Real Cardano nodes will not connect to an empty server");
+                log.error("Yaci Node must sync some blockchain data first before serving");
             }
 
             // Create TxSubmission handler for transaction processing
-            YaciTxSubmissionHandler txSubmissionHandler = new YaciTxSubmissionHandler(memPool, eventBus);
+            txSubmissionHandler = new YaciTxSubmissionHandler(
+                    memPool, eventBus, config.isEnableBlockProducer());
 
             // Create TxSubmission configuration for periodic requests
             TxSubmissionConfig txSubmissionConfig = TxSubmissionConfig.builder()
@@ -325,6 +437,256 @@ public class YaciNode implements NodeAPI {
         } catch (Exception e) {
             log.error("Failed to start NodeServer", e);
             throw new RuntimeException("Failed to start server", e);
+        }
+    }
+
+    /**
+     * Start the block producer for devnet mode
+     */
+    private void startBlockProducer() {
+        log.info("Starting block producer (devnet mode)...");
+
+        genesisConfig = GenesisConfig.load(
+                config.getShelleyGenesisFile(),
+                config.getByronGenesisFile(),
+                config.getProtocolParametersFile());
+
+        // Propagate epoch length from genesis to config so REST layer can use it
+        if (genesisConfig.getShelleyGenesisData() != null
+                && genesisConfig.getShelleyGenesisData().epochLength() > 0) {
+            config.setEpochLength(genesisConfig.getShelleyGenesisData().epochLength());
+        }
+
+        boolean freshStart = chainState.getTip() == null;
+
+        // Resolve genesis timestamp: persist on fresh start, read back on restart
+        resolvedGenesisTimestamp = genesisConfig.resolveAndPersistGenesisTimestamp(
+                config.getGenesisTimestamp(), freshStart, config.getShelleyGenesisFile());
+
+        blockProducer = new BlockProducer(
+                chainState, memPool, nodeServer, eventBus, scheduler,
+                config.getBlockTimeMillis(),
+                config.isLazyBlockProduction(),
+                resolvedGenesisTimestamp,
+                config.getSlotLengthMillis(),
+                genesisConfig,
+                transactionEvaluator,
+                getUtxoState());
+        blockProducer.start();
+
+        // Store genesis UTXOs directly in UTXO store using blake2b(address) tx hash convention.
+        // Only on fresh start (not restart) — genesis block was just produced above.
+        if (freshStart && genesisConfig.hasInitialFunds() && utxoStore != null) {
+            var tip = chainState.getTip();
+            String blockHash = tip != null ? HexUtil.encodeHexString(tip.getBlockHash()) : "";
+            long slot = tip != null ? tip.getSlot() : 0;
+            utxoStore.storeGenesisUtxos(genesisConfig.getInitialFunds(),
+                    config.getProtocolMagic(), slot, 0, blockHash);
+        }
+
+        log.info("Block producer started");
+    }
+
+    /**
+     * Initialize the mempool eviction policy. Subscribes to BlockAppliedEvent for
+     * block-confirmation eviction, and schedules periodic TTL/size-cap checks.
+     */
+    private void initMempoolEvictionPolicy() {
+        long maxAgeMillis = 30 * 60 * 1000L; // 30 minutes
+        int maxSize = 10_000;
+
+        mempoolEvictionPolicy = new DefaultMempoolEvictionPolicy(memPool, maxAgeMillis, maxSize);
+
+        // Subscribe to BlockAppliedEvent for block-confirmation eviction
+        eventBus.subscribe(BlockAppliedEvent.class, ctx -> {
+            mempoolEvictionPolicy.onBlockApplied(ctx.event());
+        }, SubscriptionOptions.builder().build());
+
+        // Schedule periodic TTL/size-cap checks every 30 seconds
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                mempoolEvictionPolicy.onPeriodicCheck();
+            } catch (Exception e) {
+                log.debug("Error in mempool periodic eviction check: {}", e.getMessage());
+            }
+        }, 30, 30, TimeUnit.SECONDS);
+
+        log.info("Mempool eviction policy initialized (maxAge=30min, maxSize={})", maxSize);
+    }
+
+    /**
+     * Set the transaction evaluator. Called externally (e.g. from node-app)
+     * to inject a concrete evaluator implementation.
+     *
+     */
+    public long getResolvedGenesisTimestamp() {
+        return resolvedGenesisTimestamp;
+    }
+
+    public void setTransactionEvaluator(TransactionValidator evaluator) {
+        if (evaluator == null || getUtxoState() == null) {
+            log.info("Transaction evaluation not available: evaluator={}, utxoState={}",
+                    evaluator != null ? "provided" : "null",
+                    getUtxoState() != null ? "available" : "null");
+            return;
+        }
+
+        this.transactionEvaluator = new TransactionValidationService(evaluator, getUtxoState());
+
+        // Wire evaluator to N2N TxSubmission handler if available
+        if (txSubmissionHandler != null) {
+            txSubmissionHandler.setTransactionEvaluator(this.transactionEvaluator);
+        }
+
+        log.info("Transaction evaluator set");
+    }
+
+    /**
+     * Pre-populate genesis UTXOs for relay mode.
+     * Stores an empty genesis block and writes UTXOs directly to the UTXO store
+     * using tx_hash = blake2b(address) convention (matching yaci-store and wallets).
+     */
+    private void initializeGenesisUtxos() {
+        log.info("Initializing genesis UTXOs from genesis files...");
+
+        genesisConfig = GenesisConfig.load(
+                config.getShelleyGenesisFile(),
+                config.getByronGenesisFile(),
+                config.getProtocolParametersFile());
+
+        // Propagate epoch length from genesis to config so REST layer can use it
+        if (genesisConfig.getShelleyGenesisData() != null
+                && genesisConfig.getShelleyGenesisData().epochLength() > 0) {
+            config.setEpochLength(genesisConfig.getShelleyGenesisData().epochLength());
+        }
+
+        boolean hasFunds = genesisConfig.hasInitialFunds() || genesisConfig.hasByronBalances();
+
+        if (hasFunds) {
+            // Build an empty genesis block (block 0) — no embedded transactions
+            var blockBuilder = new DevnetBlockBuilder();
+            var genesisBlock = blockBuilder.buildBlock(0, 0, null, java.util.List.of());
+            chainState.storeBlock(genesisBlock.blockHash(), 0L, 0L, genesisBlock.blockCbor());
+            chainState.storeBlockHeader(genesisBlock.blockHash(), 0L, 0L, genesisBlock.wrappedHeaderCbor());
+            String blockHash = HexUtil.encodeHexString(genesisBlock.blockHash());
+
+            // Store genesis UTXOs directly in UTXO store with blake2b(address) tx hashes
+            if (utxoStore != null) {
+                if (genesisConfig.hasInitialFunds()) {
+                    utxoStore.storeGenesisUtxos(genesisConfig.getInitialFunds(),
+                            config.getProtocolMagic(), 0, 0, blockHash);
+                }
+                if (genesisConfig.hasByronBalances()) {
+                    utxoStore.storeGenesisUtxos(genesisConfig.getByronBalances(),
+                            config.getProtocolMagic(), 0, 0, blockHash);
+                }
+            }
+
+            log.info("Genesis block stored with {} shelley + {} byron fund entries (UTXOs in UTXO store)",
+                    genesisConfig.getInitialFunds().size(),
+                    genesisConfig.getByronBalances().size());
+        } else {
+            log.info("No genesis funds found in genesis files");
+        }
+    }
+
+    @Override
+    public String submitTransaction(byte[] txCbor) {
+        if (transactionEvaluator != null) {
+            var result = transactionEvaluator.validate(txCbor);
+            if (!result.valid()) {
+                throw new TransactionValidationException(result);
+            }
+        }
+        var mpt = memPool.addTransaction(txCbor);
+        if (eventBus != null && mpt != null) {
+            eventBus.publish(new MemPoolTransactionReceivedEvent(mpt),
+                    EventMetadata.builder().origin("rest-api").build(),
+                    PublishOptions.builder().build());
+        }
+        return HexUtil.encodeHexString(mpt.txHash());
+    }
+
+    @Override
+    public String getProtocolParameters() {
+        return genesisConfig != null ? genesisConfig.getProtocolParameters() : null;
+    }
+
+    @Override
+    public void rollbackTo(long targetSlot) {
+        if (blockProducer == null) {
+            throw new IllegalStateException("Rollback is only supported when block producer is enabled");
+        }
+
+        ChainTip currentTip = chainState.getTip();
+        if (currentTip == null) {
+            throw new IllegalStateException("No chain tip available - chain is empty");
+        }
+
+        if (targetSlot < 0) {
+            throw new IllegalArgumentException("Target slot must be >= 0, got: " + targetSlot);
+        }
+
+        if (targetSlot >= currentTip.getSlot()) {
+            throw new IllegalArgumentException("Target slot " + targetSlot
+                    + " must be less than current tip slot " + currentTip.getSlot());
+        }
+
+        log.info("API-triggered rollback: target slot={}, current tip slot={}, block={}",
+                targetSlot, currentTip.getSlot(), currentTip.getBlockNumber());
+
+        // 1. Stop block producer
+        boolean wasRunning = blockProducer.isRunning();
+        if (wasRunning) {
+            blockProducer.stop();
+        }
+
+        try {
+            // 2. Rollback chain state (removes blocks/headers after target slot)
+            chainState.rollbackTo(targetSlot);
+
+            // 3. Get new tip after rollback for the Point
+            ChainTip newTip = chainState.getTip();
+            Point rollbackPoint;
+            if (newTip != null) {
+                rollbackPoint = new Point(newTip.getSlot(), HexUtil.encodeHexString(newTip.getBlockHash()));
+            } else {
+                rollbackPoint = new Point(targetSlot, "0000000000000000000000000000000000000000000000000000000000000000");
+            }
+
+            // 4. Publish RollbackEvent (isReal=true so UTXO deltas get unwound)
+            try {
+                EventMetadata meta = EventMetadata.builder().origin("api-rollback").build();
+                eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent(rollbackPoint, true),
+                        meta, PublishOptions.builder().build());
+            } catch (Exception ex) {
+                log.warn("RollbackEvent publish failed: {}", ex.toString());
+            }
+
+            // 5. Notify server (ChainSyncServerAgent sends Rollbackward to connected clients)
+            if (isServerRunning.get() && nodeServer != null) {
+                try {
+                    nodeServer.notifyNewDataAvailable();
+                    log.info("Notified server agents about API-triggered rollback");
+                } catch (Exception e) {
+                    log.warn("Error notifying server agents about rollback", e);
+                }
+            }
+
+            // 6. Reset block producer to resume from new tip
+            blockProducer.resetToChainTip();
+
+            // Update last known tip
+            lastKnownChainTip = chainState.getTip();
+
+            log.info("API-triggered rollback complete: new tip slot={}, block={}",
+                    newTip != null ? newTip.getSlot() : "null",
+                    newTip != null ? newTip.getBlockNumber() : "null");
+        } finally {
+            // 7. Resume block producer
+            if (wasRunning) {
+                blockProducer.start();
+            }
         }
     }
 
@@ -605,6 +967,11 @@ public class YaciNode implements NodeAPI {
                 isSyncing.set(false);
             }
 
+            // Stop block producer
+            if (blockProducer != null && blockProducer.isRunning()) {
+                blockProducer.stop();
+            }
+
             // Stop server
             if (isServerRunning.get()) {
                 if (nodeServer != null) {
@@ -629,8 +996,14 @@ public class YaciNode implements NodeAPI {
                 ((DirectRocksDBChainState) chainState).close();
             }
 
+            // Stop UTXO prune service
+            try { if (utxoPruneService != null) utxoPruneService.close(); } catch (Exception ignored) {}
+            try { if (utxoLagTask != null) utxoLagTask.cancel(true); } catch (Exception ignored) {}
+
             // Stop plugins and close event bus
             try { if (pluginManager != null) pluginManager.close(); } catch (Exception ignored) {}
+            try { if (utxoEventHandler != null) utxoEventHandler.close(); } catch (Exception ignored) {}
+            try { if (utxoEventHandlerAsync != null) utxoEventHandlerAsync.close(); } catch (Exception ignored) {}
             try { eventBus.close(); } catch (Exception ignored) {}
 
             log.info("Yaci Node stopped");
@@ -1410,6 +1783,13 @@ public class YaciNode implements NodeAPI {
             log.info("   └─ Protocol magic: {}", protocolMagic);
         }
 
+        // Block producer status
+        if (config.isEnableBlockProducer()) {
+            log.info("BLOCK PRODUCER: ENABLED (devnet)");
+            log.info("   Block interval: {}ms", config.getBlockTimeMillis());
+            log.info("   Lazy mode: {}", config.isLazyBlockProduction());
+        }
+
         // Chain state status
         ChainTip tip = chainState.getTip();
         log.info("💾 CHAIN STATE: {}", tip != null ? "HAS DATA" : "EMPTY");
@@ -1451,18 +1831,28 @@ public class YaciNode implements NodeAPI {
             bodyFetchManager.setSyncPhase(SyncPhase.INTERSECT_PHASE);
         }
 
-        // Reset to steady state after timeout (handles normal post-intersection rollback)
+        // After timeout, exit INTERSECT_PHASE. Choose next phase based on distance to remote tip.
         scheduler.schedule(() -> {
             if (syncPhase == SyncPhase.INTERSECT_PHASE) {
-                syncPhase = SyncPhase.STEADY_STATE;
-                log.info("Auto-transitioned to STEADY_STATE after intersection phase timeout");
+                // Determine distance to remote tip; default to INITIAL_SYNC if unknown/far
+                long distance = Long.MAX_VALUE;
+                try {
+                    if (remoteTip != null && remoteTip.getPoint() != null) {
+                        distance = Math.max(0, remoteTip.getPoint().getSlot() - lastProcessedSlot);
+                    }
+                } catch (Exception ignored) {}
+
+                long nearTipThreshold = 1000; // slots
+                SyncPhase nextPhase = (distance <= nearTipThreshold) ? SyncPhase.STEADY_STATE : SyncPhase.INITIAL_SYNC;
+                syncPhase = nextPhase;
+                log.info("Auto-transitioned to {} after intersection phase timeout (distance to tip: {} slots)", nextPhase, distance == Long.MAX_VALUE ? "unknown" : String.valueOf(distance));
 
                 // Update BodyFetchManager sync phase and resume if needed
                 if (isPipelinedMode && bodyFetchManager != null) {
-                    bodyFetchManager.setSyncPhase(SyncPhase.STEADY_STATE);
+                    bodyFetchManager.setSyncPhase(nextPhase);
                     if (bodyFetchManager.isPaused()) {
                         bodyFetchManager.resume();
-                        log.info("▶️ BodyFetchManager resumed after auto-transition to STEADY_STATE");
+                        log.info("▶️ BodyFetchManager resumed after auto-transition to {}", nextPhase);
                     }
                 }
             }
@@ -1649,4 +2039,11 @@ public class YaciNode implements NodeAPI {
     }
     */
 
+    private static long parseLong(Object obj, long def) {
+        if (obj instanceof Number n) return n.longValue();
+        if (obj != null) {
+            try { return Long.parseLong(String.valueOf(obj)); } catch (Exception ignored) {}
+        }
+        return def;
+    }
 }

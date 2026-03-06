@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbContext;
 import lombok.extern.slf4j.Slf4j;
 import org.rocksdb.*;
 
@@ -18,7 +19,7 @@ import java.util.List;
  * This implementation uses RocksDB directly without any caching layer.
  */
 @Slf4j
-public class DirectRocksDBChainState implements ChainState, AutoCloseable {
+public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.bloxbean.cardano.yaci.node.runtime.db.RocksDbSupplier {
 
     private static final byte[] TIP_KEY = "tip".getBytes(StandardCharsets.UTF_8);
     private static final byte[] HEADER_TIP_KEY = "header_tip".getBytes(StandardCharsets.UTF_8);
@@ -36,6 +37,9 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     // New CF to store EBBs by epoch start absolute slot (slot 0 of each epoch)
     private final ColumnFamilyHandle ebbBySlot0Handle;
 
+    // Name → CF handle registry (includes UTXO CFs)
+    private final java.util.Map<String, ColumnFamilyHandle> cfByName = new java.util.HashMap<>();
+
     static {
         RocksDB.loadLibrary();
     }
@@ -44,12 +48,48 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
         this.dbPath = dbPath;
 
         try {
-            // Configure RocksDB
+            // Determine if tuning is enabled (system property or env override)
+            final boolean tuningEnabled = isRocksTuningEnabled();
+            // Select write behavior (mutually exclusive when enabled)
+            boolean pipelined = getBool("yaci.node.rocksdb.pipelined_write", "YACI_ROCKSDB_PIPELINED_WRITE", true);
+            boolean atomic = getBool("yaci.node.rocksdb.atomic_flush", "YACI_ROCKSDB_ATOMIC_FLUSH", false);
+            if (pipelined && atomic) {
+                // Prefer pipelined for throughput unless explicitly disabled
+                log.warn("atomic_flush is incompatible with enable_pipelined_write. Preferring pipelined_write; atomic_flush will be disabled.");
+                atomic = false;
+            }
+
+            // Configure RocksDB (global)
+            final int cores = Math.max(2, Runtime.getRuntime().availableProcessors());
             final DBOptions dbOptions = new DBOptions()
                     .setCreateIfMissing(true)
                     .setCreateMissingColumnFamilies(true)
-                    .setMaxOpenFiles(100)
+                    .setMaxOpenFiles(256)
                     .setKeepLogFileNum(5);
+            if (tuningEnabled) {
+                dbOptions
+                        .setAllowConcurrentMemtableWrite(true)
+                        .setIncreaseParallelism(cores);
+                if (pipelined) dbOptions.setEnablePipelinedWrite(true);
+                if (atomic) dbOptions.setAtomicFlush(true);
+            }
+
+            // UTXO CF-specific options (only when tuning enabled)
+            ColumnFamilyOptions utxoPointLookup = null;
+            ColumnFamilyOptions utxoAddrPrefix = null;
+            ColumnFamilyOptions utxoDeltaOpts = null;
+            if (tuningEnabled) {
+                utxoPointLookup = buildPointLookupCfOptions(); // utxo_unspent, utxo_spent
+                utxoAddrPrefix = buildPrefixScanCfOptions(28); // utxo_addr
+                utxoDeltaOpts = buildSequentialCfOptions();    // utxo_block_delta
+
+                // Log effective CF tuning plan for visibility
+                log.info("RocksDB CF tuning: utxo_unspent/utxo_spent => point-lookup (ZSTD, bloom≈10bpk, whole-key, pin L0, partitioned filters)");
+                log.info("RocksDB CF tuning: utxo_addr => prefix-scan (ZSTD, prefixExtractor=28, memtablePrefixBloom≈0.10, bloom≈10bpk, pin L0, partitioned filters)");
+                log.info("RocksDB CF tuning: utxo_block_delta => sequential (ZSTD)");
+            } else {
+                log.info("RocksDB tuning disabled via flag; using defaults for CF options");
+            }
 
             // Column family descriptors
             final List<ColumnFamilyDescriptor> cfDescriptors = Arrays.asList(
@@ -60,7 +100,21 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                     new ColumnFamilyDescriptor("slot_by_number".getBytes()),
                     new ColumnFamilyDescriptor("slot_to_hash".getBytes()),
                     new ColumnFamilyDescriptor("metadata".getBytes()),
-                    new ColumnFamilyDescriptor("ebb_by_slot0".getBytes())
+                    new ColumnFamilyDescriptor("ebb_by_slot0".getBytes()),
+                    // UTXO CFs (tuned or defaults)
+                    new ColumnFamilyDescriptor(
+                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_UNSPENT.getBytes(),
+                            tuningEnabled ? utxoPointLookup : new ColumnFamilyOptions()),
+                    new ColumnFamilyDescriptor(
+                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_SPENT.getBytes(),
+                            tuningEnabled ? utxoPointLookup : new ColumnFamilyOptions()),
+                    new ColumnFamilyDescriptor(
+                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_ADDR.getBytes(),
+                            tuningEnabled ? utxoAddrPrefix : new ColumnFamilyOptions()),
+                    new ColumnFamilyDescriptor(
+                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_BLOCK_DELTA.getBytes(),
+                            tuningEnabled ? utxoDeltaOpts : new ColumnFamilyOptions()),
+                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_META.getBytes())
             );
 
             // Open database
@@ -76,11 +130,94 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             metadataHandle = cfHandles.get(6);
             ebbBySlot0Handle = cfHandles.get(7);
 
-            log.info("RocksDB initialized at: {}", dbPath);
+            // Populate name → handle map
+            for (int i = 0; i < cfDescriptors.size(); i++) {
+                String name;
+                if (i == 0) {
+                    name = new String(RocksDB.DEFAULT_COLUMN_FAMILY);
+                } else {
+                    name = new String(cfDescriptors.get(i).getName());
+                }
+                cfByName.put(name, cfHandles.get(i));
+            }
+
+            log.info("RocksDB initialized at: {} (tuningEnabled={}, pipelinedWrite={}, atomicFlush={}, parallelism={})",
+                    dbPath, tuningEnabled, pipelined && tuningEnabled, atomic && tuningEnabled, cores);
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize RocksDB", e);
         }
+    }
+
+    private static boolean isRocksTuningEnabled() {
+        try {
+            String prop = System.getProperty("yaci.node.rocksdb.tuning.enabled");
+            if (prop != null) return !"false".equalsIgnoreCase(prop);
+            String env = System.getenv("YACI_ROCKSDB_TUNING_ENABLED");
+            if (env != null) return !"false".equalsIgnoreCase(env);
+        } catch (Throwable ignored) {
+        }
+        return true; // default enabled
+    }
+
+    private static boolean getBool(String sysProp, String envVar, boolean defVal) {
+        try {
+            String prop = System.getProperty(sysProp);
+            if (prop != null) return Boolean.parseBoolean(prop);
+            String env = System.getenv(envVar);
+            if (env != null) return Boolean.parseBoolean(env);
+        } catch (Throwable ignored) {
+        }
+        return defVal;
+    }
+
+    private static ColumnFamilyOptions buildPointLookupCfOptions() {
+        ColumnFamilyOptions opts = new ColumnFamilyOptions();
+        opts.setCompressionType(CompressionType.ZSTD_COMPRESSION);
+        BlockBasedTableConfig table = new BlockBasedTableConfig();
+        table.setFilterPolicy(new BloomFilter(10, false)); // ~10 bits/key
+        table.setWholeKeyFiltering(true);
+        table.setPinL0FilterAndIndexBlocksInCache(true);
+        table.setPartitionFilters(true);
+        opts.setTableFormatConfig(table);
+        return opts;
+    }
+
+    private static ColumnFamilyOptions buildPrefixScanCfOptions(int prefixLen) {
+        ColumnFamilyOptions opts = new ColumnFamilyOptions();
+        opts.setCompressionType(CompressionType.ZSTD_COMPRESSION);
+        // Try to set a fixed prefix extractor if available in this RocksJava version
+        try {
+            Class<?> stClazz = Class.forName("org.rocksdb.SliceTransform");
+            java.lang.reflect.Method factory = stClazz.getMethod("createFixedPrefix", int.class);
+            Object st = factory.invoke(null, prefixLen);
+            java.lang.reflect.Method setter = ColumnFamilyOptions.class.getMethod("setPrefixExtractor", stClazz);
+            setter.invoke(opts, st);
+        } catch (Throwable t) {
+            // Prefix extractor not available; continue without it (bloom still helps)
+            log.warn("RocksDB SliceTransform fixed prefix not available; proceeding without prefix extractor");
+        }
+        opts.setMemtablePrefixBloomSizeRatio(0.10);
+        BlockBasedTableConfig table = new BlockBasedTableConfig();
+        table.setFilterPolicy(new BloomFilter(10, false));
+        table.setWholeKeyFiltering(false);
+        table.setPinL0FilterAndIndexBlocksInCache(true);
+        table.setPartitionFilters(true);
+        opts.setTableFormatConfig(table);
+        return opts;
+    }
+
+    private static ColumnFamilyOptions buildSequentialCfOptions() {
+        ColumnFamilyOptions opts = new ColumnFamilyOptions();
+        opts.setCompressionType(CompressionType.ZSTD_COMPRESSION);
+        BlockBasedTableConfig table = new BlockBasedTableConfig();
+        opts.setTableFormatConfig(table);
+        return opts;
+    }
+
+    @Override
+    public RocksDbContext rocks() {
+        return new RocksDbContext(db, java.util.Collections.unmodifiableMap(cfByName));
     }
 
     @Override
@@ -91,9 +228,9 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 byte[] previousBlock = getBlockByNumber(blockNumber - 1);
                 if (previousBlock == null) {
                     String errorMsg = String.format(
-                        "🚨 CONTINUITY VIOLATION: Cannot store block #%d - previous block #%d is missing! " +
-                        "This would create gaps in chainstate. slot=%d, hash=%s",
-                        blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
+                            "🚨 CONTINUITY VIOLATION: Cannot store block #%d - previous block #%d is missing! " +
+                                    "This would create gaps in chainstate. slot=%d, hash=%s",
+                            blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
                     log.error(errorMsg);
 
                     System.exit(1);
@@ -114,15 +251,15 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 boolean isEbbAtThisSlot = ebbHashAtSlot0 != null && Arrays.equals(ebbHashAtSlot0, blockHash);
                 if (!isEbbAtThisSlot) {
                     log.warn("🚨 FORK MISMATCH: Block #{} at slot {} has different hash than main header! Expected(main): {}, Got: {} - SKIPPING",
-                             blockNumber, slot,
-                             HexUtil.encodeHexString(expectedHash),
-                             HexUtil.encodeHexString(blockHash));
+                            blockNumber, slot,
+                            HexUtil.encodeHexString(expectedHash),
+                            HexUtil.encodeHexString(blockHash));
                     return; // Skip storing mismatched non-EBB block to prevent index corruption
                 }
                 // It's an EBB body at the epoch boundary; proceed to store body keyed by hash only.
                 if (log.isDebugEnabled()) {
                     log.debug("EBB body store allowed at slot {} (hash {}), main header maps to {}",
-                              slot, HexUtil.encodeHexString(blockHash), HexUtil.encodeHexString(expectedHash));
+                            slot, HexUtil.encodeHexString(blockHash), HexUtil.encodeHexString(expectedHash));
                 }
             }
 
@@ -181,9 +318,9 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 byte[] previousHeader = getBlockHeaderByNumber(blockNumber - 1);
                 if (previousHeader == null) {
                     String errorMsg = String.format(
-                        "🚨 HEADER CONTINUITY VIOLATION: Cannot store header #%d - previous header #%d is missing! " +
-                        "This would create gaps in header chainstate. slot=%d, hash=%s",
-                        blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
+                            "🚨 HEADER CONTINUITY VIOLATION: Cannot store header #%d - previous header #%d is missing! " +
+                                    "This would create gaps in header chainstate. slot=%d, hash=%s",
+                            blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
                     log.error(errorMsg);
 
                     // Throw exception to stop sync and prevent gaps
@@ -316,7 +453,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             if (bodyTip == null || slot > bodyTip.getSlot()) {
                 // Header-only rollback: common during restart when starting from header_tip
                 log.info("Header-only rollback to slot {} (body tip at {})",
-                         slot, bodyTip != null ? bodyTip.getSlot() : "null");
+                        slot, bodyTip != null ? bodyTip.getSlot() : "null");
                 performHeaderOnlyRollback(slot, rollbackBlockNumber, rollbackHash, headerTip);
             } else {
                 // Full rollback: real chain reorganization affecting both headers and bodies
@@ -387,7 +524,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             db.write(new WriteOptions(), batch);
 
             log.info("Header-only rollback completed: deleted {} headers, new header_tip at slot {}",
-                     headersDeleted, slot);
+                    headersDeleted, slot);
 
         } finally {
             batch.close();
@@ -399,12 +536,12 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
      * This is the traditional rollback used when the network has a real chain reorg.
      */
     private void performFullRollback(Long slot, long rollbackBlockNumber, byte[] rollbackHash,
-                                    ChainTip bodyTip, ChainTip headerTip) throws RocksDBException {
+                                     ChainTip bodyTip, ChainTip headerTip) throws RocksDBException {
 
         // Determine the highest block number to clean up
         long maxBlockToDelete = Math.max(
-            bodyTip != null ? bodyTip.getBlockNumber() : 0,
-            headerTip != null ? headerTip.getBlockNumber() : 0
+                bodyTip != null ? bodyTip.getBlockNumber() : 0,
+                headerTip != null ? headerTip.getBlockNumber() : 0
         );
 
         if (maxBlockToDelete <= rollbackBlockNumber) {
@@ -412,15 +549,15 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
 
             // CHECK TIP ALIGNMENT: Ensure header and body tips have same hash
             if (headerTip != null && bodyTip != null &&
-                !Arrays.equals(headerTip.getBlockHash(), bodyTip.getBlockHash())) {
+                    !Arrays.equals(headerTip.getBlockHash(), bodyTip.getBlockHash())) {
 
                 log.warn("🚨 TIP MISMATCH DETECTED: Header tip and body tip have different hashes!");
                 log.warn("Header tip: block #{} slot {} hash {}",
-                         headerTip.getBlockNumber(), headerTip.getSlot(),
-                         HexUtil.encodeHexString(headerTip.getBlockHash()));
+                        headerTip.getBlockNumber(), headerTip.getSlot(),
+                        HexUtil.encodeHexString(headerTip.getBlockHash()));
                 log.warn("Body tip: block #{} slot {} hash {}",
-                         bodyTip.getBlockNumber(), bodyTip.getSlot(),
-                         HexUtil.encodeHexString(bodyTip.getBlockHash()));
+                        bodyTip.getBlockNumber(), bodyTip.getSlot(),
+                        HexUtil.encodeHexString(bodyTip.getBlockHash()));
 
                 // Find the last block where header and body hashes match
                 long alignedBlockNumber = findLastAlignedBlock(rollbackBlockNumber);
@@ -512,7 +649,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
             db.write(new WriteOptions(), batch);
 
             log.warn("Full rollback completed: to slot={}, deleted {} slots, {} blocks, {} headers",
-                     slot, slotsDeleted, blocksDeleted, headersDeleted);
+                    slot, slotsDeleted, blocksDeleted, headersDeleted);
 
         } finally {
             batch.close();
@@ -566,15 +703,27 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
                 mainIter.seek(longToBytes(slotC));
                 while (mainIter.isValid()) {
                     long s = bytesToLong(mainIter.key());
-                    if (s < slotC) { mainIter.next(); continue; }
-                    if (s == slotC && hashC != null && HexUtil.encodeHexString(mainIter.value()).equals(hashC)) { mainIter.next(); continue; }
+                    if (s < slotC) {
+                        mainIter.next();
+                        continue;
+                    }
+                    if (s == slotC && hashC != null && HexUtil.encodeHexString(mainIter.value()).equals(hashC)) {
+                        mainIter.next();
+                        continue;
+                    }
                     break;
                 }
                 ebbIter.seek(longToBytes(slotC));
                 while (ebbIter.isValid()) {
                     long s = bytesToLong(ebbIter.key());
-                    if (s < slotC) { ebbIter.next(); continue; }
-                    if (s == slotC && hashC != null && HexUtil.encodeHexString(ebbIter.value()).equals(hashC)) { ebbIter.next(); continue; }
+                    if (s < slotC) {
+                        ebbIter.next();
+                        continue;
+                    }
+                    if (s == slotC && hashC != null && HexUtil.encodeHexString(ebbIter.value()).equals(hashC)) {
+                        ebbIter.next();
+                        continue;
+                    }
                     break;
                 }
 
@@ -767,6 +916,20 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
         }
     }
 
+    @Override
+    public Long getSlotByBlockNumber(Long blockNumber) {
+        try {
+            byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(blockNumber));
+            if (slotBytes != null) {
+                return bytesToLong(slotBytes);
+            }
+            return null;
+        } catch (Exception e) {
+            log.error("Failed to get slot by block number", e);
+            return null;
+        }
+    }
+
     /**
      * Get the first block in the chain
      */
@@ -790,7 +953,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
     /**
      * Recover from corrupted chain state by finding the last valid continuous point
      * and removing all data after that point.
-     *
+     * <p>
      * This method:
      * 1. Computes last continuous header/body block numbers up to their tips
      * 2. Removes all data after the recovery point
@@ -1036,11 +1199,11 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable {
         // Update tip if this is a newer block OR same slot with higher block number (fork handling)
         ChainTip currentTip = getTip();
         if (currentTip == null || slot > currentTip.getSlot() ||
-            (slot.equals(currentTip.getSlot()) && blockNumber > currentTip.getBlockNumber())) {
+                (slot.equals(currentTip.getSlot()) && blockNumber > currentTip.getBlockNumber())) {
             ChainTip newTip = new ChainTip(slot, blockHash, blockNumber);
             batch.put(metadataHandle, TIP_KEY, serializeChainTip(newTip));
             log.debug("Updated tip: slot={}, blockNumber={} (fork handling: same-slot={})",
-                     slot, blockNumber, currentTip != null && slot.equals(currentTip.getSlot()));
+                    slot, blockNumber, currentTip != null && slot.equals(currentTip.getSlot()));
         } else if (currentTip != null && slot.equals(currentTip.getSlot()) && blockNumber.equals(currentTip.getBlockNumber())) {
             // Same slot, same block number but potentially different hash (fork scenario)
             if (!Arrays.equals(blockHash, currentTip.getBlockHash())) {

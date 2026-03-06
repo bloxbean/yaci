@@ -167,3 +167,5 @@ rust/jniLibs
 /tasks/
 /node/chainstate/
 /node/logs/
+/node-runtime/chainstate/
+/node-app/chainstate/
