@@ -12,7 +12,7 @@ import java.util.Map;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ProtocolParamsDto(
-        int epoch,
+        @JsonProperty("epoch") int epoch,
         @JsonProperty("min_fee_a") int minFeeA,
         @JsonProperty("min_fee_b") int minFeeB,
         @JsonProperty("max_block_size") int maxBlockSize,
@@ -20,15 +20,15 @@ public record ProtocolParamsDto(
         @JsonProperty("max_block_header_size") int maxBlockHeaderSize,
         @JsonProperty("key_deposit") String keyDeposit,
         @JsonProperty("pool_deposit") String poolDeposit,
-        BigDecimal a0,
-        BigDecimal rho,
-        BigDecimal tau,
+        @JsonProperty("a0") BigDecimal a0,
+        @JsonProperty("rho") BigDecimal rho,
+        @JsonProperty("tau") BigDecimal tau,
         @JsonProperty("decentralisation_param") BigDecimal decentralisationParam,
         @JsonProperty("protocol_major_ver") int protocolMajorVer,
         @JsonProperty("protocol_minor_ver") int protocolMinorVer,
         @JsonProperty("min_utxo") String minUtxo,
         @JsonProperty("min_pool_cost") String minPoolCost,
-        String nonce,
+        @JsonProperty("nonce") String nonce,
         @JsonProperty("cost_models") Map<String, Map<String, Long>> costModels,
         @JsonProperty("price_mem") BigDecimal priceMem,
         @JsonProperty("price_step") BigDecimal priceStep,

@@ -10,12 +10,12 @@ import java.util.List;
 public record UtxoDto(
         @JsonProperty("tx_hash") String txHash,
         @JsonProperty("output_index") int outputIndex,
-        String address,
-        List<AmountDto> amount,
+        @JsonProperty("address") String address,
+        @JsonProperty("amount") List<AmountDto> amount,
         @JsonProperty("data_hash") String dataHash,
         @JsonProperty("inline_datum") String inlineDatum,
         @JsonProperty("reference_script_hash") String referenceScriptHash,
-        int epoch,
+        @JsonProperty("epoch") int epoch,
         @JsonProperty("block_number") long blockNumber,
         @JsonProperty("block_time") long blockTime
 ) {}

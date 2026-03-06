@@ -13,6 +13,13 @@ quarkus:
     category:
       "com.bloxbean.cardano.yaci":
         level: INFO
+  smallrye-openapi:
+    info-title: "Yaci Node API"
+    info-version: "${quarkus.application.version:0.1.0}"
+    info-description: "Cardano Yaci Node REST API"
+  swagger-ui:
+    always-include: ${YACI_SWAGGER_UI_ENABLED:true}
+    path: /q/swagger-ui
   banner:
     enabled: true
     path: "banner.txt"

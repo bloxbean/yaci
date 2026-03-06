@@ -12,6 +12,7 @@ dependencies {
     implementation 'io.quarkus:quarkus-arc'
     implementation 'io.quarkus:quarkus-config-yaml'
     implementation 'io.quarkus:quarkus-smallrye-health'
+    implementation 'io.quarkus:quarkus-smallrye-openapi'
 
     // Yaci Node dependencies
     implementation(project(':node-api')) {

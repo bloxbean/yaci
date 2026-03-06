@@ -6,15 +6,15 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * Epoch info DTO matching Yaci Store's response format.
  */
 public record EpochDto(
-        int epoch,
+        @JsonProperty("epoch") int epoch,
         @JsonProperty("start_time") long startTime,
         @JsonProperty("end_time") long endTime,
         @JsonProperty("first_block_time") long firstBlockTime,
         @JsonProperty("last_block_time") long lastBlockTime,
         @JsonProperty("block_count") long blockCount,
         @JsonProperty("tx_count") long txCount,
-        String output,
-        String fees,
+        @JsonProperty("output") String output,
+        @JsonProperty("fees") String fees,
         @JsonProperty("active_stake") String activeStake
 ) {
     /**

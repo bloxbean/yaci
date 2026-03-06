@@ -9,8 +9,8 @@ import java.math.BigInteger;
  * Lovelace is represented as unit="lovelace", native assets as unit=policyId+assetName.
  */
 public record AmountDto(
-        String unit,
+        @JsonProperty("unit") String unit,
         @JsonProperty("policy_id") String policyId,
         @JsonProperty("asset_name") String assetName,
-        BigInteger quantity
+        @JsonProperty("quantity") BigInteger quantity
 ) {}

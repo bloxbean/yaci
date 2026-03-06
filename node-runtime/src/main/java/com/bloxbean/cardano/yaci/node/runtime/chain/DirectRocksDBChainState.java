@@ -916,6 +916,20 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
         }
     }
 
+    @Override
+    public Long getSlotByBlockNumber(Long blockNumber) {
+        try {
+            byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(blockNumber));
+            if (slotBytes != null) {
+                return bytesToLong(slotBytes);
+            }
+            return null;
+        } catch (Exception e) {
+            log.error("Failed to get slot by block number", e);
+            return null;
+        }
+    }
+
     /**
      * Get the first block in the chain
      */

@@ -303,4 +303,14 @@ public class InMemoryChainState implements ChainState {
     public Long getBlockNumberBySlot(Long slot) {
         return blockNumberBySlot.get(slot);
     }
+
+    @Override
+    public Long getSlotByBlockNumber(Long blockNumber) {
+        for (Map.Entry<Long, Long> entry : blockNumberBySlot.entrySet()) {
+            if (entry.getValue().equals(blockNumber)) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
 }

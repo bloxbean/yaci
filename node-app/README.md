@@ -172,12 +172,56 @@ All endpoints are under `/api/v1`. Responses match [yaci-store](https://github.c
 | GET | `/epochs/latest/parameters` | Current protocol parameters |
 | GET | `/epochs/{number}/parameters` | Protocol parameters by epoch |
 
+### Devnet
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/devnet/rollback` | Trigger a controlled rollback (devnet mode only) |
+
+**Rollback request** — exactly one of `slot`, `blockNumber`, or `count` must be provided:
+
+```bash
+# Rollback to a specific slot
+curl -X POST http://localhost:8080/api/v1/devnet/rollback \
+  -H "Content-Type: application/json" \
+  -d '{"slot": 1234}'
+
+# Rollback to a specific block number
+curl -X POST http://localhost:8080/api/v1/devnet/rollback \
+  -H "Content-Type: application/json" \
+  -d '{"blockNumber": 10}'
+
+# Rollback N blocks behind current tip
+curl -X POST http://localhost:8080/api/v1/devnet/rollback \
+  -H "Content-Type: application/json" \
+  -d '{"count": 3}'
+```
+
+The rollback goes through the full standard rollback flow: ChainState rollback, RollbackEvent (UTXO delta unwind), and `Rollbackward` notification to connected n2n clients (e.g. yaci-store).
+
 ### Other
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/status` | Sync status |
 | GET | `/q/health/ready` | Health check |
+| GET | `/q/swagger-ui` | Swagger UI (interactive API explorer) |
+
+## Swagger UI
+
+An interactive API explorer is available at `/q/swagger-ui` when the node is running. The OpenAPI spec is at `/q/openapi`.
+
+To disable Swagger UI in production, set the environment variable:
+
+```bash
+YACI_SWAGGER_UI_ENABLED=false
+```
+
+Or pass the system property:
+
+```bash
+-Dquarkus.swagger-ui.always-include=false
+```
 
 ## Integration with yaci-store
 
