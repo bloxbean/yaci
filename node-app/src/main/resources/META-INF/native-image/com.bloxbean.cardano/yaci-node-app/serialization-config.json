@@ -3,7 +3,37 @@
     "name": "com.bloxbean.cardano.yaci.node.api.model.NodeStatus"
   },
   {
-    "name": "com.bloxbean.cardano.yaci.node.api.model.ChainTip"
+    "name": "com.bloxbean.cardano.yaci.core.storage.ChainTip"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.blocks.dto.BlockDto"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.epochs.dto.EpochDto"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.epochs.dto.ProtocolParamsDto"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.utxos.dto.UtxoDto"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.utxos.dto.AmountDto"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.tx.dto.TxInputsOutputsDto"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.tx.dto.TxUtxoDto"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.tx.dto.TxAmountDto"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.RollbackRequest"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.RollbackResponse"
   },
   {
     "name": "com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig"
