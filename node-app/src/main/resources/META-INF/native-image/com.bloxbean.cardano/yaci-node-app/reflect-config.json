@@ -407,6 +407,30 @@
     "allDeclaredConstructors": true
   },
   {
+    "name": "com.bloxbean.cardano.yaci.node.runtime.validation.DefaultTransactionValidatorListener_EventBindings",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.runtime.validation.DefaultConsensusListener_EventBindings",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.runtime.validation.DefaultTransactionValidatorListener",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.runtime.validation.DefaultConsensusListener",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
     "name": "com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandler",
     "allDeclaredFields": true,
     "allDeclaredMethods": true,

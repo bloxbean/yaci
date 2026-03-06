@@ -7,14 +7,12 @@ import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.events.api.EventMetadata;
 import com.bloxbean.cardano.yaci.events.api.PublishOptions;
 import com.bloxbean.cardano.yaci.events.api.EventBus;
-import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationService;
+import com.bloxbean.cardano.yaci.node.api.events.TransactionValidateEvent;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPoolTransaction;
 import com.bloxbean.cardano.yaci.node.runtime.events.MemPoolTransactionReceivedEvent;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,9 +32,6 @@ public class YaciTxSubmissionHandler implements TxSubmissionListener, TxSubmissi
     private final boolean blockProducerMode;
     private final Set<String> knownTxIds = ConcurrentHashMap.newKeySet();
     private final Map<String, String> clientConnections = new ConcurrentHashMap<>();
-
-    @Setter
-    private TransactionValidationService transactionEvaluator;
 
     // Statistics
     private long txIdsReceived = 0;
@@ -103,18 +98,23 @@ public class YaciTxSubmissionHandler implements TxSubmissionListener, TxSubmissi
 
         for (Tx tx : replyTxs.getTxns()) {
             try {
-                // Calculate transaction hash
                 String txHash = TransactionUtil.getTxHash(tx.getTx());
 
-                // Validate transaction if evaluator is available
-                if (transactionEvaluator != null) {
-                    var result = transactionEvaluator.validate(tx.getTx());
-                    if (!result.valid()) {
-                        txsRejected++;
-                        String errorMsg = result.firstErrorMessage("unknown validation error");
-                        log.warn("Rejecting invalid N2N tx {}: {}", txHash, errorMsg);
-                        continue;
-                    }
+                // Validate via event bus — registered listeners (default + plugins) will veto if invalid
+                var validateEvent = new TransactionValidateEvent(tx.getTx(), txHash, "txsubmission");
+                if (eventBus != null) {
+                    eventBus.publish(validateEvent,
+                            EventMetadata.builder().origin("txsubmission").build(),
+                            PublishOptions.builder().build());
+                }
+
+                if (validateEvent.isRejected()) {
+                    txsRejected++;
+                    String errorMsg = validateEvent.rejections().stream()
+                            .map(r -> r.reason())
+                            .collect(java.util.stream.Collectors.joining("; "));
+                    log.warn("Rejecting invalid N2N tx {}: {}", txHash, errorMsg);
+                    continue;
                 }
 
                 // Add to mempool and publish event
@@ -136,9 +136,6 @@ public class YaciTxSubmissionHandler implements TxSubmissionListener, TxSubmissi
                 }
             }
         }
-
-        // Transactions stay in mempool until evicted by MempoolEvictionPolicy
-        // (block confirmation, TTL expiry, or max-size cap)
     }
 
     // TxSubmissionHandler implementation

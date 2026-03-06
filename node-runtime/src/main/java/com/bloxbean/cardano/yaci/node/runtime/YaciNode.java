@@ -32,6 +32,9 @@ import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidatio
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationException;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
+import com.bloxbean.cardano.yaci.node.api.events.TransactionValidateEvent;
+import com.bloxbean.cardano.yaci.node.runtime.validation.DefaultTransactionValidatorListener;
+import com.bloxbean.cardano.yaci.node.runtime.validation.DefaultConsensusListener;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
 import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.events.MemPoolTransactionReceivedEvent;
@@ -172,6 +175,11 @@ public class YaciNode implements NodeAPI {
         // Event bus
         EventsOptions ev = this.runtimeOptions.events();
         this.eventBus = ev.enabled() ? new SimpleEventBus() : new NoopEventBus();
+
+        // Register default consensus listener (accept-all placeholder)
+        var consensusListener = new DefaultConsensusListener();
+        AnnotationListenerRegistrar.register(eventBus, consensusListener,
+                SubscriptionOptions.builder().build());
 
         // Initialize plugins (discovery is deferred to start())
         if (this.runtimeOptions.plugins().enabled()) {
@@ -533,9 +541,17 @@ public class YaciNode implements NodeAPI {
 
         this.transactionEvaluator = new TransactionValidationService(evaluator, getUtxoState());
 
-        // Wire evaluator to N2N TxSubmission handler if available
-        if (txSubmissionHandler != null) {
-            txSubmissionHandler.setTransactionEvaluator(this.transactionEvaluator);
+        // Register default validator listener via event bus (replaces direct wiring)
+        boolean defaultValidatorEnabled = resolveBoolean(
+                runtimeOptions.globals(), "yaci.node.validation.default-validator-enabled", true);
+
+        if (defaultValidatorEnabled) {
+            var validatorListener = new DefaultTransactionValidatorListener(this.transactionEvaluator);
+            AnnotationListenerRegistrar.register(eventBus, validatorListener,
+                    SubscriptionOptions.builder().build());
+            log.info("Default transaction validator listener registered (order=100)");
+        } else {
+            log.info("Default transaction validator listener DISABLED by config");
         }
 
         log.info("Transaction evaluator set");
@@ -592,19 +608,26 @@ public class YaciNode implements NodeAPI {
 
     @Override
     public String submitTransaction(byte[] txCbor) {
-        if (transactionEvaluator != null) {
-            var result = transactionEvaluator.validate(txCbor);
-            if (!result.valid()) {
-                throw new TransactionValidationException(result);
-            }
+        // Compute tx hash upfront for event and return value
+        String txHash = com.bloxbean.cardano.client.transaction.util.TransactionUtil.getTxHash(txCbor);
+
+        // Publish validation event — synchronous listeners will veto if invalid
+        var validateEvent = new TransactionValidateEvent(txCbor, txHash, "rest-api");
+        eventBus.publish(validateEvent,
+                EventMetadata.builder().origin("rest-api").build(),
+                PublishOptions.builder().build());
+
+        if (validateEvent.isRejected()) {
+            throw new TransactionValidationException(validateEvent.rejections());
         }
+
         var mpt = memPool.addTransaction(txCbor);
         if (eventBus != null && mpt != null) {
             eventBus.publish(new MemPoolTransactionReceivedEvent(mpt),
                     EventMetadata.builder().origin("rest-api").build(),
                     PublishOptions.builder().build());
         }
-        return HexUtil.encodeHexString(mpt.txHash());
+        return txHash;
     }
 
     @Override
@@ -2043,6 +2066,15 @@ public class YaciNode implements NodeAPI {
         if (obj instanceof Number n) return n.longValue();
         if (obj != null) {
             try { return Long.parseLong(String.valueOf(obj)); } catch (Exception ignored) {}
+        }
+        return def;
+    }
+
+    private static boolean resolveBoolean(java.util.Map<String, Object> globals, String key, boolean def) {
+        Object val = globals != null ? globals.get(key) : null;
+        if (val instanceof Boolean b) return b;
+        if (val != null) {
+            try { return Boolean.parseBoolean(String.valueOf(val)); } catch (Exception ignored) {}
         }
         return def;
     }
