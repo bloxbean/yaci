@@ -48,9 +48,9 @@ yaci:
       rocksdb: true
       path: "./chainstate"
     genesis:
-      shelley-genesis-file:
+      shelley-genesis-file: config/network/preprod/shelley-genesis.json
       byron-genesis-file:
-      protocol-parameters-file:
+      protocol-parameters-file: config/network/preprod/protocol-param.json
     block-producer:
       enabled: false
       block-time-millis: 0
@@ -85,6 +85,28 @@ yaci:
         lazy: false
         genesis-timestamp: 0
         slot-length-millis: 0
+
+"%mainnet":
+  yaci:
+    node:
+      network: mainnet
+      remote:
+        host: backbone.cardano.iog.io
+        port: 3001
+        protocol-magic: 764824073
+      genesis:
+        shelley-genesis-file: config/network/mainnet/shelley-genesis.json
+        protocol-parameters-file: config/network/mainnet/protocol-param.json
+
+"%preview":
+  yaci:
+    node:
+      network: preview
+      remote:
+        protocol-magic: 2
+      genesis:
+        shelley-genesis-file: config/network/preview/shelley-genesis.json
+        protocol-parameters-file: config/network/preview/protocol-param.json
 
 "%test":
   yaci:

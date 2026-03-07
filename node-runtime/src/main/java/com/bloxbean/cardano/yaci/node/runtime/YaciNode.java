@@ -330,6 +330,24 @@ public class YaciNode implements NodeAPI {
                 startServer();
             }
 
+            // Always load genesis config if any genesis files are configured (for protocol params, epoch length, etc.)
+            if (genesisConfig == null && hasAnyGenesisConfig()) {
+                genesisConfig = GenesisConfig.load(
+                        config.getShelleyGenesisFile(),
+                        config.getByronGenesisFile(),
+                        config.getProtocolParametersFile());
+
+                // Propagate epoch length from genesis to config
+                if (genesisConfig.getShelleyGenesisData() != null
+                        && genesisConfig.getShelleyGenesisData().epochLength() > 0) {
+                    config.setEpochLength(genesisConfig.getShelleyGenesisData().epochLength());
+                }
+
+                log.info("Genesis config loaded (protocolParams={}, shelleyData={})",
+                        genesisConfig.hasProtocolParameters() ? "available" : "none",
+                        genesisConfig.getShelleyGenesisData() != null ? "available" : "none");
+            }
+
             // Start block producer if enabled (after server so we can notify)
             if (config.isEnableBlockProducer()) {
                 startBlockProducer();
@@ -454,15 +472,17 @@ public class YaciNode implements NodeAPI {
     private void startBlockProducer() {
         log.info("Starting block producer (devnet mode)...");
 
-        genesisConfig = GenesisConfig.load(
-                config.getShelleyGenesisFile(),
-                config.getByronGenesisFile(),
-                config.getProtocolParametersFile());
+        if (genesisConfig == null) {
+            genesisConfig = GenesisConfig.load(
+                    config.getShelleyGenesisFile(),
+                    config.getByronGenesisFile(),
+                    config.getProtocolParametersFile());
 
-        // Propagate epoch length from genesis to config so REST layer can use it
-        if (genesisConfig.getShelleyGenesisData() != null
-                && genesisConfig.getShelleyGenesisData().epochLength() > 0) {
-            config.setEpochLength(genesisConfig.getShelleyGenesisData().epochLength());
+            // Propagate epoch length from genesis to config so REST layer can use it
+            if (genesisConfig.getShelleyGenesisData() != null
+                    && genesisConfig.getShelleyGenesisData().epochLength() > 0) {
+                config.setEpochLength(genesisConfig.getShelleyGenesisData().epochLength());
+            }
         }
 
         // Auto-derive block time from genesis if blockTimeMillis == 0 (auto sentinel)
@@ -638,6 +658,12 @@ public class YaciNode implements NodeAPI {
         } else {
             log.info("No genesis funds found in genesis files");
         }
+    }
+
+    private boolean hasAnyGenesisConfig() {
+        return (config.getShelleyGenesisFile() != null && !config.getShelleyGenesisFile().isBlank())
+                || (config.getByronGenesisFile() != null && !config.getByronGenesisFile().isBlank())
+                || (config.getProtocolParametersFile() != null && !config.getProtocolParametersFile().isBlank());
     }
 
     @Override

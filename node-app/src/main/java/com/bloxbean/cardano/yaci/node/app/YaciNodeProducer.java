@@ -211,7 +211,7 @@ public class YaciNodeProducer {
         log.info("Yaci Node created successfully");
 
         // Initialize transaction evaluator if enabled
-        if (txEvaluationEnabled && blockProducerEnabled) {
+        if (txEvaluationEnabled) {
             initTransactionEvaluator((YaciNode) nodeAPI, yaciConfig);
         }
 
