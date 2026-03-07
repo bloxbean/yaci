@@ -4,7 +4,7 @@ cd "$SCRIPT_DIR"
 
 if [ "$1" = "--native" ]; then
   shift
-  BINARY="build/yaci-node-runner"
+  BINARY="build/yaci-node"
   [ ! -f "$BINARY" ] && echo "Native binary not found. Build: ./gradlew :node-app:build -Dquarkus.native.enabled=true" && exit 1
   exec "$BINARY" "$@"
 else

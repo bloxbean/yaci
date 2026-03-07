@@ -52,6 +52,7 @@ public class BlockProducer {
     private ScheduledFuture<?> scheduledTask;
     private long nextBlockNumber;
     private byte[] prevBlockHash;
+    private long lastUsedSlot = -1;
     private volatile boolean running;
 
     public BlockProducer(ChainState chainState, MemPool memPool, NodeServer nodeServer,
@@ -104,6 +105,7 @@ public class BlockProducer {
         if (existingTip != null) {
             nextBlockNumber = existingTip.getBlockNumber() + 1;
             prevBlockHash = existingTip.getBlockHash();
+            lastUsedSlot = existingTip.getSlot();
             log.info("Block producer resuming from existing tip: block={}, slot={}",
                     existingTip.getBlockNumber(), existingTip.getSlot());
         } else {
@@ -114,7 +116,7 @@ public class BlockProducer {
         running = true;
 
         // Schedule periodic block production
-        scheduledTask = scheduler.scheduleAtFixedRate(() -> {
+        scheduledTask = scheduler.scheduleWithFixedDelay(() -> {
             try {
                 produceBlock();
             } catch (Exception e) {
@@ -151,6 +153,7 @@ public class BlockProducer {
         if (tip != null) {
             this.nextBlockNumber = tip.getBlockNumber() + 1;
             this.prevBlockHash = tip.getBlockHash();
+            this.lastUsedSlot = tip.getSlot();
             log.info("Block producer reset to chain tip: block={}, slot={}",
                     tip.getBlockNumber(), tip.getSlot());
         }
@@ -253,7 +256,10 @@ public class BlockProducer {
     }
 
     private long calculateCurrentSlot() {
-        return (System.currentTimeMillis() - genesisTimestamp) / slotLengthMillis;
+        long wallClockSlot = (System.currentTimeMillis() - genesisTimestamp) / slotLengthMillis;
+        long slot = Math.max(wallClockSlot, lastUsedSlot + 1);
+        lastUsedSlot = slot;
+        return slot;
     }
 
     private void publishEvent(DevnetBlockBuilder.BlockBuildResult result, int txCount) {

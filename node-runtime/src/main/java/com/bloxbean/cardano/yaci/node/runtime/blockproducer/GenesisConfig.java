@@ -111,6 +111,10 @@ public class GenesisConfig {
         return shelleyGenesisData != null ? shelleyGenesisData.networkMagic() : 0;
     }
 
+    public double getActiveSlotsCoeff() {
+        return shelleyGenesisData != null ? shelleyGenesisData.activeSlotsCoeff() : 0.0;
+    }
+
     public String getSystemStart() {
         return shelleyGenesisData != null ? shelleyGenesisData.systemStart() : null;
     }

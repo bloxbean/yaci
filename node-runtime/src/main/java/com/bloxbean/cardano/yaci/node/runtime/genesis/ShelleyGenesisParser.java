@@ -38,11 +38,12 @@ public class ShelleyGenesisParser {
         double slotLength = root.path("slotLength").asDouble(1.0);
         String systemStart = root.path("systemStart").asText(null);
         long maxLovelaceSupply = root.path("maxLovelaceSupply").asLong(0);
+        double activeSlotsCoeff = root.path("activeSlotsCoeff").asDouble(0.05);
 
-        log.info("Parsed shelley genesis: networkMagic={}, initialFunds={} entries, epochLength={}, systemStart={}",
-                networkMagic, initialFunds.size(), epochLength, systemStart);
+        log.info("Parsed shelley genesis: networkMagic={}, initialFunds={} entries, epochLength={}, systemStart={}, activeSlotsCoeff={}",
+                networkMagic, initialFunds.size(), epochLength, systemStart, activeSlotsCoeff);
 
-        return new ShelleyGenesisData(initialFunds, networkMagic, epochLength, slotLength, systemStart, maxLovelaceSupply);
+        return new ShelleyGenesisData(initialFunds, networkMagic, epochLength, slotLength, systemStart, maxLovelaceSupply, activeSlotsCoeff);
     }
 
     /**

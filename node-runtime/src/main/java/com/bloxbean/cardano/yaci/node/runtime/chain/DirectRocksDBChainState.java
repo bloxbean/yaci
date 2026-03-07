@@ -233,7 +233,6 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
                             blockNumber, blockNumber - 1, slot, HexUtil.encodeHexString(blockHash));
                     log.error(errorMsg);
 
-                    System.exit(1);
                     // Throw exception to stop sync and prevent gaps
                     throw new IllegalStateException(errorMsg);
                 }

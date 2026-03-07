@@ -5,12 +5,13 @@ import java.util.Map;
 /**
  * Data extracted from a shelley-genesis.json file.
  *
- * @param initialFunds    hex-encoded address bytes → lovelace
- * @param networkMagic    protocol magic number
- * @param epochLength     number of slots per epoch
- * @param slotLength      slot duration in seconds
- * @param systemStart     ISO-8601 system start timestamp
+ * @param initialFunds      hex-encoded address bytes → lovelace
+ * @param networkMagic      protocol magic number
+ * @param epochLength       number of slots per epoch
+ * @param slotLength        slot duration in seconds
+ * @param systemStart       ISO-8601 system start timestamp
  * @param maxLovelaceSupply max lovelace supply
+ * @param activeSlotsCoeff  fraction of slots that are active (0.0–1.0)
  */
 public record ShelleyGenesisData(
         Map<String, Long> initialFunds,
@@ -18,5 +19,6 @@ public record ShelleyGenesisData(
         long epochLength,
         double slotLength,
         String systemStart,
-        long maxLovelaceSupply
+        long maxLovelaceSupply,
+        double activeSlotsCoeff
 ) {}

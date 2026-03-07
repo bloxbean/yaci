@@ -32,6 +32,7 @@ class ShelleyGenesisParserTest {
             assertThat(data.slotLength()).isEqualTo(1.0);
             assertThat(data.systemStart()).isEqualTo("2024-01-01T00:00:00Z");
             assertThat(data.maxLovelaceSupply()).isEqualTo(45000000000000000L);
+            assertThat(data.activeSlotsCoeff()).isEqualTo(1.0);
         }
     }
 
@@ -54,6 +55,7 @@ class ShelleyGenesisParserTest {
 
             assertThat(data.initialFunds()).isEmpty();
             assertThat(data.networkMagic()).isEqualTo(1);
+            assertThat(data.activeSlotsCoeff()).isEqualTo(0.05);
         }
     }
 }

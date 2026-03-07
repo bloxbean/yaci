@@ -183,10 +183,10 @@ public class YaciNodeConfig implements NodeConfig {
                 .enableServer(true)
                 .enableClient(false)
                 .enableBlockProducer(true)
-                .blockTimeMillis(2000)
+                .blockTimeMillis(0)
                 .lazyBlockProduction(false)
                 .genesisTimestamp(0)
-                .slotLengthMillis(1000)
+                .slotLengthMillis(0)
                 .useRocksDB(false)
                 .rocksDBPath(null)
                 .fullSyncThreshold(0)
@@ -284,12 +284,8 @@ public class YaciNodeConfig implements NodeConfig {
             if (!enableServer) {
                 throw new IllegalArgumentException("Block producer mode requires server to be enabled");
             }
-            if (blockTimeMillis <= 0) {
-                blockTimeMillis = 2000;
-            }
-            if (slotLengthMillis <= 0) {
-                slotLengthMillis = 1000;
-            }
+            // blockTimeMillis == 0 is valid: means auto-derive from genesis in YaciNode
+            // slotLengthMillis == 0 is valid: means auto-derive from genesis in YaciNode
         }
 
         if (useRocksDB && (rocksDBPath == null || rocksDBPath.trim().isEmpty())) {

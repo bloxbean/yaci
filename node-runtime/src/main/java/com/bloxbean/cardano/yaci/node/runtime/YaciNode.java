@@ -465,6 +465,40 @@ public class YaciNode implements NodeAPI {
             config.setEpochLength(genesisConfig.getShelleyGenesisData().epochLength());
         }
 
+        // Auto-derive block time from genesis if blockTimeMillis == 0 (auto sentinel)
+        if (config.getBlockTimeMillis() <= 0) {
+            if (genesisConfig.getShelleyGenesisData() != null) {
+                double activeSlotsCoeff = genesisConfig.getActiveSlotsCoeff();
+                if (activeSlotsCoeff <= 0) activeSlotsCoeff = 1.0;
+                double slotLength = genesisConfig.getShelleyGenesisData().slotLength();
+                int derived = (int) (slotLength * 1000 / activeSlotsCoeff);
+                config.setBlockTimeMillis(derived);
+                log.info("Auto-derived blockTimeMillis={} from genesis (slotLength={}, activeSlotsCoeff={})",
+                        derived, slotLength, activeSlotsCoeff);
+            } else {
+                config.setBlockTimeMillis(1000);
+                log.info("No genesis data available, using default blockTimeMillis=1000");
+            }
+        } else {
+            log.info("Using explicit blockTimeMillis={}", config.getBlockTimeMillis());
+        }
+
+        // Auto-derive slotLengthMillis from genesis slotLength
+        if (config.getSlotLengthMillis() <= 0) {
+            if (genesisConfig.getShelleyGenesisData() != null
+                    && genesisConfig.getShelleyGenesisData().slotLength() > 0) {
+                int derivedSlotLength = (int) (genesisConfig.getShelleyGenesisData().slotLength() * 1000);
+                config.setSlotLengthMillis(derivedSlotLength);
+                log.info("Auto-derived slotLengthMillis={} from genesis slotLength={}",
+                        derivedSlotLength, genesisConfig.getShelleyGenesisData().slotLength());
+            } else {
+                config.setSlotLengthMillis(1000);
+                log.info("No genesis data available, using default slotLengthMillis=1000");
+            }
+        } else {
+            log.info("Using explicit slotLengthMillis={}", config.getSlotLengthMillis());
+        }
+
         boolean freshStart = chainState.getTip() == null;
 
         // Resolve genesis timestamp: persist on fresh start, read back on restart
