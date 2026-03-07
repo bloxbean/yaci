@@ -60,7 +60,7 @@ public Message buildNextMessage() {
     }
 
     private Optional<TxSubmissionRequest> removeTxIdAndHash(TxId txId) {
-        var txIdAndHashOpt = txs.stream().filter(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(txId)).findAny();
+        var txIdAndHashOpt = txs.stream().filter(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(HexUtil.encodeHexString(txId.getTxId()))).findAny();
         txIdAndHashOpt.ifPresent(txs::remove);
         return txIdAndHashOpt;
     }
@@ -143,7 +143,7 @@ public Message buildNextMessage() {
         var txToAdd = numTxToAdd - pendingTxIds.size();
         if (!txs.isEmpty()) {
             txs.stream()
-                    .map(tx -> new TxId(tx.getTxBodyType().getEra(), tx.getTxnBytes()))
+                    .map(tx -> new TxId(tx.getTxBodyType().getEra(), HexUtil.decodeHexString(tx.getTxHash())))
                     .filter(txId -> !pendingTxIds.contains(txId))
                     .limit(txToAdd)
                     .forEach(pendingTxIds::add);
@@ -183,6 +183,7 @@ public Message buildNextMessage() {
             addTxToQueue(new TxId(txBodyType.getEra(), HexUtil.decodeHexString(txHash)));
             this.sendNextMessage();
         }
+        log.info("Transaction enqueued: {}, total txs in queue: {}", txHash, txs.size());
     }
 
     public boolean hasPendingTx() {

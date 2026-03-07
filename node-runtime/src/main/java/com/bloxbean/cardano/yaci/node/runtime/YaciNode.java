@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.node.runtime;
 
+import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.network.server.NodeServer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -687,6 +688,17 @@ public class YaciNode implements NodeAPI {
                     EventMetadata.builder().origin("rest-api").build(),
                     PublishOptions.builder().build());
         }
+
+        // Forward to upstream node if connected (relay mode)
+        if (peerClient != null && peerClient.isRunning()) {
+            try {
+                peerClient.submitTxBytes(txHash, txCbor, TxBodyType.CONWAY);
+                log.debug("Transaction {} forwarded to upstream node", txHash);
+            } catch (Exception e) {
+                log.warn("Failed to forward transaction {} to upstream node: {}", txHash, e.getMessage());
+            }
+        }
+
         return txHash;
     }
 
@@ -874,6 +886,7 @@ public class YaciNode implements NodeAPI {
 
         // Connect using existing PeerClient.connect() method with pipeline listener
         peerClient.connect(pipelineListener, null); // TxSubmission handled separately if needed
+        peerClient.enableTxSubmission(); // Initiate TxSubmission N2N protocol (sends Init message)
 
         // Start header-only sync
         peerClient.startHeaderSync(startPoint, true); // Enable pipelining for headers
@@ -955,6 +968,7 @@ public class YaciNode implements NodeAPI {
 
         // Connect using existing PeerClient.connect() method with pipeline listener
         peerClient.connect(pipelineListener, null); // TxSubmission handled separately if needed
+        peerClient.enableTxSubmission(); // Initiate TxSubmission N2N protocol (sends Init message)
 
         // Start traditional sync from tip or point
         peerClient.startSync(startPoint);
