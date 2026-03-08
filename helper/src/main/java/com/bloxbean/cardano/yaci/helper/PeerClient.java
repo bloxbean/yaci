@@ -29,6 +29,8 @@ public class PeerClient {
     private Point wellKnownPoint;
     private VersionTable versionTable;
 
+    private int txMaxQueueSize;
+
     private N2NPeerFetcher n2NPeerFetcher;
 
     /**
@@ -61,6 +63,8 @@ public class PeerClient {
             throw new IllegalStateException("Already connected. Please call shutdown() before connecting again.");
 
         n2NPeerFetcher = new N2NPeerFetcher(host, port, wellKnownPoint, versionTable);
+        if (txMaxQueueSize > 0)
+            n2NPeerFetcher.setTxMaxQueueSize(txMaxQueueSize);
 
         BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(blockChainDataListener);
         ChainSyncListenerAdapter chainSyncAgentListener = new ChainSyncListenerAdapter(blockChainDataListener);
@@ -161,6 +165,16 @@ public class PeerClient {
 
     public void submitTxBytes(String txHash, byte[] txBytes, TxBodyType txBodyType) {
         n2NPeerFetcher.submitTxBytes(txHash, txBytes, txBodyType);
+    }
+
+    /**
+     * Set the maximum queue size for TxSubmissionAgent. Must be called before connect().
+     * @param txMaxQueueSize max queue size
+     */
+    public void setTxMaxQueueSize(int txMaxQueueSize) {
+        this.txMaxQueueSize = txMaxQueueSize;
+        if (n2NPeerFetcher != null)
+            n2NPeerFetcher.setTxMaxQueueSize(txMaxQueueSize);
     }
 
     public void enableTxSubmission() {
