@@ -11,6 +11,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
@@ -43,6 +44,37 @@ public class UtxoResource {
                 ? u.getUtxosByPaymentCredential(address, page, count)
                 : u.getUtxosByAddress(address, page, count);
         List<UtxoDto> body = UtxoDtoMapper.toDtoList(list);
+        return Response.ok(body).build();
+    }
+
+    @GET
+    @Path("/addresses/{address}/utxos/{asset}")
+    public Response getUtxosByAddressAndAsset(@PathParam("address") String address,
+                                              @PathParam("asset") String asset,
+                                              @QueryParam("page") @DefaultValue("1") int page,
+                                              @QueryParam("count") @DefaultValue("20") int count,
+                                              @QueryParam("order") @DefaultValue("asc") String order) {
+        UtxoState u = utxo();
+        if (u == null || !u.isEnabled()) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity("{\"error\":\"UTXO state disabled\"}")
+                    .build();
+        }
+        if (count <= 0) count = 20;
+        if (page < 1) page = 1;
+
+        // Fetch UTXOs, then filter by asset
+        var list = u.getUtxosByAddress(address, page, count);
+        List<com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo> filtered;
+        if ("lovelace".equalsIgnoreCase(asset)) {
+            filtered = list; // All UTXOs have lovelace
+        } else {
+            filtered = list.stream()
+                    .filter(utxo -> utxo.assets() != null && utxo.assets().stream()
+                            .anyMatch(a -> asset.equals(a.policyId() + a.assetName())))
+                    .collect(Collectors.toList());
+        }
+        List<UtxoDto> body = UtxoDtoMapper.toDtoList(filtered);
         return Response.ok(body).build();
     }
 

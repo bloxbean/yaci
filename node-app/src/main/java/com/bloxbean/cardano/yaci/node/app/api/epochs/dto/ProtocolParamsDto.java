@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.node.app.api.epochs.dto;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.math.BigDecimal;
@@ -10,7 +9,6 @@ import java.util.Map;
 /**
  * Protocol parameters DTO matching Yaci Store's response format.
  */
-@JsonInclude(JsonInclude.Include.NON_NULL)
 public record ProtocolParamsDto(
         @JsonProperty("epoch") int epoch,
         @JsonProperty("min_fee_a") int minFeeA,
@@ -24,6 +22,7 @@ public record ProtocolParamsDto(
         @JsonProperty("rho") BigDecimal rho,
         @JsonProperty("tau") BigDecimal tau,
         @JsonProperty("decentralisation_param") BigDecimal decentralisationParam,
+        @JsonProperty("extra_entropy") String extraEntropy,
         @JsonProperty("protocol_major_ver") int protocolMajorVer,
         @JsonProperty("protocol_minor_ver") int protocolMinorVer,
         @JsonProperty("min_utxo") String minUtxo,
@@ -40,6 +39,7 @@ public record ProtocolParamsDto(
         @JsonProperty("collateral_percent") int collateralPercent,
         @JsonProperty("max_collateral_inputs") int maxCollateralInputs,
         @JsonProperty("coins_per_utxo_size") String coinsPerUtxoSize,
+        @JsonProperty("coins_per_utxo_word") String coinsPerUtxoWord,
         // Conway governance parameters
         @JsonProperty("pvt_motion_no_confidence") BigDecimal pvtMotionNoConfidence,
         @JsonProperty("pvt_committee_normal") BigDecimal pvtCommitteeNormal,

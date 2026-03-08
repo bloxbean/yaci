@@ -13,7 +13,8 @@
       {"pattern": ".*\\.properties"},
       {"pattern": ".*\\.xml"},
       {"pattern": ".*\\.yml"},
-      {"pattern": ".*\\.yaml"}
+      {"pattern": ".*\\.yaml"},
+      {"pattern": "genesis/.*\\.json"}
     ]
   },
   "bundles": [

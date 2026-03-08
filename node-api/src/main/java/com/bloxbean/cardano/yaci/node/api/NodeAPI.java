@@ -6,6 +6,7 @@ import com.bloxbean.cardano.yaci.events.api.SubscriptionOptions;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.node.api.config.NodeConfig;
 import com.bloxbean.cardano.yaci.node.api.listener.NodeEventListener;
+import com.bloxbean.cardano.yaci.node.api.model.GenesisParameters;
 import com.bloxbean.cardano.yaci.node.api.model.NodeStatus;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 
@@ -159,6 +160,14 @@ public interface NodeAPI {
      * @return protocol parameters as a JSON string, or null if not available
      */
     String getProtocolParameters();
+
+    /**
+     * Get genesis parameters from shelley-genesis.json.
+     * Returns null if genesis data is not available.
+     *
+     * @return genesis parameters, or null
+     */
+    GenesisParameters getGenesisParameters();
 
     /**
      * Trigger a controlled rollback in devnet mode.

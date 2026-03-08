@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.node.scalusbridge;
 
 import com.bloxbean.cardano.client.api.model.ProtocolParams;
 import com.bloxbean.cardano.client.common.model.SlotConfig;
+import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 
 /**
@@ -14,5 +15,11 @@ public class ScalusTransactionValidatorFactory {
         SlotConfigHandle handle = SlotConfigBridge.custom(
                 slotConfig.getZeroTime(), slotConfig.getZeroSlot(), slotConfig.getSlotLength());
         return new ScalusBasedTransactionValidator(pp, handle, networkId);
+    }
+
+    public static TransactionEvaluator createEvaluator(ProtocolParams pp, SlotConfig slotConfig, int networkId) {
+        SlotConfigHandle handle = SlotConfigBridge.custom(
+                slotConfig.getZeroTime(), slotConfig.getZeroSlot(), slotConfig.getSlotLength());
+        return new ScalusBasedTransactionEvaluator(pp, handle, networkId);
     }
 }

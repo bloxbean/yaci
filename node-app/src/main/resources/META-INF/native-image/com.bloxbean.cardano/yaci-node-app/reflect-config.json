@@ -253,6 +253,24 @@
     "allDeclaredConstructors": true
   },
   {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.tx.dto.TxDto",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.genesis.dto.GenesisDto",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.api.model.GenesisParameters",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
     "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.RollbackRequest",
     "allDeclaredFields": true,
     "allDeclaredMethods": true,

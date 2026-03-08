@@ -1,6 +1,13 @@
 apply plugin: 'java-library'
 apply plugin: 'scala'
 
+sourceCompatibility = JavaVersion.VERSION_21
+targetCompatibility = JavaVersion.VERSION_21
+
+tasks.withType(ScalaCompile).configureEach {
+    scalaCompileOptions.additionalParameters = ['-release', '21']
+}
+
 dependencies {
     api project(':ledger-rules')
 

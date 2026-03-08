@@ -12,6 +12,7 @@ import com.bloxbean.cardano.yaci.node.api.utxo.model.AssetAmount;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.Outpoint;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo;
 import com.bloxbean.cardano.yaci.node.app.api.tx.dto.TxAmountDto;
+import com.bloxbean.cardano.yaci.node.app.api.tx.dto.TxDto;
 import com.bloxbean.cardano.yaci.node.app.api.tx.dto.TxInputsOutputsDto;
 import com.bloxbean.cardano.yaci.node.app.api.tx.dto.TxUtxoDto;
 import jakarta.inject.Inject;
@@ -33,6 +34,117 @@ public class TransactionResource {
 
     @Inject
     NodeAPI nodeAPI;
+
+    @GET
+    @Path("/{txHash}")
+    public Response getTxInfo(@PathParam("txHash") String txHash) {
+        UtxoState utxoState = nodeAPI.getUtxoState();
+        if (utxoState == null || !utxoState.isEnabled()) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "UTXO state disabled"))
+                    .build();
+        }
+
+        List<Utxo> outputs = utxoState.getOutputsByTxHash(txHash);
+        if (outputs.isEmpty()) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Transaction not found",
+                            "status_code", 404,
+                            "message", "The requested component has not been found."))
+                    .build();
+        }
+
+        try {
+            long blockNumber = outputs.get(0).blockNumber();
+            ChainState chainState = nodeAPI.getChainState();
+            byte[] blockCbor = chainState != null ? chainState.getBlockByNumber(blockNumber) : null;
+            if (blockCbor == null) {
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity(Map.of("error", "Block not found for transaction"))
+                        .build();
+            }
+
+            Block block = BlockSerializer.INSTANCE.deserialize(blockCbor);
+            if (block == null || block.getTransactionBodies() == null) {
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity(Map.of("error", "Block deserialization failed"))
+                        .build();
+            }
+
+            // Find the tx in the block
+            TransactionBody targetTx = null;
+            int txIndex = 0;
+            for (int i = 0; i < block.getTransactionBodies().size(); i++) {
+                TransactionBody txBody = block.getTransactionBodies().get(i);
+                if (txHash.equals(txBody.getTxHash())) {
+                    targetTx = txBody;
+                    txIndex = i;
+                    break;
+                }
+            }
+
+            if (targetTx == null) {
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity(Map.of("error", "Transaction not found in block"))
+                        .build();
+            }
+
+            // Compute output amounts
+            List<TxAmountDto> outputAmounts = new ArrayList<>();
+            java.math.BigInteger totalLovelace = java.math.BigInteger.ZERO;
+            if (targetTx.getOutputs() != null) {
+                for (var out : targetTx.getOutputs()) {
+                    if (out.getAmounts() != null) {
+                        for (var amt : out.getAmounts()) {
+                            if ("lovelace".equals(amt.getUnit()) && amt.getQuantity() != null) {
+                                totalLovelace = totalLovelace.add(amt.getQuantity());
+                            }
+                        }
+                    }
+                }
+            }
+            outputAmounts.add(new TxAmountDto("lovelace", totalLovelace.toString()));
+
+            // Compute block time from genesis
+            long slot = block.getHeader().getHeaderBody().getSlot();
+            String blockHash = block.getHeader().getHeaderBody().getBlockHash();
+
+            // Fee
+            String fees = targetTx.getFee() != null ? targetTx.getFee().toString() : "0";
+
+            // Validity interval
+            String invalidBefore = targetTx.getValidityIntervalStart() > 0
+                    ? String.valueOf(targetTx.getValidityIntervalStart()) : null;
+            String invalidHereafter = targetTx.getTtl() > 0
+                    ? String.valueOf(targetTx.getTtl()) : null;
+
+            // UTXO count: inputs + outputs
+            int inputCount = targetTx.getInputs() != null ? targetTx.getInputs().size() : 0;
+            int outputCount = targetTx.getOutputs() != null ? targetTx.getOutputs().size() : 0;
+
+            TxDto dto = new TxDto(
+                    txHash,
+                    blockHash,
+                    blockNumber,
+                    0L, // block_time — not easily available without genesis timestamp
+                    slot,
+                    txIndex,
+                    outputAmounts,
+                    fees,
+                    0, // size — not tracked in deserialized block
+                    invalidBefore,
+                    invalidHereafter,
+                    inputCount + outputCount,
+                    true // valid_contract — if it's in a block, it passed validation
+            );
+            return Response.ok(dto).build();
+        } catch (Exception e) {
+            log.warn("Failed to build tx info for {}: {}", txHash, e.getMessage());
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "Failed to retrieve transaction info"))
+                    .build();
+        }
+    }
 
     @GET
     @Path("/{txHash}/utxos")

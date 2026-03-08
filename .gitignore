@@ -169,3 +169,9 @@ rust/jniLibs
 /node/logs/
 /node-runtime/chainstate/
 /node-app/chainstate/
+
+# Offchain examples
+offchain-examples/meshjs/node_modules/
+offchain-examples/pycardano/__pycache__/
+offchain-examples/pycardano/.venv/
+/node-app/chainstate-preprod/

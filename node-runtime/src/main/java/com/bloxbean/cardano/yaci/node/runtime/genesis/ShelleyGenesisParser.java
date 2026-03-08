@@ -39,11 +39,17 @@ public class ShelleyGenesisParser {
         String systemStart = root.path("systemStart").asText(null);
         long maxLovelaceSupply = root.path("maxLovelaceSupply").asLong(0);
         double activeSlotsCoeff = root.path("activeSlotsCoeff").asDouble(0.05);
+        long securityParam = root.path("securityParam").asLong(0);
+        long maxKESEvolutions = root.path("maxKESEvolutions").asLong(0);
+        long slotsPerKESPeriod = root.path("slotsPerKESPeriod").asLong(0);
+        long updateQuorum = root.path("updateQuorum").asLong(0);
 
         log.info("Parsed shelley genesis: networkMagic={}, initialFunds={} entries, epochLength={}, systemStart={}, activeSlotsCoeff={}",
                 networkMagic, initialFunds.size(), epochLength, systemStart, activeSlotsCoeff);
 
-        return new ShelleyGenesisData(initialFunds, networkMagic, epochLength, slotLength, systemStart, maxLovelaceSupply, activeSlotsCoeff);
+        return new ShelleyGenesisData(initialFunds, networkMagic, epochLength, slotLength,
+                systemStart, maxLovelaceSupply, activeSlotsCoeff,
+                securityParam, maxKESEvolutions, slotsPerKESPeriod, updateQuorum);
     }
 
     /**

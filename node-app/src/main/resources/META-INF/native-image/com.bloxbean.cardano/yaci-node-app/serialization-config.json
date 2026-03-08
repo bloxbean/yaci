@@ -30,6 +30,15 @@
     "name": "com.bloxbean.cardano.yaci.node.app.api.tx.dto.TxAmountDto"
   },
   {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.tx.dto.TxDto"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.genesis.dto.GenesisDto"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.api.model.GenesisParameters"
+  },
+  {
     "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.RollbackRequest"
   },
   {

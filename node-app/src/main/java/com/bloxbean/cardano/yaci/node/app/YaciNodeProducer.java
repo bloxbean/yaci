@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
 import com.bloxbean.cardano.client.common.model.SlotConfig;
 import com.bloxbean.cardano.client.common.model.SlotConfigs;
 import com.bloxbean.cardano.yaci.core.common.Constants;
+import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.runtime.YaciNode;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
@@ -24,6 +25,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -148,6 +153,10 @@ public class YaciNodeProducer {
                 break;
         }
 
+        // Resolve genesis files: user config takes precedence, then auto-resolve from bundled classpath resources
+        String resolvedShelleyGenesis = resolveGenesisFile(shelleyGenesisFile.orElse(null), protocolMagic, "shelley-genesis.json");
+        String resolvedByronGenesis = resolveGenesisFile(byronGenesisFile.orElse(null), protocolMagic, "byron-genesis.json");
+
         // Override with configuration properties
         yaciConfig = YaciNodeConfig.builder()
                 .enableClient(clientEnabled)
@@ -172,8 +181,8 @@ public class YaciNodeProducer {
                 .lazyBlockProduction(blockProducerLazy)
                 .genesisTimestamp(genesisTimestamp)
                 .slotLengthMillis(slotLengthMillis)
-                .shelleyGenesisFile(shelleyGenesisFile.orElse(null))
-                .byronGenesisFile(byronGenesisFile.orElse(null))
+                .shelleyGenesisFile(resolvedShelleyGenesis)
+                .byronGenesisFile(resolvedByronGenesis)
                 .protocolParametersFile(protocolParametersFile.orElse(null))
                 .build();
 
@@ -282,6 +291,11 @@ public class YaciNodeProducer {
                     ScalusTransactionValidatorFactory.create(pp, slotConfig, networkId);
             yaciNode.setTransactionEvaluator(evaluator);
 
+            // Also create a script evaluator for the /utils/txs/evaluate endpoint
+            TransactionEvaluator scriptEvaluator =
+                    ScalusTransactionValidatorFactory.createEvaluator(pp, slotConfig, networkId);
+            yaciNode.setScriptEvaluator(scriptEvaluator);
+
             log.info("Transaction evaluator initialized (networkId={})", networkId);
         } catch (Exception e) {
             log.warn("Failed to initialize transaction evaluator: {}", e.getMessage());
@@ -295,5 +309,50 @@ public class YaciNodeProducer {
             nodeAPI.stop();
             log.info("Yaci Node stopped");
         }
+    }
+
+    /**
+     * Resolve a genesis file path. If the user has provided an explicit path and the file exists,
+     * use it. Otherwise, for known networks (mainnet/preprod/preview), extract the bundled
+     * classpath resource to a temp file.
+     */
+    private String resolveGenesisFile(String userPath, long magic, String filename) {
+        // If user provided an explicit path and file exists, use it
+        if (userPath != null && !userPath.isBlank()) {
+            if (new java.io.File(userPath).exists()) {
+                return userPath;
+            }
+            log.debug("User-configured genesis file not found: {}, trying bundled resource", userPath);
+        }
+
+        // Auto-resolve from bundled classpath resources based on protocol magic
+        String networkDir = networkDirForMagic(magic);
+        if (networkDir == null) {
+            return userPath; // Unknown network, can't auto-resolve
+        }
+
+        String classpathResource = "genesis/" + networkDir + "/" + filename;
+        try (InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream(classpathResource)) {
+            if (is == null) {
+                log.debug("Bundled genesis resource not found: {}", classpathResource);
+                return userPath;
+            }
+            // Extract to temp file
+            Path tempFile = Files.createTempFile("yaci-" + networkDir + "-", "-" + filename);
+            tempFile.toFile().deleteOnExit();
+            Files.copy(is, tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            log.info("Auto-resolved {} from bundled resource for {} network", filename, networkDir);
+            return tempFile.toString();
+        } catch (IOException e) {
+            log.warn("Failed to extract bundled genesis resource {}: {}", classpathResource, e.getMessage());
+            return userPath;
+        }
+    }
+
+    private static String networkDirForMagic(long magic) {
+        if (magic == Constants.MAINNET_PROTOCOL_MAGIC) return "mainnet";
+        if (magic == Constants.PREPROD_PROTOCOL_MAGIC) return "preprod";
+        if (magic == Constants.PREVIEW_PROTOCOL_MAGIC) return "preview";
+        return null;
     }
 }

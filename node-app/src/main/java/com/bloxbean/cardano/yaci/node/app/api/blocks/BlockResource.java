@@ -5,6 +5,7 @@ import com.bloxbean.cardano.yaci.core.model.HeaderBody;
 import com.bloxbean.cardano.yaci.core.model.TransactionBody;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.node.api.NodeAPI;
 import com.bloxbean.cardano.yaci.node.app.api.EpochUtil;
@@ -24,6 +25,55 @@ public class BlockResource {
 
     @Inject
     NodeAPI nodeAPI;
+
+    @GET
+    @Path("/{hashOrNumber}")
+    public Response getBlock(@PathParam("hashOrNumber") String hashOrNumber) {
+        ChainState chainState = nodeAPI.getChainState();
+        if (chainState == null) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Chain state not available"))
+                    .build();
+        }
+
+        byte[] blockCbor = null;
+        try {
+            // Detect if parameter is a block number (all digits) or a hash (hex)
+            if (hashOrNumber.matches("\\d+")) {
+                long blockNumber = Long.parseLong(hashOrNumber);
+                blockCbor = chainState.getBlockByNumber(blockNumber);
+            } else {
+                blockCbor = chainState.getBlock(HexUtil.decodeHexString(hashOrNumber));
+            }
+        } catch (Exception e) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Block not found"))
+                    .build();
+        }
+
+        if (blockCbor == null) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Block not found",
+                            "status_code", 404,
+                            "message", "The requested component has not been found."))
+                    .build();
+        }
+
+        try {
+            Block block = BlockSerializer.INSTANCE.deserialize(blockCbor);
+            ChainTip tip = chainState.getTip();
+            int confirmations = 0;
+            if (tip != null) {
+                confirmations = (int) (tip.getBlockNumber() - block.getHeader().getHeaderBody().getBlockNumber());
+            }
+            BlockDto dto = toBlockDto(block, confirmations);
+            return Response.ok(dto).build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "Failed to deserialize block: " + e.getMessage()))
+                    .build();
+        }
+    }
 
     @GET
     @Path("/latest")
@@ -51,7 +101,7 @@ public class BlockResource {
 
         try {
             Block block = BlockSerializer.INSTANCE.deserialize(blockCbor);
-            BlockDto dto = toBlockDto(block);
+            BlockDto dto = toBlockDto(block, 0);
             return Response.ok(dto).build();
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
@@ -60,7 +110,7 @@ public class BlockResource {
         }
     }
 
-    private BlockDto toBlockDto(Block block) {
+    private BlockDto toBlockDto(Block block, int confirmations) {
         HeaderBody hb = block.getHeader().getHeaderBody();
         long slot = hb.getSlot();
         int epoch = EpochUtil.slotToEpoch(slot, nodeAPI.getConfig());
@@ -106,8 +156,8 @@ public class BlockResource {
                 totalOutput.toString(),
                 totalFees.toString(),
                 hb.getPrevHash(),
-                null, // nextBlock — this is the latest
-                0,    // confirmations — latest block has 0
+                null, // nextBlock
+                confirmations,
                 eraNum
         );
     }

@@ -49,6 +49,7 @@ public final class ProtocolParamsMapper {
                 decimalVal(root, "monetaryExpansion"),
                 decimalVal(root, "treasuryCut"),
                 BigDecimal.ZERO, // decentralisation_param (deprecated, always 0 in Conway)
+                null, // extra_entropy (deprecated post-Alonzo)
                 nestedInt(root, "protocolVersion", "major"),
                 nestedInt(root, "protocolVersion", "minor"),
                 strVal(root, "utxoCostPerByte"), // min_utxo (same as coins_per_utxo_size)
@@ -65,6 +66,7 @@ public final class ProtocolParamsMapper {
                 intVal(root, "collateralPercentage"),
                 intVal(root, "maxCollateralInputs"),
                 strVal(root, "utxoCostPerByte"),
+                strVal(root, "utxoCostPerByte"), // coins_per_utxo_word (legacy alias)
                 // Conway governance — pool voting thresholds
                 nestedDecimal(root, "poolVotingThresholds", "motionNoConfidence"),
                 nestedDecimal(root, "poolVotingThresholds", "committeeNormal"),

@@ -128,6 +128,11 @@ class NodeAPITest {
         }
 
         @Override
+        public com.bloxbean.cardano.yaci.node.api.model.GenesisParameters getGenesisParameters() {
+            return null;
+        }
+
+        @Override
         public void rollbackTo(long targetSlot) {
             // no-op for test
         }

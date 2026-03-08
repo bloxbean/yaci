@@ -30,6 +30,7 @@ import com.bloxbean.cardano.yaci.node.runtime.blockproducer.DevnetBlockBuilder;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationService;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionEvaluationService;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationException;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
@@ -106,6 +107,7 @@ public class YaciNode implements NodeAPI {
     private GenesisConfig genesisConfig;
     private long resolvedGenesisTimestamp;
     private TransactionValidationService transactionEvaluator;
+    private TransactionEvaluationService transactionEvalService;
     private YaciTxSubmissionHandler txSubmissionHandler;
     private MempoolEvictionPolicy mempoolEvictionPolicy;
 
@@ -612,6 +614,19 @@ public class YaciNode implements NodeAPI {
         log.info("Transaction evaluator set");
     }
 
+    public void setScriptEvaluator(com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator scriptEvaluator) {
+        if (scriptEvaluator == null || getUtxoState() == null) {
+            log.info("Script evaluation not available");
+            return;
+        }
+        this.transactionEvalService = new TransactionEvaluationService(scriptEvaluator, getUtxoState());
+        log.info("Script evaluator set for /utils/txs/evaluate endpoint");
+    }
+
+    public TransactionEvaluationService getTransactionEvalService() {
+        return transactionEvalService;
+    }
+
     /**
      * Pre-populate genesis UTXOs for relay mode.
      * Stores an empty genesis block and writes UTXOs directly to the UTXO store
@@ -705,6 +720,26 @@ public class YaciNode implements NodeAPI {
     @Override
     public String getProtocolParameters() {
         return genesisConfig != null ? genesisConfig.getProtocolParameters() : null;
+    }
+
+    @Override
+    public com.bloxbean.cardano.yaci.node.api.model.GenesisParameters getGenesisParameters() {
+        if (genesisConfig == null || genesisConfig.getShelleyGenesisData() == null) {
+            return null;
+        }
+        var d = genesisConfig.getShelleyGenesisData();
+        return new com.bloxbean.cardano.yaci.node.api.model.GenesisParameters(
+                d.activeSlotsCoeff(),
+                d.updateQuorum(),
+                String.valueOf(d.maxLovelaceSupply()),
+                d.networkMagic(),
+                d.epochLength(),
+                d.systemStart(),
+                d.slotsPerKESPeriod(),
+                (int) d.slotLength(),
+                d.maxKESEvolutions(),
+                d.securityParam()
+        );
     }
 
     @Override

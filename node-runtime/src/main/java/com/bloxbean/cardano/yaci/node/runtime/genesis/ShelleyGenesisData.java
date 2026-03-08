@@ -12,6 +12,10 @@ import java.util.Map;
  * @param systemStart       ISO-8601 system start timestamp
  * @param maxLovelaceSupply max lovelace supply
  * @param activeSlotsCoeff  fraction of slots that are active (0.0–1.0)
+ * @param securityParam     k value (finality confirmation depth)
+ * @param maxKESEvolutions  max KES key evolutions
+ * @param slotsPerKESPeriod slots per KES period
+ * @param updateQuorum      governance update quorum
  */
 public record ShelleyGenesisData(
         Map<String, Long> initialFunds,
@@ -20,5 +24,9 @@ public record ShelleyGenesisData(
         double slotLength,
         String systemStart,
         long maxLovelaceSupply,
-        double activeSlotsCoeff
+        double activeSlotsCoeff,
+        long securityParam,
+        long maxKESEvolutions,
+        long slotsPerKESPeriod,
+        long updateQuorum
 ) {}
