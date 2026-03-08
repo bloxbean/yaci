@@ -126,7 +126,7 @@ public class TransactionResource {
                     txHash,
                     blockHash,
                     blockNumber,
-                    0L, // block_time — not easily available without genesis timestamp
+                    nodeAPI.slotToUnixTime(slot),
                     slot,
                     txIndex,
                     outputAmounts,

@@ -24,3 +24,8 @@ tasks.named('compileJava').configure {
     // All sources are jointly compiled by the Scala compiler
     source = files()
 }
+
+// Avoid duplicate .tasty entries when both Scala and Java srcDirs overlap
+tasks.named('jar').configure {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

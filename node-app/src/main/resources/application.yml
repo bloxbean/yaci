@@ -49,8 +49,11 @@ yaci:
       path: "./chainstate"
     genesis:
       shelley-genesis-file: config/network/preprod/shelley-genesis.json
-      byron-genesis-file:
+      byron-genesis-file: config/network/preprod/byron-genesis.json
+      alonzo-genesis-file: config/network/preprod/alonzo-genesis.json
+      conway-genesis-file: config/network/preprod/conway-genesis.json
       protocol-parameters-file: config/network/preprod/protocol-param.json
+    dev-mode: false
     block-producer:
       enabled: false
       block-time-millis: 0
@@ -72,12 +75,16 @@ yaci:
     node:
       network: devnet
       auto-sync-start: true
+      dev-mode: true
       client:
         enabled: false
       remote:
         protocol-magic: 42
       genesis:
         shelley-genesis-file: config/devnet/shelley-genesis.json
+        byron-genesis-file: config/devnet/byron-genesis.json
+        alonzo-genesis-file: config/devnet/alonzo-genesis.json
+        conway-genesis-file: config/devnet/conway-genesis.json
         protocol-parameters-file: config/protocol-param.json
       block-producer:
         enabled: true
@@ -96,6 +103,9 @@ yaci:
         protocol-magic: 764824073
       genesis:
         shelley-genesis-file: config/network/mainnet/shelley-genesis.json
+        byron-genesis-file: config/network/mainnet/byron-genesis.json
+        alonzo-genesis-file: config/network/mainnet/alonzo-genesis.json
+        conway-genesis-file: config/network/mainnet/conway-genesis.json
         protocol-parameters-file: config/network/mainnet/protocol-param.json
 
 "%preview":
@@ -106,6 +116,9 @@ yaci:
         protocol-magic: 2
       genesis:
         shelley-genesis-file: config/network/preview/shelley-genesis.json
+        byron-genesis-file: config/network/preview/byron-genesis.json
+        alonzo-genesis-file: config/network/preview/alonzo-genesis.json
+        conway-genesis-file: config/network/preview/conway-genesis.json
         protocol-parameters-file: config/network/preview/protocol-param.json
 
 "%test":

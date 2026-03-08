@@ -8,8 +8,15 @@ import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbContext;
 import lombok.extern.slf4j.Slf4j;
 import org.rocksdb.*;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -24,18 +31,18 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
     private static final byte[] TIP_KEY = "tip".getBytes(StandardCharsets.UTF_8);
     private static final byte[] HEADER_TIP_KEY = "header_tip".getBytes(StandardCharsets.UTF_8);
 
-    private final RocksDB db;
+    private RocksDB db;
     private final String dbPath;
 
-    // Column families
-    private final ColumnFamilyHandle blocksHandle;
-    private final ColumnFamilyHandle headersHandle;
-    private final ColumnFamilyHandle numberBySlotHandle;
-    private final ColumnFamilyHandle slotByNumberHandle;
-    private final ColumnFamilyHandle metadataHandle;
-    private final ColumnFamilyHandle slotToHashHandle;
-    // New CF to store EBBs by epoch start absolute slot (slot 0 of each epoch)
-    private final ColumnFamilyHandle ebbBySlot0Handle;
+    // Column families (mutable for snapshot restore / reopen)
+    private ColumnFamilyHandle blocksHandle;
+    private ColumnFamilyHandle headersHandle;
+    private ColumnFamilyHandle numberBySlotHandle;
+    private ColumnFamilyHandle slotByNumberHandle;
+    private ColumnFamilyHandle metadataHandle;
+    private ColumnFamilyHandle slotToHashHandle;
+    // CF to store EBBs by epoch start absolute slot (slot 0 of each epoch)
+    private ColumnFamilyHandle ebbBySlot0Handle;
 
     // Name → CF handle registry (includes UTXO CFs)
     private final java.util.Map<String, ColumnFamilyHandle> cfByName = new java.util.HashMap<>();
@@ -46,7 +53,14 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
 
     public DirectRocksDBChainState(String dbPath) {
         this.dbPath = dbPath;
+        openDb();
+    }
 
+    /**
+     * Open (or reopen) the RocksDB database at {@code dbPath}.
+     * Assigns all column family handles and populates the name→handle map.
+     */
+    private void openDb() {
         try {
             // Determine if tuning is enabled (system property or env override)
             final boolean tuningEnabled = isRocksTuningEnabled();
@@ -131,6 +145,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
             ebbBySlot0Handle = cfHandles.get(7);
 
             // Populate name → handle map
+            cfByName.clear();
             for (int i = 0; i < cfDescriptors.size(); i++) {
                 String name;
                 if (i == 0) {
@@ -1165,6 +1180,161 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
 
         log.warn("🧱 Could not find any valid continuous body block");
         return null;
+    }
+
+    /**
+     * Create an atomic snapshot of the database using RocksDB's Checkpoint API.
+     * The snapshot uses hard links, making it fast and space-efficient.
+     *
+     * @param snapshotPath directory to create the checkpoint in (must not exist)
+     */
+    public void createSnapshot(String snapshotPath) {
+        try (Checkpoint checkpoint = Checkpoint.create(db)) {
+            checkpoint.createCheckpoint(snapshotPath);
+            log.info("RocksDB snapshot created at: {}", snapshotPath);
+        } catch (RocksDBException e) {
+            throw new RuntimeException("Failed to create RocksDB snapshot at " + snapshotPath, e);
+        }
+    }
+
+    /**
+     * Restore from a snapshot: close current DB, delete DB dir, copy snapshot, reopen.
+     * Caller must ensure no concurrent reads/writes during restore.
+     *
+     * @param snapshotPath directory containing the checkpoint to restore from
+     */
+    public void restoreFromSnapshot(String snapshotPath) {
+        Path snapshotDir = Path.of(snapshotPath);
+        if (!Files.isDirectory(snapshotDir)) {
+            throw new IllegalArgumentException("Snapshot directory does not exist: " + snapshotPath);
+        }
+
+        log.info("Restoring RocksDB from snapshot: {} -> {}", snapshotPath, dbPath);
+
+        // 1. Close current DB
+        close();
+
+        // 2. Delete current DB directory
+        Path dbDir = Path.of(dbPath);
+        try {
+            if (Files.exists(dbDir)) {
+                deleteRecursively(dbDir);
+                log.info("Deleted existing DB directory: {}", dbPath);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to delete DB directory: " + dbPath, e);
+        }
+
+        // 3. Copy snapshot to DB path
+        try {
+            copyRecursively(snapshotDir, dbDir);
+            log.info("Copied snapshot to DB directory: {}", dbPath);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to copy snapshot to DB path", e);
+        }
+
+        // 4. Reopen DB
+        openDb();
+        log.info("RocksDB restored and reopened from snapshot: {}", snapshotPath);
+    }
+
+    public String getDbPath() {
+        return dbPath;
+    }
+
+    private static void deleteRecursively(Path dir) throws IOException {
+        Files.walkFileTree(dir, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
+            }
+            @Override
+            public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
+                Files.delete(d);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private static void copyRecursively(Path src, Path dest) throws IOException {
+        Files.walkFileTree(src, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                Files.createDirectories(dest.resolve(src.relativize(dir)));
+                return FileVisitResult.CONTINUE;
+            }
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.copy(file, dest.resolve(src.relativize(file)), StandardCopyOption.COPY_ATTRIBUTES);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    // --- Era start slot tracking ---
+
+    private static final String ERA_START_SLOT_PREFIX = "era_";
+    private static final String ERA_START_SLOT_SUFFIX = "_start_slot";
+
+    /**
+     * Store the start slot for a given era value in the metadata column family.
+     * Idempotent: if already stored, this is a no-op.
+     *
+     * @param eraValue the era ordinal (e.g. 2 for Shelley, 7 for Conway)
+     * @param slot     the first slot of this era
+     */
+    public void setEraStartSlot(int eraValue, long slot) {
+        byte[] key = (ERA_START_SLOT_PREFIX + eraValue + ERA_START_SLOT_SUFFIX).getBytes(StandardCharsets.UTF_8);
+        try {
+            byte[] existing = db.get(metadataHandle, key);
+            if (existing != null) {
+                return; // already stored
+            }
+            db.put(metadataHandle, key, longToBytes(slot));
+            log.info("Stored era {} start slot: {}", eraValue, slot);
+        } catch (RocksDBException e) {
+            log.error("Failed to store era {} start slot", eraValue, e);
+        }
+    }
+
+    /**
+     * Get the start slot for a given era value.
+     *
+     * @param eraValue the era ordinal
+     * @return the start slot, or empty if not stored
+     */
+    public java.util.OptionalLong getEraStartSlot(int eraValue) {
+        byte[] key = (ERA_START_SLOT_PREFIX + eraValue + ERA_START_SLOT_SUFFIX).getBytes(StandardCharsets.UTF_8);
+        try {
+            byte[] val = db.get(metadataHandle, key);
+            if (val != null) {
+                return java.util.OptionalLong.of(bytesToLong(val));
+            }
+        } catch (RocksDBException e) {
+            log.error("Failed to get era {} start slot", eraValue, e);
+        }
+        return java.util.OptionalLong.empty();
+    }
+
+    /**
+     * Scan for the smallest era start slot where era > 1 (i.e., first non-Byron era).
+     *
+     * @return the first non-Byron era start slot, or empty if none stored
+     */
+    public java.util.OptionalLong getFirstNonByronEraStartSlot() {
+        long minSlot = Long.MAX_VALUE;
+        boolean found = false;
+        // Eras 2 (Shelley) through 7 (Conway)
+        for (int era = com.bloxbean.cardano.yaci.core.model.Era.Shelley.value;
+             era <= com.bloxbean.cardano.yaci.core.model.Era.Conway.value; era++) {
+            var opt = getEraStartSlot(era);
+            if (opt.isPresent() && opt.getAsLong() < minSlot) {
+                minSlot = opt.getAsLong();
+                found = true;
+            }
+        }
+        return found ? java.util.OptionalLong.of(minSlot) : java.util.OptionalLong.empty();
     }
 
     /**

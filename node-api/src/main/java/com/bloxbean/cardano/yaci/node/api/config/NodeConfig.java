@@ -35,4 +35,12 @@ public interface NodeConfig {
     default long getEpochLength() {
         return 432000;
     }
+
+    /**
+     * Check if dev mode is enabled.
+     * Dev mode enables devnet-only features (rollback, snapshot, faucet, time advance, genesis download).
+     */
+    default boolean isDevMode() {
+        return false;
+    }
 }

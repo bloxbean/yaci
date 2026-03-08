@@ -34,13 +34,16 @@ public class GenesisConfig {
     private final String protocolParameters;
     private final Map<String, Long> byronBalances;
     private final ShelleyGenesisData shelleyGenesisData;
+    private final ByronGenesisData byronGenesisData;
 
     private GenesisConfig(Map<String, Long> initialFunds, String protocolParameters,
-                          Map<String, Long> byronBalances, ShelleyGenesisData shelleyGenesisData) {
+                          Map<String, Long> byronBalances, ShelleyGenesisData shelleyGenesisData,
+                          ByronGenesisData byronGenesisData) {
         this.initialFunds = initialFunds;
         this.protocolParameters = protocolParameters;
         this.byronBalances = byronBalances;
         this.shelleyGenesisData = shelleyGenesisData;
+        this.byronGenesisData = byronGenesisData;
     }
 
     /**
@@ -56,6 +59,7 @@ public class GenesisConfig {
         Map<String, Long> funds = Collections.emptyMap();
         Map<String, Long> byronBalances = Collections.emptyMap();
         ShelleyGenesisData shelleyData = null;
+        ByronGenesisData byronData = null;
         String protocolParams = null;
 
         if (shelleyGenesisFile != null && !shelleyGenesisFile.isBlank()) {
@@ -69,7 +73,7 @@ public class GenesisConfig {
 
         if (byronGenesisFile != null && !byronGenesisFile.isBlank()) {
             try {
-                ByronGenesisData byronData = ByronGenesisParser.parse(new File(byronGenesisFile));
+                byronData = ByronGenesisParser.parse(new File(byronGenesisFile));
                 byronBalances = byronData.nonAvvmBalances();
             } catch (IOException e) {
                 log.error("Failed to parse byron genesis from {}: {}", byronGenesisFile, e.getMessage());
@@ -80,7 +84,7 @@ public class GenesisConfig {
             protocolParams = loadProtocolParameters(protocolParametersFile);
         }
 
-        return new GenesisConfig(funds, protocolParams, byronBalances, shelleyData);
+        return new GenesisConfig(funds, protocolParams, byronBalances, shelleyData, byronData);
     }
 
     private static String loadProtocolParameters(String path) {
@@ -135,6 +139,34 @@ public class GenesisConfig {
             log.warn("Failed to parse systemStart '{}': {}", systemStart, e.getMessage());
             return 0;
         }
+    }
+
+    /**
+     * Byron slot duration in seconds. Defaults to 20 if no Byron genesis is available.
+     */
+    public long getByronSlotDurationSeconds() {
+        return byronGenesisData != null && byronGenesisData.slotDuration() > 0
+                ? byronGenesisData.slotDuration() : 20;
+    }
+
+    /**
+     * Network start time in Unix epoch seconds.
+     * Uses Byron genesis startTime if available, otherwise parses Shelley systemStart.
+     */
+    public long getNetworkStartTimeSeconds() {
+        if (byronGenesisData != null && byronGenesisData.startTime() > 0) {
+            return byronGenesisData.startTime();
+        }
+        long millis = getSystemStartEpochMillis();
+        return millis > 0 ? millis / 1000 : 0;
+    }
+
+    /**
+     * Shelley slot length in seconds. Defaults to 1.0 if no Shelley genesis is available.
+     */
+    public double getShelleySlotLengthSeconds() {
+        return shelleyGenesisData != null && shelleyGenesisData.slotLength() > 0
+                ? shelleyGenesisData.slotLength() : 1.0;
     }
 
     /**

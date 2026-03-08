@@ -31,22 +31,23 @@ import java.util.Optional;
  * Listens to BlockAppliedEvent and RollbackEvent, applies compact deltas.
  */
 public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Prunable, UtxoStatusProvider, AutoCloseable {
-    private final RocksDB db;
+    private RocksDB db;
     private final Logger log;
     private final boolean enabled;
+    private final RocksDbSupplier supplier;
 
-    private final ColumnFamilyHandle cfUnspent;
-    private final ColumnFamilyHandle cfSpent;
-    private final ColumnFamilyHandle cfAddr;
-    private final ColumnFamilyHandle cfDelta;
-    private final ColumnFamilyHandle cfMeta;
+    private ColumnFamilyHandle cfUnspent;
+    private ColumnFamilyHandle cfSpent;
+    private ColumnFamilyHandle cfAddr;
+    private ColumnFamilyHandle cfDelta;
+    private ColumnFamilyHandle cfMeta;
 
     private final int pruneDepth;
     private final int rollbackWindow;
     private final int pruneBatchSize;
     private final boolean indexAddressHash;
     private final boolean indexPaymentCred;
-    private final UtxoProcessor processor;
+    private UtxoProcessor processor;
     // Metrics
     private final boolean metricsEnabled;
     private final java.util.concurrent.ScheduledExecutorService metricsScheduler;
@@ -67,6 +68,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     public DefaultUtxoStore(RocksDbSupplier supplier,
                             Logger logger,
                             java.util.Map<String, Object> config) {
+        this.supplier = supplier;
         this.db = supplier.rocks().db();
         this.log = logger;
         Object ev = config != null ? config.getOrDefault("yaci.node.utxo.enabled", Boolean.TRUE) : Boolean.TRUE;
@@ -112,6 +114,23 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         }
 
         log.info("DefaultUtxoStore initialized (enabled={})", enabled);
+    }
+
+    /**
+     * Reinitialize DB and CF handles from the supplier after a snapshot restore.
+     * The supplier's underlying RocksDB has been closed and reopened, so all
+     * cached handles are stale.
+     */
+    public void reinitialize() {
+        var ctx = supplier.rocks();
+        this.db = ctx.db();
+        this.cfUnspent = ctx.handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_UNSPENT);
+        this.cfSpent = ctx.handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_SPENT);
+        this.cfAddr = ctx.handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_ADDR);
+        this.cfDelta = ctx.handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_BLOCK_DELTA);
+        this.cfMeta = ctx.handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_META);
+        this.processor = new DefaultUtxoProcessor(this.db);
+        log.info("DefaultUtxoStore reinitialized after snapshot restore");
     }
 
     @Override
@@ -528,6 +547,59 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         } catch (Exception ex) {
             log.error("Failed to store genesis UTXOs: {}", ex.toString());
         }
+    }
+
+    private final java.util.concurrent.atomic.AtomicLong faucetNonce = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
+
+    @Override
+    public String injectFaucetUtxo(String address, long lovelace) {
+        if (!enabled) throw new IllegalStateException("UTXO store is not enabled");
+
+        // Generate unique tx hash: blake2b-256(address_bytes + nonce)
+        byte[] addrBytes = address.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        long nonce = faucetNonce.incrementAndGet();
+        byte[] nonceBytes = java.nio.ByteBuffer.allocate(8).putLong(nonce).array();
+        byte[] combined = new byte[addrBytes.length + nonceBytes.length];
+        System.arraycopy(addrBytes, 0, combined, 0, addrBytes.length);
+        System.arraycopy(nonceBytes, 0, combined, addrBytes.length, nonceBytes.length);
+
+        String txHash = HexUtil.encodeHexString(
+                com.bloxbean.cardano.client.crypto.Blake2bUtil.blake2bHash256(combined));
+        int outputIndex = 0;
+
+        // Use slot 0 / block 0 — faucet UTXOs are synthetic
+        long slot = 0;
+        long blockNumber = 0;
+        String blockHash = "0000000000000000000000000000000000000000000000000000000000000000";
+
+        try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+            byte[] val = UtxoCborCodec.encodeUtxoRecord(
+                    address, java.math.BigInteger.valueOf(lovelace),
+                    null, null, null, null, null, false,
+                    slot, blockNumber, blockHash);
+            byte[] outKey = UtxoKeyUtil.outpointKey(txHash, outputIndex);
+            batch.put(cfUnspent, outKey, val);
+
+            // Address index
+            if (indexAddressHash) {
+                byte[] addrHash = UtxoKeyUtil.addrHash28(address);
+                byte[] addrIdxKey = UtxoKeyUtil.addressIndexKey(addrHash, slot, txHash, outputIndex);
+                batch.put(cfAddr, addrIdxKey, new byte[0]);
+            }
+            if (indexPaymentCred) {
+                byte[] pc = UtxoKeyUtil.paymentCred28(address);
+                if (pc != null) {
+                    byte[] pIdx = UtxoKeyUtil.addressIndexKey(pc, slot, txHash, outputIndex);
+                    batch.put(cfAddr, pIdx, new byte[0]);
+                }
+            }
+
+            db.write(wo, batch);
+            log.info("Faucet UTXO injected: txHash={}, address={}, lovelace={}", txHash, address, lovelace);
+        } catch (Exception ex) {
+            throw new RuntimeException("Failed to inject faucet UTXO", ex);
+        }
+        return txHash;
     }
 
     @Override

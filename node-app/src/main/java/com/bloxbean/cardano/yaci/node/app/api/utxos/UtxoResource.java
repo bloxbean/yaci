@@ -43,7 +43,7 @@ public class UtxoResource {
         var list = usePaymentCredential
                 ? u.getUtxosByPaymentCredential(address, page, count)
                 : u.getUtxosByAddress(address, page, count);
-        List<UtxoDto> body = UtxoDtoMapper.toDtoList(list);
+        List<UtxoDto> body = UtxoDtoMapper.toDtoList(list, nodeAPI::slotToUnixTime);
         return Response.ok(body).build();
     }
 
@@ -74,7 +74,7 @@ public class UtxoResource {
                             .anyMatch(a -> asset.equals(a.policyId() + a.assetName())))
                     .collect(Collectors.toList());
         }
-        List<UtxoDto> body = UtxoDtoMapper.toDtoList(filtered);
+        List<UtxoDto> body = UtxoDtoMapper.toDtoList(filtered, nodeAPI::slotToUnixTime);
         return Response.ok(body).build();
     }
 
@@ -89,7 +89,7 @@ public class UtxoResource {
                     .build();
         }
         return u.getUtxo(new Outpoint(txHash, index))
-                .map(utxo -> Response.ok(UtxoDtoMapper.toDto(utxo)).build())
+                .map(utxo -> Response.ok(UtxoDtoMapper.toDto(utxo, nodeAPI::slotToUnixTime)).build())
                 .orElse(Response.status(Response.Status.NOT_FOUND).build());
     }
 
@@ -108,7 +108,7 @@ public class UtxoResource {
         if (count <= 0) count = 20;
         if (page < 1) page = 1;
         var list = u.getUtxosByPaymentCredential(paymentCredential, page, count);
-        List<UtxoDto> body = UtxoDtoMapper.toDtoList(list);
+        List<UtxoDto> body = UtxoDtoMapper.toDtoList(list, nodeAPI::slotToUnixTime);
         return Response.ok(body).build();
 }
 }

@@ -45,6 +45,33 @@
     "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.RollbackResponse"
   },
   {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.SnapshotRequest"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.SnapshotResponse"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.FundRequest"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.FundResponse"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.TimeAdvanceRequest"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.TimeAdvanceResponse"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.api.model.FundResult"
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult"
+  },
+  {
     "name": "com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig"
   },
   {

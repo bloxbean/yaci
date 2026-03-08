@@ -34,18 +34,25 @@ public class ByronGenesisParser {
     private static ByronGenesisData parseRoot(JsonNode root) {
         Map<String, Long> nonAvvmBalances = parseNonAvvmBalances(root.get("nonAvvmBalances"));
         long startTime = root.path("startTime").asLong(0);
-        long protocolMagic = root.path("protocolConsts").path("k").asLong(0);
 
-        // Try to get protocolMagic from blockVersionData or protocolConsts
+        // Extract k from protocolConsts
+        long k = root.path("protocolConsts").path("k").asLong(0);
+
+        // Extract protocolMagic from protocolConsts
+        long protocolMagic = 0;
         JsonNode protoConsts = root.get("protocolConsts");
         if (protoConsts != null && protoConsts.has("protocolMagic")) {
             protocolMagic = protoConsts.get("protocolMagic").asLong(0);
         }
 
-        log.info("Parsed byron genesis: nonAvvmBalances={} entries, startTime={}, protocolMagic={}",
-                nonAvvmBalances.size(), startTime, protocolMagic);
+        // Extract slot duration from blockVersionData.slotDuration (in milliseconds)
+        long slotDurationMs = root.path("blockVersionData").path("slotDuration").asLong(0);
+        long slotDuration = slotDurationMs > 0 ? slotDurationMs / 1000 : 0;
 
-        return new ByronGenesisData(nonAvvmBalances, startTime, protocolMagic);
+        log.info("Parsed byron genesis: nonAvvmBalances={} entries, startTime={}, protocolMagic={}, slotDuration={}s, k={}",
+                nonAvvmBalances.size(), startTime, protocolMagic, slotDuration, k);
+
+        return new ByronGenesisData(nonAvvmBalances, startTime, protocolMagic, slotDuration, k);
     }
 
     private static Map<String, Long> parseNonAvvmBalances(JsonNode balancesNode) {

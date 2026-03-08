@@ -292,6 +292,54 @@ public class BlockProducer {
         }
     }
 
+    /**
+     * Produce empty blocks rapidly from the current tip slot up to (and including) targetSlot.
+     * Each block advances by one slot step. Used for time/slot advance in devnet mode.
+     *
+     * @param targetSlot the slot to advance to
+     * @return number of blocks produced
+     */
+    public int produceEmptyBlocksToSlot(long targetSlot) {
+        if (targetSlot <= lastUsedSlot) {
+            log.warn("Target slot {} is not ahead of last used slot {}", targetSlot, lastUsedSlot);
+            return 0;
+        }
+
+        int blocksProduced = 0;
+        long currentSlot = lastUsedSlot + 1;
+
+        while (currentSlot <= targetSlot) {
+            var result = blockBuilder.buildBlock(nextBlockNumber, currentSlot, prevBlockHash, List.of());
+            storeBlock(result);
+
+            long producedBlockNumber = nextBlockNumber;
+            nextBlockNumber++;
+            prevBlockHash = result.blockHash();
+            lastUsedSlot = currentSlot;
+            blocksProduced++;
+
+            publishEvent(result, 0);
+
+            if (blocksProduced % 1000 == 0) {
+                log.info("Time advance progress: {} blocks produced, current slot={}", blocksProduced, currentSlot);
+            }
+
+            currentSlot++;
+        }
+
+        // Notify server once at the end
+        notifyServer();
+
+        log.info("Time advance complete: {} empty blocks produced, new tip slot={}, block={}",
+                blocksProduced, lastUsedSlot, nextBlockNumber - 1);
+
+        return blocksProduced;
+    }
+
+    public int getSlotLengthMillis() {
+        return slotLengthMillis;
+    }
+
     private void notifyServer() {
         if (nodeServer != null) {
             try {

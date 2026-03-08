@@ -97,6 +97,10 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.utxo.applyAsync", defaultValue = "false")
     boolean utxoApplyAsync;
 
+    // Dev mode
+    @ConfigProperty(name = "yaci.node.dev-mode", defaultValue = "false")
+    boolean devMode;
+
     // Block producer config
     @ConfigProperty(name = "yaci.node.block-producer.enabled", defaultValue = "false")
     boolean blockProducerEnabled;
@@ -122,6 +126,12 @@ public class YaciNodeProducer {
 
     @ConfigProperty(name = "yaci.node.genesis.byron-genesis-file")
     java.util.Optional<String> byronGenesisFile;
+
+    @ConfigProperty(name = "yaci.node.genesis.alonzo-genesis-file")
+    java.util.Optional<String> alonzoGenesisFile;
+
+    @ConfigProperty(name = "yaci.node.genesis.conway-genesis-file")
+    java.util.Optional<String> conwayGenesisFile;
 
     @ConfigProperty(name = "yaci.node.genesis.protocol-parameters-file")
     java.util.Optional<String> protocolParametersFile;
@@ -156,6 +166,8 @@ public class YaciNodeProducer {
         // Resolve genesis files: user config takes precedence, then auto-resolve from bundled classpath resources
         String resolvedShelleyGenesis = resolveGenesisFile(shelleyGenesisFile.orElse(null), protocolMagic, "shelley-genesis.json");
         String resolvedByronGenesis = resolveGenesisFile(byronGenesisFile.orElse(null), protocolMagic, "byron-genesis.json");
+        String resolvedAlonzoGenesis = resolveGenesisFile(alonzoGenesisFile.orElse(null), protocolMagic, "alonzo-genesis.json");
+        String resolvedConwayGenesis = resolveGenesisFile(conwayGenesisFile.orElse(null), protocolMagic, "conway-genesis.json");
 
         // Override with configuration properties
         yaciConfig = YaciNodeConfig.builder()
@@ -177,12 +189,15 @@ public class YaciNodeProducer {
                 .enableMonitoring(yaciConfig.isEnableMonitoring())
                 .monitoringPort(yaciConfig.getMonitoringPort())
                 .enableBlockProducer(blockProducerEnabled)
+                .devMode(devMode)
                 .blockTimeMillis(blockTimeMillis)
                 .lazyBlockProduction(blockProducerLazy)
                 .genesisTimestamp(genesisTimestamp)
                 .slotLengthMillis(slotLengthMillis)
                 .shelleyGenesisFile(resolvedShelleyGenesis)
                 .byronGenesisFile(resolvedByronGenesis)
+                .alonzoGenesisFile(resolvedAlonzoGenesis)
+                .conwayGenesisFile(resolvedConwayGenesis)
                 .protocolParametersFile(protocolParametersFile.orElse(null))
                 .build();
 

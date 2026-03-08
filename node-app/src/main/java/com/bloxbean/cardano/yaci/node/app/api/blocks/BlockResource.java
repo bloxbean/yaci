@@ -143,7 +143,7 @@ public class BlockResource {
         int eraNum = block.getEra() != null ? block.getEra().getValue() : 0;
 
         return new BlockDto(
-                0L, // time — not tracked in chain state
+                nodeAPI.slotToUnixTime(slot),
                 hb.getBlockNumber(),
                 hb.getBlockNumber(),
                 hb.getBlockHash(),

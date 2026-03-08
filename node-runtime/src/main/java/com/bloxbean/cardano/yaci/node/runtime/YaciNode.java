@@ -106,6 +106,7 @@ public class YaciNode implements NodeAPI {
     private BlockProducer blockProducer;
     private GenesisConfig genesisConfig;
     private long resolvedGenesisTimestamp;
+    private SlotTimeCalculator slotTimeCalculator;
     private TransactionValidationService transactionEvaluator;
     private TransactionEvaluationService transactionEvalService;
     private YaciTxSubmissionHandler txSubmissionHandler;
@@ -356,6 +357,10 @@ public class YaciNode implements NodeAPI {
                 startBlockProducer();
             }
 
+            // Initialize slot-to-time calculator from genesis data.
+            // Done after startBlockProducer() so resolvedGenesisTimestamp is authoritative.
+            initSlotTimeCalculator();
+
             // Initialize mempool eviction policy — evict on block confirmation, TTL, and size cap
             initMempoolEvictionPolicy();
 
@@ -549,7 +554,41 @@ public class YaciNode implements NodeAPI {
                     config.getProtocolMagic(), slot, 0, blockHash);
         }
 
+        // For devnet block producer mode, era starts at Conway from slot 0
+        if (freshStart && chainState instanceof DirectRocksDBChainState rocksState) {
+            rocksState.setEraStartSlot(com.bloxbean.cardano.yaci.core.model.Era.Conway.value, 0);
+        }
+
         log.info("Block producer started");
+    }
+
+    /**
+     * Initialize the SlotTimeCalculator from genesis config data.
+     */
+    private void initSlotTimeCalculator() {
+        if (genesisConfig == null) return;
+
+        // Use authoritative resolved timestamp from block producer if available
+        long networkStartTimeSec = (resolvedGenesisTimestamp > 0)
+                ? resolvedGenesisTimestamp / 1000
+                : genesisConfig.getNetworkStartTimeSeconds();
+        long byronSlotDurationSec = genesisConfig.getByronSlotDurationSeconds();
+        double shelleySlotLengthSec = genesisConfig.getShelleySlotLengthSeconds();
+
+        if (networkStartTimeSec > 0) {
+            slotTimeCalculator = new SlotTimeCalculator(
+                    networkStartTimeSec, byronSlotDurationSec, shelleySlotLengthSec, chainState);
+            log.info("SlotTimeCalculator initialized: networkStart={}, byronSlotDuration={}s, shelleySlotLength={}s",
+                    networkStartTimeSec, byronSlotDurationSec, shelleySlotLengthSec);
+
+            // Subscribe to BlockAppliedEvent to detect era transitions (only when slot-time is active)
+            eventBus.subscribe(BlockAppliedEvent.class, ctx -> {
+                BlockAppliedEvent event = ctx.event();
+                if (event.era() != null && chainState instanceof DirectRocksDBChainState rocksState) {
+                    rocksState.setEraStartSlot(event.era().getValue(), event.slot());
+                }
+            }, SubscriptionOptions.builder().build());
+        }
     }
 
     /**
@@ -744,9 +783,7 @@ public class YaciNode implements NodeAPI {
 
     @Override
     public void rollbackTo(long targetSlot) {
-        if (blockProducer == null) {
-            throw new IllegalStateException("Rollback is only supported when block producer is enabled");
-        }
+        requireDevMode("Rollback");
 
         ChainTip currentTip = chainState.getTip();
         if (currentTip == null) {
@@ -818,6 +855,316 @@ public class YaciNode implements NodeAPI {
                 blockProducer.start();
             }
         }
+    }
+
+    // --- Devnet developer tools: Snapshot, Fund, Time Advance ---
+
+    private static final int MAX_TIME_ADVANCE_SLOTS = 100_000;
+
+    private void requireDevMode(String operation) {
+        if (!config.isDevMode()) {
+            throw new IllegalStateException(operation + " requires dev mode (yaci.node.dev-mode=true)");
+        }
+        if (blockProducer == null) {
+            throw new IllegalStateException(operation + " requires block producer to be running");
+        }
+    }
+
+    @Override
+    public com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo createSnapshot(String name) {
+        requireDevMode("Snapshot");
+        if (!(chainState instanceof DirectRocksDBChainState rocksState)) {
+            throw new IllegalStateException("Snapshots require RocksDB storage");
+        }
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Snapshot name must not be empty");
+        }
+
+        // Snapshot dir: <dbPath>/../snapshots/<name>/
+        java.nio.file.Path snapshotsDir = java.nio.file.Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
+        java.nio.file.Path snapshotDir = snapshotsDir.resolve(name);
+        java.nio.file.Path checkpointDir = snapshotDir.resolve("checkpoint");
+
+        if (java.nio.file.Files.exists(snapshotDir)) {
+            throw new IllegalArgumentException("Snapshot '" + name + "' already exists");
+        }
+
+        // Pause block producer during snapshot
+        boolean wasRunning = blockProducer.isRunning();
+        if (wasRunning) blockProducer.stop();
+
+        try {
+            java.nio.file.Files.createDirectories(snapshotDir);
+            rocksState.createSnapshot(checkpointDir.toString());
+
+            ChainTip tip = chainState.getTip();
+            long slot = tip != null ? tip.getSlot() : 0;
+            long blockNumber = tip != null ? tip.getBlockNumber() : 0;
+            long createdAt = System.currentTimeMillis();
+
+            // Write metadata
+            var metaJson = String.format(
+                    "{\"name\":\"%s\",\"slot\":%d,\"blockNumber\":%d,\"createdAt\":%d}",
+                    name, slot, blockNumber, createdAt);
+            java.nio.file.Files.writeString(snapshotDir.resolve("snapshot-meta.json"), metaJson);
+
+            log.info("Snapshot '{}' created: slot={}, block={}", name, slot, blockNumber);
+            return new com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo(name, slot, blockNumber, createdAt);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create snapshot '" + name + "'", e);
+        } finally {
+            if (wasRunning) blockProducer.start();
+        }
+    }
+
+    @Override
+    public void restoreSnapshot(String name) {
+        requireDevMode("Restore");
+        if (!(chainState instanceof DirectRocksDBChainState rocksState)) {
+            throw new IllegalStateException("Snapshots require RocksDB storage");
+        }
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Snapshot name must not be empty");
+        }
+
+        java.nio.file.Path snapshotsDir = java.nio.file.Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
+        java.nio.file.Path snapshotDir = snapshotsDir.resolve(name);
+        java.nio.file.Path checkpointDir = snapshotDir.resolve("checkpoint");
+
+        if (!java.nio.file.Files.isDirectory(checkpointDir)) {
+            throw new IllegalArgumentException("Snapshot '" + name + "' does not exist");
+        }
+
+        log.info("Restoring snapshot '{}'...", name);
+
+        // 1. Stop block producer
+        boolean wasRunning = blockProducer.isRunning();
+        if (wasRunning) blockProducer.stop();
+
+        try {
+            // 2. Restore DB from snapshot
+            rocksState.restoreFromSnapshot(checkpointDir.toString());
+
+            // 2b. Reinitialize UTXO store with new DB handles
+            if (utxoStore != null) {
+                utxoStore.reinitialize();
+            }
+
+            // 3. Clear mempool
+            if (memPool != null) {
+                memPool.clear();
+            }
+
+            // 4. Reset block producer to new chain tip
+            blockProducer.resetToChainTip();
+
+            // 5. Notify server — connected clients get informed
+            if (isServerRunning.get() && nodeServer != null) {
+                try {
+                    nodeServer.notifyNewDataAvailable();
+                } catch (Exception e) {
+                    log.warn("Error notifying server after snapshot restore", e);
+                }
+            }
+
+            // Invalidate slot-time cache so it re-reads era data from restored DB
+            if (slotTimeCalculator != null) {
+                slotTimeCalculator.invalidateCache();
+            }
+
+            // Update last known tip
+            ChainTip newTip = chainState.getTip();
+            lastKnownChainTip = newTip;
+            log.info("Snapshot '{}' restored: new tip slot={}, block={}",
+                    name,
+                    newTip != null ? newTip.getSlot() : "null",
+                    newTip != null ? newTip.getBlockNumber() : "null");
+        } finally {
+            // 6. Resume block producer
+            if (wasRunning) blockProducer.start();
+        }
+    }
+
+    @Override
+    public java.util.List<com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo> listSnapshots() {
+        if (!(chainState instanceof DirectRocksDBChainState rocksState)) {
+            return java.util.List.of();
+        }
+
+        java.nio.file.Path snapshotsDir = java.nio.file.Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
+        if (!java.nio.file.Files.isDirectory(snapshotsDir)) {
+            return java.util.List.of();
+        }
+
+        var results = new java.util.ArrayList<com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo>();
+        try (var dirs = java.nio.file.Files.list(snapshotsDir)) {
+            dirs.filter(java.nio.file.Files::isDirectory).forEach(dir -> {
+                java.nio.file.Path metaFile = dir.resolve("snapshot-meta.json");
+                if (java.nio.file.Files.exists(metaFile)) {
+                    try {
+                        String json = java.nio.file.Files.readString(metaFile);
+                        var info = parseSnapshotMeta(json);
+                        if (info != null) results.add(info);
+                    } catch (Exception e) {
+                        log.warn("Failed to read snapshot metadata: {}", metaFile, e);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            log.warn("Failed to list snapshots", e);
+        }
+
+        results.sort(java.util.Comparator.comparingLong(com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo::createdAt));
+        return results;
+    }
+
+    @Override
+    public void deleteSnapshot(String name) {
+        if (!(chainState instanceof DirectRocksDBChainState rocksState)) {
+            throw new IllegalStateException("Snapshots require RocksDB storage");
+        }
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Snapshot name must not be empty");
+        }
+
+        java.nio.file.Path snapshotsDir = java.nio.file.Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
+        java.nio.file.Path snapshotDir = snapshotsDir.resolve(name);
+
+        if (!java.nio.file.Files.isDirectory(snapshotDir)) {
+            throw new IllegalArgumentException("Snapshot '" + name + "' does not exist");
+        }
+
+        try {
+            deleteRecursively(snapshotDir);
+            log.info("Snapshot '{}' deleted", name);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to delete snapshot '" + name + "'", e);
+        }
+    }
+
+    @Override
+    public com.bloxbean.cardano.yaci.node.api.model.FundResult fundAddress(String address, long lovelace) {
+        requireDevMode("Faucet");
+        if (utxoStore == null || !utxoStore.isEnabled()) {
+            throw new IllegalStateException("Faucet requires UTXO store to be enabled");
+        }
+        if (address == null || address.isBlank()) {
+            throw new IllegalArgumentException("Address must not be empty");
+        }
+        if (lovelace <= 0) {
+            throw new IllegalArgumentException("Lovelace amount must be positive");
+        }
+
+        String txHash = utxoStore.injectFaucetUtxo(address, lovelace);
+        return new com.bloxbean.cardano.yaci.node.api.model.FundResult(txHash, 0, lovelace);
+    }
+
+    @Override
+    public com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult advanceTimeBySlots(int slots) {
+        requireDevMode("Time advance");
+        if (slots <= 0) {
+            throw new IllegalArgumentException("Slots must be positive, got: " + slots);
+        }
+        if (slots > MAX_TIME_ADVANCE_SLOTS) {
+            throw new IllegalArgumentException("Cannot advance more than " + MAX_TIME_ADVANCE_SLOTS + " slots per request");
+        }
+
+        ChainTip currentTip = chainState.getTip();
+        long currentSlot = currentTip != null ? currentTip.getSlot() : 0;
+        long targetSlot = currentSlot + slots;
+
+        // Stop scheduled block producer, produce rapid blocks, resume
+        boolean wasRunning = blockProducer.isRunning();
+        if (wasRunning) blockProducer.stop();
+
+        try {
+            int blocksProduced = blockProducer.produceEmptyBlocksToSlot(targetSlot);
+
+            ChainTip newTip = chainState.getTip();
+            lastKnownChainTip = newTip;
+
+            return new com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult(
+                    newTip != null ? newTip.getSlot() : 0,
+                    newTip != null ? newTip.getBlockNumber() : 0,
+                    blocksProduced);
+        } finally {
+            if (wasRunning) blockProducer.start();
+        }
+    }
+
+    @Override
+    public com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult advanceTimeBySeconds(int seconds) {
+        requireDevMode("Time advance");
+        if (seconds <= 0) {
+            throw new IllegalArgumentException("Seconds must be positive, got: " + seconds);
+        }
+
+        int slotLengthMs = blockProducer.getSlotLengthMillis();
+        if (slotLengthMs <= 0) {
+            throw new IllegalStateException("Slot length is not configured");
+        }
+
+        int slots = (int) ((long) seconds * 1000 / slotLengthMs);
+        if (slots <= 0) slots = 1;
+
+        return advanceTimeBySlots(slots);
+    }
+
+    @Override
+    public long slotToUnixTime(long slot) {
+        if (slotTimeCalculator != null) {
+            return slotTimeCalculator.slotToUnixTime(slot);
+        }
+        return 0;
+    }
+
+    private static com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo parseSnapshotMeta(String json) {
+        // Minimal JSON parsing without adding a dependency
+        try {
+            String name = extractJsonString(json, "name");
+            long slot = extractJsonLong(json, "slot");
+            long blockNumber = extractJsonLong(json, "blockNumber");
+            long createdAt = extractJsonLong(json, "createdAt");
+            return new com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo(name, slot, blockNumber, createdAt);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String extractJsonString(String json, String key) {
+        String search = "\"" + key + "\":\"";
+        int start = json.indexOf(search);
+        if (start < 0) return null;
+        start += search.length();
+        int end = json.indexOf("\"", start);
+        return json.substring(start, end);
+    }
+
+    private static long extractJsonLong(String json, String key) {
+        String search = "\"" + key + "\":";
+        int start = json.indexOf(search);
+        if (start < 0) return 0;
+        start += search.length();
+        int end = start;
+        while (end < json.length() && (Character.isDigit(json.charAt(end)) || json.charAt(end) == '-')) {
+            end++;
+        }
+        return Long.parseLong(json.substring(start, end));
+    }
+
+    private static void deleteRecursively(java.nio.file.Path dir) throws java.io.IOException {
+        java.nio.file.Files.walkFileTree(dir, new java.nio.file.SimpleFileVisitor<>() {
+            @Override
+            public java.nio.file.FileVisitResult visitFile(java.nio.file.Path file, java.nio.file.attribute.BasicFileAttributes attrs) throws java.io.IOException {
+                java.nio.file.Files.delete(file);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+            @Override
+            public java.nio.file.FileVisitResult postVisitDirectory(java.nio.file.Path d, java.io.IOException exc) throws java.io.IOException {
+                java.nio.file.Files.delete(d);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+        });
     }
 
     /**

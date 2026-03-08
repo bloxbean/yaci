@@ -46,12 +46,15 @@ public class YaciNodeConfig implements NodeConfig {
 
     // Block producer configuration (devnet mode)
     private boolean enableBlockProducer;
+    private boolean devMode;
     private int blockTimeMillis;
     private boolean lazyBlockProduction;
     private long genesisTimestamp;
     private int slotLengthMillis;
     private String shelleyGenesisFile;     // Path to shelley-genesis.json
     private String byronGenesisFile;       // Path to byron-genesis.json (optional, for relay mode)
+    private String alonzoGenesisFile;      // Path to alonzo-genesis.json (optional)
+    private String conwayGenesisFile;      // Path to conway-genesis.json (optional)
     private String protocolParametersFile; // Path to protocol params JSON
     private boolean txEvaluationEnabled;   // Enable ledger rule validation for submitted transactions
 
@@ -183,6 +186,7 @@ public class YaciNodeConfig implements NodeConfig {
                 .enableServer(true)
                 .enableClient(false)
                 .enableBlockProducer(true)
+                .devMode(true)
                 .blockTimeMillis(0)
                 .lazyBlockProduction(false)
                 .genesisTimestamp(0)
@@ -286,6 +290,10 @@ public class YaciNodeConfig implements NodeConfig {
             }
             // blockTimeMillis == 0 is valid: means auto-derive from genesis in YaciNode
             // slotLengthMillis == 0 is valid: means auto-derive from genesis in YaciNode
+        }
+
+        if (devMode && !enableBlockProducer) {
+            throw new IllegalArgumentException("Dev mode requires block producer to be enabled");
         }
 
         if (useRocksDB && (rocksDBPath == null || rocksDBPath.trim().isEmpty())) {

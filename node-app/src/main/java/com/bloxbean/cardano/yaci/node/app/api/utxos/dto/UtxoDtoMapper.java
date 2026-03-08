@@ -6,12 +6,17 @@ import com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.LongUnaryOperator;
 import java.util.stream.Collectors;
 
 public final class UtxoDtoMapper {
     private UtxoDtoMapper() {}
 
     public static UtxoDto toDto(Utxo u) {
+        return toDto(u, slot -> 0);
+    }
+
+    public static UtxoDto toDto(Utxo u, LongUnaryOperator slotToTime) {
         String inlineHex = u.inlineDatum() != null ? HexUtil.encodeHexString(u.inlineDatum()) : null;
 
         List<AmountDto> amounts = new ArrayList<>();
@@ -35,11 +40,15 @@ public final class UtxoDtoMapper {
                 u.referenceScriptHash(),
                 0, // epoch (not tracked per-utxo)
                 u.blockNumber(),
-                0  // block_time (not tracked)
+                slotToTime.applyAsLong(u.slot())
         );
     }
 
     public static List<UtxoDto> toDtoList(List<Utxo> list) {
-        return list == null ? List.of() : list.stream().map(UtxoDtoMapper::toDto).collect(Collectors.toList());
+        return toDtoList(list, slot -> 0);
+    }
+
+    public static List<UtxoDto> toDtoList(List<Utxo> list, LongUnaryOperator slotToTime) {
+        return list == null ? List.of() : list.stream().map(u -> toDto(u, slotToTime)).collect(Collectors.toList());
     }
 }

@@ -25,4 +25,24 @@ public interface UtxoStoreWriter {
                                    long slot, long blockNumber, String blockHash) {
         // Default no-op for implementations that don't support direct genesis storage
     }
+
+    /**
+     * Reinitialize DB handles after a snapshot restore.
+     * Called when the underlying RocksDB has been closed and reopened.
+     */
+    default void reinitialize() {
+        // no-op for implementations that don't need it
+    }
+
+    /**
+     * Inject a synthetic faucet UTXO directly into the unspent store.
+     * The UTXO won't appear in any block's transactions — this is a devnet convenience.
+     *
+     * @param address   bech32 address to fund
+     * @param lovelace  amount in lovelace
+     * @return the synthetic tx hash (hex) used as the UTXO key
+     */
+    default String injectFaucetUtxo(String address, long lovelace) {
+        throw new UnsupportedOperationException("Faucet injection not supported");
+    }
 }
