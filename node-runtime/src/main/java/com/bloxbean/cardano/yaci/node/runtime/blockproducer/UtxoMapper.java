@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.node.runtime.blockproducer;
 import com.bloxbean.cardano.client.api.model.Amount;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.AssetAmount;
+import com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,8 +17,7 @@ public class UtxoMapper {
     /**
      * Convert a yaci Utxo record to a CCL Utxo model.
      */
-    public static com.bloxbean.cardano.client.api.model.Utxo toCclUtxo(
-            com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo yaciUtxo) {
+    public static com.bloxbean.cardano.client.api.model.Utxo toCclUtxo(Utxo yaciUtxo) {
         if (yaciUtxo == null) return null;
 
         List<Amount> amounts = new ArrayList<>();

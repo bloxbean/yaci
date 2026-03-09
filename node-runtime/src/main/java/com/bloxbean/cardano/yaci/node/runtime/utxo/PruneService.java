@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -15,7 +16,7 @@ public final class PruneService implements AutoCloseable {
     public PruneService(Prunable prunable, long intervalMillis) {
         this.prunable = prunable;
         this.intervalMillis = Math.max(1000L, intervalMillis);
-        this.scheduler = java.util.concurrent.Executors.newScheduledThreadPool(1, java.lang.Thread.ofVirtual().factory());
+        this.scheduler = Executors.newScheduledThreadPool(1, Thread.ofVirtual().factory());
     }
 
     public void start() {

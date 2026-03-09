@@ -1,8 +1,11 @@
 package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
-import com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent;
+import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.RollbackEvent;
+
+import java.math.BigInteger;
+import java.util.Map;
 
 public interface UtxoStoreWriter {
     void applyBlock(BlockAppliedEvent e);
@@ -21,7 +24,7 @@ public interface UtxoStoreWriter {
      * @param blockNumber   block number (typically 0)
      * @param blockHash     block hash hex
      */
-    default void storeGenesisUtxos(java.util.Map<String, java.math.BigInteger> shelleyFunds, long networkMagic,
+    default void storeGenesisUtxos(Map<String, BigInteger> shelleyFunds, long networkMagic,
                                    long slot, long blockNumber, String blockHash) {
         // Default no-op for implementations that don't support direct genesis storage
     }
@@ -35,7 +38,7 @@ public interface UtxoStoreWriter {
      * @param blockNumber     block number
      * @param blockHash       block hash hex
      */
-    default void storeByronGenesisUtxos(java.util.Map<String, java.math.BigInteger> nonAvvmBalances,
+    default void storeByronGenesisUtxos(Map<String, BigInteger> nonAvvmBalances,
                                         long slot, long blockNumber, String blockHash) {
         // Default no-op for implementations that don't support Byron genesis storage
     }

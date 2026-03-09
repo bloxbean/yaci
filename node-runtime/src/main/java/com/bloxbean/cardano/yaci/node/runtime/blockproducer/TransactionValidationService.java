@@ -10,6 +10,7 @@ import com.bloxbean.cardano.yaci.node.ledgerrules.ValidationError;
 import com.bloxbean.cardano.yaci.node.ledgerrules.ValidationResult;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -55,7 +56,7 @@ public class TransactionValidationService {
 
         // Collect all inputs that need resolution: regular + reference + collateral
         Set<Utxo> inputUtxos = new HashSet<>();
-        List<TransactionInput> allInputs = new java.util.ArrayList<>();
+        List<TransactionInput> allInputs = new ArrayList<>();
 
         if (transaction.getBody().getInputs() != null) {
             allInputs.addAll(transaction.getBody().getInputs());

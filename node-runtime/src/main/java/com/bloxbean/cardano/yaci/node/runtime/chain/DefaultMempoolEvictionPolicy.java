@@ -1,7 +1,7 @@
 package com.bloxbean.cardano.yaci.node.runtime.chain;
 
 import com.bloxbean.cardano.yaci.core.model.TransactionBody;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Set;

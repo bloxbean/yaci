@@ -1,15 +1,16 @@
 package com.bloxbean.cardano.yaci.node.runtime.plugins;
 
 import com.bloxbean.cardano.yaci.events.api.DomainEventListener;
+import com.bloxbean.cardano.yaci.events.api.SubscriptionHandle;
 import com.bloxbean.cardano.yaci.events.api.SubscriptionOptions;
 import com.bloxbean.cardano.yaci.events.api.support.AnnotationListenerRegistrar;
 import com.bloxbean.cardano.yaci.node.api.plugin.NodePlugin;
 import com.bloxbean.cardano.yaci.node.api.plugin.PluginCapability;
 import com.bloxbean.cardano.yaci.node.api.plugin.PluginContext;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockReceivedEvent;
-import com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent;
-import com.bloxbean.cardano.yaci.node.runtime.events.SyncStatusChangedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.BlockReceivedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.RollbackEvent;
+import com.bloxbean.cardano.yaci.node.api.events.SyncStatusChangedEvent;
 import org.slf4j.Logger;
 
 import java.util.List;
@@ -48,7 +49,7 @@ import java.util.Set;
  */
 public final class LoggingPlugin implements NodePlugin {
     private Logger log;
-    private List<com.bloxbean.cardano.yaci.events.api.SubscriptionHandle> handles;
+    private List<SubscriptionHandle> handles;
 
     @Override public String id() { return "com.bloxbean.cardano.yaci.plugins.logging"; }
     @Override public String version() { return "1.0.0"; }

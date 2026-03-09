@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.node.runtime.chain;
+package com.bloxbean.cardano.yaci.node.api.model;
 
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 

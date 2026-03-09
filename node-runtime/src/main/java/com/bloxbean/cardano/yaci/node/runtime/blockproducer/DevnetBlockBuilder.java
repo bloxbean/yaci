@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.node.runtime.blockproducer;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -10,7 +11,7 @@ import java.util.List;
 /**
  * Builds structurally valid Conway-era (era 7) CBOR blocks for devnet block production.
  * No real cryptography — uses dummy zero-filled byte arrays of correct lengths.
- *
+ * <p>
  * Produces two outputs per block:
  * - Full block CBOR for ChainState.storeBlock(): [7, [header, tx_bodies, witnesses, aux_data, invalid_txs]]
  * - Wrapped header CBOR for ChainState.storeBlockHeader(): [7, h'serialized_header_array']
@@ -40,14 +41,15 @@ public class DevnetBlockBuilder {
             byte[] blockHash,
             long blockNumber,
             long slot
-    ) {}
+    ) {
+    }
 
     /**
      * Build a Conway-era block.
      *
-     * @param blockNumber the block number
-     * @param slot the slot number
-     * @param prevHash the previous block hash (null for genesis)
+     * @param blockNumber  the block number
+     * @param slot         the slot number
+     * @param prevHash     the previous block hash (null for genesis)
      * @param transactions list of complete transaction CBOR bytes (each is [body, witnesses, is_valid, aux_data])
      * @return BlockBuildResult with full block, wrapped header, and computed block hash
      */
@@ -105,7 +107,7 @@ public class DevnetBlockBuilder {
 
         log.debug("Built block #{} at slot {} with {} txs, bodySize={}, blockHash={}",
                 blockNumber, slot, transactions != null ? transactions.size() : 0,
-                bodySize, com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(blockHash));
+                bodySize, HexUtil.encodeHexString(blockHash));
 
         return new BlockBuildResult(blockCbor, wrappedHeaderCbor, blockHash, blockNumber, slot);
     }
@@ -113,8 +115,8 @@ public class DevnetBlockBuilder {
     /**
      * Build the header array: [[header_body_fields...], signature]
      * Post-Babbage header body fields (per BlockHeaderSerializer.postBabbageHeader):
-     *   [blockNumber, slot, prevHash, issuerVkey, vrfVkey, vrfResult,
-     *    blockBodySize, blockBodyHash, operationalCert, protocolVersion]
+     * [blockNumber, slot, prevHash, issuerVkey, vrfVkey, vrfResult,
+     * blockBodySize, blockBodyHash, operationalCert, protocolVersion]
      */
     private Array buildHeaderArray(long blockNumber, long slot, byte[] prevHash,
                                    long bodySize, byte[] bodyHash) {

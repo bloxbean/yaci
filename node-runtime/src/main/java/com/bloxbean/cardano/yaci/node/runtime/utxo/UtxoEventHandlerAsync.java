@@ -2,10 +2,11 @@ package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
 import com.bloxbean.cardano.yaci.events.api.DomainEventListener;
 import com.bloxbean.cardano.yaci.events.api.EventBus;
+import com.bloxbean.cardano.yaci.events.api.SubscriptionHandle;
 import com.bloxbean.cardano.yaci.events.api.SubscriptionOptions;
 import com.bloxbean.cardano.yaci.events.api.support.AnnotationListenerRegistrar;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
-import com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent;
+import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.RollbackEvent;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -18,7 +19,7 @@ import java.util.concurrent.Executors;
 public final class UtxoEventHandlerAsync implements AutoCloseable {
     private final UtxoStoreWriter writer;
     private final ExecutorService single;
-    private final List<com.bloxbean.cardano.yaci.events.api.SubscriptionHandle> handles;
+    private final List<SubscriptionHandle> handles;
 
     public UtxoEventHandlerAsync(EventBus bus, UtxoStoreWriter writer) {
         this.writer = writer;

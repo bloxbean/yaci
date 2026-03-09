@@ -11,6 +11,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListe
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.helper.PeerClient;
+import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -55,7 +56,6 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
 
     public HeaderSyncManager(PeerClient peerClient, ChainState chainState) {
         this(peerClient, chainState, 50000, null); // Default gap threshold of 50,000 blocks
-//        this(peerClient, chainState, -1); // Disable backpressure by default
     }
 
     public HeaderSyncManager(PeerClient peerClient, ChainState chainState, long maxGapThreshold) {
@@ -207,7 +207,7 @@ public class HeaderSyncManager implements ChainSyncAgentListener {
 
             // Store Byron EB header: avoid updating number->slot mapping (EBB shares difficulty)
             var hashBytes = HexUtil.decodeHexString(blockHash);
-            if (chainState instanceof com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState rocks) {
+            if (chainState instanceof DirectRocksDBChainState rocks) {
                 rocks.storeByronEbHeader(hashBytes, blockNumber, absoluteSlot, originalHeaderBytes);
             } else {
                 chainState.storeBlockHeader(hashBytes, blockNumber, absoluteSlot, originalHeaderBytes);

@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.node.runtime.events;
+package com.bloxbean.cardano.yaci.node.api.events;
 
 import com.bloxbean.cardano.yaci.events.api.Event;
 
@@ -27,4 +27,3 @@ public final class TipChangedEvent implements Event {
     public long currentBlockNo() { return currentBlockNo; }
     public String currentHash() { return currentHash; }
 }
-

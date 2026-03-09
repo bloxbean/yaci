@@ -2,29 +2,49 @@ package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
 import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.client.address.Address;
+import com.bloxbean.cardano.client.crypto.Base58;
+import com.bloxbean.cardano.client.crypto.Blake2bUtil;
+import com.bloxbean.cardano.yaci.core.common.Constants;
+import com.bloxbean.cardano.yaci.core.model.Amount;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Era;
+import com.bloxbean.cardano.yaci.core.model.TransactionBody;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
-import com.bloxbean.cardano.yaci.core.common.Constants;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
-import com.bloxbean.cardano.yaci.node.api.utxo.model.Outpoint;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.AssetAmount;
+import com.bloxbean.cardano.yaci.node.api.utxo.model.Outpoint;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo;
 import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbSupplier;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
-import com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent;
+import com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames;
+import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.RollbackEvent;
 import org.rocksdb.*;
 import org.slf4j.Logger;
 
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Default UTXO store backed by RocksDB column families.
@@ -50,35 +70,33 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     private UtxoProcessor processor;
     // Metrics
     private final boolean metricsEnabled;
-    private final java.util.concurrent.ScheduledExecutorService metricsScheduler;
+    private final ScheduledExecutorService metricsScheduler;
     private final long rocksSampleMillis;
     private volatile long lastPruneMs = 0L;
     private volatile long lastDeltaDeleted = 0L;
     private volatile long lastSpentDeleted = 0L;
-    private final java.util.ArrayDeque<Long> applyLatencies = new java.util.ArrayDeque<>();
+    private final ArrayDeque<Long> applyLatencies = new ArrayDeque<>();
     private final int applyLatencyWindow = 200;
     private volatile int lastApplyCreated = 0;
     private volatile int lastApplySpent = 0;
-    private final java.util.ArrayDeque<Long> applyTimestamps = new java.util.ArrayDeque<>();
-    private final java.util.ArrayDeque<Long> blockSizes = new java.util.ArrayDeque<>();
+    private final ArrayDeque<Long> applyTimestamps = new ArrayDeque<>();
+    private final ArrayDeque<Long> blockSizes = new ArrayDeque<>();
     private final int blockSizeWindow = 200;
     private volatile long lastBlockSize = 0L;
-    private final java.util.concurrent.atomic.AtomicReference<java.util.Map<String, Long>> cfEstimates = new java.util.concurrent.atomic.AtomicReference<>(java.util.Map.of());
+    private final AtomicReference<java.util.Map<String, Long>> cfEstimates = new AtomicReference<>(java.util.Map.of());
 
-    public DefaultUtxoStore(RocksDbSupplier supplier,
-                            Logger logger,
-                            java.util.Map<String, Object> config) {
+    public DefaultUtxoStore(RocksDbSupplier supplier, Logger logger, java.util.Map<String, Object> config) {
         this.supplier = supplier;
         this.db = supplier.rocks().db();
         this.log = logger;
         Object ev = config != null ? config.getOrDefault("yaci.node.utxo.enabled", Boolean.TRUE) : Boolean.TRUE;
         this.enabled = (ev instanceof Boolean b) ? b : Boolean.parseBoolean(String.valueOf(ev));
 
-        this.cfUnspent = supplier.rocks().handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_UNSPENT);
-        this.cfSpent = supplier.rocks().handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_SPENT);
-        this.cfAddr = supplier.rocks().handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_ADDR);
-        this.cfDelta = supplier.rocks().handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_BLOCK_DELTA);
-        this.cfMeta = supplier.rocks().handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_META);
+        this.cfUnspent = supplier.rocks().handle(UtxoCfNames.UTXO_UNSPENT);
+        this.cfSpent = supplier.rocks().handle(UtxoCfNames.UTXO_SPENT);
+        this.cfAddr = supplier.rocks().handle(UtxoCfNames.UTXO_ADDR);
+        this.cfDelta = supplier.rocks().handle(UtxoCfNames.UTXO_BLOCK_DELTA);
+        this.cfMeta = supplier.rocks().handle(UtxoCfNames.UTXO_META);
 
         this.pruneDepth = getInt(config, "yaci.node.utxo.pruneDepth", 2160);
         this.rollbackWindow = getInt(config, "yaci.node.utxo.rollbackWindow", 4320);
@@ -107,8 +125,8 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         int sampleSec = getInt(config, "yaci.node.metrics.sample.rocksdb.seconds", 30);
         this.rocksSampleMillis = Math.max(0, sampleSec) * 1000L;
         if (metricsEnabled && rocksSampleMillis > 0) {
-            this.metricsScheduler = java.util.concurrent.Executors.newScheduledThreadPool(1, java.lang.Thread.ofVirtual().factory());
-            this.metricsScheduler.scheduleAtFixedRate(this::sampleCfEstimates, rocksSampleMillis, rocksSampleMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+            this.metricsScheduler = Executors.newScheduledThreadPool(1, Thread.ofVirtual().factory());
+            this.metricsScheduler.scheduleAtFixedRate(this::sampleCfEstimates, rocksSampleMillis, rocksSampleMillis, TimeUnit.MILLISECONDS);
         } else {
             this.metricsScheduler = null;
         }
@@ -124,11 +142,11 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     public void reinitialize() {
         var ctx = supplier.rocks();
         this.db = ctx.db();
-        this.cfUnspent = ctx.handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_UNSPENT);
-        this.cfSpent = ctx.handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_SPENT);
-        this.cfAddr = ctx.handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_ADDR);
-        this.cfDelta = ctx.handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_BLOCK_DELTA);
-        this.cfMeta = ctx.handle(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_META);
+        this.cfUnspent = ctx.handle(UtxoCfNames.UTXO_UNSPENT);
+        this.cfSpent = ctx.handle(UtxoCfNames.UTXO_SPENT);
+        this.cfAddr = ctx.handle(UtxoCfNames.UTXO_ADDR);
+        this.cfDelta = ctx.handle(UtxoCfNames.UTXO_BLOCK_DELTA);
+        this.cfMeta = ctx.handle(UtxoCfNames.UTXO_META);
         this.processor = new DefaultUtxoProcessor(this.db);
         log.info("DefaultUtxoStore reinitialized after snapshot restore");
     }
@@ -154,7 +172,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                     if (results.size() >= pageSize) break;
                     // suffix: 28 addr | 8 slot | 32 hash | 2 idx
                     int off = 28 + 8;
-                    String txHash = com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(java.util.Arrays.copyOfRange(key, off, off + 32));
+                    String txHash = HexUtil.encodeHexString(Arrays.copyOfRange(key, off, off + 32));
                     int idx = ByteBuffer.wrap(key, off + 32, 2).order(ByteOrder.BIG_ENDIAN).getShort() & 0xffff;
                     byte[] ukey = UtxoKeyUtil.outpointKey(txHash, idx);
                     byte[] val = db.get(cfUnspent, ukey);
@@ -197,7 +215,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                     }
                     if (results.size() >= pageSize) break;
                     int off = 28 + 8;
-                    String txHash = com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(java.util.Arrays.copyOfRange(key, off, off + 32));
+                    String txHash = HexUtil.encodeHexString(Arrays.copyOfRange(key, off, off + 32));
                     int idx = ByteBuffer.wrap(key, off + 32, 2).order(ByteOrder.BIG_ENDIAN).getShort() & 0xffff;
                     byte[] ukey = UtxoKeyUtil.outpointKey(txHash, idx);
                     byte[] val = db.get(cfUnspent, ukey);
@@ -262,14 +280,16 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         }
     }
 
-    private void scanCfForTxHash(ColumnFamilyHandle cf, byte[] hashPrefix, String txHashHex,
-                                  List<Utxo> results, boolean isSpent) {
+    private void scanCfForTxHash(ColumnFamilyHandle cf, byte[] hashPrefix, String txHashHex, List<Utxo> results, boolean isSpent) {
         try (RocksIterator it = db.newIterator(cf)) {
             it.seek(hashPrefix);
             while (it.isValid()) {
                 byte[] key = it.key();
                 // Key format: txHash(32) + index(2) = 34 bytes
-                if (key.length < 34) { it.next(); continue; }
+                if (key.length < 34) {
+                    it.next();
+                    continue;
+                }
                 if (!UtxoKeyUtil.prefixMatches(key, hashPrefix, 32)) break;
                 int idx = ByteBuffer.wrap(key, 32, 2).order(ByteOrder.BIG_ENDIAN).getShort() & 0xffff;
                 Outpoint outpoint = new Outpoint(txHashHex, idx);
@@ -291,15 +311,13 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     private Utxo storedToUtxo(UtxoCborCodec.StoredUtxo stored, Outpoint outpoint) {
         List<AssetAmount> amts = new ArrayList<>();
         if (stored.assets != null) {
-            for (com.bloxbean.cardano.yaci.core.model.Amount a : stored.assets) {
+            for (Amount a : stored.assets) {
                 if (a.getPolicyId() == null) continue;
                 String nameHex = a.getAssetNameBytes() != null ? HexUtil.encodeHexString(a.getAssetNameBytes()) : null;
                 amts.add(new AssetAmount(a.getPolicyId(), nameHex, a.getQuantity()));
             }
         }
-        return new Utxo(outpoint, stored.address, stored.lovelace,
-                amts, stored.datumHash, stored.inlineDatum, null,
-                stored.collateralReturn, stored.slot, stored.blockNumber, stored.blockHash);
+        return new Utxo(outpoint, stored.address, stored.lovelace, amts, stored.datumHash, stored.inlineDatum, null, stored.collateralReturn, stored.slot, stored.blockNumber, stored.blockHash);
     }
 
     @Override
@@ -319,8 +337,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
             var block = e.block();
             // Capture block body size for metrics
             try {
-                long bodySize = block.getHeader() != null && block.getHeader().getHeaderBody() != null
-                        ? block.getHeader().getHeaderBody().getBlockBodySize() : 0L;
+                long bodySize = block.getHeader() != null && block.getHeader().getHeaderBody() != null ? block.getHeader().getHeaderBody().getBlockBodySize() : 0L;
                 if (metricsEnabled) {
                     lastBlockSize = bodySize;
                     synchronized (blockSizes) {
@@ -331,11 +348,9 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
             } catch (Throwable ignored) {
             }
 
-            java.util.List<Integer> invList = block.getInvalidTransactions();
-            java.util.Set<Integer> invalidIdx = (invList != null)
-                    ? new java.util.HashSet<>(invList)
-                    : java.util.Collections.emptySet();
-            List<com.bloxbean.cardano.yaci.core.model.TransactionBody> txs = block.getTransactionBodies();
+            List<Integer> invList = block.getInvalidTransactions();
+            Set<Integer> invalidIdx = (invList != null) ? new HashSet<>(invList) : Collections.emptySet();
+            List<TransactionBody> txs = block.getTransactionBodies();
             List<UtxoDeltaCodec.OutRef> createdRefs = new ArrayList<>();
             List<UtxoDeltaCodec.OutRef> spentRefs = new ArrayList<>();
 
@@ -349,9 +364,9 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                             byte[] prev = ctx.getUnspent(key);
                             if (prev != null) {
                                 Map spentMap = new Map();
-                                spentMap.put(new UnsignedInteger(6), com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.deserializeOne(prev));
+                                spentMap.put(new UnsignedInteger(6), CborSerializationUtil.deserializeOne(prev));
                                 spentMap.put(new UnsignedInteger(1), new UnsignedInteger(slot));
-                                byte[] spentVal = com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.serialize(spentMap, true);
+                                byte[] spentVal = CborSerializationUtil.serialize(spentMap, true);
                                 batch.put(cfSpent, key, spentVal);
                                 batch.delete(cfUnspent, key);
                                 var stored = UtxoCborCodec.decodeUtxoRecord(prev);
@@ -374,13 +389,11 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                     if (tx.getOutputs() != null) {
                         for (int outIdx = 0; outIdx < tx.getOutputs().size(); outIdx++) {
                             var out = tx.getOutputs().get(outIdx);
-                            java.math.BigInteger lovelace = java.math.BigInteger.ZERO;
+                            BigInteger lovelace = BigInteger.ZERO;
                             var amounts = out.getAmounts();
-                            if (amounts != null) for (com.bloxbean.cardano.yaci.core.model.Amount a : amounts)
+                            if (amounts != null) for (Amount a : amounts)
                                 if ("lovelace".equals(a.getUnit())) lovelace = a.getQuantity();
-                            byte[] val = UtxoCborCodec.encodeUtxoRecord(out.getAddress(), lovelace, amounts,
-                                    out.getDatumHash(), out.getInlineDatum() != null ? com.bloxbean.cardano.yaci.core.util.HexUtil.decodeHexString(out.getInlineDatum()) : null,
-                                    out.getScriptRef(), null, false, slot, blockNo, blockHash);
+                            byte[] val = UtxoCborCodec.encodeUtxoRecord(out.getAddress(), lovelace, amounts, out.getDatumHash(), out.getInlineDatum() != null ? HexUtil.decodeHexString(out.getInlineDatum()) : null, out.getScriptRef(), null, false, slot, blockNo, blockHash);
                             byte[] outKey = UtxoKeyUtil.outpointKey(tx.getTxHash(), outIdx);
                             batch.put(cfUnspent, outKey, val);
                             //log.info("UTXO created: {}:{}", tx.getTxHash(), outIdx);
@@ -406,9 +419,9 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                             byte[] prev = ctx.getUnspent(key);
                             if (prev != null) {
                                 Map spentMap = new Map();
-                                spentMap.put(new UnsignedInteger(6), com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.deserializeOne(prev));
+                                spentMap.put(new UnsignedInteger(6), CborSerializationUtil.deserializeOne(prev));
                                 spentMap.put(new UnsignedInteger(1), new UnsignedInteger(slot));
-                                byte[] spentVal = com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.serialize(spentMap, true);
+                                byte[] spentVal = CborSerializationUtil.serialize(spentMap, true);
                                 batch.put(cfSpent, key, spentVal);
                                 batch.delete(cfUnspent, key);
                                 var stored = UtxoCborCodec.decodeUtxoRecord(prev);
@@ -430,14 +443,12 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                     }
                     if (tx.getCollateralReturn() != null) {
                         var out = tx.getCollateralReturn();
-                        java.math.BigInteger lovelace = java.math.BigInteger.ZERO;
+                        BigInteger lovelace = BigInteger.ZERO;
                         var amounts = out.getAmounts();
-                        if (amounts != null) for (com.bloxbean.cardano.yaci.core.model.Amount a : amounts)
+                        if (amounts != null) for (Amount a : amounts)
                             if ("lovelace".equals(a.getUnit())) lovelace = a.getQuantity();
                         int outIdx = tx.getOutputs() != null ? tx.getOutputs().size() : 0;
-                        byte[] val = UtxoCborCodec.encodeUtxoRecord(out.getAddress(), lovelace, amounts,
-                                out.getDatumHash(), out.getInlineDatum() != null ? com.bloxbean.cardano.yaci.core.util.HexUtil.decodeHexString(out.getInlineDatum()) : null,
-                                out.getScriptRef(), null, true, slot, blockNo, blockHash);
+                        byte[] val = UtxoCborCodec.encodeUtxoRecord(out.getAddress(), lovelace, amounts, out.getDatumHash(), out.getInlineDatum() != null ? HexUtil.decodeHexString(out.getInlineDatum()) : null, out.getScriptRef(), null, true, slot, blockNo, blockHash);
                         byte[] outKey = UtxoKeyUtil.outpointKey(tx.getTxHash(), outIdx);
                         batch.put(cfUnspent, outKey, val);
                         if (indexAddressHash) {
@@ -467,8 +478,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
             db.write(wo, batch);
 
             if (log.isDebugEnabled()) {
-                log.debug("UTXO applied: block={} slot={} created={} spent={} era={}",
-                        blockNo, slot, createdRefs.size(), spentRefs.size(), e.era());
+                log.debug("UTXO applied: block={} slot={} created={} spent={} era={}", blockNo, slot, createdRefs.size(), spentRefs.size(), e.era());
             }
             if (metricsEnabled) {
                 long dtMs = (System.nanoTime() - t0) / 1_000_000L;
@@ -491,8 +501,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     }
 
     @Override
-    public void storeGenesisUtxos(java.util.Map<String, java.math.BigInteger> shelleyFunds, long networkMagic,
-                                  long slot, long blockNumber, String blockHash) {
+    public void storeGenesisUtxos(java.util.Map<String, BigInteger> shelleyFunds, long networkMagic, long slot, long blockNumber, String blockHash) {
         if (!enabled || shelleyFunds == null || shelleyFunds.isEmpty()) return;
 
         boolean isMainnet = (networkMagic == Constants.MAINNET_PROTOCOL_MAGIC);
@@ -502,28 +511,24 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
             for (var entry : shelleyFunds.entrySet()) {
                 String hexAddr = entry.getKey();
-                java.math.BigInteger lovelace = entry.getValue();
+                BigInteger lovelace = entry.getValue();
 
                 // Derive genesis tx hash: blake2b-256(address_hex_bytes) — matches yaci-store convention
                 byte[] addrBytes = HexUtil.decodeHexString(hexAddr);
-                String txHash = HexUtil.encodeHexString(
-                        com.bloxbean.cardano.client.crypto.Blake2bUtil.blake2bHash256(addrBytes));
+                String txHash = HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(addrBytes));
                 int outputIndex = 0;
 
                 // Convert hex address to bech32
                 String bech32Addr;
                 try {
-                    bech32Addr = new com.bloxbean.cardano.client.address.Address(addrPrefix, addrBytes).toBech32();
+                    bech32Addr = new Address(addrPrefix, addrBytes).toBech32();
                 } catch (Exception e) {
                     log.warn("Could not convert genesis address to bech32: {}", hexAddr);
                     bech32Addr = hexAddr; // fallback to hex
                 }
 
                 // Encode UTXO record
-                byte[] val = UtxoCborCodec.encodeUtxoRecord(
-                        bech32Addr, lovelace,
-                        null, null, null, null, null, false,
-                        slot, blockNumber, blockHash);
+                byte[] val = UtxoCborCodec.encodeUtxoRecord(bech32Addr, lovelace, null, null, null, null, null, false, slot, blockNumber, blockHash);
                 byte[] outKey = UtxoKeyUtil.outpointKey(txHash, outputIndex);
                 batch.put(cfUnspent, outKey, val);
 
@@ -550,8 +555,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     }
 
     @Override
-    public void storeByronGenesisUtxos(java.util.Map<String, java.math.BigInteger> nonAvvmBalances,
-                                       long slot, long blockNumber, String blockHash) {
+    public void storeByronGenesisUtxos(java.util.Map<String, BigInteger> nonAvvmBalances, long slot, long blockNumber, String blockHash) {
         if (!enabled || nonAvvmBalances == null || nonAvvmBalances.isEmpty()) return;
 
         int stored = 0;
@@ -559,19 +563,15 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
             for (var entry : nonAvvmBalances.entrySet()) {
                 String byronAddress = entry.getKey();
-                java.math.BigInteger lovelace = entry.getValue();
+                BigInteger lovelace = entry.getValue();
 
                 // Derive genesis tx hash: blake2b-256(Base58.decode(address)) — matches yaci-store convention
-                byte[] addrBytes = com.bloxbean.cardano.client.crypto.Base58.decode(byronAddress);
-                String txHash = HexUtil.encodeHexString(
-                        com.bloxbean.cardano.client.crypto.Blake2bUtil.blake2bHash256(addrBytes));
+                byte[] addrBytes = Base58.decode(byronAddress);
+                String txHash = HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(addrBytes));
                 int outputIndex = 0;
 
                 // Store address as-is (base58 string, no bech32 conversion for Byron)
-                byte[] val = UtxoCborCodec.encodeUtxoRecord(
-                        byronAddress, lovelace,
-                        null, null, null, null, null, false,
-                        slot, blockNumber, blockHash);
+                byte[] val = UtxoCborCodec.encodeUtxoRecord(byronAddress, lovelace, null, null, null, null, null, false, slot, blockNumber, blockHash);
                 byte[] outKey = UtxoKeyUtil.outpointKey(txHash, outputIndex);
                 batch.put(cfUnspent, outKey, val);
 
@@ -590,22 +590,21 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         }
     }
 
-    private final java.util.concurrent.atomic.AtomicLong faucetNonce = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
+    private final AtomicLong faucetNonce = new AtomicLong(System.nanoTime());
 
     @Override
     public String injectFaucetUtxo(String address, long lovelace) {
         if (!enabled) throw new IllegalStateException("UTXO store is not enabled");
 
         // Generate unique tx hash: blake2b-256(address_bytes + nonce)
-        byte[] addrBytes = address.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] addrBytes = address.getBytes(StandardCharsets.UTF_8);
         long nonce = faucetNonce.incrementAndGet();
-        byte[] nonceBytes = java.nio.ByteBuffer.allocate(8).putLong(nonce).array();
+        byte[] nonceBytes = ByteBuffer.allocate(8).putLong(nonce).array();
         byte[] combined = new byte[addrBytes.length + nonceBytes.length];
         System.arraycopy(addrBytes, 0, combined, 0, addrBytes.length);
         System.arraycopy(nonceBytes, 0, combined, addrBytes.length, nonceBytes.length);
 
-        String txHash = HexUtil.encodeHexString(
-                com.bloxbean.cardano.client.crypto.Blake2bUtil.blake2bHash256(combined));
+        String txHash = HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(combined));
         int outputIndex = 0;
 
         // Use slot 0 / block 0 — faucet UTXOs are synthetic
@@ -614,10 +613,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         String blockHash = "0000000000000000000000000000000000000000000000000000000000000000";
 
         try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
-            byte[] val = UtxoCborCodec.encodeUtxoRecord(
-                    address, java.math.BigInteger.valueOf(lovelace),
-                    null, null, null, null, null, false,
-                    slot, blockNumber, blockHash);
+            byte[] val = UtxoCborCodec.encodeUtxoRecord(address, BigInteger.valueOf(lovelace), null, null, null, null, null, false, slot, blockNumber, blockHash);
             byte[] outKey = UtxoKeyUtil.outpointKey(txHash, outputIndex);
             batch.put(cfUnspent, outKey, val);
 
@@ -729,8 +725,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         if (lastAppliedBlock > tipBlock) {
             // Roll back to tip slot (fork safe within rollback window)
             String hashHex = tip.getBlockHash() != null ? HexUtil.encodeHexString(tip.getBlockHash()) : null;
-            rollbackTo(new com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent(
-                    new com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point(tip.getSlot(), hashHex), true));
+            rollbackTo(new RollbackEvent(new Point(tip.getSlot(), hashHex), true));
             return;
         }
 
@@ -751,16 +746,16 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
             long slot = block.getHeader().getHeaderBody().getSlot();
             String blockHash = block.getHeader().getHeaderBody().getBlockHash();
             Era era = block.getEra();
-            applyBlock(new com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent(era, slot, bn, blockHash, block));
+            applyBlock(new BlockAppliedEvent(era, slot, bn, blockHash, block));
         }
     }
 
     // ---- Prune Scheduler Support ----
 
-    private static final byte[] META_LAST_APPLIED_SLOT = "meta.last_applied_slot".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-    private static final byte[] META_LAST_APPLIED_BLOCK = "meta.last_applied_block".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-    private static final byte[] META_PRUNE_DELTA_CURSOR = "prune.delta.cursor".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-    private static final byte[] META_PRUNE_SPENT_CURSOR = "prune.spent.cursor".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final byte[] META_LAST_APPLIED_SLOT = "meta.last_applied_slot".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] META_LAST_APPLIED_BLOCK = "meta.last_applied_block".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] META_PRUNE_DELTA_CURSOR = "prune.delta.cursor".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] META_PRUNE_SPENT_CURSOR = "prune.spent.cursor".getBytes(StandardCharsets.UTF_8);
 
     /**
      * Execute one bounded prune pass using persisted cursors, outside the hot apply path.
@@ -859,16 +854,16 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     @Override
     public java.util.Map<String, Object> getMetrics() {
         if (!metricsEnabled) return java.util.Map.of();
-        java.util.List<Long> snap;
+        List<Long> snap;
         synchronized (applyLatencies) {
-            snap = new java.util.ArrayList<>(applyLatencies);
+            snap = new ArrayList<>(applyLatencies);
         }
         double avg = 0, p95 = 0;
         if (!snap.isEmpty()) {
             long sum = 0;
             for (long v : snap) sum += v;
             avg = sum * 1.0 / snap.size();
-            java.util.Collections.sort(snap);
+            Collections.sort(snap);
             p95 = snap.get((int) Math.floor(0.95 * (snap.size() - 1)));
         }
         long now = System.currentTimeMillis();
@@ -879,7 +874,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
             within = applyTimestamps.size();
         }
         double bps = within / 30.0;
-        java.util.Map<String, Object> m = new java.util.HashMap<>();
+        java.util.Map<String, Object> m = new HashMap<>();
         m.put("apply.ms.avg", avg);
         m.put("apply.ms.p95", p95);
         m.put("apply.created.last", lastApplyCreated);
@@ -890,9 +885,9 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         m.put("prune.spentDeleted.last", lastSpentDeleted);
         // Block size metrics
         long bsAvg = 0;
-        java.util.List<Long> bsnap;
+        List<Long> bsnap;
         synchronized (blockSizes) {
-            bsnap = new java.util.ArrayList<>(blockSizes);
+            bsnap = new ArrayList<>(blockSizes);
         }
         if (!bsnap.isEmpty()) {
             long sum = 0;
@@ -911,12 +906,12 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
 
     private void sampleCfEstimates() {
         try {
-            java.util.Map<String, Long> m = new java.util.HashMap<>();
+            java.util.Map<String, Long> m = new HashMap<>();
             m.put("utxo_unspent.estimateNumKeys", parseEstimate(cfUnspent));
             m.put("utxo_spent.estimateNumKeys", parseEstimate(cfSpent));
             m.put("utxo_addr.estimateNumKeys", parseEstimate(cfAddr));
             m.put("utxo_block_delta.estimateNumKeys", parseEstimate(cfDelta));
-            cfEstimates.set(java.util.Collections.unmodifiableMap(m));
+            cfEstimates.set(Collections.unmodifiableMap(m));
         } catch (Throwable ignored) {
         }
     }
@@ -946,7 +941,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         try (RocksIterator it = db.newIterator(cfDelta); WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
             if (cursor != null) {
                 it.seek(cursor);
-                if (it.isValid() && java.util.Arrays.equals(it.key(), cursor)) it.next();
+                if (it.isValid() && Arrays.equals(it.key(), cursor)) it.next();
             } else {
                 it.seekToFirst();
             }
@@ -992,7 +987,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         try (RocksIterator it = db.newIterator(cfSpent); WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
             if (cursor != null) {
                 it.seek(cursor);
-                if (it.isValid() && java.util.Arrays.equals(it.key(), cursor)) it.next();
+                if (it.isValid() && Arrays.equals(it.key(), cursor)) it.next();
             } else {
                 it.seekToFirst();
             }
@@ -1008,9 +1003,9 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                 byte[] k = it.key();
                 byte[] v = it.value();
                 try {
-                    Map m = (Map) com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.deserializeOne(v);
+                    Map m = (Map) CborSerializationUtil.deserializeOne(v);
                     co.nstant.in.cbor.model.DataItem d = m.get(new UnsignedInteger(1));
-                    long s = d != null ? com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toLong(d) : 0L;
+                    long s = d != null ? CborSerializationUtil.toLong(d) : 0L;
                     if (s > 0 && s <= spentCutoff) {
                         batch.delete(cfSpent, k);
                         remaining--;

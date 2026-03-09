@@ -1,14 +1,18 @@
 package com.bloxbean.cardano.yaci.node.runtime.chain;
 
+import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbContext;
+import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbSupplier;
+import com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames;
 import lombok.extern.slf4j.Slf4j;
 import org.rocksdb.*;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
@@ -19,14 +23,18 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.OptionalLong;
 
 /**
  * Direct RocksDB implementation of ChainState
  * This implementation uses RocksDB directly without any caching layer.
  */
 @Slf4j
-public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.bloxbean.cardano.yaci.node.runtime.db.RocksDbSupplier {
+public class DirectRocksDBChainState implements ChainState, AutoCloseable, RocksDbSupplier {
 
     private static final byte[] TIP_KEY = "tip".getBytes(StandardCharsets.UTF_8);
     private static final byte[] HEADER_TIP_KEY = "header_tip".getBytes(StandardCharsets.UTF_8);
@@ -45,7 +53,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
     private ColumnFamilyHandle ebbBySlot0Handle;
 
     // Name → CF handle registry (includes UTXO CFs)
-    private final java.util.Map<String, ColumnFamilyHandle> cfByName = new java.util.HashMap<>();
+    private final Map<String, ColumnFamilyHandle> cfByName = new HashMap<>();
 
     static {
         RocksDB.loadLibrary();
@@ -117,18 +125,18 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
                     new ColumnFamilyDescriptor("ebb_by_slot0".getBytes()),
                     // UTXO CFs (tuned or defaults)
                     new ColumnFamilyDescriptor(
-                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_UNSPENT.getBytes(),
+                            UtxoCfNames.UTXO_UNSPENT.getBytes(),
                             tuningEnabled ? utxoPointLookup : new ColumnFamilyOptions()),
                     new ColumnFamilyDescriptor(
-                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_SPENT.getBytes(),
+                            UtxoCfNames.UTXO_SPENT.getBytes(),
                             tuningEnabled ? utxoPointLookup : new ColumnFamilyOptions()),
                     new ColumnFamilyDescriptor(
-                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_ADDR.getBytes(),
+                            UtxoCfNames.UTXO_ADDR.getBytes(),
                             tuningEnabled ? utxoAddrPrefix : new ColumnFamilyOptions()),
                     new ColumnFamilyDescriptor(
-                            com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_BLOCK_DELTA.getBytes(),
+                            UtxoCfNames.UTXO_BLOCK_DELTA.getBytes(),
                             tuningEnabled ? utxoDeltaOpts : new ColumnFamilyOptions()),
-                    new ColumnFamilyDescriptor(com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames.UTXO_META.getBytes())
+                    new ColumnFamilyDescriptor(UtxoCfNames.UTXO_META.getBytes())
             );
 
             // Open database
@@ -204,9 +212,9 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
         // Try to set a fixed prefix extractor if available in this RocksJava version
         try {
             Class<?> stClazz = Class.forName("org.rocksdb.SliceTransform");
-            java.lang.reflect.Method factory = stClazz.getMethod("createFixedPrefix", int.class);
+            Method factory = stClazz.getMethod("createFixedPrefix", int.class);
             Object st = factory.invoke(null, prefixLen);
-            java.lang.reflect.Method setter = ColumnFamilyOptions.class.getMethod("setPrefixExtractor", stClazz);
+            Method setter = ColumnFamilyOptions.class.getMethod("setPrefixExtractor", stClazz);
             setter.invoke(opts, st);
         } catch (Throwable t) {
             // Prefix extractor not available; continue without it (bloom still helps)
@@ -232,7 +240,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
 
     @Override
     public RocksDbContext rocks() {
-        return new RocksDbContext(db, java.util.Collections.unmodifiableMap(cfByName));
+        return new RocksDbContext(db, Collections.unmodifiableMap(cfByName));
     }
 
     @Override
@@ -1249,6 +1257,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
                 Files.delete(file);
                 return FileVisitResult.CONTINUE;
             }
+
             @Override
             public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
                 Files.delete(d);
@@ -1264,6 +1273,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
                 Files.createDirectories(dest.resolve(src.relativize(dir)));
                 return FileVisitResult.CONTINUE;
             }
+
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 Files.copy(file, dest.resolve(src.relativize(file)), StandardCopyOption.COPY_ATTRIBUTES);
@@ -1304,17 +1314,17 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
      * @param eraValue the era ordinal
      * @return the start slot, or empty if not stored
      */
-    public java.util.OptionalLong getEraStartSlot(int eraValue) {
+    public OptionalLong getEraStartSlot(int eraValue) {
         byte[] key = (ERA_START_SLOT_PREFIX + eraValue + ERA_START_SLOT_SUFFIX).getBytes(StandardCharsets.UTF_8);
         try {
             byte[] val = db.get(metadataHandle, key);
             if (val != null) {
-                return java.util.OptionalLong.of(bytesToLong(val));
+                return OptionalLong.of(bytesToLong(val));
             }
         } catch (RocksDBException e) {
             log.error("Failed to get era {} start slot", eraValue, e);
         }
-        return java.util.OptionalLong.empty();
+        return OptionalLong.empty();
     }
 
     /**
@@ -1322,19 +1332,19 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, com.b
      *
      * @return the first non-Byron era start slot, or empty if none stored
      */
-    public java.util.OptionalLong getFirstNonByronEraStartSlot() {
+    public OptionalLong getFirstNonByronEraStartSlot() {
         long minSlot = Long.MAX_VALUE;
         boolean found = false;
         // Eras 2 (Shelley) through 7 (Conway)
-        for (int era = com.bloxbean.cardano.yaci.core.model.Era.Shelley.value;
-             era <= com.bloxbean.cardano.yaci.core.model.Era.Conway.value; era++) {
+        for (int era = Era.Shelley.value;
+             era <= Era.Conway.value; era++) {
             var opt = getEraStartSlot(era);
             if (opt.isPresent() && opt.getAsLong() < minSlot) {
                 minSlot = opt.getAsLong();
                 found = true;
             }
         }
-        return found ? java.util.OptionalLong.of(minSlot) : java.util.OptionalLong.empty();
+        return found ? OptionalLong.of(minSlot) : OptionalLong.empty();
     }
 
     /**

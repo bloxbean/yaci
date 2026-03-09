@@ -1,7 +1,7 @@
 package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
 import com.bloxbean.cardano.yaci.core.model.TransactionBody;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
 
@@ -49,9 +49,9 @@ final class DefaultUtxoProcessor implements UtxoProcessor {
         if (!keys.isEmpty()) {
             try {
                 // Use multiGetAsList with repeated CF handle matching the keys list size
-                java.util.List<ColumnFamilyHandle> cfs = new ArrayList<>(keys.size());
+                List<ColumnFamilyHandle> cfs = new ArrayList<>(keys.size());
                 for (int i = 0; i < keys.size(); i++) cfs.add(cfUnspent);
-                java.util.List<byte[]> vals = db.multiGetAsList(cfs, keys);
+                List<byte[]> vals = db.multiGetAsList(cfs, keys);
                 for (int i = 0; i < keys.size(); i++) {
                     cache.put(new ByteArrayWrapper(keys.get(i)), vals.get(i));
                 }

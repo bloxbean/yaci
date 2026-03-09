@@ -7,7 +7,6 @@ import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -206,32 +205,6 @@ public class InMemoryChainState implements ChainState {
             if (log.isDebugEnabled()) log.debug("Error finding blocks in range: {}", e.getMessage());
         }
         return out;
-    }
-
-    /**
-     * Helper method to get block number for a given point
-     */
-    private Long getBlockNumberForPoint(Point point) {
-        if (point == null) {
-            return null;
-        }
-
-        // Try to find by hash first
-        if (point.getHash() != null) {
-            try {
-                byte[] blockHash = HexUtil.decodeHexString(point.getHash());
-                for (Map.Entry<Long, byte[]> entry : blockHashByNumber.entrySet()) {
-                    if (Arrays.equals(entry.getValue(), blockHash)) {
-                        return entry.getKey();
-                    }
-                }
-            } catch (Exception e) {
-                // Fall through to slot-based lookup
-            }
-        }
-
-        // Try to find by slot
-        return blockNumberBySlot.get(point.getSlot());
     }
 
     @Override
