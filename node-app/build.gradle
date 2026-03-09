@@ -122,9 +122,13 @@ tasks.register('nodeDistZip', Zip) {
 
 // When nodeNativeDistZip is requested, activate the 'native' Quarkus profile
 // so quarkusBuild produces a native binary instead of an uber-jar.
+// On Linux, also enable mostly-static linking for cross-distro portability.
 gradle.taskGraph.whenReady { graph ->
     if (graph.hasTask(":${project.name}:nodeNativeDistZip")) {
         System.setProperty('quarkus.profile', 'native')
+        if (System.getProperty('os.name').toLowerCase().contains('linux')) {
+            System.setProperty('quarkus.native.additional-build-args', '-H:+StaticExecutableWithDynamicLibC')
+        }
     }
 }
 
