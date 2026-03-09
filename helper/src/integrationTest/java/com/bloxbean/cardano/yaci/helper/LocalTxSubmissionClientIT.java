@@ -125,7 +125,7 @@ class LocalTxSubmissionClientIT extends BaseTest {
         Account account = new Account(Networks.testnet(), mnemonic);
         var signedTransaction = account.sign(transaction);
 
-        var txSubmissionRequest = new TxSubmissionRequest(TxBodyType.BABBAGE, signedTransaction.serialize());
+        var txSubmissionRequest = new TxSubmissionRequest(TxBodyType.CONWAY, signedTransaction.serialize());
         var txResult = localTxSubmissionClient.submitTx(txSubmissionRequest).block(Duration.ofSeconds(20));
 
         System.out.println(signedTransaction.serializeToHex());

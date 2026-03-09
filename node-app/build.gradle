@@ -1,0 +1,168 @@
+plugins {
+    id 'application'
+    id 'io.quarkus' version "${quarkusPluginVersion}"
+}
+
+dependencies {
+    implementation enforcedPlatform("${quarkusPlatformGroupId}:${quarkusPlatformArtifactId}:${quarkusPlatformVersion}")
+
+    // Quarkus dependencies
+    implementation 'io.quarkus:quarkus-resteasy'
+    implementation 'io.quarkus:quarkus-resteasy-jackson'
+    implementation 'io.quarkus:quarkus-arc'
+    implementation 'io.quarkus:quarkus-config-yaml'
+    implementation 'io.quarkus:quarkus-smallrye-health'
+    implementation 'io.quarkus:quarkus-smallrye-openapi'
+
+    // Yaci Node dependencies
+    implementation(project(':node-api')) {
+        exclude group: 'io.netty', module: 'netty-all'
+    }
+    implementation(project(':node-runtime')) {
+        exclude group: 'io.netty', module: 'netty-all'
+    }
+    implementation(project(':scalus-bridge')) {
+        exclude group: 'io.netty', module: 'netty-all'
+    }
+
+    implementation("com.google.auto.service:auto-service:1.1.1")
+
+    annotationProcessor(project(':events-processor'))
+    annotationProcessor "com.google.auto.service:auto-service:1.1.1"
+
+    testImplementation 'io.quarkus:quarkus-junit5'
+    testImplementation 'io.rest-assured:rest-assured'
+
+    testImplementation "com.bloxbean.cardano:cardano-client-lib:0.7.1"
+    testImplementation "com.bloxbean.cardano:cardano-client-backend-blockfrost:0.7.1"
+    testImplementation "com.bloxbean.cardano:cardano-client-quicktx:0.7.1"
+}
+
+application {
+    mainClass = 'io.quarkus.runner.GeneratedMain'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+// Disable default application plugin dist tasks (incompatible with Quarkus)
+distZip.enabled = false
+distTar.enabled = false
+startScripts.enabled = false
+
+test {
+    useJUnitPlatform {
+        excludeTags 'integration'
+    }
+}
+
+tasks.register('integrationTest', Test) {
+    useJUnitPlatform {
+        includeTags 'integration'
+    }
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+}
+
+// --- Distribution packaging tasks ---
+
+def detectPlatform() {
+    def osName = System.getProperty('os.name').toLowerCase()
+    def osArch = System.getProperty('os.arch').toLowerCase()
+
+    def os
+    if (osName.contains('linux')) {
+        os = 'linux'
+    } else if (osName.contains('mac') || osName.contains('darwin')) {
+        os = 'macos'
+    } else if (osName.contains('windows')) {
+        os = 'windows'
+    } else {
+        os = osName.replaceAll('[^a-z0-9]', '')
+    }
+
+    def arch
+    if (osArch == 'amd64' || osArch == 'x86_64') {
+        arch = 'x64'
+    } else if (osArch == 'aarch64' || osArch == 'arm64') {
+        arch = 'arm64'
+    } else {
+        arch = osArch.replaceAll('[^a-z0-9]', '')
+    }
+
+    return "${os}-${arch}"
+}
+
+def distVersion = rootProject.version.toString().replaceAll('-SNAPSHOT', '')
+
+tasks.register('nodeDistZip', Zip) {
+    dependsOn 'quarkusBuild'
+    group = 'distribution'
+    description = 'Creates a distributable zip with the uber-jar, config, and start script'
+
+    archiveFileName = "yaci-node-${distVersion}.zip"
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+
+    into("yaci-node-${distVersion}") {
+        from(layout.buildDirectory.file('yaci-node.jar'))
+        from('bin/yaci-node.sh') {
+            fileMode 0755
+        }
+        from('bin/README.md')
+        from('config') {
+            into 'config'
+        }
+        into('plugins') {
+            from({ [] }) // empty directory
+        }
+    }
+}
+
+// When nodeNativeDistZip is requested, activate the 'native' Quarkus profile
+// so quarkusBuild produces a native binary instead of an uber-jar.
+// On Linux, also enable mostly-static linking for cross-distro portability.
+gradle.taskGraph.whenReady { graph ->
+    if (graph.hasTask(":${project.name}:nodeNativeDistZip")) {
+        System.setProperty('quarkus.profile', 'native')
+        if (System.getProperty('os.name').toLowerCase().contains('linux')) {
+            System.setProperty('quarkus.native.additional-build-args', '-H:+StaticExecutableWithDynamicLibC')
+        }
+    }
+}
+
+tasks.register('nodeNativeDistZip', Zip) {
+    dependsOn 'quarkusBuild'
+    group = 'distribution'
+    description = 'Builds the native binary and creates a distributable zip'
+
+    def platform = detectPlatform()
+    archiveFileName = "yaci-node-native-${distVersion}-${platform}.zip"
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+
+    doFirst {
+        def binary = layout.buildDirectory.file('yaci-node').get().asFile
+        if (!binary.exists()) {
+            throw new GradleException(
+                "Native binary not found at ${binary.path}. The native build may have failed."
+            )
+        }
+    }
+
+    into("yaci-node-native-${distVersion}-${platform}") {
+        from(layout.buildDirectory.file('yaci-node')) {
+            fileMode 0755
+        }
+        from('bin/yaci-node.sh') {
+            fileMode 0755
+        }
+        from('bin/README.md')
+        from('config') {
+            into 'config'
+        }
+        into('plugins') {
+            from({ [] }) // empty directory
+        }
+    }
+}

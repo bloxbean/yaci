@@ -91,5 +91,10 @@ public class TcpProxyManager {
             connections.clear();
         }
     }
+
+    public static void main(String[] args) throws IOException {
+        TcpProxyManager tcpProxyManager = new TcpProxyManager();
+        tcpProxyManager.startProxy(3334, "localhost", 3001);
+    }
 }
 

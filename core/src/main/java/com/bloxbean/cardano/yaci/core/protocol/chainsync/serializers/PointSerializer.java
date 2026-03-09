@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.Special;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -24,6 +25,11 @@ public enum PointSerializer implements Serializer<Point> {
 
     @Override
     public Point deserializeDI(DataItem di) {
+        // Handle Special values (like null/undefined) which represent Point.ORIGIN
+        if (di instanceof Special) {
+            return Point.ORIGIN;
+        }
+
         Array array = (Array) di;
         if (array.getDataItems().isEmpty())
             return Point.ORIGIN;

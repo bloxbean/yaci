@@ -21,7 +21,11 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     private int counter = 0;
 
     public LocalChainSyncAgent(Point[] knownPoints) {
-        this.currenState = Idle;
+        this(knownPoints, true);
+    }
+    public LocalChainSyncAgent(Point[] knownPoints, boolean isClient) {
+        super(isClient);
+        this.currentState = Idle;
         this.knownPoints = knownPoints;
 
         if (knownPoints != null && knownPoints.length > 0)
@@ -29,7 +33,11 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     }
 
     public LocalChainSyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo) {
-        this.currenState = Idle;
+        this(knownPoints,stopSlotNo, agentNo, true);
+    }
+    public LocalChainSyncAgent(Point[] knownPoints, long stopSlotNo, int agentNo, boolean isClient) {
+        super(isClient);
+        this.currentState = Idle;
         this.knownPoints = knownPoints;
         this.stopAt = stopSlotNo;
         this.agentNo = agentNo;
@@ -140,6 +148,7 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
     }
 
     private void onRollForward(LocalRollForward rollForward) {
+
         if (rollForward.getBlock() != null) { //For shelley and later era
             getAgentListeners().stream().forEach(
                     chainSyncAgentListener -> {
@@ -182,18 +191,18 @@ public class LocalChainSyncAgent extends Agent<LocalChainSyncAgentListener> {
             }
 
             if (stopAt != 0 && rollForward.getBlock().getHeader().getHeaderBody().getSlot() >= stopAt) {
-                this.currenState = HandshkeState.Done;
+                this.currentState = HandshkeState.Done;
             }
         }
     }
 
     @Override
     public boolean isDone() {
-        return currenState == Done;
+        return currentState == Done;
     }
 
     public void reset() {
-        this.currenState = Idle;
+        this.currentState = Idle;
         this.counter = 0;
     }
 

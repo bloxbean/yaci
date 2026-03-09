@@ -13,7 +13,7 @@ import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxIds
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxs;
 import lombok.extern.slf4j.Slf4j;
 
-import static com.bloxbean.cardano.yaci.core.common.TxBodyType.BABBAGE;
+import static com.bloxbean.cardano.yaci.core.common.TxBodyType.CONWAY;
 
 /**
  * This helper is still under development.
@@ -25,21 +25,27 @@ public class TxSubmissionClient {
     private String host;
     private int port;
     private VersionTable versionTable;
+    private int maxQueueSize;
     private HandshakeAgent handshakeAgent;
     private TxSubmissionAgent txSubmissionAgent;
     private KeepAliveAgent keepAliveAgent;
     private TCPNodeClient n2nClient;
 
     public TxSubmissionClient(String host, int port, VersionTable versionTable) {
+        this(host, port, versionTable, 0);
+    }
+
+    public TxSubmissionClient(String host, int port, VersionTable versionTable, int maxQueueSize) {
         this.host = host;
         this.port = port;
         this.versionTable = versionTable;
+        this.maxQueueSize = maxQueueSize;
         init();
     }
 
     private void init() {
         handshakeAgent = new HandshakeAgent(versionTable);
-        txSubmissionAgent = new TxSubmissionAgent();
+        txSubmissionAgent = maxQueueSize > 0 ? new TxSubmissionAgent(true, maxQueueSize) : new TxSubmissionAgent();
         keepAliveAgent = new KeepAliveAgent();
 
         n2nClient = new TCPNodeClient(host, port, handshakeAgent, txSubmissionAgent, keepAliveAgent);
@@ -105,7 +111,7 @@ public class TxSubmissionClient {
 
     public void submitTxBytes(byte[] txBytes) {
         var txHash = TransactionUtil.getTxHash(txBytes);
-        this.submitTxBytes(txHash, txBytes, BABBAGE);
+        this.submitTxBytes(txHash, txBytes, CONWAY);
     }
 
     public void submitTxBytes(String txHash, byte[] txBytes, TxBodyType txBodyType) {

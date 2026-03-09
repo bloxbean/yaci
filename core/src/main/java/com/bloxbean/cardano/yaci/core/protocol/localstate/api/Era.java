@@ -17,4 +17,14 @@ public enum Era {
     public int getValue() {
         return value;
     }
+
+    public static Era fromInt(int value) {
+        for (Era era : Era.values()) {
+            if (era.value == value) {
+                return era;
+            }
+        }
+        return null;
+    }
+
 }

@@ -1,0 +1,141 @@
+quarkus:
+  application:
+    name: yaci-node
+  package:
+    output-name: yaci-node
+    jar:
+      type: uber-jar
+      add-runner-suffix: false
+  http:
+    port: 8080
+    test-port: 0
+  log:
+    level: INFO
+    category:
+      "com.bloxbean.cardano.yaci":
+        level: INFO
+  smallrye-openapi:
+    info-title: "Yaci Node API"
+    info-version: "${quarkus.application.version:0.1.0}"
+    info-description: "Cardano Yaci Node REST API"
+  swagger-ui:
+    always-include: ${YACI_SWAGGER_UI_ENABLED:true}
+    path: /q/swagger-ui
+  banner:
+    enabled: true
+    path: "banner.txt"
+
+yaci:
+  events:
+    enabled: true
+  plugins:
+    enabled: true
+    directory: plugins
+    logging:
+      enabled: false
+  node:
+    network: preprod
+    auto-sync-start: true
+    client:
+      enabled: true
+    remote:
+      host: preprod-node.world.dev.cardano.org
+      port: 30000
+      protocol-magic: 1
+    server:
+      enabled: true
+      port: 13337
+    storage:
+      rocksdb: true
+      path: "./chainstate"
+    genesis:
+      shelley-genesis-file: config/network/preprod/shelley-genesis.json
+      byron-genesis-file: config/network/preprod/byron-genesis.json
+      alonzo-genesis-file: config/network/preprod/alonzo-genesis.json
+      conway-genesis-file: config/network/preprod/conway-genesis.json
+      protocol-parameters-file: config/network/preprod/protocol-param.json
+    dev-mode: false
+    block-producer:
+      enabled: false
+      block-time-millis: 0
+      lazy: false
+      genesis-timestamp: 0
+      slot-length-millis: 0
+      tx-evaluation: true
+
+"%native":
+  quarkus:
+    package:
+      jar:
+        enabled: false
+    native:
+      enabled: true
+
+"%devnet":
+  yaci:
+    node:
+      network: devnet
+      auto-sync-start: true
+      dev-mode: true
+      client:
+        enabled: false
+      remote:
+        protocol-magic: 42
+      genesis:
+        shelley-genesis-file: config/network/devnet/shelley-genesis.json
+        byron-genesis-file: config/network/devnet/byron-genesis.json
+        alonzo-genesis-file: config/network/devnet/alonzo-genesis.json
+        conway-genesis-file: config/network/devnet/conway-genesis.json
+        protocol-parameters-file: config/network/devnet/protocol-param.json
+      block-producer:
+        enabled: true
+        block-time-millis: 0
+        lazy: false
+        genesis-timestamp: 0
+        slot-length-millis: 0
+
+"%mainnet":
+  yaci:
+    node:
+      network: mainnet
+      remote:
+        host: backbone.cardano.iog.io
+        port: 3001
+        protocol-magic: 764824073
+      genesis:
+        shelley-genesis-file: config/network/mainnet/shelley-genesis.json
+        byron-genesis-file: config/network/mainnet/byron-genesis.json
+        alonzo-genesis-file: config/network/mainnet/alonzo-genesis.json
+        conway-genesis-file: config/network/mainnet/conway-genesis.json
+        protocol-parameters-file: config/network/mainnet/protocol-param.json
+
+"%preview":
+  yaci:
+    node:
+      network: preview
+      remote:
+        protocol-magic: 2
+      genesis:
+        shelley-genesis-file: config/network/preview/shelley-genesis.json
+        byron-genesis-file: config/network/preview/byron-genesis.json
+        alonzo-genesis-file: config/network/preview/alonzo-genesis.json
+        conway-genesis-file: config/network/preview/conway-genesis.json
+        protocol-parameters-file: config/network/preview/protocol-param.json
+
+"%test":
+  yaci:
+    events:
+      enabled: true
+    plugins:
+      enabled: false
+      logging:
+        enabled: false
+    node:
+      auto-sync-start: false
+      client:
+        enabled: false
+      server:
+        enabled: true
+      storage:
+        rocksdb: false
+        path: "./chainstate-test"

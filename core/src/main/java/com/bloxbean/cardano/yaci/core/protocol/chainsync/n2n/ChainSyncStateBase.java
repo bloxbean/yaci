@@ -6,8 +6,10 @@ import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.State;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.AwaitReply;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.ChainSyncMsgDone;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers.FindIntersectSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers.IntersectFoundSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers.IntersectNotFoundSerializer;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers.RequestNextSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers.RollForwardSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers.RollbackwardSerializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
@@ -23,21 +25,22 @@ public interface ChainSyncStateBase extends State {
             Array array = (Array) CborSerializationUtil.deserializeOne(bytes);
             int id = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
             switch (id) {
+                case 0:
+                    return RequestNextSerializer.INSTANCE.deserialize(bytes);
                 case 1:
                     return new AwaitReply();
                 case 2:
                     return RollForwardSerializer.INSTANCE.deserialize(bytes);
                 case 3:
                     return RollbackwardSerializer.INSTANCE.deserialize(bytes);
+                case 4:
+                    return FindIntersectSerializer.INSTANCE.deserialize(bytes);
                 case 5:
                     return IntersectFoundSerializer.INSTANCE.deserialize(bytes);
                 case 6:
                     return IntersectNotFoundSerializer.INSTANCE.deserialize(bytes);
                 case 7:
                     return new ChainSyncMsgDone();
-                case 4: //TODO -- should not come here. But for conway, it's coming. Need to check
-                    log.error("ChainSync reply received. But it's not expected. So ignoring it: " + HexUtil.encodeHexString(bytes));
-                    return null;
                 default:
                     throw new RuntimeException(String.format("Invalid msg id: %d", id));
             }

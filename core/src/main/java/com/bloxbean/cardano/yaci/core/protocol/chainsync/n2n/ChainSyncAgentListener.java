@@ -32,4 +32,20 @@ public interface ChainSyncAgentListener extends AgentListener {
     default void rollforwardByronEra(Tip tip, ByronEbHead byronEbHead) {
 
     }
+
+    // New methods with original header bytes for proper storage
+    default void rollforward(Tip tip, BlockHeader blockHeader, byte[] originalHeaderBytes) {
+        // Default implementation calls the original method for backward compatibility
+        rollforward(tip, blockHeader);
+    }
+
+    default void rollforwardByronEra(Tip tip, ByronBlockHead byronBlockHead, byte[] originalHeaderBytes) {
+        // Default implementation calls the original method for backward compatibility
+        rollforwardByronEra(tip, byronBlockHead);
+    }
+
+    default void rollforwardByronEra(Tip tip, ByronEbHead byronEbHead, byte[] originalHeaderBytes) {
+        // Default implementation calls the original method for backward compatibility
+        rollforwardByronEra(tip, byronEbHead);
+    }
 }

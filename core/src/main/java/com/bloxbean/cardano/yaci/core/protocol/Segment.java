@@ -16,24 +16,36 @@ import java.io.IOException;
 @Slf4j
 public class Segment {
     private int timestamp;
-    private short protocol;
+    private int protocol;
     private byte[] payload;
 
     public void serialize(ByteBuf out) throws IOException {
+        // Log what we're about to write for debugging
+        if (log.isDebugEnabled()) {
+            log.debug("Serializing segment - timestamp: {} (0x{}), protocol: {} (0x{}), payload length: {}",
+                     timestamp, Integer.toHexString(timestamp),
+                     protocol, Integer.toHexString(protocol),
+                     payload.length);
+        }
+        
         out.writeInt(timestamp);
-        out.writeShort(protocol);
+        int protocolToWrite = protocol & 0xFFFF;
+        out.writeShort(protocolToWrite);
         out.writeShort(payload.length);
         out.writeBytes(payload);
+        
+        // Log the actual bytes written
+        if (log.isDebugEnabled()) {
+            log.debug("Wrote bytes - timestamp: 0x{}, protocol: 0x{}, length: 0x{}",
+                     Integer.toHexString(timestamp),
+                     Integer.toHexString(protocolToWrite),
+                     Integer.toHexString(payload.length));
+        }
     }
 
     public static Segment deserialize(ByteBuf in) {
         int timestamp = (int) in.readUnsignedInt();
-        int protocol = in.readShort();
-
-        //TODO -- check the following logic for unsigned
-        if (protocol < 0)
-            protocol = protocol + 32768;
-
+        int protocol = in.readUnsignedShort(); // Read as unsigned to handle response flag properly
         int payloadLen = in.readUnsignedShort();
 
         if (log.isTraceEnabled()) {
@@ -48,7 +60,7 @@ public class Segment {
 
         Segment segment = Segment.builder()
                 .timestamp(timestamp)
-                .protocol((short) protocol)
+                .protocol(protocol)  // Don't cast to short, keep as int
                 .payload(payload)
                 .build();
 

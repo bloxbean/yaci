@@ -160,3 +160,19 @@ rust/jniLibs
 # End of https://www.toptal.com/developers/gitignore/api/java,gradle,intellij
 
 /backends/cardano-graphql/build/
+/.vscode/
+/chainstate/
+/.claude/
+/temp-adr/
+/tasks/
+/node/chainstate/
+/node/logs/
+/node-runtime/chainstate/
+/node-app/chainstate/
+
+# Offchain examples
+offchain-examples/meshjs/node_modules/
+offchain-examples/pycardano/__pycache__/
+offchain-examples/pycardano/.venv/
+/node-app/chainstate-preprod/
+**/chainstate*/

@@ -9,6 +9,8 @@ public enum YaciConfig {
     private boolean returnBlockCbor;
     private boolean returnTxBodyCbor;
 
+    private boolean blockFetchCheckRangeExists = false;
+
     YaciConfig() {
         returnBlockCbor = false;
         returnTxBodyCbor = false;
@@ -44,5 +46,13 @@ public enum YaciConfig {
      */
     public void setReturnTxBodyCbor(boolean returnTxBodyCbor) {
         this.returnTxBodyCbor = returnTxBodyCbor;
+    }
+
+    public void setBlockFetchCheckRangeExists(boolean blockFetchCheckRangeExists) {
+        this.blockFetchCheckRangeExists = blockFetchCheckRangeExists;
+    }
+
+    public boolean isBlockFetchCheckRangeExists() {
+        return blockFetchCheckRangeExists;
     }
 }

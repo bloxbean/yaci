@@ -18,8 +18,8 @@ public enum PeerSharingState implements PeerSharingStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return true; // Client has agency in idle state
+        public boolean hasAgency(boolean isClient) {
+            return isClient; // Client has agency in idle state
         }
     },
 
@@ -38,8 +38,8 @@ public enum PeerSharingState implements PeerSharingStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
-            return false; // Server has agency in busy state
+        public boolean hasAgency(boolean isClient) {
+            return !isClient; // Server has agency in busy state
         }
     },
 
@@ -50,7 +50,7 @@ public enum PeerSharingState implements PeerSharingStateBase {
         }
 
         @Override
-        public boolean hasAgency() {
+        public boolean hasAgency(boolean isClient) {
             return false; // No agency in terminal state
         }
     }

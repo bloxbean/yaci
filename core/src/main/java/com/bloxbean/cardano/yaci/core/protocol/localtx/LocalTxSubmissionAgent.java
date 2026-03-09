@@ -19,9 +19,13 @@ public class LocalTxSubmissionAgent extends Agent<LocalTxSubmissionListener> {
     private Queue<TxSubmissionRequest> pendingQueue;
 
     public LocalTxSubmissionAgent() {
+        this(true);
+    }
+    public LocalTxSubmissionAgent(boolean isClient) {
+        super(isClient);
         txnQueue = new ConcurrentLinkedQueue<>();
         pendingQueue = new ConcurrentLinkedQueue<>();
-        this.currenState = LocalTxSubmissionState.Idle;
+        this.currentState = LocalTxSubmissionState.Idle;
     }
 
     @Override
@@ -31,7 +35,7 @@ public class LocalTxSubmissionAgent extends Agent<LocalTxSubmissionListener> {
 
     @Override
     public boolean isDone() {
-        return this.currenState == LocalTxSubmissionState.Done;
+        return this.currentState == LocalTxSubmissionState.Done;
     }
 
     @Override
@@ -39,7 +43,7 @@ public class LocalTxSubmissionAgent extends Agent<LocalTxSubmissionListener> {
         if (shutDown)
             return new MsgDone();
 
-        switch ((LocalTxSubmissionState) currenState) {
+        switch ((LocalTxSubmissionState) currentState) {
             case Idle:
                 if (txnQueue.peek() != null) {
                     if (log.isDebugEnabled())
@@ -104,7 +108,7 @@ public class LocalTxSubmissionAgent extends Agent<LocalTxSubmissionListener> {
 
     @Override
     public synchronized void reset() {
-        this.currenState = LocalTxSubmissionState.Idle;
+        this.currentState = LocalTxSubmissionState.Idle;
         this.txnQueue.clear();
         this.pendingQueue.clear();
     }

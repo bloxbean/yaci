@@ -1,0 +1,15 @@
+dependencies {
+    implementation project(':events-core')
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            pom {
+                name = 'Yaci Events Processor'
+                description = 'Annotation processor for events generating runtime bindings'
+            }
+        }
+    }
+}
+

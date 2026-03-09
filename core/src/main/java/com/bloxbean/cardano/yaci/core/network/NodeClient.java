@@ -90,7 +90,6 @@ public abstract class NodeClient {
                 @Override
                 public void initChannel(Channel ch)
                         throws Exception {
-                    //ch.pipeline().addLast("readTimeoutHandler", new ReadTimeoutHandler(30));
                     ch.pipeline().addLast(new MiniProtoRequestDataEncoder(),
                             new MiniProtoStreamingByteToMessageDecoder(agents),
                             new MiniProtoClientInboundHandler(handshakeAgent, agents));
@@ -143,9 +142,10 @@ public abstract class NodeClient {
             session = null;
         }
 
-        //TODO -- find a better way to wait for session to close
+        // Session.dispose() now properly waits for channel closure
+        // Small delay to ensure any remaining event loop processing is complete
         try {
-            Thread.sleep(1000);
+            Thread.sleep(100);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
@@ -194,6 +194,7 @@ public abstract class NodeClient {
         public void disconnected() {
             if (showConnectionLog())
                 log.info("Connection closed !!!");
+            
             if (session != null) {
                 session.dispose();
             }
@@ -202,8 +203,7 @@ public abstract class NodeClient {
                 agent.disconnected();
             }
 
-            //TODO some delay
-            //Try to start again
+            // Try to start again
             if (session != null && session.shouldReconnect()) {
                 log.warn("Trying to reconnect !!!");
                 session = null; //reset session before creating a new one.
