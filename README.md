@@ -16,6 +16,10 @@ previous blocks, query information from a local node, monitor the local mempool,
 
 **Development Branch:** main
 
+## Prerequisites
+
+- Java 21 or later
+
 ## Dependencies
 
 Maven
