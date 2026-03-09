@@ -31,10 +31,10 @@ jobs:
         with:
           name: jar-dist
           path: node-app/build/distributions/yaci-node-*.zip
-          retention-days: 14
+          retention-days: 3
 
   native-dist:
-    if: ${{ inputs.build_native }}
+    #if: ${{ inputs.build_native }}  # TODO: restore after testing
     strategy:
       matrix:
         include:
@@ -61,4 +61,4 @@ jobs:
         with:
           name: native-dist-${{ matrix.label }}
           path: node-app/build/distributions/yaci-node-native-*.zip
-          retention-days: 14
+          retention-days: 3
