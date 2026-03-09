@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.node.runtime.genesis;
 
+import java.math.BigInteger;
 import java.util.Map;
 
 /**
@@ -18,7 +19,7 @@ import java.util.Map;
  * @param updateQuorum      governance update quorum
  */
 public record ShelleyGenesisData(
-        Map<String, Long> initialFunds,
+        Map<String, BigInteger> initialFunds,
         long networkMagic,
         long epochLength,
         double slotLength,

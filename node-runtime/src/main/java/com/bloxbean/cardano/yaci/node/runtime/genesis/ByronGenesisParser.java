@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigInteger;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,7 +33,7 @@ public class ByronGenesisParser {
     }
 
     private static ByronGenesisData parseRoot(JsonNode root) {
-        Map<String, Long> nonAvvmBalances = parseNonAvvmBalances(root.get("nonAvvmBalances"));
+        Map<String, BigInteger> nonAvvmBalances = parseNonAvvmBalances(root.get("nonAvvmBalances"));
         long startTime = root.path("startTime").asLong(0);
 
         // Extract k from protocolConsts
@@ -55,18 +56,18 @@ public class ByronGenesisParser {
         return new ByronGenesisData(nonAvvmBalances, startTime, protocolMagic, slotDuration, k);
     }
 
-    private static Map<String, Long> parseNonAvvmBalances(JsonNode balancesNode) {
+    private static Map<String, BigInteger> parseNonAvvmBalances(JsonNode balancesNode) {
         if (balancesNode == null || balancesNode.isNull() || !balancesNode.isObject()) {
             return Collections.emptyMap();
         }
 
-        Map<String, Long> balances = new LinkedHashMap<>();
+        Map<String, BigInteger> balances = new LinkedHashMap<>();
         var fields = balancesNode.fields();
         while (fields.hasNext()) {
             var entry = fields.next();
             // Byron genesis uses string values for amounts (e.g., "30000000000000000")
-            long amount = Long.parseLong(entry.getValue().asText("0"));
-            if (amount > 0) {
+            BigInteger amount = new BigInteger(entry.getValue().asText("0"));
+            if (amount.compareTo(BigInteger.ZERO) > 0) {
                 balances.put(entry.getKey(), amount);
             }
         }

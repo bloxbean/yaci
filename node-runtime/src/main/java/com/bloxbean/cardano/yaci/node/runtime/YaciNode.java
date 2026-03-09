@@ -697,8 +697,8 @@ public class YaciNode implements NodeAPI {
                             config.getProtocolMagic(), 0, 0, blockHash);
                 }
                 if (genesisConfig.hasByronBalances()) {
-                    utxoStore.storeGenesisUtxos(genesisConfig.getByronBalances(),
-                            config.getProtocolMagic(), 0, 0, blockHash);
+                    utxoStore.storeByronGenesisUtxos(genesisConfig.getByronBalances(),
+                            0, 0, blockHash);
                 }
             }
 

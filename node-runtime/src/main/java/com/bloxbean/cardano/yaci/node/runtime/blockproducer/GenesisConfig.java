@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -30,14 +31,14 @@ public class GenesisConfig {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final Map<String, Long> initialFunds;
+    private final Map<String, BigInteger> initialFunds;
     private final String protocolParameters;
-    private final Map<String, Long> byronBalances;
+    private final Map<String, BigInteger> byronBalances;
     private final ShelleyGenesisData shelleyGenesisData;
     private final ByronGenesisData byronGenesisData;
 
-    private GenesisConfig(Map<String, Long> initialFunds, String protocolParameters,
-                          Map<String, Long> byronBalances, ShelleyGenesisData shelleyGenesisData,
+    private GenesisConfig(Map<String, BigInteger> initialFunds, String protocolParameters,
+                          Map<String, BigInteger> byronBalances, ShelleyGenesisData shelleyGenesisData,
                           ByronGenesisData byronGenesisData) {
         this.initialFunds = initialFunds;
         this.protocolParameters = protocolParameters;
@@ -56,8 +57,8 @@ public class GenesisConfig {
      */
     public static GenesisConfig load(String shelleyGenesisFile, String byronGenesisFile,
                                      String protocolParametersFile) {
-        Map<String, Long> funds = Collections.emptyMap();
-        Map<String, Long> byronBalances = Collections.emptyMap();
+        Map<String, BigInteger> funds = Collections.emptyMap();
+        Map<String, BigInteger> byronBalances = Collections.emptyMap();
         ShelleyGenesisData shelleyData = null;
         ByronGenesisData byronData = null;
         String protocolParams = null;

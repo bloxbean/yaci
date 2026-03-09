@@ -5,6 +5,7 @@ import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -30,17 +31,17 @@ public class GenesisTxBuilder {
      * @param initialFunds map of hex-encoded address bytes to lovelace amount
      * @return list of complete transaction CBOR bytes (each is [body, witnesses, is_valid, aux_data])
      */
-    public static List<byte[]> buildGenesisTransactions(Map<String, Long> initialFunds) {
+    public static List<byte[]> buildGenesisTransactions(Map<String, BigInteger> initialFunds) {
         if (initialFunds == null || initialFunds.isEmpty()) {
             return List.of();
         }
 
         List<byte[]> transactions = new ArrayList<>();
-        List<Map.Entry<String, Long>> entries = new ArrayList<>(initialFunds.entrySet());
+        List<Map.Entry<String, BigInteger>> entries = new ArrayList<>(initialFunds.entrySet());
 
         for (int batchStart = 0; batchStart < entries.size(); batchStart += MAX_OUTPUTS_PER_TX) {
             int batchEnd = Math.min(batchStart + MAX_OUTPUTS_PER_TX, entries.size());
-            List<Map.Entry<String, Long>> batch = entries.subList(batchStart, batchEnd);
+            List<Map.Entry<String, BigInteger>> batch = entries.subList(batchStart, batchEnd);
             int txIndex = batchStart / MAX_OUTPUTS_PER_TX;
 
             byte[] txCbor = buildSingleGenesisTx(batch, txIndex);
@@ -58,7 +59,7 @@ public class GenesisTxBuilder {
      * @param outputs list of (hex address, lovelace) entries
      * @param txIndex transaction index (used for the dummy input index)
      */
-    private static byte[] buildSingleGenesisTx(List<Map.Entry<String, Long>> outputs, int txIndex) {
+    private static byte[] buildSingleGenesisTx(List<Map.Entry<String, BigInteger>> outputs, int txIndex) {
         // tx_body (CBOR map): {0: inputs, 1: outputs, 2: fee}
         co.nstant.in.cbor.model.Map txBody = new co.nstant.in.cbor.model.Map();
 
@@ -72,7 +73,7 @@ public class GenesisTxBuilder {
 
         // outputs: post-Alonzo format [{0: h'<addr_bytes>', 1: <lovelace>}, ...]
         Array outputsArray = new Array();
-        for (Map.Entry<String, Long> entry : outputs) {
+        for (Map.Entry<String, BigInteger> entry : outputs) {
             co.nstant.in.cbor.model.Map output = new co.nstant.in.cbor.model.Map();
             byte[] addrBytes = HexUtil.decodeHexString(entry.getKey());
             output.put(new UnsignedInteger(0), new ByteString(addrBytes));

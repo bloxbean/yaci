@@ -7,6 +7,7 @@ import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigInteger;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +26,7 @@ class GenesisTxBuilderTest {
     void singleFund_producesOneTx() {
         // Use a 57-byte Shelley address hex (enterprise address, network tag 0x60 + 28 bytes key hash)
         String addrHex = "60" + "aa".repeat(28);
-        Map<String, Long> funds = Map.of(addrHex, 10_000_000_000L);
+        Map<String, BigInteger> funds = Map.of(addrHex, BigInteger.valueOf(10_000_000_000L));
 
         List<byte[]> txs = GenesisTxBuilder.buildGenesisTransactions(funds);
         assertThat(txs).hasSize(1);
@@ -58,9 +59,9 @@ class GenesisTxBuilderTest {
 
     @Test
     void multipleFunds_allInOneTx() {
-        Map<String, Long> funds = new LinkedHashMap<>();
-        funds.put("60" + "aa".repeat(28), 5_000_000_000L);
-        funds.put("60" + "bb".repeat(28), 3_000_000_000L);
+        Map<String, BigInteger> funds = new LinkedHashMap<>();
+        funds.put("60" + "aa".repeat(28), BigInteger.valueOf(5_000_000_000L));
+        funds.put("60" + "bb".repeat(28), BigInteger.valueOf(3_000_000_000L));
 
         List<byte[]> txs = GenesisTxBuilder.buildGenesisTransactions(funds);
         assertThat(txs).hasSize(1);
@@ -73,10 +74,10 @@ class GenesisTxBuilderTest {
 
     @Test
     void moreThanMaxOutputs_splitsIntoMultipleTxs() {
-        Map<String, Long> funds = new LinkedHashMap<>();
+        Map<String, BigInteger> funds = new LinkedHashMap<>();
         for (int i = 0; i < GenesisTxBuilder.MAX_OUTPUTS_PER_TX + 5; i++) {
             String addrHex = "60" + String.format("%02x", i % 256).repeat(28);
-            funds.put(addrHex + String.format("%04d", i), 1_000_000L);
+            funds.put(addrHex + String.format("%04d", i), BigInteger.valueOf(1_000_000L));
         }
 
         List<byte[]> txs = GenesisTxBuilder.buildGenesisTransactions(funds);
@@ -98,7 +99,7 @@ class GenesisTxBuilderTest {
     @Test
     void genesisTxRoundTripsThroughBlockSerializer() {
         String addrHex = "60" + "cc".repeat(28);
-        Map<String, Long> funds = Map.of(addrHex, 2_000_000_000L);
+        Map<String, BigInteger> funds = Map.of(addrHex, BigInteger.valueOf(2_000_000_000L));
 
         List<byte[]> txs = GenesisTxBuilder.buildGenesisTransactions(funds);
 
@@ -115,7 +116,7 @@ class GenesisTxBuilderTest {
     @Test
     void genesisTx_usesZeroHashInput() {
         String addrHex = "60" + "dd".repeat(28);
-        Map<String, Long> funds = Map.of(addrHex, 1_000_000L);
+        Map<String, BigInteger> funds = Map.of(addrHex, BigInteger.valueOf(1_000_000L));
 
         List<byte[]> txs = GenesisTxBuilder.buildGenesisTransactions(funds);
         DataItem di = CborSerializationUtil.deserializeOne(txs.get(0));

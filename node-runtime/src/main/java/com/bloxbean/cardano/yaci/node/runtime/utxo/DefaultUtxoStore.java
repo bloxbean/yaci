@@ -491,7 +491,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     }
 
     @Override
-    public void storeGenesisUtxos(java.util.Map<String, Long> shelleyFunds, long networkMagic,
+    public void storeGenesisUtxos(java.util.Map<String, java.math.BigInteger> shelleyFunds, long networkMagic,
                                   long slot, long blockNumber, String blockHash) {
         if (!enabled || shelleyFunds == null || shelleyFunds.isEmpty()) return;
 
@@ -502,7 +502,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
             for (var entry : shelleyFunds.entrySet()) {
                 String hexAddr = entry.getKey();
-                long lovelace = entry.getValue();
+                java.math.BigInteger lovelace = entry.getValue();
 
                 // Derive genesis tx hash: blake2b-256(address_hex_bytes) — matches yaci-store convention
                 byte[] addrBytes = HexUtil.decodeHexString(hexAddr);
@@ -521,7 +521,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
 
                 // Encode UTXO record
                 byte[] val = UtxoCborCodec.encodeUtxoRecord(
-                        bech32Addr, java.math.BigInteger.valueOf(lovelace),
+                        bech32Addr, lovelace,
                         null, null, null, null, null, false,
                         slot, blockNumber, blockHash);
                 byte[] outKey = UtxoKeyUtil.outpointKey(txHash, outputIndex);
@@ -543,9 +543,50 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                 stored++;
             }
             db.write(wo, batch);
-            log.info("Stored {} genesis UTXOs (tx_hash = blake2b(address), outputIndex=0)", stored);
+            log.info("Stored {} Shelley genesis UTXOs (tx_hash = blake2b(address), outputIndex=0)", stored);
         } catch (Exception ex) {
-            log.error("Failed to store genesis UTXOs: {}", ex.toString());
+            log.error("Failed to store Shelley genesis UTXOs: {}", ex.toString());
+        }
+    }
+
+    @Override
+    public void storeByronGenesisUtxos(java.util.Map<String, java.math.BigInteger> nonAvvmBalances,
+                                       long slot, long blockNumber, String blockHash) {
+        if (!enabled || nonAvvmBalances == null || nonAvvmBalances.isEmpty()) return;
+
+        int stored = 0;
+
+        try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+            for (var entry : nonAvvmBalances.entrySet()) {
+                String byronAddress = entry.getKey();
+                java.math.BigInteger lovelace = entry.getValue();
+
+                // Derive genesis tx hash: blake2b-256(Base58.decode(address)) — matches yaci-store convention
+                byte[] addrBytes = com.bloxbean.cardano.client.crypto.Base58.decode(byronAddress);
+                String txHash = HexUtil.encodeHexString(
+                        com.bloxbean.cardano.client.crypto.Blake2bUtil.blake2bHash256(addrBytes));
+                int outputIndex = 0;
+
+                // Store address as-is (base58 string, no bech32 conversion for Byron)
+                byte[] val = UtxoCborCodec.encodeUtxoRecord(
+                        byronAddress, lovelace,
+                        null, null, null, null, null, false,
+                        slot, blockNumber, blockHash);
+                byte[] outKey = UtxoKeyUtil.outpointKey(txHash, outputIndex);
+                batch.put(cfUnspent, outKey, val);
+
+                // Address index (address hash only — Byron addresses don't have Shelley-style payment credentials)
+                if (indexAddressHash) {
+                    byte[] addrHash = UtxoKeyUtil.addrHash28(byronAddress);
+                    byte[] addrIdxKey = UtxoKeyUtil.addressIndexKey(addrHash, slot, txHash, outputIndex);
+                    batch.put(cfAddr, addrIdxKey, new byte[0]);
+                }
+                stored++;
+            }
+            db.write(wo, batch);
+            log.info("Stored {} Byron genesis UTXOs (tx_hash = blake2b(Base58.decode(address)), outputIndex=0)", stored);
+        } catch (Exception ex) {
+            log.error("Failed to store Byron genesis UTXOs: {}", ex.toString());
         }
     }
 

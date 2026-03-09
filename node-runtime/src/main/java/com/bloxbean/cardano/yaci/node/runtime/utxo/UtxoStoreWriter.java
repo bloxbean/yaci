@@ -11,7 +11,7 @@ public interface UtxoStoreWriter {
     boolean isEnabled();
 
     /**
-     * Store genesis UTXOs directly using Cardano protocol convention:
+     * Store Shelley genesis UTXOs directly using Cardano protocol convention:
      * tx_hash = blake2b-256(address_hex_bytes), outputIndex = 0.
      * This matches how yaci-store and wallets derive genesis UTXO references.
      *
@@ -21,9 +21,23 @@ public interface UtxoStoreWriter {
      * @param blockNumber   block number (typically 0)
      * @param blockHash     block hash hex
      */
-    default void storeGenesisUtxos(java.util.Map<String, Long> shelleyFunds, long networkMagic,
+    default void storeGenesisUtxos(java.util.Map<String, java.math.BigInteger> shelleyFunds, long networkMagic,
                                    long slot, long blockNumber, String blockHash) {
         // Default no-op for implementations that don't support direct genesis storage
+    }
+
+    /**
+     * Store Byron genesis UTXOs (nonAvvmBalances) directly.
+     * Byron addresses are base58-encoded. tx_hash = blake2b-256(Base58.decode(address)).
+     *
+     * @param nonAvvmBalances Byron base58 address → lovelace
+     * @param slot            slot number for the genesis block
+     * @param blockNumber     block number
+     * @param blockHash       block hash hex
+     */
+    default void storeByronGenesisUtxos(java.util.Map<String, java.math.BigInteger> nonAvvmBalances,
+                                        long slot, long blockNumber, String blockHash) {
+        // Default no-op for implementations that don't support Byron genesis storage
     }
 
     /**

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -16,9 +17,9 @@ class ShelleyGenesisParserTest {
 
             assertThat(data.initialFunds()).hasSize(2);
             assertThat(data.initialFunds())
-                    .containsEntry("604fb41f142d1f7b8e51dd9232a110cf72aec955275439b72870b9c20d", 10000000000000L);
+                    .containsEntry("604fb41f142d1f7b8e51dd9232a110cf72aec955275439b72870b9c20d", new BigInteger("10000000000000"));
             assertThat(data.initialFunds())
-                    .containsEntry("60a0f1aa7dca95017c11e7e373aebcf0c4568cf47ec12b94f8eb5bba8b", 3000000000000000L);
+                    .containsEntry("60a0f1aa7dca95017c11e7e373aebcf0c4568cf47ec12b94f8eb5bba8b", new BigInteger("3000000000000000"));
         }
     }
 

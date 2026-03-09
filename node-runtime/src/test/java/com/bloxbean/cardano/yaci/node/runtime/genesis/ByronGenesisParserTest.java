@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -19,7 +20,7 @@ class ByronGenesisParserTest {
             assertThat(data.nonAvvmBalances()).hasSize(1);
             assertThat(data.nonAvvmBalances())
                     .containsEntry("FHnt4NL7yPXuYUxBF33VX5dZMBDAab2kvSNLRzCskvuKNCSDknzrQvKeQhGUw5a",
-                            30000000000000000L);
+                            new BigInteger("30000000000000000"));
         }
     }
 

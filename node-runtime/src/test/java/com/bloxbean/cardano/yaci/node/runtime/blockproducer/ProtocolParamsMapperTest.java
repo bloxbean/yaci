@@ -16,7 +16,7 @@ class ProtocolParamsMapperTest {
     @Test
     void fromNodeProtocolParam_parsesAllFields() throws IOException {
         String json = Files.readString(
-                Path.of("../node-app/config/protocol-param.json"));
+                Path.of("../node-app/config/network/devnet/protocol-param.json"));
         ProtocolParams pp = ProtocolParamsMapper.fromNodeProtocolParam(json);
 
         // Fee structure

@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigInteger;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,7 +33,7 @@ public class ShelleyGenesisParser {
     }
 
     private static ShelleyGenesisData parseRoot(JsonNode root) {
-        Map<String, Long> initialFunds = parseInitialFunds(root.get("initialFunds"));
+        Map<String, BigInteger> initialFunds = parseInitialFunds(root.get("initialFunds"));
         long networkMagic = root.path("networkMagic").asLong(0);
         long epochLength = root.path("epochLength").asLong(0);
         double slotLength = root.path("slotLength").asDouble(1.0);
@@ -65,16 +66,16 @@ public class ShelleyGenesisParser {
         log.info("Updated systemStart in {}: {}", file.getPath(), systemStart);
     }
 
-    private static Map<String, Long> parseInitialFunds(JsonNode fundsNode) {
+    private static Map<String, BigInteger> parseInitialFunds(JsonNode fundsNode) {
         if (fundsNode == null || fundsNode.isNull() || !fundsNode.isObject()) {
             return Collections.emptyMap();
         }
 
-        Map<String, Long> funds = new LinkedHashMap<>();
+        Map<String, BigInteger> funds = new LinkedHashMap<>();
         var fields = fundsNode.fields();
         while (fields.hasNext()) {
             var entry = fields.next();
-            funds.put(entry.getKey(), entry.getValue().asLong());
+            funds.put(entry.getKey(), new BigInteger(entry.getValue().asText("0")));
         }
         return Collections.unmodifiableMap(funds);
     }

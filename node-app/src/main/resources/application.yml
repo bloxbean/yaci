@@ -4,6 +4,7 @@ quarkus:
   package:
     output-name: yaci-node
     jar:
+      type: uber-jar
       add-runner-suffix: false
   http:
     port: 8080
@@ -81,11 +82,11 @@ yaci:
       remote:
         protocol-magic: 42
       genesis:
-        shelley-genesis-file: config/devnet/shelley-genesis.json
-        byron-genesis-file: config/devnet/byron-genesis.json
-        alonzo-genesis-file: config/devnet/alonzo-genesis.json
-        conway-genesis-file: config/devnet/conway-genesis.json
-        protocol-parameters-file: config/protocol-param.json
+        shelley-genesis-file: config/network/devnet/shelley-genesis.json
+        byron-genesis-file: config/network/devnet/byron-genesis.json
+        alonzo-genesis-file: config/network/devnet/alonzo-genesis.json
+        conway-genesis-file: config/network/devnet/conway-genesis.json
+        protocol-parameters-file: config/network/devnet/protocol-param.json
       block-producer:
         enabled: true
         block-time-millis: 0

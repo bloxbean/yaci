@@ -68,6 +68,9 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.auto-sync-start", defaultValue = "false")
     boolean autoSyncStart;
 
+    @ConfigProperty(name = "quarkus.http.port", defaultValue = "8080")
+    int httpPort;
+
     @ConfigProperty(name = "yaci.events.enabled", defaultValue = "true")
     boolean eventsEnabled;
 
@@ -252,14 +255,14 @@ public class YaciNodeProducer {
                 NodeAPI node = createNodeAPI();
                 node.start();
                 log.info("Yaci Node started automatically and syncing with {} network", network);
-                log.info("REST API available at http://localhost:8080/api/v1/node/ for manual control");
+                log.info("REST API available at http://localhost:{}/api/v1/node/ for manual control", httpPort);
             } catch (Exception e) {
                 log.error("Failed to auto-start Yaci Node: {}", e.getMessage());
-                log.info("You can still start manually via: curl -X POST http://localhost:8080/api/v1/node/start");
+                log.info("You can still start manually via: curl -X POST http://localhost:{}/api/v1/node/start", httpPort);
             }
         } else {
-            log.info("Auto-sync is disabled. Start manually via: curl -X POST http://localhost:8080/api/v1/node/start");
-            log.info("REST API available at http://localhost:8080/api/v1/node/");
+            log.info("Auto-sync is disabled. Start manually via: curl -X POST http://localhost:{}/api/v1/node/start", httpPort);
+            log.info("REST API available at http://localhost:{}/api/v1/node/", httpPort);
         }
     }
 

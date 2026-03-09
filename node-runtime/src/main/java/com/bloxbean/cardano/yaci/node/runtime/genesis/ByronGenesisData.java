@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.node.runtime.genesis;
 
+import java.math.BigInteger;
 import java.util.Map;
 
 /**
@@ -12,7 +13,7 @@ import java.util.Map;
  * @param k               security parameter from protocolConsts.k (epoch length = k * 10)
  */
 public record ByronGenesisData(
-        Map<String, Long> nonAvvmBalances,
+        Map<String, BigInteger> nonAvvmBalances,
         long startTime,
         long protocolMagic,
         long slotDuration,
