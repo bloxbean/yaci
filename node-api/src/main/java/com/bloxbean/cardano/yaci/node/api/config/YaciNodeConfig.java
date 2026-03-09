@@ -44,6 +44,24 @@ public class YaciNodeConfig implements NodeConfig {
     private long syncStartSlot;
     private String syncStartBlockHash;
 
+    // Block producer configuration (devnet mode)
+    private boolean enableBlockProducer;
+    private boolean devMode;
+    private int blockTimeMillis;
+    private boolean lazyBlockProduction;
+    private long genesisTimestamp;
+    private int slotLengthMillis;
+    private String shelleyGenesisFile;     // Path to shelley-genesis.json
+    private String byronGenesisFile;       // Path to byron-genesis.json (optional, for relay mode)
+    private String alonzoGenesisFile;      // Path to alonzo-genesis.json (optional)
+    private String conwayGenesisFile;      // Path to conway-genesis.json (optional)
+    private String protocolParametersFile; // Path to protocol params JSON
+    private boolean txEvaluationEnabled;   // Enable ledger rule validation for submitted transactions
+
+    // Genesis-derived configuration
+    @Builder.Default
+    private long epochLength = 432000;     // Slots per epoch (from shelley-genesis.json epochLength)
+
     // Implement NodeConfig interface
     @Override
     public boolean isClientEnabled() {
@@ -156,6 +174,38 @@ public class YaciNodeConfig implements NodeConfig {
     }
 
     /**
+     * Create a default configuration for a standalone devnet with block production.
+     * No upstream node needed — produces its own blocks.
+     */
+    public static YaciNodeConfig devnetDefault(int serverPort) {
+        return YaciNodeConfig.builder()
+                .remoteHost(null)
+                .remotePort(0)
+                .protocolMagic(42) // Custom devnet magic
+                .serverPort(serverPort)
+                .enableServer(true)
+                .enableClient(false)
+                .enableBlockProducer(true)
+                .devMode(true)
+                .blockTimeMillis(0)
+                .lazyBlockProduction(false)
+                .genesisTimestamp(0)
+                .slotLengthMillis(0)
+                .useRocksDB(false)
+                .rocksDBPath(null)
+                .fullSyncThreshold(0)
+                .enablePipelinedSync(false)
+                .headerPipelineDepth(0)
+                .bodyBatchSize(0)
+                .maxParallelBodies(0)
+                .enableSelectiveBodyFetch(false)
+                .selectiveBodyFetchRatio(0)
+                .enableMonitoring(false)
+                .monitoringPort(8080)
+                .build();
+    }
+
+    /**
      * Create a configuration for performance testing with pipeline toggle
      */
     public static YaciNodeConfig performanceTestConfig(String remoteHost, int remotePort, long protocolMagic,
@@ -227,8 +277,23 @@ public class YaciNodeConfig implements NodeConfig {
             }
         }
 
-        if (!enableClient && !enableServer) {
-            throw new IllegalArgumentException("At least one of client or server must be enabled");
+        if (!enableClient && !enableServer && !enableBlockProducer) {
+            throw new IllegalArgumentException("At least one of client, server, or block producer must be enabled");
+        }
+
+        if (enableBlockProducer) {
+            if (enableClient) {
+                throw new IllegalArgumentException("Block producer mode cannot be used with client mode");
+            }
+            if (!enableServer) {
+                throw new IllegalArgumentException("Block producer mode requires server to be enabled");
+            }
+            // blockTimeMillis == 0 is valid: means auto-derive from genesis in YaciNode
+            // slotLengthMillis == 0 is valid: means auto-derive from genesis in YaciNode
+        }
+
+        if (devMode && !enableBlockProducer) {
+            throw new IllegalArgumentException("Dev mode requires block producer to be enabled");
         }
 
         if (useRocksDB && (rocksDBPath == null || rocksDBPath.trim().isEmpty())) {

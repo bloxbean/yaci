@@ -337,6 +337,14 @@ public class ServerIntegrationTest {
         }
 
         @Override
+        public Long getSlotByBlockNumber(Long blockNumber) {
+            if (blockNumber == 1L) return 1000L;
+            if (blockNumber == 2L) return 2000L;
+            if (blockNumber == 3L) return 3000L;
+            return null;
+        }
+
+        @Override
         public void rollbackTo(Long slot) {
             // Not needed for this test
         }

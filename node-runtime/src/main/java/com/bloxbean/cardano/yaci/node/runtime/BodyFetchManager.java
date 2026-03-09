@@ -16,11 +16,13 @@ import com.bloxbean.cardano.yaci.node.api.SyncPhase;
 import com.bloxbean.cardano.yaci.events.api.EventBus;
 import com.bloxbean.cardano.yaci.events.api.EventMetadata;
 import com.bloxbean.cardano.yaci.events.api.PublishOptions;
+import com.bloxbean.cardano.yaci.node.api.events.BlockConsensusEvent;
 import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.events.BlockReceivedEvent;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -484,6 +486,16 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 throw new RuntimeException("Invalid block hash hex format: " + hash, e);
             }
 
+            // Consensus check — let plugins approve/reject this block
+            var consensusEvent = new BlockConsensusEvent(slot, blockNumber, hash, blockBytes);
+            eventBus.publish(consensusEvent, recvMeta, PublishOptions.builder().build());
+            if (consensusEvent.isRejected()) {
+                log.warn("Block #{} at slot {} rejected by consensus: {}", blockNumber, slot,
+                        consensusEvent.rejections().stream().map(r -> r.source() + ": " + r.reason())
+                                .collect(Collectors.joining("; ")));
+                return;
+            }
+
             chainState.storeBlock(
                 hashBytes,
                 blockNumber,
@@ -590,6 +602,16 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 throw new RuntimeException("Invalid Byron block hash hex format: " + hash, e);
             }
 
+            // Consensus check — let plugins approve/reject this block
+            var consensusEvent = new BlockConsensusEvent(slot, blockNumber, hash, blockBytes);
+            eventBus.publish(consensusEvent, recvMeta, PublishOptions.builder().build());
+            if (consensusEvent.isRejected()) {
+                log.warn("Byron block #{} at slot {} rejected by consensus: {}", blockNumber, slot,
+                        consensusEvent.rejections().stream().map(r -> r.source() + ": " + r.reason())
+                                .collect(Collectors.joining("; ")));
+                return;
+            }
+
             chainState.storeBlock(
                 hashBytes,
                 blockNumber,
@@ -689,6 +711,16 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 hashBytes = HexUtil.decodeHexString(hash);
             } catch (Exception e) {
                 throw new RuntimeException("Invalid Byron EB block hash hex format: " + hash, e);
+            }
+
+            // Consensus check — let plugins approve/reject this block
+            var consensusEvent = new BlockConsensusEvent(slot, blockNumber, hash, blockBytes);
+            eventBus.publish(consensusEvent, recvMeta, PublishOptions.builder().build());
+            if (consensusEvent.isRejected()) {
+                log.warn("Byron EB block #{} at slot {} rejected by consensus: {}", blockNumber, slot,
+                        consensusEvent.rejections().stream().map(r -> r.source() + ": " + r.reason())
+                                .collect(Collectors.joining("; ")));
+                return;
             }
 
             chainState.storeBlock(

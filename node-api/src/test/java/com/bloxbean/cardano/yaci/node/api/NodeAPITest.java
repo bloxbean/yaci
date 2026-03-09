@@ -7,6 +7,7 @@ import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.node.api.config.NodeConfig;
 import com.bloxbean.cardano.yaci.node.api.listener.NodeEventListener;
 import com.bloxbean.cardano.yaci.node.api.model.NodeStatus;
+import com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.*;
@@ -103,6 +104,11 @@ class NodeAPITest {
         }
 
         @Override
+        public String submitTransaction(byte[] txCbor) {
+            return "dummy-hash";
+        }
+
+        @Override
         public void registerListeners(Object... listeners) {
 
         }
@@ -110,6 +116,66 @@ class NodeAPITest {
         @Override
         public void registerListener(Object listener, SubscriptionOptions sbOptions) {
 
+        }
+
+        @Override
+        public com.bloxbean.cardano.yaci.node.api.utxo.UtxoState getUtxoState() {
+            return null;
+        }
+
+        @Override
+        public String getProtocolParameters() {
+            return null;
+        }
+
+        @Override
+        public com.bloxbean.cardano.yaci.node.api.model.GenesisParameters getGenesisParameters() {
+            return null;
+        }
+
+        @Override
+        public void rollbackTo(long targetSlot) {
+            // no-op for test
+        }
+
+        @Override
+        public SnapshotInfo createSnapshot(String name) {
+            return new com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo(name, 0, 0, System.currentTimeMillis());
+        }
+
+        @Override
+        public void restoreSnapshot(String name) {
+            // no-op for test
+        }
+
+        @Override
+        public java.util.List<com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo> listSnapshots() {
+            return java.util.List.of();
+        }
+
+        @Override
+        public void deleteSnapshot(String name) {
+            // no-op for test
+        }
+
+        @Override
+        public com.bloxbean.cardano.yaci.node.api.model.FundResult fundAddress(String address, long lovelace) {
+            return new com.bloxbean.cardano.yaci.node.api.model.FundResult("dummy-hash", 0, lovelace);
+        }
+
+        @Override
+        public com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult advanceTimeBySlots(int slots) {
+            return new com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult(slots, slots, slots);
+        }
+
+        @Override
+        public com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult advanceTimeBySeconds(int seconds) {
+            return new com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult(seconds, seconds, seconds);
+        }
+
+        @Override
+        public long slotToUnixTime(long slot) {
+            return 0;
         }
     }
 

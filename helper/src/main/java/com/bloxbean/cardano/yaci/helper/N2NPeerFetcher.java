@@ -62,6 +62,9 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     private TxSubmissionAgent txSubmissionAgent;
     private TCPNodeClient n2nClient;
 
+    // Tx submission queue size (0 = use agent default)
+    private int txMaxQueueSize;
+
     // Keep alive tracking
     private int lastKeepAliveResponseCookie = 0;
     private long lastKeepAliveResponseTime = 0;
@@ -113,7 +116,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         keepAliveAgent = new KeepAliveAgent();
         chainSyncAgent = new ChainsyncAgent(new Point[]{wellKnownPoint});
         blockFetchAgent = new BlockfetchAgent();
-        txSubmissionAgent = new TxSubmissionAgent();
+        txSubmissionAgent = txMaxQueueSize > 0 ? new TxSubmissionAgent(true, txMaxQueueSize) : new TxSubmissionAgent();
 
         blockFetchAgent.resetPoints(wellKnownPoint, wellKnownPoint);
         setupAgentListeners();
@@ -502,6 +505,14 @@ public class N2NPeerFetcher implements Fetcher<Block> {
             // No tip available yet - chain sync probably hasn't started
             return Optional.empty();
         }
+    }
+
+    /**
+     * Set the maximum queue size for TxSubmissionAgent. Must be called before start().
+     * @param txMaxQueueSize max queue size (0 = use agent default)
+     */
+    public void setTxMaxQueueSize(int txMaxQueueSize) {
+        this.txMaxQueueSize = txMaxQueueSize;
     }
 
     public void enableTxSubmission() {

@@ -25,21 +25,27 @@ public class TxSubmissionClient {
     private String host;
     private int port;
     private VersionTable versionTable;
+    private int maxQueueSize;
     private HandshakeAgent handshakeAgent;
     private TxSubmissionAgent txSubmissionAgent;
     private KeepAliveAgent keepAliveAgent;
     private TCPNodeClient n2nClient;
 
     public TxSubmissionClient(String host, int port, VersionTable versionTable) {
+        this(host, port, versionTable, 0);
+    }
+
+    public TxSubmissionClient(String host, int port, VersionTable versionTable, int maxQueueSize) {
         this.host = host;
         this.port = port;
         this.versionTable = versionTable;
+        this.maxQueueSize = maxQueueSize;
         init();
     }
 
     private void init() {
         handshakeAgent = new HandshakeAgent(versionTable);
-        txSubmissionAgent = new TxSubmissionAgent();
+        txSubmissionAgent = maxQueueSize > 0 ? new TxSubmissionAgent(true, maxQueueSize) : new TxSubmissionAgent();
         keepAliveAgent = new KeepAliveAgent();
 
         n2nClient = new TCPNodeClient(host, port, handshakeAgent, txSubmissionAgent, keepAliveAgent);

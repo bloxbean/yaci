@@ -1,0 +1,14 @@
+dependencies {
+    api libs.cardano.client.core  // CCL core types: ProtocolParams, Utxo, Transaction
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            pom {
+                name = 'Yaci Ledger Rules'
+                description = 'Yaci Ledger Rules - Transaction validation interface for Cardano ledger rules'
+            }
+        }
+    }
+}

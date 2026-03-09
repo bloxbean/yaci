@@ -6,6 +6,7 @@ import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.model.TxSubmissionRequest;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Optional;
@@ -13,6 +14,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 @Slf4j
 public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
+    private static final int DEFAULT_MAX_QUEUE_SIZE = 1000;
+
     // txs should be stored in a thread-safe, ordered (tx dependency/chaining) data structure.
     private final ConcurrentLinkedQueue<TxSubmissionRequest> txs;
     /**
@@ -24,15 +27,23 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
      */
     private final ConcurrentLinkedQueue<TxId> requestedTxIds;
 
+    private final int maxQueueSize;
+
     public TxSubmissionAgent() {
         this(true);
     }
+
     public TxSubmissionAgent(boolean isClient) {
+        this(isClient, DEFAULT_MAX_QUEUE_SIZE);
+    }
+
+    public TxSubmissionAgent(boolean isClient, int maxQueueSize) {
         super(isClient);
         this.currentState = TxSubmissionState.Init;
         this.txs = new ConcurrentLinkedQueue<>();
         this.pendingTxIds = new ConcurrentLinkedQueue<>();
         this.requestedTxIds = new ConcurrentLinkedQueue<>();
+        this.maxQueueSize = maxQueueSize;
     }
 
     @Override
@@ -41,7 +52,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     @Override
-public Message buildNextMessage() {
+    public Message buildNextMessage() {
         switch ((TxSubmissionState) currentState) {
             case Init:
                 return new Init();
@@ -60,7 +71,7 @@ public Message buildNextMessage() {
     }
 
     private Optional<TxSubmissionRequest> removeTxIdAndHash(TxId txId) {
-        var txIdAndHashOpt = txs.stream().filter(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(txId)).findAny();
+        var txIdAndHashOpt = txs.stream().filter(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(HexUtil.encodeHexString(txId.getTxId()))).findAny();
         txIdAndHashOpt.ifPresent(txs::remove);
         return txIdAndHashOpt;
     }
@@ -75,8 +86,7 @@ public Message buildNextMessage() {
                     .forEach(txSubmissionRequest ->
                             replyTxIds.addTxId(txSubmissionRequest.getTxBodyType().getEra(), txSubmissionRequest.getTxHash(), txSubmissionRequest.getTxnBytes().length)
                     );
-            if (log.isDebugEnabled())
-                log.debug("TxIds: {}", replyTxIds.getTxIdAndSizeMap().size());
+            log.info("Sending {} TxId(s) to upstream node", replyTxIds.getTxIdAndSizeMap().size());
             return replyTxIds;
         }
         return new ReplyTxIds();
@@ -90,9 +100,11 @@ public Message buildNextMessage() {
         requestedTxIds.forEach(txId -> findTxIdAndHash(txId).ifPresent(txSubmissionRequest ->
                 replyTxs.addTx(new Tx(txSubmissionRequest.getTxBodyType().getEra(), txSubmissionRequest.getTxnBytes()))
         ));
+        // Proactively clean delivered txs from txs queue — byte[] bodies have been serialized
+        requestedTxIds.forEach(this::removeTxIdAndHash);
+        requestedTxIds.clear();
 
-        if (log.isDebugEnabled())
-            log.debug("Txs: {}", replyTxs.getTxns().size());
+        log.info("Sending {} Tx(s) to upstream node", replyTxs.getTxns().size());
         return replyTxs;
     }
 
@@ -143,7 +155,7 @@ public Message buildNextMessage() {
         var txToAdd = numTxToAdd - pendingTxIds.size();
         if (!txs.isEmpty()) {
             txs.stream()
-                    .map(tx -> new TxId(tx.getTxBodyType().getEra(), tx.getTxnBytes()))
+                    .map(tx -> new TxId(tx.getTxBodyType().getEra(), HexUtil.decodeHexString(tx.getTxHash())))
                     .filter(txId -> !pendingTxIds.contains(txId))
                     .limit(txToAdd)
                     .forEach(pendingTxIds::add);
@@ -165,28 +177,53 @@ public Message buildNextMessage() {
             for (int i = 0; i < numTxToRemove; i++) {
                 var txHash = pendingTxIds.poll();
                 if (txHash != null) {
-                    // remove from map
                     removeTxIdAndHash(txHash);
                 }
             }
-
+            if (numAcknowledgedTransactions > numTxToRemove) {
+                log.warn("Ack count {} exceeded pendingTxIds size {}", numAcknowledgedTransactions, numTxToRemove);
+            }
+            log.info("Upstream node acknowledged {} tx(s), remaining in queue: {}", numTxToRemove, txs.size());
         }
-
     }
 
-    public void enqueueTransaction(String txHash, byte[] txBytes, TxBodyType txBodyType) {
-        if (txs.stream().anyMatch(txSubmissionRequest -> txSubmissionRequest.getTxHash().equals(txHash))) {
-            return;
+    /**
+     * Enqueue a transaction for submission to the upstream node.
+     *
+     * @return true if the transaction was enqueued, false if rejected (queue full or duplicate)
+     */
+    public boolean enqueueTransaction(String txHash, byte[] txBytes, TxBodyType txBodyType) {
+        boolean shouldWake;
+        synchronized (this) {
+            if (txs.size() >= maxQueueSize) {
+                log.warn("Tx queue full ({}/{}), rejecting: {}", txs.size(), maxQueueSize, txHash);
+                return false;
+            }
+            if (txs.stream().anyMatch(req -> req.getTxHash().equals(txHash))) {
+                return false; // duplicate
+            }
+            txs.add(TxSubmissionRequest.builder().txHash(txHash).txnBytes(txBytes).txBodyType(txBodyType).build());
+            shouldWake = TxSubmissionState.TxIdsBlocking.equals(currentState);
+            if (shouldWake) {
+                addTxToQueue(new TxId(txBodyType.getEra(), HexUtil.decodeHexString(txHash)));
+            }
         }
-        txs.add(TxSubmissionRequest.builder().txHash(txHash).txnBytes(txBytes).txBodyType(txBodyType).build());
-        if (TxSubmissionState.TxIdsBlocking.equals(currentState)) {
-            addTxToQueue(new TxId(txBodyType.getEra(), HexUtil.decodeHexString(txHash)));
-            this.sendNextMessage();
+        log.info("Transaction enqueued: {}, total txs in queue: {}", txHash, txs.size());
+        if (shouldWake) {
+            Channel ch = getChannel();
+            if (ch != null && ch.isActive()) {
+                ch.eventLoop().execute(this::sendNextMessage);
+            }
         }
+        return true;
     }
 
     public boolean hasPendingTx() {
         return !pendingTxIds.isEmpty();
+    }
+
+    public int getQueueSize() {
+        return txs.size();
     }
 
     @Override

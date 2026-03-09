@@ -1,0 +1,31 @@
+apply plugin: 'java-library'
+apply plugin: 'scala'
+
+sourceCompatibility = JavaVersion.VERSION_21
+targetCompatibility = JavaVersion.VERSION_21
+
+tasks.withType(ScalaCompile).configureEach {
+    scalaCompileOptions.additionalParameters = ['-release', '21']
+}
+
+dependencies {
+    api project(':ledger-rules')
+
+    implementation libs.scala3.library
+    implementation libs.scalus.bloxbean.ccl
+    implementation libs.scalus.cardano.ledger
+}
+
+// Java factory in src/main/java/ references Scala types from src/main/scala/.
+// Include it in Scala joint compilation so cross-references resolve in one pass.
+// IntelliJ still treats src/main/java/ as a proper Java source root.
+sourceSets.main.scala.srcDir 'src/main/java'
+tasks.named('compileJava').configure {
+    // All sources are jointly compiled by the Scala compiler
+    source = files()
+}
+
+// Avoid duplicate .tasty entries when both Scala and Java srcDirs overlap
+tasks.named('jar').configure {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

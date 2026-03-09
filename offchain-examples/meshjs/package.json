@@ -1,0 +1,13 @@
+{
+  "name": "yaci-meshjs-test",
+  "version": "1.0.0",
+  "description": "MeshJS end-to-end test for Yaci Blockfrost-compatible API",
+  "type": "module",
+  "scripts": {
+    "test": "node src/test-yaci.mjs"
+  },
+  "dependencies": {
+    "@meshsdk/core": "latest",
+    "xhr2": "^0.2.1"
+  }
+}

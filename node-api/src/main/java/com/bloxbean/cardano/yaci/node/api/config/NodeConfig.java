@@ -27,4 +27,20 @@ public interface NodeConfig {
      * Get the protocol magic number for the target network
      */
     long getProtocolMagic();
+
+    /**
+     * Number of slots per epoch. Loaded from shelley-genesis.json epochLength when available.
+     * Default: 432000 (standard Cardano 5-day epoch).
+     */
+    default long getEpochLength() {
+        return 432000;
+    }
+
+    /**
+     * Check if dev mode is enabled.
+     * Dev mode enables devnet-only features (rollback, snapshot, faucet, time advance, genesis download).
+     */
+    default boolean isDevMode() {
+        return false;
+    }
 }
