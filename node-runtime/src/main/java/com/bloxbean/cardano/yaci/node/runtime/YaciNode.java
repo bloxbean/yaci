@@ -688,14 +688,9 @@ public class YaciNode implements NodeAPI {
         boolean hasFunds = genesisConfig.hasInitialFunds() || genesisConfig.hasByronBalances();
 
         if (hasFunds) {
-            // Build an empty genesis block (block 0) — no embedded transactions
-            var blockBuilder = new DevnetBlockBuilder();
-            var genesisBlock = blockBuilder.buildBlock(0, 0, null, java.util.List.of());
-            chainState.storeBlock(genesisBlock.blockHash(), 0L, 0L, genesisBlock.blockCbor());
-            chainState.storeBlockHeader(genesisBlock.blockHash(), 0L, 0L, genesisBlock.wrappedHeaderCbor());
-            String blockHash = HexUtil.encodeHexString(genesisBlock.blockHash());
+            // Store genesis UTXOs directly in UTXO store with blake2b(address) tx hashes.
+            String blockHash = "0000000000000000000000000000000000000000000000000000000000000000";
 
-            // Store genesis UTXOs directly in UTXO store with blake2b(address) tx hashes
             if (utxoStore != null) {
                 if (genesisConfig.hasInitialFunds()) {
                     utxoStore.storeGenesisUtxos(genesisConfig.getInitialFunds(),
@@ -707,7 +702,7 @@ public class YaciNode implements NodeAPI {
                 }
             }
 
-            log.info("Genesis block stored with {} shelley + {} byron fund entries (UTXOs in UTXO store)",
+            log.info("Genesis UTXOs stored: {} shelley + {} byron fund entries",
                     genesisConfig.getInitialFunds().size(),
                     genesisConfig.getByronBalances().size());
         } else {
