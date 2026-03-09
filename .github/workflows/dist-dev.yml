@@ -1,6 +1,9 @@
 name: Dev Distribution Build
 
 on:
+  push:
+    branches:
+      - feat/yaci-node-mock-bp  # TODO: remove after testing
   workflow_dispatch:
     inputs:
       build_native:
