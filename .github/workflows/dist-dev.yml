@@ -2,8 +2,8 @@ name: Dev Distribution Build
 
 on:
   push:
-    branches:
-      - develop/yaci-node  # TODO: remove after testing
+    tags:
+      - 'dev-*'
   workflow_dispatch:
     inputs:
       build_native:
@@ -34,7 +34,7 @@ jobs:
           retention-days: 3
 
   native-dist:
-    #if: ${{ inputs.build_native }}  # TODO: restore after testing
+    if: ${{ inputs.build_native }}
     strategy:
       matrix:
         include:
