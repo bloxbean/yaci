@@ -11,26 +11,15 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class SyncTipContext {
     private final AtomicLong networkTipSlot = new AtomicLong(-1L);
-    private final AtomicLong lastUpdateEpochMs = new AtomicLong(0L);
 
     public void update(Tip tip) {
         if (tip != null && tip.getPoint() != null) {
             networkTipSlot.set(Math.max(0L, tip.getPoint().getSlot()));
-            lastUpdateEpochMs.set(System.currentTimeMillis());
         }
-    }
-
-    public void invalidate() {
-        networkTipSlot.set(-1L);
-        lastUpdateEpochMs.set(System.currentTimeMillis());
     }
 
     public long getNetworkTipSlot() {
         return networkTipSlot.get();
-    }
-
-    public long getLastUpdateEpochMs() {
-        return lastUpdateEpochMs.get();
     }
 }
 

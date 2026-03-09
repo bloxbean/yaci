@@ -1,5 +1,7 @@
 package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
+import java.util.Map;
+
 public interface UtxoStatusProvider {
     boolean isEnabled();
     String storeType();
@@ -10,6 +12,6 @@ public interface UtxoStatusProvider {
     int getPruneBatchSize();
     byte[] getDeltaCursorKey();
     byte[] getSpentCursorKey();
-    java.util.Map<String, Object> getMetrics();
-    java.util.Map<String, Long> getCfEstimates();
+    Map<String, Object> getMetrics();
+    Map<String, Long> getCfEstimates();
 }

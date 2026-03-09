@@ -1,7 +1,7 @@
-package com.bloxbean.cardano.yaci.node.runtime.events;
+package com.bloxbean.cardano.yaci.node.api.events;
 
 import com.bloxbean.cardano.yaci.events.api.Event;
-import com.bloxbean.cardano.yaci.node.runtime.chain.MemPoolTransaction;
+import com.bloxbean.cardano.yaci.node.api.model.MemPoolTransaction;
 
 /**
  * Event published when a transaction is received and added to the mempool.
@@ -17,4 +17,3 @@ public final class MemPoolTransactionReceivedEvent implements Event {
         return transaction;
     }
 }
-

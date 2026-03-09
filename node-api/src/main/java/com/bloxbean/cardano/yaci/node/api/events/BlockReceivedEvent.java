@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.node.runtime.events;
+package com.bloxbean.cardano.yaci.node.api.events;
 
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Era;
@@ -6,26 +6,26 @@ import com.bloxbean.cardano.yaci.events.api.Event;
 
 /**
  * Event published when a block is received from the upstream Cardano node.
- * 
+ *
  * This event is published BEFORE the block is stored in the chain state,
  * allowing plugins to inspect or validate blocks before persistence.
  * For post-storage processing, use BlockAppliedEvent instead.
- * 
+ *
  * Event timing:
  * - Published immediately after block is fetched and parsed
  * - Before any validation or storage operations
  * - May be published for blocks that are later rejected
- * 
+ *
  * Use cases:
  * - Block validation and filtering
  * - Pre-storage transformations
  * - Network monitoring and statistics
  * - Real-time block streaming to external systems
- * 
+ *
  * Note: The block reference is to the in-memory parsed object.
  * For Byron era blocks, the block field may be null as they use
  * a different internal representation.
- * 
+ *
  * @see BlockAppliedEvent for post-storage notifications
  */
 public final class BlockReceivedEvent implements Event {
@@ -49,4 +49,3 @@ public final class BlockReceivedEvent implements Event {
     public String blockHash() { return blockHash; }
     public Block block() { return block; }
 }
-

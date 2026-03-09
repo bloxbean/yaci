@@ -90,15 +90,15 @@ final class UtxoCborCodec {
         String address = new String(((ByteString) map.get(new UnsignedInteger(0))).getBytes());
         BigInteger lovelace = CborSerializationUtil.toBigInteger(map.get(new UnsignedInteger(1)));
         // Assets
-        java.util.List<com.bloxbean.cardano.yaci.core.model.Amount> assets = new java.util.ArrayList<>();
+        List<Amount> assets = new ArrayList<>();
         DataItem d2 = map.get(new UnsignedInteger(2));
         if (d2 instanceof Array arr) {
             for (DataItem di : arr.getDataItems()) {
                 Array a = (Array) di;
                 String pol = HexUtil.encodeHexString(((ByteString) a.getDataItems().get(0)).getBytes());
                 byte[] nameBytes = ((ByteString) a.getDataItems().get(1)).getBytes();
-                java.math.BigInteger qty = CborSerializationUtil.toBigInteger(a.getDataItems().get(2));
-                assets.add(new com.bloxbean.cardano.yaci.core.model.Amount(null, pol, null, nameBytes, qty));
+                BigInteger qty = CborSerializationUtil.toBigInteger(a.getDataItems().get(2));
+                assets.add(new Amount(null, pol, null, nameBytes, qty));
             }
         }
         // Datum hash and inline datum
@@ -121,7 +121,7 @@ final class UtxoCborCodec {
     static class StoredUtxo {
         final String address;
         final BigInteger lovelace;
-        final java.util.List<com.bloxbean.cardano.yaci.core.model.Amount> assets;
+        final List<Amount> assets;
         final String datumHash;
         final byte[] inlineDatum;
         final boolean collateralReturn;
@@ -130,7 +130,7 @@ final class UtxoCborCodec {
         final String blockHash;
 
         StoredUtxo(String address, BigInteger lovelace,
-                   java.util.List<com.bloxbean.cardano.yaci.core.model.Amount> assets,
+                   List<Amount> assets,
                    String datumHash, byte[] inlineDatum,
                    boolean collateralReturn, long slot, long blockNumber, String blockHash) {
             this.address = address;

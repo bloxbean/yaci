@@ -17,8 +17,10 @@ import com.bloxbean.cardano.yaci.events.api.EventBus;
 import com.bloxbean.cardano.yaci.events.api.EventMetadata;
 import com.bloxbean.cardano.yaci.events.api.PublishOptions;
 import com.bloxbean.cardano.yaci.node.api.events.BlockConsensusEvent;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockReceivedEvent;
+import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
+import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.BlockReceivedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.TipChangedEvent;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -524,7 +526,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                         .blockNo(_newTip.getBlockNumber())
                         .blockHash(HexUtil.encodeHexString(_newTip.getBlockHash()))
                         .build();
-                eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.TipChangedEvent(
+                eventBus.publish(new TipChangedEvent(
                         null, null, null,
                         _newTip.getSlot(), _newTip.getBlockNumber(), HexUtil.encodeHexString(_newTip.getBlockHash())
                 ), tipMeta, PublishOptions.builder().build());
@@ -637,7 +639,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                         .blockNo(_newTipByron.getBlockNumber())
                         .blockHash(HexUtil.encodeHexString(_newTipByron.getBlockHash()))
                         .build();
-                eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.TipChangedEvent(
+                eventBus.publish(new TipChangedEvent(
                         null, null, null,
                         _newTipByron.getSlot(), _newTipByron.getBlockNumber(), HexUtil.encodeHexString(_newTipByron.getBlockHash())
                 ), tipMeta, PublishOptions.builder().build());
@@ -751,7 +753,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                         .blockNo(_newTipEb.getBlockNumber())
                         .blockHash(HexUtil.encodeHexString(_newTipEb.getBlockHash()))
                         .build();
-                eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.TipChangedEvent(
+                eventBus.publish(new TipChangedEvent(
                         null, null, null,
                         _newTipEb.getSlot(), _newTipEb.getBlockNumber(), HexUtil.encodeHexString(_newTipEb.getBlockHash())
                 ), tipMeta, PublishOptions.builder().build());
@@ -851,7 +853,7 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 // Pause fetching during probe to avoid churn
                 paused.set(true);
 
-                if (chainState instanceof com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState rocks) {
+                if (chainState instanceof DirectRocksDBChainState rocks) {
                     if (rocks.detectCorruption()) {
                         log.warn("🚨 Corruption detected during runtime probe - attempting recovery");
                         rocks.recoverFromCorruption();
@@ -1190,6 +1192,4 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
         }
         return syncPhase == SyncPhase.STEADY_STATE;
     }
-
-    // Helper methods removed - using HexUtil instead
 }

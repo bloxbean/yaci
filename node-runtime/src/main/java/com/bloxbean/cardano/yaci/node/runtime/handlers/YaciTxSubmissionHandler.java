@@ -8,14 +8,15 @@ import com.bloxbean.cardano.yaci.events.api.EventMetadata;
 import com.bloxbean.cardano.yaci.events.api.PublishOptions;
 import com.bloxbean.cardano.yaci.events.api.EventBus;
 import com.bloxbean.cardano.yaci.node.api.events.TransactionValidateEvent;
+import com.bloxbean.cardano.yaci.node.api.events.MemPoolTransactionReceivedEvent;
+import com.bloxbean.cardano.yaci.node.api.model.MemPoolTransaction;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
-import com.bloxbean.cardano.yaci.node.runtime.chain.MemPoolTransaction;
-import com.bloxbean.cardano.yaci.node.runtime.events.MemPoolTransactionReceivedEvent;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * Implementation of TxSubmissionListener and TxSubmissionHandler that integrates
@@ -112,7 +113,7 @@ public class YaciTxSubmissionHandler implements TxSubmissionListener, TxSubmissi
                     txsRejected++;
                     String errorMsg = validateEvent.rejections().stream()
                             .map(r -> r.reason())
-                            .collect(java.util.stream.Collectors.joining("; "));
+                            .collect(Collectors.joining("; "));
                     log.warn("Rejecting invalid N2N tx {}: {}", txHash, errorMsg);
                     continue;
                 }

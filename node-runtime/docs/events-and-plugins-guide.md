@@ -140,7 +140,7 @@ You can annotate methods on your plugin (or any object you register) to receive 
 
 ```java
 import com.bloxbean.cardano.yaci.events.api.DomainEventListener;
-import com.bloxbean.cardano.yaci.node.runtime.events.*;
+import com.bloxbean.cardano.yaci.node.api.events.*;
 
 public final class MyPlugin implements NodePlugin {
   @DomainEventListener(order = 0)

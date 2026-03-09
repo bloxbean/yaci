@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.node.runtime.chain;
 import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.node.api.model.MemPoolTransaction;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;

@@ -1,6 +1,6 @@
 package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
 import org.rocksdb.ColumnFamilyHandle;
 
 /**

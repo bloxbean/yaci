@@ -1,5 +1,7 @@
 package com.bloxbean.cardano.yaci.node.runtime.chain;
 
+import com.bloxbean.cardano.yaci.node.api.model.MemPoolTransaction;
+
 import java.util.Set;
 
 public interface MemPool {

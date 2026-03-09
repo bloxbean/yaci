@@ -1,61 +1,88 @@
 package com.bloxbean.cardano.yaci.node.runtime;
 
+import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
+import com.bloxbean.cardano.yaci.core.model.BlockHeader;
+import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.network.server.NodeServer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.events.api.*;
+import com.bloxbean.cardano.yaci.events.api.config.EventsOptions;
 import com.bloxbean.cardano.yaci.events.api.support.AnnotationListenerRegistrar;
+import com.bloxbean.cardano.yaci.events.impl.NoopEventBus;
+import com.bloxbean.cardano.yaci.events.impl.SimpleEventBus;
 import com.bloxbean.cardano.yaci.helper.*;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
-import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.node.api.NodeAPI;
 import com.bloxbean.cardano.yaci.node.api.SyncPhase;
-import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
-import com.bloxbean.cardano.yaci.node.api.listener.NodeEventListener;
 import com.bloxbean.cardano.yaci.node.api.config.RuntimeOptions;
-import com.bloxbean.cardano.yaci.events.api.config.EventsOptions;
+import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
+import com.bloxbean.cardano.yaci.node.api.events.TransactionValidateEvent;
+import com.bloxbean.cardano.yaci.node.api.listener.NodeEventListener;
+import com.bloxbean.cardano.yaci.node.api.model.FundResult;
+import com.bloxbean.cardano.yaci.node.api.model.GenesisParameters;
 import com.bloxbean.cardano.yaci.node.api.model.NodeStatus;
-import com.bloxbean.cardano.yaci.node.runtime.chain.InMemoryChainState;
-import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
-import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
-import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
-import com.bloxbean.cardano.yaci.node.runtime.chain.MempoolEvictionPolicy;
-import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMempoolEvictionPolicy;
+import com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo;
+import com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult;
+import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
+import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
+import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.BlockProducer;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.DevnetBlockBuilder;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper;
-import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationService;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionEvaluationService;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationException;
-import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationService;
+import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
+import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMempoolEvictionPolicy;
+import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
+import com.bloxbean.cardano.yaci.node.runtime.chain.InMemoryChainState;
+import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
+import com.bloxbean.cardano.yaci.node.runtime.chain.MempoolEvictionPolicy;
+import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.MemPoolTransactionReceivedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.NodeStartedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.RollbackEvent;
+import com.bloxbean.cardano.yaci.node.api.events.SyncStatusChangedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
-import com.bloxbean.cardano.yaci.node.api.events.TransactionValidateEvent;
-import com.bloxbean.cardano.yaci.node.runtime.validation.DefaultTransactionValidatorListener;
-import com.bloxbean.cardano.yaci.node.runtime.validation.DefaultConsensusListener;
-import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
-import com.bloxbean.cardano.yaci.node.runtime.events.MemPoolTransactionReceivedEvent;
-import lombok.extern.slf4j.Slf4j;
-import com.bloxbean.cardano.yaci.events.api.*;
-import com.bloxbean.cardano.yaci.events.impl.SimpleEventBus;
-import com.bloxbean.cardano.yaci.events.impl.NoopEventBus;
-import com.bloxbean.cardano.yaci.node.runtime.events.NodeStartedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.plugins.PluginManager;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.Prunable;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.PruneService;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandler;
-import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStoreFactory;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStoreWriter;
+import com.bloxbean.cardano.yaci.node.runtime.validation.DefaultConsensusListener;
+import com.bloxbean.cardano.yaci.node.runtime.validation.DefaultTransactionValidatorListener;
+import lombok.extern.slf4j.Slf4j;
 
+import java.io.IOException;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+
 
 /**
  * Yaci Node - Acts as both client and server
@@ -80,20 +107,16 @@ public class YaciNode implements NodeAPI {
     // Client sync component - now using pipelined sync for parallel ChainSync and BlockFetch
     private PeerClient peerClient;
     private boolean isInitialSyncComplete = false;
-    private boolean isBulkBatchSync = false;
-
     // Pipelining state
     private PipelineConfig pipelineConfig;
     private boolean isPipelinedMode = false;
-    private long headersReceived = 0;
-    private long bodiesReceived = 0;
 
     // Pipeline managers
     private HeaderSyncManager headerSyncManager;
     private BodyFetchManager bodyFetchManager;
 
     // Remote tip info for sync strategy
-    private com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip remoteTip;
+    private Tip remoteTip;
 
     // Server components (for serving other clients)
     private NodeServer nodeServer;
@@ -135,11 +158,11 @@ public class YaciNode implements NodeAPI {
     private final RuntimeOptions runtimeOptions;
     private final EventBus eventBus;
     private PluginManager pluginManager;
-    private com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStoreWriter utxoStore;
+    private UtxoStoreWriter utxoStore;
     private PruneService utxoPruneService;
     private UtxoEventHandler utxoEventHandler;
-    private com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync utxoEventHandlerAsync;
-    private java.util.concurrent.ScheduledFuture<?> utxoLagTask;
+    private UtxoEventHandlerAsync utxoEventHandlerAsync;
+    private ScheduledFuture<?> utxoLagTask;
 
     public YaciNode(YaciNodeConfig config) {
         this(config, RuntimeOptions.defaults());
@@ -195,7 +218,7 @@ public class YaciNode implements NodeAPI {
             Object enabledOpt = this.runtimeOptions.globals().get("yaci.node.utxo.enabled");
             boolean utxoEnabled = enabledOpt instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(enabledOpt));
             if (utxoEnabled && (chainState instanceof DirectRocksDBChainState rocks)) {
-                this.utxoStore = com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStoreFactory.create(rocks, log, this.runtimeOptions.globals());
+                this.utxoStore = UtxoStoreFactory.create(rocks, log, this.runtimeOptions.globals());
                 // Reconcile UTXO with chainstate before subscribing and starting prune
                 try {
                     this.utxoStore.reconcile(rocks);
@@ -207,20 +230,20 @@ public class YaciNode implements NodeAPI {
                 Object asyncOpt = this.runtimeOptions.globals().get("yaci.node.utxo.applyAsync");
                 if (asyncOpt instanceof Boolean b) applyAsync = b; else if (asyncOpt != null) try { applyAsync = Boolean.parseBoolean(String.valueOf(asyncOpt)); } catch (Exception ignored) {}
                 if (applyAsync) {
-                    this.utxoEventHandlerAsync = new com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync(eventBus, this.utxoStore);
+                    this.utxoEventHandlerAsync = new UtxoEventHandlerAsync(eventBus, this.utxoStore);
                     log.info("UTXO store initialized ({}); UtxoEventHandlerAsync registered (applyAsync=true)",
-                            (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp) ? sp.storeType() : "?");
+                            (this.utxoStore instanceof UtxoStatusProvider sp) ? sp.storeType() : "?");
                 } else {
                     this.utxoEventHandler = new UtxoEventHandler(eventBus, this.utxoStore);
                     log.info("UTXO store initialized ({}); UtxoEventHandler registered",
-                            (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp) ? sp.storeType() : "?");
+                            (this.utxoStore instanceof UtxoStatusProvider sp) ? sp.storeType() : "?");
                 }
                 // Start prune service on virtual-thread scheduler
                 long intervalSec = 5L;
                 Object po = this.runtimeOptions.globals().get("yaci.node.utxo.prune.schedule.seconds");
                 if (po instanceof Number n) intervalSec = Math.max(1L, n.longValue());
                 else if (po != null) try { intervalSec = Math.max(1L, Long.parseLong(String.valueOf(po))); } catch (Exception ignored) {}
-                this.utxoPruneService = new PruneService((com.bloxbean.cardano.yaci.node.runtime.utxo.Prunable) this.utxoStore, intervalSec * 1000);
+                this.utxoPruneService = new PruneService((Prunable) this.utxoStore, intervalSec * 1000);
                 this.utxoPruneService.start();
                 log.info("UTXO prune service started (interval={}s)", intervalSec);
 
@@ -232,7 +255,7 @@ public class YaciNode implements NodeAPI {
                 final long failIfAbove = parseLong(this.runtimeOptions.globals().get("yaci.node.utxo.lag.failIfAbove"), -1L);
                 this.utxoLagTask = scheduler.scheduleAtFixedRate(() -> {
                     try {
-                        long lastApplied = (this.utxoStore instanceof com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider sp)
+                        long lastApplied = (this.utxoStore instanceof UtxoStatusProvider sp)
                                 ? sp.getLastAppliedBlock() : 0L;
                         var tip = chainState.getTip();
                         long tipBlock = tip != null ? tip.getBlockNumber() : 0L;
@@ -245,7 +268,7 @@ public class YaciNode implements NodeAPI {
                             log.warn("UTXO lag {} blocks exceeds configured threshold {}", lag, failIfAbove);
                         }
                     } catch (Throwable ignored) {}
-                }, lagLogSec, lagLogSec, java.util.concurrent.TimeUnit.SECONDS);
+                }, lagLogSec, lagLogSec, TimeUnit.SECONDS);
             } else {
                 log.info("UTXO store not initialized (enabled={}, rocksdb={})", utxoEnabled, (chainState instanceof DirectRocksDBChainState));
             }
@@ -272,54 +295,6 @@ public class YaciNode implements NodeAPI {
                 .processingThreads(4)      // Multiple threads for performance
                 .headerBufferSize(config.getHeaderPipelineDepth() * 5)  // Buffer size based on pipeline depth
                 .build();
-    }
-
-    /**
-     * Create an adaptive selective body fetch strategy
-     * This determines which block bodies to fetch based on configuration and current sync state
-     */
-    private java.util.function.Predicate<BlockHeader> createSelectiveBodyFetchStrategy() {
-        return header -> {
-            try {
-                // If selective body fetch is disabled, fetch all bodies
-                if (!config.isEnableSelectiveBodyFetch()) {
-                    return true;
-                }
-
-                long slot = header.getHeaderBody().getSlot();
-                long blockNumber = header.getHeaderBody().getBlockNumber();
-                int fetchRatio = config.getSelectiveBodyFetchRatio();
-
-                // During initial sync, be more selective to improve performance
-                if (!isInitialSyncComplete) {
-                    // Use configured ratio for bulk sync
-                    if (fetchRatio == 0 || blockNumber % fetchRatio == 0) {
-                        return true;
-                    }
-
-                    // Always fetch recent blocks (last 100 slots) to maintain tip accuracy
-                    if (remoteTip != null && (remoteTip.getPoint().getSlot() - slot) < 100) {
-                        return true;
-                    }
-
-                    // Always fetch epoch boundary blocks (assuming 21600 slots per epoch for most eras)
-                    if (slot % 21600 < 100) {
-                        return true;
-                    }
-
-                    return false;
-                } else {
-                    // During real-time sync, fetch all bodies for immediate serving
-                    return true;
-                }
-
-            } catch (Exception e) {
-                if (log.isDebugEnabled()) {
-                    log.debug("Error in selective body fetch strategy, defaulting to fetch: {}", e.getMessage());
-                }
-                return true; // Default to fetching when in doubt
-            }
-        };
     }
 
     /**
@@ -556,7 +531,7 @@ public class YaciNode implements NodeAPI {
 
         // For devnet block producer mode, era starts at Conway from slot 0
         if (freshStart && chainState instanceof DirectRocksDBChainState rocksState) {
-            rocksState.setEraStartSlot(com.bloxbean.cardano.yaci.core.model.Era.Conway.value, 0);
+            rocksState.setEraStartSlot(Era.Conway.value, 0);
         }
 
         log.info("Block producer started");
@@ -653,7 +628,7 @@ public class YaciNode implements NodeAPI {
         log.info("Transaction evaluator set");
     }
 
-    public void setScriptEvaluator(com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator scriptEvaluator) {
+    public void setScriptEvaluator(TransactionEvaluator scriptEvaluator) {
         if (scriptEvaluator == null || getUtxoState() == null) {
             log.info("Script evaluation not available");
             return;
@@ -719,7 +694,7 @@ public class YaciNode implements NodeAPI {
     @Override
     public String submitTransaction(byte[] txCbor) {
         // Compute tx hash upfront for event and return value
-        String txHash = com.bloxbean.cardano.client.transaction.util.TransactionUtil.getTxHash(txCbor);
+        String txHash = TransactionUtil.getTxHash(txCbor);
 
         // Publish validation event — synchronous listeners will veto if invalid
         var validateEvent = new TransactionValidateEvent(txCbor, txHash, "rest-api");
@@ -757,12 +732,12 @@ public class YaciNode implements NodeAPI {
     }
 
     @Override
-    public com.bloxbean.cardano.yaci.node.api.model.GenesisParameters getGenesisParameters() {
+    public GenesisParameters getGenesisParameters() {
         if (genesisConfig == null || genesisConfig.getShelleyGenesisData() == null) {
             return null;
         }
         var d = genesisConfig.getShelleyGenesisData();
-        return new com.bloxbean.cardano.yaci.node.api.model.GenesisParameters(
+        return new GenesisParameters(
                 d.activeSlotsCoeff(),
                 d.updateQuorum(),
                 String.valueOf(d.maxLovelaceSupply()),
@@ -819,7 +794,7 @@ public class YaciNode implements NodeAPI {
             // 4. Publish RollbackEvent (isReal=true so UTXO deltas get unwound)
             try {
                 EventMetadata meta = EventMetadata.builder().origin("api-rollback").build();
-                eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent(rollbackPoint, true),
+                eventBus.publish(new RollbackEvent(rollbackPoint, true),
                         meta, PublishOptions.builder().build());
             } catch (Exception ex) {
                 log.warn("RollbackEvent publish failed: {}", ex.toString());
@@ -866,7 +841,7 @@ public class YaciNode implements NodeAPI {
     }
 
     @Override
-    public com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo createSnapshot(String name) {
+    public SnapshotInfo createSnapshot(String name) {
         requireDevMode("Snapshot");
         if (!(chainState instanceof DirectRocksDBChainState rocksState)) {
             throw new IllegalStateException("Snapshots require RocksDB storage");
@@ -876,11 +851,11 @@ public class YaciNode implements NodeAPI {
         }
 
         // Snapshot dir: <dbPath>/../snapshots/<name>/
-        java.nio.file.Path snapshotsDir = java.nio.file.Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
-        java.nio.file.Path snapshotDir = snapshotsDir.resolve(name);
-        java.nio.file.Path checkpointDir = snapshotDir.resolve("checkpoint");
+        Path snapshotsDir = Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
+        Path snapshotDir = snapshotsDir.resolve(name);
+        Path checkpointDir = snapshotDir.resolve("checkpoint");
 
-        if (java.nio.file.Files.exists(snapshotDir)) {
+        if (Files.exists(snapshotDir)) {
             throw new IllegalArgumentException("Snapshot '" + name + "' already exists");
         }
 
@@ -889,7 +864,7 @@ public class YaciNode implements NodeAPI {
         if (wasRunning) blockProducer.stop();
 
         try {
-            java.nio.file.Files.createDirectories(snapshotDir);
+            Files.createDirectories(snapshotDir);
             rocksState.createSnapshot(checkpointDir.toString());
 
             ChainTip tip = chainState.getTip();
@@ -901,10 +876,10 @@ public class YaciNode implements NodeAPI {
             var metaJson = String.format(
                     "{\"name\":\"%s\",\"slot\":%d,\"blockNumber\":%d,\"createdAt\":%d}",
                     name, slot, blockNumber, createdAt);
-            java.nio.file.Files.writeString(snapshotDir.resolve("snapshot-meta.json"), metaJson);
+            Files.writeString(snapshotDir.resolve("snapshot-meta.json"), metaJson);
 
             log.info("Snapshot '{}' created: slot={}, block={}", name, slot, blockNumber);
-            return new com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo(name, slot, blockNumber, createdAt);
+            return new SnapshotInfo(name, slot, blockNumber, createdAt);
         } catch (Exception e) {
             throw new RuntimeException("Failed to create snapshot '" + name + "'", e);
         } finally {
@@ -922,11 +897,11 @@ public class YaciNode implements NodeAPI {
             throw new IllegalArgumentException("Snapshot name must not be empty");
         }
 
-        java.nio.file.Path snapshotsDir = java.nio.file.Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
-        java.nio.file.Path snapshotDir = snapshotsDir.resolve(name);
-        java.nio.file.Path checkpointDir = snapshotDir.resolve("checkpoint");
+        Path snapshotsDir = Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
+        Path snapshotDir = snapshotsDir.resolve(name);
+        Path checkpointDir = snapshotDir.resolve("checkpoint");
 
-        if (!java.nio.file.Files.isDirectory(checkpointDir)) {
+        if (!Files.isDirectory(checkpointDir)) {
             throw new IllegalArgumentException("Snapshot '" + name + "' does not exist");
         }
 
@@ -981,23 +956,23 @@ public class YaciNode implements NodeAPI {
     }
 
     @Override
-    public java.util.List<com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo> listSnapshots() {
+    public List<SnapshotInfo> listSnapshots() {
         if (!(chainState instanceof DirectRocksDBChainState rocksState)) {
-            return java.util.List.of();
+            return List.of();
         }
 
-        java.nio.file.Path snapshotsDir = java.nio.file.Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
-        if (!java.nio.file.Files.isDirectory(snapshotsDir)) {
-            return java.util.List.of();
+        Path snapshotsDir = Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
+        if (!Files.isDirectory(snapshotsDir)) {
+            return List.of();
         }
 
-        var results = new java.util.ArrayList<com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo>();
-        try (var dirs = java.nio.file.Files.list(snapshotsDir)) {
-            dirs.filter(java.nio.file.Files::isDirectory).forEach(dir -> {
-                java.nio.file.Path metaFile = dir.resolve("snapshot-meta.json");
-                if (java.nio.file.Files.exists(metaFile)) {
+        var results = new ArrayList<SnapshotInfo>();
+        try (var dirs = Files.list(snapshotsDir)) {
+            dirs.filter(Files::isDirectory).forEach(dir -> {
+                Path metaFile = dir.resolve("snapshot-meta.json");
+                if (Files.exists(metaFile)) {
                     try {
-                        String json = java.nio.file.Files.readString(metaFile);
+                        String json = Files.readString(metaFile);
                         var info = parseSnapshotMeta(json);
                         if (info != null) results.add(info);
                     } catch (Exception e) {
@@ -1009,7 +984,7 @@ public class YaciNode implements NodeAPI {
             log.warn("Failed to list snapshots", e);
         }
 
-        results.sort(java.util.Comparator.comparingLong(com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo::createdAt));
+        results.sort(Comparator.comparingLong(SnapshotInfo::createdAt));
         return results;
     }
 
@@ -1022,10 +997,10 @@ public class YaciNode implements NodeAPI {
             throw new IllegalArgumentException("Snapshot name must not be empty");
         }
 
-        java.nio.file.Path snapshotsDir = java.nio.file.Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
-        java.nio.file.Path snapshotDir = snapshotsDir.resolve(name);
+        Path snapshotsDir = Path.of(rocksState.getDbPath()).getParent().resolve("snapshots");
+        Path snapshotDir = snapshotsDir.resolve(name);
 
-        if (!java.nio.file.Files.isDirectory(snapshotDir)) {
+        if (!Files.isDirectory(snapshotDir)) {
             throw new IllegalArgumentException("Snapshot '" + name + "' does not exist");
         }
 
@@ -1038,7 +1013,7 @@ public class YaciNode implements NodeAPI {
     }
 
     @Override
-    public com.bloxbean.cardano.yaci.node.api.model.FundResult fundAddress(String address, long lovelace) {
+    public FundResult fundAddress(String address, long lovelace) {
         requireDevMode("Faucet");
         if (utxoStore == null || !utxoStore.isEnabled()) {
             throw new IllegalStateException("Faucet requires UTXO store to be enabled");
@@ -1051,11 +1026,11 @@ public class YaciNode implements NodeAPI {
         }
 
         String txHash = utxoStore.injectFaucetUtxo(address, lovelace);
-        return new com.bloxbean.cardano.yaci.node.api.model.FundResult(txHash, 0, lovelace);
+        return new FundResult(txHash, 0, lovelace);
     }
 
     @Override
-    public com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult advanceTimeBySlots(int slots) {
+    public TimeAdvanceResult advanceTimeBySlots(int slots) {
         requireDevMode("Time advance");
         if (slots <= 0) {
             throw new IllegalArgumentException("Slots must be positive, got: " + slots);
@@ -1078,7 +1053,7 @@ public class YaciNode implements NodeAPI {
             ChainTip newTip = chainState.getTip();
             lastKnownChainTip = newTip;
 
-            return new com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult(
+            return new TimeAdvanceResult(
                     newTip != null ? newTip.getSlot() : 0,
                     newTip != null ? newTip.getBlockNumber() : 0,
                     blocksProduced);
@@ -1088,7 +1063,7 @@ public class YaciNode implements NodeAPI {
     }
 
     @Override
-    public com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult advanceTimeBySeconds(int seconds) {
+    public TimeAdvanceResult advanceTimeBySeconds(int seconds) {
         requireDevMode("Time advance");
         if (seconds <= 0) {
             throw new IllegalArgumentException("Seconds must be positive, got: " + seconds);
@@ -1113,14 +1088,14 @@ public class YaciNode implements NodeAPI {
         return 0;
     }
 
-    private static com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo parseSnapshotMeta(String json) {
+    private static SnapshotInfo parseSnapshotMeta(String json) {
         // Minimal JSON parsing without adding a dependency
         try {
             String name = extractJsonString(json, "name");
             long slot = extractJsonLong(json, "slot");
             long blockNumber = extractJsonLong(json, "blockNumber");
             long createdAt = extractJsonLong(json, "createdAt");
-            return new com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo(name, slot, blockNumber, createdAt);
+            return new SnapshotInfo(name, slot, blockNumber, createdAt);
         } catch (Exception e) {
             return null;
         }
@@ -1147,17 +1122,17 @@ public class YaciNode implements NodeAPI {
         return Long.parseLong(json.substring(start, end));
     }
 
-    private static void deleteRecursively(java.nio.file.Path dir) throws java.io.IOException {
-        java.nio.file.Files.walkFileTree(dir, new java.nio.file.SimpleFileVisitor<>() {
+    private static void deleteRecursively(Path dir) throws IOException {
+        Files.walkFileTree(dir, new SimpleFileVisitor<>() {
             @Override
-            public java.nio.file.FileVisitResult visitFile(java.nio.file.Path file, java.nio.file.attribute.BasicFileAttributes attrs) throws java.io.IOException {
-                java.nio.file.Files.delete(file);
-                return java.nio.file.FileVisitResult.CONTINUE;
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
             }
             @Override
-            public java.nio.file.FileVisitResult postVisitDirectory(java.nio.file.Path d, java.io.IOException exc) throws java.io.IOException {
-                java.nio.file.Files.delete(d);
-                return java.nio.file.FileVisitResult.CONTINUE;
+            public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
+                Files.delete(d);
+                return FileVisitResult.CONTINUE;
             }
         });
     }
@@ -1220,7 +1195,7 @@ public class YaciNode implements NodeAPI {
     /**
      * Start pipelined client sync with parallel ChainSync and BlockFetch
      */
-    private void startPipelinedClientSync(ChainTip localTip, com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip remoteTip, Point startPoint) {
+    private void startPipelinedClientSync(ChainTip localTip, Tip remoteTip, Point startPoint) {
         // Reset sync phase when starting new sync
         syncPhase = SyncPhase.INITIAL_SYNC;
         log.info("ChainSync agent started - reset to INITIAL_SYNC phase");
@@ -1415,7 +1390,7 @@ public class YaciNode implements NodeAPI {
                 updateSyncProgress();
                 if (prev != syncPhase) {
                     EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
-                    eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.SyncStatusChangedEvent(prev, syncPhase), meta, PublishOptions.builder().build());
+                    eventBus.publish(new SyncStatusChangedEvent(prev, syncPhase), meta, PublishOptions.builder().build());
                 }
             }
         }
@@ -1484,176 +1459,6 @@ public class YaciNode implements NodeAPI {
         }
     }
 
-    // Legacy BlockChainDataListener methods - now handled by pipeline managers
-    // Kept for backward compatibility but commented out
-    /*
-    @Override
-    public void onByronBlock(ByronMainBlock byronBlock) {
-        // In pipeline mode, delegate to BodyFetchManager for block storage
-        if (isPipelinedMode && bodyFetchManager != null) {
-            bodyFetchManager.onByronBlock(byronBlock);
-        } else {
-            // Sequential mode - handle normally
-            storeByronBlock(byronBlock);
-        }
-
-        blocksProcessed++;
-        bodiesReceived++;
-        lastProcessedSlot = byronBlock.getHeader().getConsensusData().getAbsoluteSlot();
-        long blockNumber = byronBlock.getHeader().getConsensusData().getDifficulty().longValue();
-
-        // Check if we've caught up to the remote tip (BlockFetch complete)
-        checkSyncProgress();
-        updateSyncPhase();
-
-        // Update last known tip
-        lastKnownChainTip = chainState.getTip();
-
-        // Notify server agents about new block (only in real-time mode)
-        if (isServerRunning.get() && isInitialSyncComplete) {
-            try {
-                nodeServer.notifyNewDataAvailable();
-            } catch (Exception e) {
-                log.warn("Error notifying server agents about new Byron block", e);
-            }
-        }
-
-        // Enhanced logging for pipelined mode
-        if (isPipelinedMode) {
-            if (isInitialSyncComplete) {
-                log.info("🔄 Real-time: Block #{} at slot {} (Byron) [H:{}, B:{}]",
-                        blockNumber, lastProcessedSlot, headersReceived, bodiesReceived);
-            } else {
-                if (blocksProcessed % 20 == 0) {
-                    log.info("📦 Bodies: {} received (Block #{} at slot {}) (Byron) [H:{}, B:{}]",
-                            bodiesReceived, blockNumber, lastProcessedSlot, headersReceived, bodiesReceived);
-                }
-            }
-        } else {
-            // Legacy mode logging
-            if (isInitialSyncComplete) {
-                log.info("ChainSync: Block #{} at slot {} (Byron)", blockNumber, lastProcessedSlot);
-            } else {
-                if (blocksProcessed % 100 == 0) {
-                    log.info("BlockFetch: Processed {} blocks, current slot: {} (Byron)", blocksProcessed, lastProcessedSlot);
-                }
-            }
-        }
-    }
-    */
-
-    /*
-    @Override
-    public void onByronEbBlock(ByronEbBlock byronEbBlock) {
-        storeByronEbBlock(byronEbBlock);
-        blocksProcessed++;
-        bodiesReceived++;
-        lastProcessedSlot = byronEbBlock.getHeader().getConsensusData().getAbsoluteSlot();
-        long blockNumber = byronEbBlock.getHeader().getConsensusData().getDifficulty().longValue();
-
-        // Check if we've caught up to the remote tip (BlockFetch complete)
-        checkSyncProgress();
-        updateSyncPhase();
-
-        // Update last known tip
-        lastKnownChainTip = chainState.getTip();
-
-        // Notify server agents about new block (only in real-time mode)
-        if (isServerRunning.get() && isInitialSyncComplete) {
-            try {
-                nodeServer.notifyNewDataAvailable();
-            } catch (Exception e) {
-                log.warn("Error notifying server agents about new Byron EB block", e);
-            }
-        }
-
-        // Enhanced logging for pipelined mode
-        if (isPipelinedMode) {
-            if (isInitialSyncComplete) {
-                log.info("🔄 Real-time: Block #{} at slot {} (Byron EB) [H:{}, B:{}]",
-                        blockNumber, lastProcessedSlot, headersReceived, bodiesReceived);
-            } else {
-                if (blocksProcessed % 20 == 0) {
-                    log.info("📦 Bodies: {} received (Block #{} at slot {}) (Byron EB) [H:{}, B:{}]",
-                            bodiesReceived, blockNumber, lastProcessedSlot, headersReceived, bodiesReceived);
-                }
-            }
-        } else {
-            // Legacy mode logging
-            if (isInitialSyncComplete) {
-                log.info("ChainSync: Block #{} at slot {} (Byron EB)", blockNumber, lastProcessedSlot);
-            } else {
-                if (blocksProcessed % 100 == 0) {
-                    log.info("BlockFetch: Processed {} blocks, current slot: {} (Byron EB)", blocksProcessed, lastProcessedSlot);
-                }
-            }
-        }
-    }
-    */
-
-    /*
-    @Override
-    public void onBlock(Era era, Block block, List<Transaction> transactions) {
-        // In pipeline mode, delegate to BodyFetchManager for block storage
-        if (isPipelinedMode && bodyFetchManager != null) {
-            bodyFetchManager.onBlock(era, block, transactions);
-        } else {
-            // Sequential mode - handle normally
-            storeShelleyBlock(block);
-        }
-
-        blocksProcessed++;
-        bodiesReceived++;
-        lastProcessedSlot = block.getHeader().getHeaderBody().getSlot();
-        long blockNumber = block.getHeader().getHeaderBody().getBlockNumber();
-
-        if (log.isDebugEnabled()) {
-            log.debug("Successfully processed block: era={}, blockNumber={}, slot={}",
-                    era, blockNumber, lastProcessedSlot);
-        }
-
-        // Check if we've caught up to the remote tip (BlockFetch complete)
-        checkSyncProgress();
-        updateSyncPhase();
-
-        // Update last known tip
-        lastKnownChainTip = chainState.getTip();
-
-        // Notify server agents about new block (only in real-time mode)
-        if (isServerRunning.get() && isInitialSyncComplete) {
-            try {
-                nodeServer.notifyNewDataAvailable();
-            } catch (Exception e) {
-                log.warn("Error notifying server agents about new {} block", era, e);
-            }
-        }
-
-        // Enhanced logging for pipelined mode
-        if (isPipelinedMode) {
-            if (isInitialSyncComplete) {
-                // Real-time mode - log every block with pipeline info
-                log.info("🔄 Real-time: Block #{} at slot {} ({}) [H:{}, B:{}]",
-                        blockNumber, lastProcessedSlot, era, headersReceived, bodiesReceived);
-            } else {
-                // Bulk sync mode - log every 20 blocks with pipeline progress
-                if (blocksProcessed % 20 == 0) {
-                    log.info("📦 Bodies: {} received (Block #{} at slot {}) [H:{}, B:{}]",
-                            bodiesReceived, blockNumber, lastProcessedSlot, headersReceived, bodiesReceived);
-                }
-            }
-        } else {
-            // Legacy mode logging
-            if (isInitialSyncComplete) {
-                log.info("ChainSync: Block #{} at slot {} ({})", blockNumber, lastProcessedSlot, era);
-            } else {
-                if (blocksProcessed % 100 == 0) {
-                    log.info("BlockFetch: Current block: {}, slot: {}",  blockNumber, lastProcessedSlot);
-                }
-            }
-        }
-    }
-    */
-
     // Rollback handling - coordinates between managers and handles server notifications
     public void handleRollback(Point point) {
         var localTip = chainState.getTip();
@@ -1696,7 +1501,7 @@ public class YaciNode implements NodeAPI {
         // Publish rollback event
         try {
             EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
-            eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.RollbackEvent(point, isReal), meta, PublishOptions.builder().build());
+            eventBus.publish(new RollbackEvent(point, isReal), meta, PublishOptions.builder().build());
         } catch (Exception ex) {
             log.debug("RollbackEvent publish failed: {}", ex.toString());
         }
@@ -1751,212 +1556,6 @@ public class YaciNode implements NodeAPI {
             log.warn("Recovery attempt during {} failed: {}", context, e.toString());
         }
     }
-
-    /*
-    @Override
-    public void batchDone() {
-        if (isBulkBatchSync) {
-            isBulkBatchSync = false; // Reset bulk sync flag
-            log.info("Batch sync complete - activate ChainSync mode");
-            startClientSync();
-        }
-    }
-    */
-
-
-    /*
-    @Override
-    public void intersactNotFound(Tip tip) {
-        var localTip = chainState.getTip();
-        log.warn("Intersect not found. Local tip: {}, Remote tip: {}", localTip, tip);
-        if (localTip != null) {
-            long rollbackSlot = Math.max(0, localTip.getSlot() - 300); // Ensure we don't go negative
-
-            // Extra protection: if we have significant progress, don't rollback to genesis
-            if (localTip.getBlockNumber() > 1000 && rollbackSlot == 0) {
-                log.error("🚨 INTERSECT NOT FOUND - WOULD CAUSE MASSIVE ROLLBACK! 🚨");
-                log.error("Current tip: slot={}, block={}", localTip.getSlot(), localTip.getBlockNumber());
-                log.error("Calculated rollback to: slot={}", rollbackSlot);
-                log.error("This suggests a serious chain mismatch - preventing data loss!");
-                log.error("Stack trace for debugging:");
-                Thread.dumpStack();
-                log.error("EMERGENCY EXIT - Check logs for debugging information");
-                System.exit(1);
-                return;
-            }
-
-            chainState.rollbackTo(rollbackSlot);
-            log.warn("Rolled back 300 slots to: {} (from tip: slot={}, block={})",
-                    rollbackSlot, localTip.getSlot(), localTip.getBlockNumber());
-        } else {
-            log.warn("Local tip is empty - no rollback needed");
-        }
-    }
-    */
-
-    /*
-    @Override
-    public void onDisconnect() {
-        // Prevent multiple disconnect log messages within a short time window
-        if (disconnectLogged.compareAndSet(false, true)) {
-            log.warn("Disconnected from remote node - will attempt to reconnect");
-
-            // Reset the flag after 5 seconds to allow future disconnect logging
-            Thread.ofVirtual().start(() -> {
-                try {
-                    Thread.sleep(5000);
-                    disconnectLogged.set(false);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            });
-        }
-
-        // Don't immediately set syncing to false for pipelined sync with auto-reconnection
-        // The sync will be marked as stopped only if the connection cannot be re-established
-        if (!isPipelinedMode) {
-            isSyncing.set(false);
-        }
-    }
-    */
-
-    // Private helper methods
-
-    // Storage helper methods - now handled by pipeline managers
-    /*
-    private void validateChainContinuity(String prevBlockHash, long currentBlockNumber,
-                                         long currentSlot, String currentBlockHash) {
-        try {
-            // Skip validation for genesis block
-            if (currentBlockNumber == 0 || prevBlockHash == null || prevBlockHash.isEmpty()) {
-                if (log.isDebugEnabled()) {
-                    log.debug("Skipping chain continuity check for genesis block: {}", currentBlockNumber);
-                }
-                return;
-            }
-
-            // Check if previous block exists in storage
-            byte[] prevBlockHashBytes = HexUtil.decodeHexString(prevBlockHash);
-            byte[] prevBlock = chainState.getBlock(prevBlockHashBytes);
-            byte[] prevHeader = chainState.getBlockHeader(prevBlockHashBytes);
-
-            if (prevBlock == null && prevHeader == null) {
-                log.error("🚨 CRITICAL: CHAIN CONTINUITY GAP DETECTED! 🚨");
-                log.error("Missing previous block when trying to store block #{} at slot {}", currentBlockNumber, currentSlot);
-                log.error("Current block hash: {}", currentBlockHash);
-                log.error("Missing previous block hash: {}", prevBlockHash);
-                log.error("Previous block number would be: {}", currentBlockNumber - 1);
-                log.error("");
-                log.error("This indicates a serious gap in blockchain data synchronization!");
-                log.error("The chain state would be incomplete and unreliable if we continue.");
-                log.error("");
-                log.error("STOPPING PROCESS to prevent data corruption.");
-                log.error("A recovery mechanism needs to be implemented to fetch missing blocks.");
-
-                // Exit immediately to prevent corrupt chain state
-                System.exit(1);
-            }
-
-            if (log.isDebugEnabled()) {
-                log.debug("Chain continuity validated for block #{}: previous block {} exists",
-                        currentBlockNumber, prevBlockHash);
-            }
-
-        } catch (Exception e) {
-            log.error("Error validating chain continuity for block #{}: {}", currentBlockNumber, e.getMessage());
-            log.error("Stopping process due to validation error to ensure data integrity");
-            System.exit(1);
-        }
-    }
-    */
-
-    /*
-    private void storeByronBlock(ByronMainBlock byronBlock) {
-        long blockNumber = byronBlock.getHeader().getConsensusData().getDifficulty().longValue();
-        try {
-            byte[] blockHash = HexUtil.decodeHexString(byronBlock.getHeader().getBlockHash());
-            long slot = byronBlock.getHeader().getConsensusData().getAbsoluteSlot();
-            byte[] blockCbor = HexUtil.decodeHexString(byronBlock.getCbor());
-
-            // Validate chain continuity
-            validateChainContinuity(byronBlock.getHeader().getPrevBlock(), blockNumber, slot,
-                    byronBlock.getHeader().getBlockHash());
-
-            // Store complete block
-            chainState.storeBlock(blockHash, blockNumber, slot, blockCbor);
-
-        } catch (Exception e) {
-            log.error("Error storing Byron block", e);
-            throw new RuntimeException("Failed to store Byron block " + blockNumber, e);
-        }
-    }
-    */
-
-    /*
-    private void storeByronEbBlock(ByronEbBlock byronEbBlock) {
-        long blockNumber = byronEbBlock.getHeader().getConsensusData().getDifficulty().longValue();
-        try {
-            byte[] blockHash = HexUtil.decodeHexString(byronEbBlock.getHeader().getBlockHash());
-            long slot = byronEbBlock.getHeader().getConsensusData().getAbsoluteSlot();
-            byte[] blockCbor = HexUtil.decodeHexString(byronEbBlock.getCbor());
-
-            // Validate chain continuity
-            validateChainContinuity(byronEbBlock.getHeader().getPrevBlock(), blockNumber, slot,
-                    byronEbBlock.getHeader().getBlockHash());
-
-            // Store complete block
-            chainState.storeBlock(blockHash, blockNumber, slot, blockCbor);
-
-        } catch (Exception e) {
-            log.error("Error storing Byron EB block", e);
-            throw new RuntimeException("Failed to store Byron EB block " + blockNumber, e);
-        }
-    }
-    */
-
-    /*
-    private void storeShelleyBlock(Block block) {
-        long blockNumber = block.getHeader().getHeaderBody().getBlockNumber();
-        try {
-            byte[] blockHash = HexUtil.decodeHexString(block.getHeader().getHeaderBody().getBlockHash());
-            long slot = block.getHeader().getHeaderBody().getSlot();
-            byte[] blockCbor = HexUtil.decodeHexString(block.getCbor());
-
-            // Validate chain continuity
-            validateChainContinuity(block.getHeader().getHeaderBody().getPrevHash(), blockNumber, slot,
-                    block.getHeader().getHeaderBody().getBlockHash());
-
-            // Store complete block
-            chainState.storeBlock(blockHash, blockNumber, slot, blockCbor);
-
-        } catch (Exception e) {
-            log.error("Error storing Shelley+ block", e);
-            throw new RuntimeException("Failed to store Shelley+ block " + blockNumber, e);
-        }
-    }
-    */
-
-    /*
-    private byte[] extractHeaderFromBlock(byte[] blockCbor) {
-        try {
-            DataItem[] dataItems = CborSerializationUtil.deserialize(blockCbor);
-            if (dataItems != null && dataItems.length > 0 && dataItems[0] instanceof Array) {
-                Array blockArray = (Array) dataItems[0];
-                if (!blockArray.getDataItems().isEmpty()) {
-                    DataItem headerDI = blockArray.getDataItems().get(0);
-                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    new CborEncoder(baos).encode(headerDI);
-                    return baos.toByteArray();
-                }
-            }
-            log.warn("Could not extract header; block CBOR format not as expected.");
-            return null;
-        } catch (Exception e) {
-            log.warn("Failed to extract header from block CBOR", e);
-            return null;
-        }
-    }
-    */
 
     /**
      * Determines if a rollback is a real chain reorganization or just a reconnection rollback
@@ -2049,7 +1648,7 @@ public class YaciNode implements NodeAPI {
                     nextPhase, distance == Long.MAX_VALUE ? "unknown" : String.valueOf(distance));
             if (prev != syncPhase) {
                 EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
-                eventBus.publish(new com.bloxbean.cardano.yaci.node.runtime.events.SyncStatusChangedEvent(prev, syncPhase), meta, PublishOptions.builder().build());
+                eventBus.publish(new SyncStatusChangedEvent(prev, syncPhase), meta, PublishOptions.builder().build());
             }
         }
     }
@@ -2337,7 +1936,7 @@ public class YaciNode implements NodeAPI {
      * If local tip is already close to the remote tip, transition to STEADY_STATE immediately.
      * Invoked on intersection-found with the remote tip info available.
      */
-    public void maybeFastTransitionToSteadyState(com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip remoteTip) {
+    public void maybeFastTransitionToSteadyState(Tip remoteTip) {
         try {
             if (!isPipelinedMode) return;
 
@@ -2361,158 +1960,6 @@ public class YaciNode implements NodeAPI {
         }
     }
 
-    // Legacy ChainSyncAgentListener methods - now handled by HeaderSyncManager
-    /*
-    @Override
-    public void rollforward(Tip tip, BlockHeader blockHeader, byte[] originalHeaderBytes) {
-        headersReceived++;
-        lastProcessedSlot = Math.max(lastProcessedSlot, blockHeader.getHeaderBody().getSlot());
-
-        // In pipeline mode, delegate to HeaderSyncManager for header-only processing
-        if (isPipelinedMode && headerSyncManager != null) {
-            headerSyncManager.rollforward(tip, blockHeader, originalHeaderBytes);
-        }
-
-        remoteTip = tip;
-
-        if (originalHeaderBytes != null && originalHeaderBytes.length > 0) {
-            try {
-                // Store header immediately when received from ChainSync
-                chainState.storeBlockHeader(
-                        HexUtil.decodeHexString(blockHeader.getHeaderBody().getBlockHash()),
-                        blockHeader.getHeaderBody().getBlockNumber(),
-                        blockHeader.getHeaderBody().getSlot(),
-                        originalHeaderBytes
-                );
-
-                if (log.isDebugEnabled()) {
-                    log.debug("Successfully stored Shelley+ block header: slot={}, hash={}",
-                            blockHeader.getHeaderBody().getSlot(),
-                            blockHeader.getHeaderBody().getBlockHash());
-                }
-
-                // Log header progress in pipelined mode
-                if (isPipelinedMode) {
-                    if (headersReceived % 100 == 0) {
-                        log.info("ChainSync: Processed {} headers, current block: {}, current slot: {} (Shelley+)",
-                                headersReceived, blockHeader.getHeaderBody().getBlockNumber(), blockHeader.getHeaderBody().getSlot());
-                    }
-                } else {
-                    // Legacy mode logging
-                    if (headersReceived % 100 == 0) {
-                        log.info("ChainSync: Processed {} headers, current block: {}, current slot: {} (Shelley+)",
-                                headersReceived, blockHeader.getHeaderBody().getBlockNumber(), blockHeader.getHeaderBody().getSlot());
-                    }
-                }
-
-                if (log.isDebugEnabled()) {
-                    log.debug("Stored Shelley+ header: slot={}, hash={}",
-                            blockHeader.getHeaderBody().getSlot(),
-                            blockHeader.getHeaderBody().getBlockHash());
-                }
-
-            } catch (Exception e) {
-                log.error("Error storing Shelley+ block header from original bytes", e);
-                throw new RuntimeException("Failed to store Shelley+ block header", e);
-            }
-        } else {
-            // Fall back to existing behavior if originalHeaderBytes not available
-            log.warn("No original header bytes available for Shelley+ block: {}", blockHeader.getHeaderBody().getBlockHash());
-            throw new RuntimeException("Original header bytes not available for Shelley+ block: " + blockHeader.getHeaderBody().getBlockHash());
-        }
-    }
-    */
-
-    /*
-    @Override
-    public void rollforwardByronEra(Tip tip, ByronBlockHead byronBlockHead, byte[] originalHeaderBytes) {
-        headersReceived++;
-        lastProcessedSlot = Math.max(lastProcessedSlot, byronBlockHead.getConsensusData().getAbsoluteSlot());
-
-        if (originalHeaderBytes != null && originalHeaderBytes.length > 0) {
-            try {
-                // Store Byron header immediately when received from ChainSync
-                chainState.storeBlockHeader(
-                        HexUtil.decodeHexString(byronBlockHead.getBlockHash()),
-                        byronBlockHead.getConsensusData().getDifficulty().longValue(),
-                        byronBlockHead.getConsensusData().getAbsoluteSlot(),
-                        originalHeaderBytes
-                );
-
-                // Log header progress in pipelined mode
-                if (isPipelinedMode) {
-                    if (headersReceived % 100 == 0) {
-                        log.info("📄 Headers: {} received, current slot: {} (Byron)",
-                                headersReceived, byronBlockHead.getConsensusData().getAbsoluteSlot());
-                    }
-                } else {
-                    // Legacy mode logging
-                    if (headersReceived % 100 == 0) {
-                        log.info("BlockFetch: Processed {} headers, current slot: {} (Byron)",
-                                headersReceived, byronBlockHead.getConsensusData().getAbsoluteSlot());
-                    }
-                }
-
-                if (log.isDebugEnabled()) {
-                    log.debug("Stored Byron header: slot={}, hash={}",
-                            byronBlockHead.getConsensusData().getAbsoluteSlot(),
-                            byronBlockHead.getBlockHash());
-                }
-
-            } catch (Exception e) {
-                log.error("Error storing Byron block header from original bytes", e);
-                throw new RuntimeException("Failed to store Byron block header", e);
-            }
-        } else {
-            // Fall back to existing behavior if originalHeaderBytes not available
-            log.warn("No original header bytes available for Byron block: {}", byronBlockHead.getBlockHash());
-            throw new RuntimeException("Original header bytes not available for Byron block: " + byronBlockHead.getBlockHash());
-        }
-    }
-    */
-
-    /*
-    @Override
-    public void rollforwardByronEra(Tip tip, ByronEbHead byronEbHead, byte[] originalHeaderBytes) {
-        headersReceived++;
-        lastProcessedSlot = Math.max(lastProcessedSlot, byronEbHead.getConsensusData().getAbsoluteSlot());
-
-        if (originalHeaderBytes != null && originalHeaderBytes.length > 0) {
-            try {
-                // Store Byron EB header immediately when received from ChainSync
-                chainState.storeBlockHeader(
-                        HexUtil.decodeHexString(byronEbHead.getBlockHash()),
-                        byronEbHead.getConsensusData().getDifficulty().longValue(),
-                        byronEbHead.getConsensusData().getAbsoluteSlot(),
-                        originalHeaderBytes
-                );
-
-                // Log header progress in pipelined mode
-                if (isPipelinedMode) {
-                    if (headersReceived % 100 == 0) {
-                        log.info("📄 Headers: {} received, current slot: {} (Byron EB)",
-                                headersReceived, byronEbHead.getConsensusData().getAbsoluteSlot());
-                    }
-                }
-
-                if (log.isDebugEnabled()) {
-                    log.debug("Stored Byron EB header: slot={}, hash={}",
-                            byronEbHead.getConsensusData().getAbsoluteSlot(),
-                            byronEbHead.getBlockHash());
-                }
-
-            } catch (Exception e) {
-                log.error("Error storing Byron EB block header from original bytes", e);
-                throw new RuntimeException("Failed to store Byron EB block header", e);
-            }
-        } else {
-            // Fall back to existing behavior if originalHeaderBytes not available
-            log.warn("No original header bytes available for Byron EB block: {}", byronEbHead.getBlockHash());
-            throw new RuntimeException("Original header bytes not available for Byron EB block: " + byronEbHead.getBlockHash());
-        }
-    }
-    */
-
     private static long parseLong(Object obj, long def) {
         if (obj instanceof Number n) return n.longValue();
         if (obj != null) {
@@ -2521,7 +1968,7 @@ public class YaciNode implements NodeAPI {
         return def;
     }
 
-    private static boolean resolveBoolean(java.util.Map<String, Object> globals, String key, boolean def) {
+    private static boolean resolveBoolean(Map<String, Object> globals, String key, boolean def) {
         Object val = globals != null ? globals.get(key) : null;
         if (val instanceof Boolean b) return b;
         if (val != null) {

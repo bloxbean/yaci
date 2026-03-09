@@ -1,6 +1,6 @@
 package com.bloxbean.cardano.yaci.node.runtime.chain;
 
-import com.bloxbean.cardano.yaci.node.runtime.events.BlockAppliedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
 
 /**
  * Policy for evicting transactions from the mempool.

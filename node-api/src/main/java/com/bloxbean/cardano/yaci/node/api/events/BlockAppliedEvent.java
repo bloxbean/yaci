@@ -1,4 +1,4 @@
-package com.bloxbean.cardano.yaci.node.runtime.events;
+package com.bloxbean.cardano.yaci.node.api.events;
 
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Era;
@@ -25,4 +25,3 @@ public final class BlockAppliedEvent implements Event {
     public String blockHash() { return blockHash; }
     public Block block() { return block; }
 }
-
