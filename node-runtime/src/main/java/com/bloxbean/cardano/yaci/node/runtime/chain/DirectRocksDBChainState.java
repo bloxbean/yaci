@@ -55,6 +55,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
     // Name → CF handle registry (includes UTXO CFs)
     private final Map<String, ColumnFamilyHandle> cfByName = new HashMap<>();
 
+
     static {
         RocksDB.loadLibrary();
     }
@@ -286,7 +287,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
             }
 
             // Use write batch for atomic updates
-            try (WriteBatch batch = new WriteBatch()) {
+            try (WriteBatch batch = new WriteBatch();
+                 WriteOptions writeOptions = new WriteOptions()) {
                 // Store block
                 batch.put(blocksHandle, blockHash, block);
 
@@ -298,7 +300,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
                 updateTip(batch, blockHash, blockNumber, slot);
 
                 // Write batch atomically
-                db.write(new WriteOptions(), batch);
+                db.write(writeOptions, batch);
 
                 log.debug("Stored block: number={}, slot={}, hash={}",
                         blockNumber, slot, HexUtil.encodeHexString(blockHash));
@@ -354,7 +356,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
             }
 
             // Use write batch for atomic updates
-            try (WriteBatch batch = new WriteBatch()) {
+            try (WriteBatch batch = new WriteBatch();
+                 WriteOptions writeOptions = new WriteOptions()) {
                 // Store header
                 batch.put(headersHandle, blockHash, blockHeader);
                 ChainTip newHeaderTip = new ChainTip(slot, blockHash, blockNumber);
@@ -371,7 +374,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
                 }
 
                 // Write batch atomically
-                db.write(new WriteOptions(), batch);
+                db.write(writeOptions, batch);
 
                 log.debug("Stored header: hash={}, extracted slot={}, blockNumber={}",
                         HexUtil.encodeHexString(blockHash), slot, blockNumber);
@@ -393,7 +396,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
 
     // Store Byron EBB header: keep header bytes and header_tip, index in ebb_by_slot0 only
     public void storeByronEbHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
-        try (WriteBatch batch = new WriteBatch()) {
+        try (WriteBatch batch = new WriteBatch();
+             WriteOptions writeOptions = new WriteOptions()) {
             // Store EBB header bytes (by hash)
             batch.put(headersHandle, blockHash, blockHeader);
 
@@ -406,7 +410,7 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
                 batch.put(ebbBySlot0Handle, longToBytes(slot), blockHash);
             }
 
-            db.write(new WriteOptions(), batch);
+            db.write(writeOptions, batch);
             log.debug("Stored Byron EBB header (ebb_by_slot0 only): slot={}, blockNumber={}", slot, blockNumber);
         } catch (Exception e) {
             throw new RuntimeException("Failed to store Byron EBB header", e);
@@ -543,7 +547,9 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
             batch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newHeaderTip));
 
             // Commit all changes
-            db.write(new WriteOptions(), batch);
+            try (WriteOptions wo = new WriteOptions()) {
+                db.write(wo, batch);
+            }
 
             log.info("Header-only rollback completed: deleted {} headers, new header_tip at slot {}",
                     headersDeleted, slot);
@@ -600,7 +606,9 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
                         WriteBatch batch = new WriteBatch();
                         try {
                             batch.put(metadataHandle, TIP_KEY, serializeChainTip(alignedTip));
-                            db.write(new WriteOptions(), batch);
+                            try (WriteOptions wo = new WriteOptions()) {
+                                db.write(wo, batch);
+                            }
 
                             log.warn("✅ REALIGNED body tip to block #{} at slot {} where header/body hashes match",
                                     alignedBlockNumber, alignedSlot);
@@ -668,7 +676,9 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
             batch.put(metadataHandle, TIP_KEY, serializeChainTip(newTip));
 
             // Commit all changes
-            db.write(new WriteOptions(), batch);
+            try (WriteOptions wo = new WriteOptions()) {
+                db.write(wo, batch);
+            }
 
             log.warn("Full rollback completed: to slot={}, deleted {} slots, {} blocks, {} headers",
                     slot, slotsDeleted, blocksDeleted, headersDeleted);
