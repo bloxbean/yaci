@@ -34,6 +34,10 @@ import com.bloxbean.cardano.yaci.node.api.model.TimeAdvanceResult;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
+import com.bloxbean.cardano.yaci.node.api.bootstrap.BootstrapDataProvider;
+import com.bloxbean.cardano.yaci.node.api.bootstrap.BootstrapOutpoint;
+import com.bloxbean.cardano.yaci.node.runtime.bootstrap.BootstrapResult;
+import com.bloxbean.cardano.yaci.node.runtime.bootstrap.BootstrapService;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.BlockProducer;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.DevnetBlockBuilder;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
@@ -159,6 +163,7 @@ public class YaciNode implements NodeAPI {
     private final EventBus eventBus;
     private PluginManager pluginManager;
     private UtxoStoreWriter utxoStore;
+    private BootstrapDataProvider bootstrapDataProvider;
     private PruneService utxoPruneService;
     private UtxoEventHandler utxoEventHandler;
     private UtxoEventHandlerAsync utxoEventHandlerAsync;
@@ -345,6 +350,12 @@ public class YaciNode implements NodeAPI {
                 initializeGenesisUtxos();
             }
 
+            // Bootstrap state if enabled and chain state is empty
+            if (config.isEnableBootstrap() && config.isEnableClient()
+                    && chainState.getTip() == null && chainState.getHeaderTip() == null) {
+                performBootstrap();
+            }
+
             // Validate chain state before starting sync
             if (config.isEnableClient()) {
                 validateChainState();
@@ -371,6 +382,58 @@ public class YaciNode implements NodeAPI {
         } else {
             log.warn("Node is already running");
         }
+    }
+
+    /**
+     * Perform bootstrap using the provided data provider.
+     * Called automatically during start() if bootstrap is enabled and chain state is empty.
+     */
+    private void performBootstrap() {
+        if (!(chainState instanceof DirectRocksDBChainState rocks)) {
+            log.warn("Bootstrap requires RocksDB chain state. Skipping.");
+            return;
+        }
+
+        if (bootstrapDataProvider == null) {
+            throw new IllegalStateException(
+                    "Bootstrap is enabled but no BootstrapDataProvider is configured. "
+                            + "Set a provider via setBootstrapDataProvider() before calling start().");
+        }
+
+        log.info("=== Bootstrap State Mode ===");
+        log.info("Block: {}", config.getBootstrapBlockNumber() <= 0 ? "latest" : config.getBootstrapBlockNumber());
+
+        BootstrapService bootstrapService = new BootstrapService(rocks, utxoStore);
+
+        List<BootstrapOutpoint> outpoints = null;
+        if (config.getBootstrapUtxos() != null) {
+            outpoints = config.getBootstrapUtxos().stream()
+                    .map(c -> new BootstrapOutpoint(c.getTxHash(), c.getOutputIndex()))
+                    .toList();
+        }
+
+        BootstrapResult result = bootstrapService.bootstrap(
+                config.getBootstrapBlockNumber(),
+                config.getBootstrapAddresses(),
+                outpoints,
+                bootstrapDataProvider);
+
+        log.info("=== Bootstrap Complete: block #{}, slot={}, {} UTXOs ===",
+                result.blockNumber(), result.slot(), result.utxosInjected());
+    }
+
+    /**
+     * Set the bootstrap data provider. Must be called before start() if bootstrap is enabled.
+     */
+    public void setBootstrapDataProvider(BootstrapDataProvider provider) {
+        this.bootstrapDataProvider = provider;
+    }
+
+    /**
+     * Get the UTXO store writer. Used by BootstrapResource for incremental UTXO refresh.
+     */
+    public UtxoStoreWriter getUtxoStoreWriter() {
+        return utxoStore;
     }
 
     /**

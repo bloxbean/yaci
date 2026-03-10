@@ -640,6 +640,82 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     }
 
     @Override
+    public void injectBootstrapUtxos(List<com.bloxbean.cardano.yaci.node.api.bootstrap.BootstrapUtxo> utxos,
+                                     long blockNumber, long slot, String blockHash) {
+        if (!enabled) throw new IllegalStateException("UTXO store is not enabled");
+        if (utxos == null || utxos.isEmpty()) return;
+
+        try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+            List<UtxoDeltaCodec.OutRef> created = new ArrayList<>();
+
+            for (var utxo : utxos) {
+                // Convert BootstrapAsset list to Amount list for encoding
+                List<Amount> amounts = null;
+                if (utxo.assets() != null && !utxo.assets().isEmpty()) {
+                    amounts = new ArrayList<>();
+                    for (var asset : utxo.assets()) {
+                        Amount a = Amount.builder()
+                                .policyId(asset.policyId())
+                                .assetNameBytes(asset.assetName() != null
+                                        ? HexUtil.decodeHexString(asset.assetName()) : new byte[0])
+                                .quantity(asset.quantity())
+                                .build();
+                        amounts.add(a);
+                    }
+                }
+
+                byte[] inlineDatum = utxo.inlineDatumCbor() != null
+                        ? HexUtil.decodeHexString(utxo.inlineDatumCbor()) : null;
+
+                byte[] val = UtxoCborCodec.encodeUtxoRecord(
+                        utxo.address(), utxo.lovelace(), amounts,
+                        utxo.datumHash(), inlineDatum, utxo.scriptRefCbor(),
+                        null, false, slot, blockNumber, blockHash);
+
+                byte[] outKey = UtxoKeyUtil.outpointKey(utxo.txHash(), utxo.outputIndex());
+                batch.put(cfUnspent, outKey, val);
+
+                // Address index
+                if (indexAddressHash) {
+                    byte[] addrHash = UtxoKeyUtil.addrHash28(utxo.address());
+                    byte[] addrIdxKey = UtxoKeyUtil.addressIndexKey(addrHash, slot,
+                            utxo.txHash(), utxo.outputIndex());
+                    batch.put(cfAddr, addrIdxKey, new byte[0]);
+                }
+                if (indexPaymentCred) {
+                    byte[] pc = UtxoKeyUtil.paymentCred28(utxo.address());
+                    if (pc != null) {
+                        byte[] pIdx = UtxoKeyUtil.addressIndexKey(pc, slot,
+                                utxo.txHash(), utxo.outputIndex());
+                        batch.put(cfAddr, pIdx, new byte[0]);
+                    }
+                }
+
+                created.add(new UtxoDeltaCodec.OutRef(utxo.txHash(), utxo.outputIndex()));
+            }
+
+            // Write delta for rollback support
+            byte[] deltaKey = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(blockNumber).array();
+            byte[] deltaVal = UtxoDeltaCodec.encode(blockNumber, slot, blockHash,
+                    created, Collections.emptyList());
+            batch.put(cfDelta, deltaKey, deltaVal);
+
+            // Update meta high-water marks
+            batch.put(cfMeta, META_LAST_APPLIED_SLOT,
+                    ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(slot).array());
+            batch.put(cfMeta, META_LAST_APPLIED_BLOCK,
+                    ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(blockNumber).array());
+
+            db.write(wo, batch);
+            log.info("***********************************************************************");
+            log.info("*** Bootstrap: injected {} UTXOs at block #{}, slot={}", utxos.size(), blockNumber, slot);
+            log.info("***********************************************************************");
+        } catch (Exception ex) {
+            throw new RuntimeException("Failed to inject bootstrap UTXOs", ex);
+        }
+    }
+
+    @Override
     public void rollbackTo(RollbackEvent e) {
         if (!enabled) return;
         long targetSlot = e.target().getSlot();

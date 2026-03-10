@@ -1,10 +1,12 @@
 package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
+import com.bloxbean.cardano.yaci.node.api.bootstrap.BootstrapUtxo;
 import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
 import com.bloxbean.cardano.yaci.node.api.events.RollbackEvent;
 
 import java.math.BigInteger;
+import java.util.List;
 import java.util.Map;
 
 public interface UtxoStoreWriter {
@@ -61,5 +63,20 @@ public interface UtxoStoreWriter {
      */
     default String injectFaucetUtxo(String address, long lovelace) {
         throw new UnsupportedOperationException("Faucet injection not supported");
+    }
+
+    /**
+     * Inject bootstrap UTXOs directly into the unspent store.
+     * Uses real tx hashes and output indices from an external data provider.
+     * Supports multi-assets, datum hashes, inline datums, and script references.
+     *
+     * @param utxos       UTXOs fetched from bootstrap data provider
+     * @param blockNumber block number at which these UTXOs are valid
+     * @param slot        slot number
+     * @param blockHash   block hash (hex)
+     */
+    default void injectBootstrapUtxos(List<BootstrapUtxo> utxos, long blockNumber,
+                                      long slot, String blockHash) {
+        throw new UnsupportedOperationException("Bootstrap UTXO injection not supported");
     }
 }

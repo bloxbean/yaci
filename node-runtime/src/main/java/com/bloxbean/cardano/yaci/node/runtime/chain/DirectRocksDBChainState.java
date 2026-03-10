@@ -417,6 +417,47 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
         }
     }
 
+    /**
+     * Store a block header without continuity check.
+     * Used only during bootstrap to seed synthetic chain entries at arbitrary block numbers.
+     */
+    public void forceStoreBlockHeader(byte[] blockHash, Long blockNumber, Long slot, byte[] blockHeader) {
+        try (WriteBatch batch = new WriteBatch();
+             WriteOptions writeOptions = new WriteOptions()) {
+            batch.put(headersHandle, blockHash, blockHeader);
+            ChainTip newHeaderTip = new ChainTip(slot, blockHash, blockNumber);
+            batch.put(metadataHandle, HEADER_TIP_KEY, serializeChainTip(newHeaderTip));
+
+            if (slot != null && blockNumber != null) {
+                updateChainState(batch, blockHash, blockNumber, slot);
+                batch.put(slotByNumberHandle, longToBytes(blockNumber), longToBytes(slot));
+            }
+
+            db.write(writeOptions, batch);
+            log.info("Bootstrap: stored header #{}, slot={}, hash={}",
+                    blockNumber, slot, HexUtil.encodeHexString(blockHash));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to force-store block header", e);
+        }
+    }
+
+    /**
+     * Store a block body without continuity or hash-consistency check.
+     * Used only during bootstrap to seed synthetic chain entries at arbitrary block numbers.
+     */
+    public void forceStoreBlock(byte[] blockHash, Long blockNumber, Long slot, byte[] block) {
+        try (WriteBatch batch = new WriteBatch();
+             WriteOptions writeOptions = new WriteOptions()) {
+            batch.put(blocksHandle, blockHash, block);
+            updateTip(batch, blockHash, blockNumber, slot);
+            db.write(writeOptions, batch);
+            log.info("Bootstrap: stored block #{}, slot={}, hash={}",
+                    blockNumber, slot, HexUtil.encodeHexString(blockHash));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to force-store block", e);
+        }
+    }
+
     @Override
     public byte[] getBlockByNumber(Long blockNumber) {
         try {

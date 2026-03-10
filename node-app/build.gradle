@@ -21,6 +21,9 @@ dependencies {
     implementation(project(':node-runtime')) {
         exclude group: 'io.netty', module: 'netty-all'
     }
+    implementation(project(':node-bootstrap-providers')) {
+        exclude group: 'io.netty', module: 'netty-all'
+    }
     implementation(project(':scalus-bridge')) {
         exclude group: 'io.netty', module: 'netty-all'
     }
