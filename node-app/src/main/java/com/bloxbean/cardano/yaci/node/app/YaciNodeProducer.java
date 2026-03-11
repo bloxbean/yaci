@@ -101,6 +101,22 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.utxo.applyAsync", defaultValue = "false")
     boolean utxoApplyAsync;
 
+    // Block body pruning config
+    @ConfigProperty(name = "yaci.node.chain.block-body-prune-depth", defaultValue = "0")
+    int blockBodyPruneDepth;
+    @ConfigProperty(name = "yaci.node.chain.block-prune-batch-size", defaultValue = "500000")
+    int blockPruneBatchSize;
+    @ConfigProperty(name = "yaci.node.chain.block-prune-interval-seconds", defaultValue = "300")
+    long blockPruneIntervalSeconds;
+
+    // UTXO storage filter config
+    @ConfigProperty(name = "yaci.node.filters.utxo.enabled", defaultValue = "false")
+    boolean utxoFilterEnabled;
+    @ConfigProperty(name = "yaci.node.filters.utxo.addresses")
+    java.util.Optional<java.util.List<String>> utxoFilterAddresses;
+    @ConfigProperty(name = "yaci.node.filters.utxo.payment-credentials")
+    java.util.Optional<java.util.List<String>> utxoFilterPaymentCredentials;
+
     // Dev mode
     @ConfigProperty(name = "yaci.node.dev-mode", defaultValue = "false")
     boolean devMode;
@@ -263,6 +279,16 @@ public class YaciNodeProducer {
         globals.put("yaci.node.utxo.delta.selfContained", utxoDeltaSelfContained);
         globals.put("yaci.node.utxo.applyAsync", utxoApplyAsync);
         globals.put("yaci.node.tx-evaluation.enabled", txEvaluationEnabled);
+
+        // Block pruning
+        globals.put("yaci.node.chain.block-body-prune-depth", blockBodyPruneDepth);
+        globals.put("yaci.node.chain.block-prune-batch-size", blockPruneBatchSize);
+        globals.put("yaci.node.chain.block-prune-interval-seconds", blockPruneIntervalSeconds);
+
+        // UTXO filters
+        globals.put("yaci.node.filters.utxo.enabled", utxoFilterEnabled);
+        globals.put("yaci.node.filters.utxo.addresses", utxoFilterAddresses.orElse(java.util.List.of()));
+        globals.put("yaci.node.filters.utxo.payment-credentials", utxoFilterPaymentCredentials.orElse(java.util.List.of()));
 
         RuntimeOptions runtimeOptions = new RuntimeOptions(eventsOptions, pluginsOptions, globals);
 

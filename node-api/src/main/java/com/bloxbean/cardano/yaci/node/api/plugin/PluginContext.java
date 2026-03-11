@@ -96,6 +96,17 @@ public interface PluginContext {
     void registerService(String key, Object service);
     
     /**
+     * Register a storage filter for controlling what data gets persisted.
+     * <p>
+     * Filters are composed into a chain — all filters must accept for an
+     * output to be stored. Multiple filters can be registered; they are
+     * applied in {@link StorageFilter#priority()} order.
+     *
+     * @param filter the storage filter to register
+     */
+    void registerStorageFilter(StorageFilter filter);
+
+    /**
      * Get a service registered by another plugin.
      * 
      * Services are looked up by key and cast to the requested type.

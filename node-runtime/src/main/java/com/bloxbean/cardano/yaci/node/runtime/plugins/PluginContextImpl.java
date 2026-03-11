@@ -2,8 +2,10 @@ package com.bloxbean.cardano.yaci.node.runtime.plugins;
 
 import com.bloxbean.cardano.yaci.events.api.EventBus;
 import com.bloxbean.cardano.yaci.node.api.plugin.PluginContext;
+import com.bloxbean.cardano.yaci.node.api.plugin.StorageFilter;
 import org.slf4j.Logger;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,14 +18,17 @@ final class PluginContextImpl implements PluginContext {
     private final ScheduledExecutorService scheduler;
     private final Optional<ClassLoader> classLoader;
     private final Map<String, Object> registry = new ConcurrentHashMap<>();
+    private final List<StorageFilter> storageFilters;
 
     PluginContextImpl(EventBus eventBus, Logger logger, Map<String, Object> config,
-                      ScheduledExecutorService scheduler, Optional<ClassLoader> classLoader) {
+                      ScheduledExecutorService scheduler, Optional<ClassLoader> classLoader,
+                      List<StorageFilter> storageFilters) {
         this.eventBus = eventBus;
         this.logger = logger;
         this.config = config;
         this.scheduler = scheduler;
         this.classLoader = classLoader;
+        this.storageFilters = storageFilters;
     }
 
     @Override public EventBus eventBus() { return eventBus; }
@@ -31,6 +36,11 @@ final class PluginContextImpl implements PluginContext {
     @Override public Map<String, Object> config() { return config; }
     @Override public ScheduledExecutorService scheduler() { return scheduler; }
     @Override public Optional<ClassLoader> pluginClassLoader() { return classLoader; }
+
+    @Override
+    public void registerStorageFilter(StorageFilter filter) {
+        if (filter != null) storageFilters.add(filter);
+    }
 
     @Override public void registerService(String key, Object service) { registry.put(key, service); }
     @Override public <T> Optional<T> getService(String key, Class<T> type) {

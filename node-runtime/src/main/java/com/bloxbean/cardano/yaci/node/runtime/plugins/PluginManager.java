@@ -3,10 +3,12 @@ package com.bloxbean.cardano.yaci.node.runtime.plugins;
 import com.bloxbean.cardano.yaci.events.api.EventBus;
 import com.bloxbean.cardano.yaci.node.api.plugin.NodePlugin;
 import com.bloxbean.cardano.yaci.node.api.plugin.PluginContext;
+import com.bloxbean.cardano.yaci.node.api.plugin.StorageFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 
 /**
@@ -47,7 +49,10 @@ public final class PluginManager implements AutoCloseable {
     
     // Ordered list of plugins (respects dependencies)
     private final List<NodePlugin> plugins = new ArrayList<>();
-    
+
+    // Shared storage filters list — plugins add to this via PluginContext
+    private final List<StorageFilter> storageFilters = new CopyOnWriteArrayList<>();
+
     // Track lifecycle state
     private boolean started = false;
 
@@ -63,7 +68,7 @@ public final class PluginManager implements AutoCloseable {
         for (NodePlugin p : loader) {
             try {
                 log.info("Discovered plugin: {}:{}", p.id(), p.version());
-                PluginContext ctx = new PluginContextImpl(eventBus, log, config, scheduler, Optional.ofNullable(classLoader));
+                PluginContext ctx = new PluginContextImpl(eventBus, log, config, scheduler, Optional.ofNullable(classLoader), storageFilters);
                 p.init(ctx);
                 plugins.add(p);
             } catch (Throwable t) {
@@ -131,6 +136,14 @@ public final class PluginManager implements AutoCloseable {
             try { p.close(); } catch (Throwable ignored) {}
         }
         plugins.clear();
+    }
+
+    /**
+     * Returns the list of storage filters registered by plugins.
+     * This list may continue to grow as plugins register filters during init/start.
+     */
+    public List<StorageFilter> getStorageFilters() {
+        return storageFilters;
     }
 
     private static String safeId(NodePlugin p) {

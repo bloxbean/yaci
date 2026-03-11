@@ -45,6 +45,7 @@ import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionEvaluationService;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationException;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationService;
+import com.bloxbean.cardano.yaci.node.runtime.chain.BlockPruner;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMempoolEvictionPolicy;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
@@ -58,8 +59,12 @@ import com.bloxbean.cardano.yaci.node.api.events.RollbackEvent;
 import com.bloxbean.cardano.yaci.node.api.events.SyncStatusChangedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
 import com.bloxbean.cardano.yaci.node.runtime.plugins.PluginManager;
+import com.bloxbean.cardano.yaci.node.api.plugin.StorageFilter;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.AddressUtxoFilter;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.DefaultUtxoStore;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.Prunable;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.PruneService;
+import com.bloxbean.cardano.yaci.node.runtime.utxo.StorageFilterChain;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandler;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoStatusProvider;
@@ -165,6 +170,7 @@ public class YaciNode implements NodeAPI {
     private UtxoStoreWriter utxoStore;
     private BootstrapDataProvider bootstrapDataProvider;
     private PruneService utxoPruneService;
+    private PruneService blockPruneService;
     private UtxoEventHandler utxoEventHandler;
     private UtxoEventHandlerAsync utxoEventHandlerAsync;
     private ScheduledFuture<?> utxoLagTask;
@@ -280,6 +286,24 @@ public class YaciNode implements NodeAPI {
         } catch (Throwable t) {
             log.warn("Failed to initialize UTXO store: {}", t.toString());
         }
+
+        // Phase 4: Initialize block body pruning if configured and RocksDB is used
+        try {
+            int blockPruneDepth = (int) parseLong(this.runtimeOptions.globals().get("yaci.node.chain.block-body-prune-depth"), 0);
+            if (blockPruneDepth > 0 && (chainState instanceof DirectRocksDBChainState rocks)) {
+                int pruneBatch = (int) parseLong(this.runtimeOptions.globals().get("yaci.node.chain.block-prune-batch-size"), 200);
+                long pruneIntervalSec = parseLong(this.runtimeOptions.globals().get("yaci.node.chain.block-prune-interval-seconds"), 120);
+                BlockPruner blockPruner = new BlockPruner(rocks, blockPruneDepth, pruneBatch);
+                this.blockPruneService = new PruneService(blockPruner, pruneIntervalSec * 1000);
+                this.blockPruneService.start();
+                log.info("Block body prune service started (retention={} blocks, batch={}, interval={}s)",
+                        blockPruneDepth, pruneBatch, pruneIntervalSec);
+            } else {
+                log.info("Block body pruning disabled (block-body-prune-depth=0)");
+            }
+        } catch (Throwable t) {
+            log.warn("Failed to initialize block prune service: {}", t.toString());
+        }
     }
 
     @Override
@@ -375,6 +399,11 @@ public class YaciNode implements NodeAPI {
                 } catch (Exception e) {
                     log.warn("Plugin manager init/start failed: {}", e.toString(), e);
                 }
+            }
+
+            // Initialize UTXO filter chain (after plugins so plugin-registered filters are included)
+            if (utxoStore != null) {
+                initUtxoFilterChain(utxoStore, this.runtimeOptions.globals());
             }
 
             EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
@@ -1510,6 +1539,7 @@ public class YaciNode implements NodeAPI {
 
             // Stop UTXO prune service
             try { if (utxoPruneService != null) utxoPruneService.close(); } catch (Exception ignored) {}
+            try { if (blockPruneService != null) blockPruneService.close(); } catch (Exception ignored) {}
             try { if (utxoLagTask != null) utxoLagTask.cancel(true); } catch (Exception ignored) {}
 
             // Stop plugins and close event bus
@@ -2020,6 +2050,49 @@ public class YaciNode implements NodeAPI {
             }
         } catch (Exception e) {
             log.debug("Fast transition near-tip check failed: {}", e.toString());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void initUtxoFilterChain(UtxoStoreWriter store, java.util.Map<String, Object> globals) {
+        if (!(store instanceof DefaultUtxoStore defaultStore)) return;
+        boolean filterEnabled = resolveBoolean(globals, "yaci.node.filters.utxo.enabled", false);
+        if (!filterEnabled) {
+            log.info("UTXO storage filtering disabled");
+            return;
+        }
+
+        java.util.Set<String> addresses = new java.util.HashSet<>();
+        java.util.Set<String> paymentCreds = new java.util.HashSet<>();
+
+        Object addrObj = globals.get("yaci.node.filters.utxo.addresses");
+        if (addrObj instanceof java.util.Collection<?> c) {
+            for (Object a : c) if (a != null) addresses.add(String.valueOf(a));
+        } else if (addrObj instanceof String s && !s.isBlank()) {
+            addresses.add(s);
+        }
+
+        Object pcObj = globals.get("yaci.node.filters.utxo.payment-credentials");
+        if (pcObj instanceof java.util.Collection<?> c) {
+            for (Object p : c) if (p != null) paymentCreds.add(String.valueOf(p));
+        } else if (pcObj instanceof String s && !s.isBlank()) {
+            paymentCreds.add(s);
+        }
+
+        List<StorageFilter> filters = new ArrayList<>();
+        if (!addresses.isEmpty() || !paymentCreds.isEmpty()) {
+            filters.add(new AddressUtxoFilter(addresses, paymentCreds));
+            log.info("UTXO filter configured: {} addresses, {} payment-credentials", addresses.size(), paymentCreds.size());
+        }
+
+        // Also include any plugin-registered filters
+        if (pluginManager != null) {
+            filters.addAll(pluginManager.getStorageFilters());
+        }
+
+        if (!filters.isEmpty()) {
+            defaultStore.setFilterChain(new StorageFilterChain(filters));
+            log.info("UTXO storage filter chain active with {} filter(s)", filters.size());
         }
     }
 
