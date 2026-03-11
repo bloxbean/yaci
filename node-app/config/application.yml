@@ -39,6 +39,35 @@
 #     server:
 #       port: 13337
 
+# UTXO Storage Filters
+# ---------------------
+# Filter UTXOs before persisting to RocksDB. Only matching outputs are stored.
+# Useful for dApp-specific nodes that only need UTXOs for certain addresses.
+#
+# yaci:
+#   node:
+#     filters:
+#       utxo:
+#         enabled: true
+#         addresses:                  # Bech32 addresses to store UTXOs for
+#           - addr_test1wzn5ee2qaqvly3hx7e0nk3vhm240n5muq3plhjcnvx9ppjgf62u6a
+#           - addr_test1vry3appc9j737z67gperyapaszy5u74wt0k8eq6nxjzpuusw3kd9e
+#         payment-credentials:        # Payment credential hashes (28-byte hex)
+#           - 6313d841f3e1d906d5a87ed9104739748a13e50cd23bf103d4883cee #addr_test1wp338kzp70sajpk44pldjyz8896g5yl9pnfrhugr6jyremsz6nwpp
+
+# Block Body Pruning
+# ---------------------
+# Prune old block bodies beyond a retention window to reduce DB size.
+# Headers and indices are preserved so the node can still serve as a relay.
+# Set block-body-prune-depth to 0 to disable (default).
+#
+# yaci:
+#   node:
+#     chain:
+#         block-body-prune-depth: 2160    # Blocks to retain (2160 ≈ Cardano finality)
+#         block-prune-batch-size: 500000     # Entries per prune pass
+#         block-prune-interval-seconds: 300
+
 # Bootstrap State Mode
 # ---------------------
 # Enable bootstrap to skip full chain sync and start from a specific block.

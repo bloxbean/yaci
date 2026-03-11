@@ -55,6 +55,15 @@ yaci:
       conway-genesis-file: config/network/preprod/conway-genesis.json
       protocol-parameters-file: config/network/preprod/protocol-param.json
     dev-mode: false
+    chain:
+      block-body-prune-depth: 0          # blocks to retain (0 = disabled)
+      block-prune-batch-size: 500000     # entries per prune pass
+      block-prune-interval-seconds: 300
+    filters:
+      utxo:
+        enabled: false
+        addresses: []
+        payment-credentials: []
     block-producer:
       enabled: false
       block-time-millis: 0

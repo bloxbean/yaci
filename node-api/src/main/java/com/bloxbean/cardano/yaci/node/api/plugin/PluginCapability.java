@@ -4,6 +4,7 @@ public enum PluginCapability {
     EVENT_CONSUMER,
     NOTIFIER,
     STORAGE_ADAPTER,
-    POLICY
+    POLICY,
+    STORAGE_FILTER
 }
 

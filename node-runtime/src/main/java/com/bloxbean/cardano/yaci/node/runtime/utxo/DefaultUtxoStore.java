@@ -20,6 +20,7 @@ import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.AssetAmount;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.Outpoint;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo;
+import com.bloxbean.cardano.yaci.node.api.plugin.UtxoFilterContext;
 import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbSupplier;
 import com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames;
 import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
@@ -68,6 +69,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     private final boolean indexAddressHash;
     private final boolean indexPaymentCred;
     private UtxoProcessor processor;
+    private volatile StorageFilterChain filterChain;
     // Metrics
     private final boolean metricsEnabled;
     private final ScheduledExecutorService metricsScheduler;
@@ -149,6 +151,14 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         this.cfMeta = ctx.handle(UtxoCfNames.UTXO_META);
         this.processor = new DefaultUtxoProcessor(this.db);
         log.info("DefaultUtxoStore reinitialized after snapshot restore");
+    }
+
+    /**
+     * Set the storage filter chain for filtering UTXO outputs before persistence.
+     * Must be called before block application starts.
+     */
+    public void setFilterChain(StorageFilterChain filterChain) {
+        this.filterChain = filterChain;
     }
 
     @Override
@@ -353,6 +363,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
             List<TransactionBody> txs = block.getTransactionBodies();
             List<UtxoDeltaCodec.OutRef> createdRefs = new ArrayList<>();
             List<UtxoDeltaCodec.OutRef> spentRefs = new ArrayList<>();
+            int filteredOutputs = 0;
 
             for (int i = 0; i < txs.size(); i++) {
                 var tx = txs.get(i);
@@ -393,6 +404,20 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                             var amounts = out.getAmounts();
                             if (amounts != null) for (Amount a : amounts)
                                 if ("lovelace".equals(a.getUnit())) lovelace = a.getQuantity();
+                            // Apply storage filter chain
+                            StorageFilterChain fc = this.filterChain;
+                            if (fc != null && !fc.isEmpty()) {
+                                byte[] pcBytes = UtxoKeyUtil.paymentCred28(out.getAddress());
+                                String pcHex = pcBytes != null ? HexUtil.encodeHexString(pcBytes) : null;
+                                var filterCtx = new UtxoFilterContext(
+                                        out.getAddress(), pcHex,
+                                        lovelace.longValueExact(), amounts,
+                                        slot, blockNo, tx.getTxHash(), outIdx);
+                                if (!fc.acceptUtxoOutput(filterCtx, block, tx)) {
+                                    filteredOutputs++;
+                                    continue;
+                                }
+                            }
                             byte[] val = UtxoCborCodec.encodeUtxoRecord(out.getAddress(), lovelace, amounts, out.getDatumHash(), out.getInlineDatum() != null ? HexUtil.decodeHexString(out.getInlineDatum()) : null, out.getScriptRef(), null, false, slot, blockNo, blockHash);
                             byte[] outKey = UtxoKeyUtil.outpointKey(tx.getTxHash(), outIdx);
                             batch.put(cfUnspent, outKey, val);
@@ -478,7 +503,11 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
             db.write(wo, batch);
 
             if (log.isDebugEnabled()) {
-                log.debug("UTXO applied: block={} slot={} created={} spent={} era={}", blockNo, slot, createdRefs.size(), spentRefs.size(), e.era());
+                if (filteredOutputs > 0) {
+                    log.debug("UTXO applied: block={} slot={} created={} spent={} filtered={} era={}", blockNo, slot, createdRefs.size(), spentRefs.size(), filteredOutputs, e.era());
+                } else {
+                    log.debug("UTXO applied: block={} slot={} created={} spent={} era={}", blockNo, slot, createdRefs.size(), spentRefs.size(), e.era());
+                }
             }
             if (metricsEnabled) {
                 long dtMs = (System.nanoTime() - t0) / 1_000_000L;
