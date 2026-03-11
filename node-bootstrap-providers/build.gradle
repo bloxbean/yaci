@@ -1,0 +1,15 @@
+dependencies {
+    api project(':node-api')
+    implementation libs.jackson.databind
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            pom {
+                name = 'Yaci Node Bootstrap Providers'
+                description = 'Bootstrap data providers (Blockfrost, Koios) for Yaci Node lightweight relay mode'
+            }
+        }
+    }
+}

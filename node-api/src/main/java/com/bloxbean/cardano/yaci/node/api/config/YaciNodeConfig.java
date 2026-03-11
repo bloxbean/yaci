@@ -4,6 +4,8 @@ import com.bloxbean.cardano.yaci.core.common.Constants;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * Configuration for YaciNode (renamed from HybridNodeConfig).
  * Provides comprehensive configuration options for both client and server modes.
@@ -57,6 +59,18 @@ public class YaciNodeConfig implements NodeConfig {
     private String conwayGenesisFile;      // Path to conway-genesis.json (optional)
     private String protocolParametersFile; // Path to protocol params JSON
     private boolean txEvaluationEnabled;   // Enable ledger rule validation for submitted transactions
+
+    // Bootstrap configuration (lightweight relay mode)
+    private boolean enableBootstrap;
+    @Builder.Default
+    private long bootstrapBlockNumber = -1;  // -1 = "latest"
+    private List<String> bootstrapAddresses;
+    private List<BootstrapOutpointConfig> bootstrapUtxos;
+    private String bootstrapProvider;       // "blockfrost" or "koios"
+    private String bootstrapBlockfrostApiKey;
+    private String bootstrapBlockfrostBaseUrl;
+    private String bootstrapKoiosBaseUrl;
+    private String network;                 // "mainnet", "preprod", "preview" — used for provider URL auto-detection
 
     // Genesis-derived configuration
     @Builder.Default

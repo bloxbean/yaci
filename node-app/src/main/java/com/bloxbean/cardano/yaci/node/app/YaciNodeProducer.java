@@ -6,6 +6,7 @@ import com.bloxbean.cardano.yaci.node.api.NodeAPI;
 import com.bloxbean.cardano.yaci.node.api.config.PluginsOptions;
 import com.bloxbean.cardano.yaci.node.api.config.RuntimeOptions;
 import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
+import com.bloxbean.cardano.yaci.node.app.bootstrap.BootstrapConfigParser;
 import com.bloxbean.cardano.client.common.model.SlotConfig;
 import com.bloxbean.cardano.client.common.model.SlotConfigs;
 import com.bloxbean.cardano.yaci.core.common.Constants;
@@ -123,6 +124,31 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.block-producer.tx-evaluation", defaultValue = "true")
     boolean txEvaluationEnabled;
 
+    // Bootstrap config
+    @ConfigProperty(name = "yaci.node.bootstrap.enabled", defaultValue = "false")
+    boolean bootstrapEnabled;
+
+    @ConfigProperty(name = "yaci.node.bootstrap.block-number", defaultValue = "-1")
+    long bootstrapBlockNumber;
+
+    @ConfigProperty(name = "yaci.node.bootstrap.provider", defaultValue = "blockfrost")
+    String bootstrapProvider;
+
+    @ConfigProperty(name = "yaci.node.bootstrap.addresses")
+    java.util.Optional<java.util.List<String>> bootstrapAddresses;
+
+    @ConfigProperty(name = "yaci.node.bootstrap.utxos")
+    java.util.Optional<java.util.List<String>> bootstrapUtxos;
+
+    @ConfigProperty(name = "yaci.node.bootstrap.blockfrost.api-key")
+    java.util.Optional<String> bootstrapBlockfrostApiKey;
+
+    @ConfigProperty(name = "yaci.node.bootstrap.blockfrost.base-url")
+    java.util.Optional<String> bootstrapBlockfrostBaseUrl;
+
+    @ConfigProperty(name = "yaci.node.bootstrap.koios.base-url")
+    java.util.Optional<String> bootstrapKoiosBaseUrl;
+
     // Genesis config (shared between devnet and relay modes)
     @ConfigProperty(name = "yaci.node.genesis.shelley-genesis-file")
     java.util.Optional<String> shelleyGenesisFile;
@@ -202,6 +228,15 @@ public class YaciNodeProducer {
                 .alonzoGenesisFile(resolvedAlonzoGenesis)
                 .conwayGenesisFile(resolvedConwayGenesis)
                 .protocolParametersFile(protocolParametersFile.orElse(null))
+                .enableBootstrap(bootstrapEnabled)
+                .bootstrapBlockNumber(bootstrapBlockNumber)
+                .bootstrapProvider(bootstrapProvider)
+                .bootstrapAddresses(bootstrapAddresses.orElse(null))
+                .bootstrapUtxos(BootstrapConfigParser.parseUtxoRefs(bootstrapUtxos.orElse(null)))
+                .bootstrapBlockfrostApiKey(bootstrapBlockfrostApiKey.orElse(null))
+                .bootstrapBlockfrostBaseUrl(bootstrapBlockfrostBaseUrl.orElse(null))
+                .bootstrapKoiosBaseUrl(bootstrapKoiosBaseUrl.orElse(null))
+                .network(network)
                 .build();
 
         // Validate configuration
@@ -237,6 +272,11 @@ public class YaciNodeProducer {
         nodeAPI = new YaciNode(yaciConfig, runtimeOptions);
         log.info("Yaci Node created successfully");
 
+        // Wire bootstrap data provider if bootstrap is enabled
+        if (bootstrapEnabled) {
+            wireBootstrapProvider((YaciNode) nodeAPI, yaciConfig);
+        }
+
         // Initialize transaction evaluator if enabled
         if (txEvaluationEnabled) {
             initTransactionEvaluator((YaciNode) nodeAPI, yaciConfig);
@@ -257,7 +297,12 @@ public class YaciNodeProducer {
                 log.info("Yaci Node started automatically and syncing with {} network", network);
                 log.info("REST API available at http://localhost:{}/api/v1/node/ for manual control", httpPort);
             } catch (Exception e) {
-                log.error("Failed to auto-start Yaci Node: {}", e.getMessage());
+                log.error("Failed to auto-start Yaci Node: {}", e.getMessage(), e);
+                if (bootstrapEnabled) {
+                    log.error("Bootstrap mode is enabled but failed. "
+                            + "The node cannot start without bootstrap state. Shutting down.");
+                    throw new RuntimeException("Bootstrap failed, cannot start node", e);
+                }
                 log.info("You can still start manually via: curl -X POST http://localhost:{}/api/v1/node/start", httpPort);
             }
         } else {
@@ -317,6 +362,51 @@ public class YaciNodeProducer {
             log.info("Transaction evaluator initialized (networkId={})", networkId);
         } catch (Exception e) {
             log.warn("Failed to initialize transaction evaluator: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Wire the bootstrap data provider into the YaciNode based on configuration.
+     */
+    private void wireBootstrapProvider(YaciNode yaciNode, YaciNodeConfig yaciConfig) {
+        try {
+            String providerType = yaciConfig.getBootstrapProvider() != null
+                    ? yaciConfig.getBootstrapProvider().toLowerCase() : "blockfrost";
+            String net = yaciConfig.getNetwork() != null ? yaciConfig.getNetwork() : "preprod";
+
+            com.bloxbean.cardano.yaci.node.api.bootstrap.BootstrapDataProvider provider;
+            switch (providerType) {
+                case "koios" -> {
+                    if (yaciConfig.getBootstrapKoiosBaseUrl() != null
+                            && !yaciConfig.getBootstrapKoiosBaseUrl().isBlank()) {
+                        provider = new com.bloxbean.cardano.yaci.node.bootstrap.providers.KoiosBootstrapProvider(
+                                yaciConfig.getBootstrapKoiosBaseUrl());
+                    } else {
+                        provider = com.bloxbean.cardano.yaci.node.bootstrap.providers.KoiosBootstrapProvider
+                                .forNetwork(net);
+                    }
+                }
+                default -> { // blockfrost
+                    String apiKey = yaciConfig.getBootstrapBlockfrostApiKey();
+                    if (apiKey == null || apiKey.isBlank()) {
+                        log.warn("Bootstrap enabled but no Blockfrost API key configured. "
+                                + "Set yaci.node.bootstrap.blockfrost.api-key");
+                        return;
+                    }
+                    if (yaciConfig.getBootstrapBlockfrostBaseUrl() != null
+                            && !yaciConfig.getBootstrapBlockfrostBaseUrl().isBlank()) {
+                        provider = new com.bloxbean.cardano.yaci.node.bootstrap.providers.BlockfrostBootstrapProvider(
+                                yaciConfig.getBootstrapBlockfrostBaseUrl(), apiKey);
+                    } else {
+                        provider = com.bloxbean.cardano.yaci.node.bootstrap.providers.BlockfrostBootstrapProvider
+                                .forNetwork(net, apiKey);
+                    }
+                }
+            }
+            yaciNode.setBootstrapDataProvider(provider);
+            log.info("Bootstrap data provider configured: {}", providerType);
+        } catch (Exception e) {
+            log.error("Failed to configure bootstrap provider: {}", e.getMessage());
         }
     }
 
