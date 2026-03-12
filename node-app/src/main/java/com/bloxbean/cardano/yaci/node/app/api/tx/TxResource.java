@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.node.app.api.tx;
 
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.node.api.NodeAPI;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationException;
 import jakarta.inject.Inject;
@@ -46,7 +47,7 @@ public class TxResource {
                     .build();
         }
         try {
-            byte[] txCbor = hexToBytes(txHex.strip());
+            byte[] txCbor = HexUtil.decodeHexString(txHex.strip());
             return doSubmit(txCbor);
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST)
@@ -86,21 +87,5 @@ public class TxResource {
                     .entity(Map.of("error", "Failed to submit transaction: " + e.getMessage()))
                     .build();
         }
-    }
-
-    private static byte[] hexToBytes(String hex) {
-        if (hex.length() % 2 != 0) {
-            throw new IllegalArgumentException("Odd-length hex string");
-        }
-        byte[] bytes = new byte[hex.length() / 2];
-        for (int i = 0; i < bytes.length; i++) {
-            int hi = Character.digit(hex.charAt(i * 2), 16);
-            int lo = Character.digit(hex.charAt(i * 2 + 1), 16);
-            if (hi == -1 || lo == -1) {
-                throw new IllegalArgumentException("Invalid hex character");
-            }
-            bytes[i] = (byte) ((hi << 4) | lo);
-        }
-        return bytes;
     }
 }
