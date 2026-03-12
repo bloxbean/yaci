@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.node.app.api.utils;
 
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.node.api.NodeAPI;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
 import com.bloxbean.cardano.yaci.node.runtime.YaciNode;
@@ -35,8 +36,8 @@ public class EvaluationResource {
     @POST
     @Path("/evaluate")
     @Consumes("application/cbor")
-    public Response evaluateCbor(byte[] txCbor) {
-        return doEvaluate(txCbor);
+    public Response evaluateCbor(String txCbor) {
+        return doEvaluate(HexUtil.decodeHexString(txCbor));
     }
 
     /**
@@ -49,8 +50,9 @@ public class EvaluationResource {
         if (txHex == null || txHex.isBlank()) {
             return errorResponse("Transaction CBOR required");
         }
+
         try {
-            byte[] txCbor = hexToBytes(txHex.strip());
+            byte[] txCbor = HexUtil.decodeHexString(txHex.strip());
             return doEvaluate(txCbor);
         } catch (IllegalArgumentException e) {
             return errorResponse("Invalid hex string");
@@ -95,7 +97,7 @@ public class EvaluationResource {
 
             return Response.ok(response).build();
         } catch (Exception e) {
-            log.warn("Script evaluation failed: {}", e.getMessage());
+            log.warn("Script evaluation failed: {}", e);
 
             Map<String, Object> failure = new LinkedHashMap<>();
             failure.put("message", e.getMessage());
@@ -129,21 +131,5 @@ public class EvaluationResource {
         response.put("result", result);
 
         return Response.ok(response).build();
-    }
-
-    private static byte[] hexToBytes(String hex) {
-        if (hex.length() % 2 != 0) {
-            throw new IllegalArgumentException("Odd-length hex string");
-        }
-        byte[] bytes = new byte[hex.length() / 2];
-        for (int i = 0; i < bytes.length; i++) {
-            int hi = Character.digit(hex.charAt(i * 2), 16);
-            int lo = Character.digit(hex.charAt(i * 2 + 1), 16);
-            if (hi == -1 || lo == -1) {
-                throw new IllegalArgumentException("Invalid hex character");
-            }
-            bytes[i] = (byte) ((hi << 4) | lo);
-        }
-        return bytes;
     }
 }
