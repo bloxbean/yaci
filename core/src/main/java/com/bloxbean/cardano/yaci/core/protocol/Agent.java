@@ -94,7 +94,7 @@ public abstract class Agent<T extends AgentListener> {
 
         // Check the base protocol ID without the response flag
         int baseProtocolId = protocolWithFlag & 0x7FFF;
-        if (baseProtocolId < 0 || baseProtocolId > 100) {
+        if (baseProtocolId < 0 || baseProtocolId > 199) {
             log.error("🚨 Suspicious protocol ID: {} (0x{}) (base: {} 0x{})",
                      protocolWithFlag, Integer.toHexString(protocolWithFlag),
                      baseProtocolId, Integer.toHexString(baseProtocolId));
@@ -243,6 +243,17 @@ public abstract class Agent<T extends AgentListener> {
 
     public Channel getChannel() {
         return channel;
+    }
+
+    /**
+     * Returns true if the underlying Netty channel is non-null and currently active.
+     * Callers that do not have a direct dependency on Netty should use this method
+     * instead of {@code getChannel().isActive()} to avoid compile-time leakage of
+     * the Netty {@code Channel} type.
+     */
+    public boolean isChannelActive() {
+        Channel ch = this.channel;
+        return ch != null && ch.isActive();
     }
 
     /**
