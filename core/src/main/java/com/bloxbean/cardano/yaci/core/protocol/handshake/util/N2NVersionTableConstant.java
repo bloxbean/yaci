@@ -19,6 +19,16 @@ public class N2NVersionTableConstant {
     public final static long PROTOCOL_V12 = 12;
     public final static long PROTOCOL_V13 = 13;
     public final static long PROTOCOL_V14 = 14;
+    public final static long PROTOCOL_V100 = 100;
+
+    /**
+     * Check if the negotiated version supports app-layer protocols (Protocol 100+).
+     * @param versionNumber the negotiated version from handshake
+     * @return true if the version supports app-layer protocols
+     */
+    public static boolean isAppLayerVersion(long versionNumber) {
+        return versionNumber >= PROTOCOL_V100;
+    }
 
     public static VersionTable v4AndAbove(long networkMagic) {
         N2NVersionData versionData = new N2NVersionData(networkMagic, true);
@@ -51,6 +61,29 @@ public class N2NVersionTableConstant {
         versionTableMap.put(PROTOCOL_V12, versionData);
         versionTableMap.put(PROTOCOL_V13, versionData);
         versionTableMap.put(PROTOCOL_V14, versionData);
+
+        return new VersionTable(versionTableMap);
+    }
+
+    /**
+     * Version table for Yaci nodes that support app-layer protocols.
+     * Includes V100 for app-layer capability signaling.
+     * When connecting to Cardano nodes, V100 is ignored and V14 is negotiated.
+     * When connecting to other Yaci nodes, V100 is the highest mutually supported version.
+     */
+    public static VersionTable v11AndAboveWithAppLayer(long networkMagic) {
+        return v11AndAboveWithAppLayer(networkMagic, true, 0, false);
+    }
+
+    public static VersionTable v11AndAboveWithAppLayer(long networkMagic, boolean initiatorOnlyDiffusionMode, int peerSharing, boolean query) {
+        N2NVersionData versionData = new N2NVersionData(networkMagic, initiatorOnlyDiffusionMode, peerSharing, query);
+
+        Map<Long, VersionData> versionTableMap = new HashMap<>();
+        versionTableMap.put(PROTOCOL_V11, versionData);
+        versionTableMap.put(PROTOCOL_V12, versionData);
+        versionTableMap.put(PROTOCOL_V13, versionData);
+        versionTableMap.put(PROTOCOL_V14, versionData);
+        versionTableMap.put(PROTOCOL_V100, versionData);
 
         return new VersionTable(versionTableMap);
     }

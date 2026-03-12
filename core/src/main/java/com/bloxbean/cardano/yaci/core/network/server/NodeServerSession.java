@@ -18,6 +18,10 @@ import io.netty.channel.ChannelPipeline;
 import io.netty.handler.timeout.IdleStateHandler;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 @Slf4j
 public class NodeServerSession {
     private final Channel clientChannel;
@@ -26,14 +30,22 @@ public class NodeServerSession {
     private final ChainState chainState;
     private final TxSubmissionListener txSubmissionListener;
     private final TxSubmissionConfig txSubmissionConfig;
+    private final List<AgentFactory> agentFactories;
 
     public NodeServerSession(Channel clientChannel, VersionTable versionTable, ChainState chainState,
                            TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig) {
+        this(clientChannel, versionTable, chainState, txSubmissionListener, txSubmissionConfig, Collections.emptyList());
+    }
+
+    public NodeServerSession(Channel clientChannel, VersionTable versionTable, ChainState chainState,
+                           TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig,
+                           List<AgentFactory> agentFactories) {
         this.clientChannel = clientChannel;
         this.handshakeAgent = new HandshakeAgent(versionTable, false);
         this.chainState = chainState;
         this.txSubmissionListener = txSubmissionListener;
         this.txSubmissionConfig = txSubmissionConfig != null ? txSubmissionConfig : TxSubmissionConfig.createDefault();
+        this.agentFactories = agentFactories != null ? agentFactories : Collections.emptyList();
         this.agents = createAgents();
 
         setupPipeline();
@@ -62,13 +74,13 @@ public class NodeServerSession {
     }
 
     private Agent[] createAgents() {
-        // Initialize specific mini-protocol handlers (ChainSync, BlockFetch, etc.)
+        // Initialize L1 mini-protocol handlers
         ChainSyncServerAgent chainSyncAgent = new ChainSyncServerAgent(chainState);
         BlockFetchServerAgent blockFetchAgent = new BlockFetchServerAgent(chainState);
         TxSubmissionServerAgent txSubmissionAgent = new TxSubmissionServerAgent(txSubmissionConfig);
         KeepAliveServerAgent keepAliveAgent = new KeepAliveServerAgent();
 
-        // Set channels for agents
+        // Set channels for L1 agents
         chainSyncAgent.setChannel(clientChannel);
         blockFetchAgent.setChannel(clientChannel);
         txSubmissionAgent.setChannel(clientChannel);
@@ -79,12 +91,28 @@ public class NodeServerSession {
             txSubmissionAgent.addListener(txSubmissionListener);
         }
 
-        return new Agent[]{
-            chainSyncAgent,
-            blockFetchAgent,
-            txSubmissionAgent,
-            keepAliveAgent
-        };
+        List<Agent<?>> allAgents = new ArrayList<>();
+        allAgents.add(chainSyncAgent);
+        allAgents.add(blockFetchAgent);
+        allAgents.add(txSubmissionAgent);
+        allAgents.add(keepAliveAgent);
+
+        // Create and add app-layer agents from factories
+        for (AgentFactory factory : agentFactories) {
+            try {
+                Agent<?> agent = factory.createAgent();
+                if (agent != null) {
+                    agent.setChannel(clientChannel);
+                    allAgents.add(agent);
+                    log.info("Added app-layer agent: {} (protocol {})",
+                            agent.getClass().getSimpleName(), agent.getProtocolId());
+                }
+            } catch (Exception e) {
+                log.warn("Failed to create agent from factory: {}", e.getMessage());
+            }
+        }
+
+        return allAgents.toArray(new Agent[0]);
     }
 }
 

@@ -3,8 +3,10 @@ package com.bloxbean.cardano.yaci.node.app;
 import com.bloxbean.cardano.yaci.events.api.SubscriptionOptions;
 import com.bloxbean.cardano.yaci.events.api.config.EventsOptions;
 import com.bloxbean.cardano.yaci.node.api.NodeAPI;
+import com.bloxbean.cardano.yaci.node.api.config.PeerType;
 import com.bloxbean.cardano.yaci.node.api.config.PluginsOptions;
 import com.bloxbean.cardano.yaci.node.api.config.RuntimeOptions;
+import com.bloxbean.cardano.yaci.node.api.config.UpstreamConfig;
 import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
 import com.bloxbean.cardano.yaci.node.app.bootstrap.BootstrapConfigParser;
 import com.bloxbean.cardano.client.common.model.SlotConfig;
@@ -30,7 +32,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -140,6 +144,43 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.block-producer.tx-evaluation", defaultValue = "true")
     boolean txEvaluationEnabled;
 
+    // App-layer messaging config
+    @ConfigProperty(name = "yaci.node.app-layer.enabled", defaultValue = "false")
+    boolean appLayerEnabled;
+
+    @ConfigProperty(name = "yaci.node.app-layer.auth-mode", defaultValue = "open")
+    String appLayerAuthMode;
+
+    @ConfigProperty(name = "yaci.node.app-layer.allowed-keys")
+    java.util.Optional<java.util.List<String>> appLayerAllowedKeys;
+
+    @ConfigProperty(name = "yaci.node.app-layer.mempool-max-size", defaultValue = "1000")
+    int appMessageMemPoolMaxSize;
+
+    @ConfigProperty(name = "yaci.node.app-layer.default-ttl-seconds", defaultValue = "600")
+    long appMessageDefaultTtlSeconds;
+
+    @ConfigProperty(name = "yaci.node.app-layer.consensus-mode", defaultValue = "single-signer")
+    String appConsensusMode;
+
+    @ConfigProperty(name = "yaci.node.app-layer.block-interval-ms", defaultValue = "5000")
+    int appBlockIntervalMs;
+
+    @ConfigProperty(name = "yaci.node.app-layer.consensus-threshold", defaultValue = "1")
+    int appConsensusThreshold;
+
+    @ConfigProperty(name = "yaci.node.app-layer.consensus-total-signers", defaultValue = "1")
+    int appConsensusTotalSigners;
+
+    @ConfigProperty(name = "yaci.node.app-layer.ledger-enabled", defaultValue = "true")
+    boolean appLedgerEnabled;
+
+    @ConfigProperty(name = "yaci.node.app-layer.ledger-path")
+    java.util.Optional<String> appLedgerPath;
+
+    @ConfigProperty(name = "yaci.node.app-layer.topics")
+    java.util.Optional<java.util.List<String>> appTopics;
+
     // Bootstrap config
     @ConfigProperty(name = "yaci.node.bootstrap.enabled", defaultValue = "false")
     boolean bootstrapEnabled;
@@ -164,6 +205,16 @@ public class YaciNodeProducer {
 
     @ConfigProperty(name = "yaci.node.bootstrap.koios.base-url")
     java.util.Optional<String> bootstrapKoiosBaseUrl;
+
+    // Peer discovery config
+    @ConfigProperty(name = "yaci.node.peer-discovery.enabled", defaultValue = "false")
+    boolean peerDiscoveryEnabled;
+
+    @ConfigProperty(name = "yaci.node.peer-discovery.interval-seconds", defaultValue = "60")
+    int peerDiscoveryIntervalSeconds;
+
+    @ConfigProperty(name = "yaci.node.peer-discovery.max-peers", defaultValue = "20")
+    int peerDiscoveryMaxPeers;
 
     // Genesis config (shared between devnet and relay modes)
     @ConfigProperty(name = "yaci.node.genesis.shelley-genesis-file")
@@ -253,6 +304,22 @@ public class YaciNodeProducer {
                 .bootstrapBlockfrostBaseUrl(bootstrapBlockfrostBaseUrl.orElse(null))
                 .bootstrapKoiosBaseUrl(bootstrapKoiosBaseUrl.orElse(null))
                 .network(network)
+                .upstreams(parseUpstreams())
+                .peerDiscoveryEnabled(peerDiscoveryEnabled)
+                .peerDiscoveryIntervalSeconds(peerDiscoveryIntervalSeconds)
+                .peerDiscoveryMaxPeers(peerDiscoveryMaxPeers)
+                .enableAppLayer(appLayerEnabled)
+                .appLayerAuthMode(appLayerAuthMode)
+                .appLayerAllowedKeys(appLayerAllowedKeys.orElse(java.util.List.of()))
+                .appMessageMemPoolMaxSize(appMessageMemPoolMaxSize)
+                .appMessageDefaultTtlSeconds(appMessageDefaultTtlSeconds)
+                .appConsensusMode(appConsensusMode)
+                .appBlockIntervalMs(appBlockIntervalMs)
+                .appConsensusThreshold(appConsensusThreshold)
+                .appConsensusTotalSigners(appConsensusTotalSigners)
+                .appLedgerEnabled(appLedgerEnabled)
+                .appLedgerPath(appLedgerPath.orElse(null))
+                .appTopics(appTopics.orElse(java.util.List.of()))
                 .build();
 
         // Validate configuration
@@ -481,6 +548,37 @@ public class YaciNodeProducer {
             log.warn("Failed to extract bundled genesis resource {}: {}", classpathResource, e.getMessage());
             return userPath;
         }
+    }
+
+    /**
+     * Parse upstream peer list from Quarkus indexed config properties.
+     * Format: yaci.node.upstreams[0].host, yaci.node.upstreams[0].port, yaci.node.upstreams[0].type
+     */
+    private List<UpstreamConfig> parseUpstreams() {
+        List<UpstreamConfig> result = new ArrayList<>();
+        var config = org.eclipse.microprofile.config.ConfigProvider.getConfig();
+
+        for (int i = 0; i < 50; i++) { // support up to 50 upstreams
+            String prefix = "yaci.node.upstreams[" + i + "]";
+            var host = config.getOptionalValue(prefix + ".host", String.class);
+            if (host.isEmpty()) break;
+
+            int port = config.getOptionalValue(prefix + ".port", Integer.class).orElse(3001);
+            String typeStr = config.getOptionalValue(prefix + ".type", String.class).orElse("cardano");
+            PeerType type;
+            try {
+                type = PeerType.valueOf(typeStr.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                type = PeerType.CARDANO;
+            }
+
+            result.add(UpstreamConfig.builder()
+                    .host(host.get())
+                    .port(port)
+                    .type(type)
+                    .build());
+        }
+        return result;
     }
 
     private static String networkDirForMagic(long magic) {

@@ -12,6 +12,8 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -25,6 +27,7 @@ public class NodeServer {
     private ChainState chainState;
     private TxSubmissionListener txSubmissionListener;
     private TxSubmissionConfig txSubmissionConfig;
+    private List<AgentFactory> agentFactories;
     private final static Map<Channel, NodeServerSession> sessions = new ConcurrentHashMap<>();
 
     public NodeServer(int port, VersionTable versionTable, ChainState chainState) {
@@ -36,6 +39,12 @@ public class NodeServer {
     }
 
     public NodeServer(int port, VersionTable versionTable, ChainState chainState, TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig) {
+        this(port, versionTable, chainState, txSubmissionListener, txSubmissionConfig, Collections.emptyList());
+    }
+
+    public NodeServer(int port, VersionTable versionTable, ChainState chainState,
+                      TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig,
+                      List<AgentFactory> agentFactories) {
         this.port = port;
         this.bossGroup = new NioEventLoopGroup(1);
         this.workerGroup = new NioEventLoopGroup();
@@ -43,6 +52,7 @@ public class NodeServer {
         this.chainState = chainState;
         this.txSubmissionListener = txSubmissionListener;
         this.txSubmissionConfig = txSubmissionConfig != null ? txSubmissionConfig : TxSubmissionConfig.createDefault();
+        this.agentFactories = agentFactories != null ? agentFactories : Collections.emptyList();
     }
 
     public void start() {
@@ -61,7 +71,7 @@ public class NodeServer {
                             log.info("Local address: {}", ch.localAddress());
 
                             try {
-                                NodeServerSession session = new NodeServerSession(ch, versionTable, chainState, txSubmissionListener, txSubmissionConfig);
+                                NodeServerSession session = new NodeServerSession(ch, versionTable, chainState, txSubmissionListener, txSubmissionConfig, agentFactories);
                                 sessions.put(ch, session);
                                 log.info("Created session for client: {}", ch.remoteAddress());
                             } catch (Exception e) {

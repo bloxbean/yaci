@@ -3,7 +3,6 @@ package com.bloxbean.cardano.yaci.node.runtime;
 import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
-import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.network.server.NodeServer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -39,12 +38,13 @@ import com.bloxbean.cardano.yaci.node.api.bootstrap.BootstrapOutpoint;
 import com.bloxbean.cardano.yaci.node.runtime.bootstrap.BootstrapResult;
 import com.bloxbean.cardano.yaci.node.runtime.bootstrap.BootstrapService;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.BlockProducer;
-import com.bloxbean.cardano.yaci.node.runtime.blockproducer.DevnetBlockBuilder;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
-import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionEvaluationService;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationException;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationService;
+import com.bloxbean.cardano.yaci.node.api.chain.ChainSelectionStrategy;
+import com.bloxbean.cardano.yaci.node.api.config.UpstreamConfig;
+import com.bloxbean.cardano.yaci.node.api.events.PeerConnectedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.chain.BlockPruner;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMempoolEvictionPolicy;
@@ -52,11 +52,29 @@ import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.InMemoryChainState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MempoolEvictionPolicy;
+import com.bloxbean.cardano.yaci.node.runtime.chain.PraosChainSelection;
+import com.bloxbean.cardano.yaci.node.runtime.peer.PeerConnection;
+import com.bloxbean.cardano.yaci.node.runtime.peer.PeerDiscoveryService;
+import com.bloxbean.cardano.yaci.node.runtime.peer.PeerPool;
+import com.bloxbean.cardano.yaci.node.runtime.sync.BodyFetchScheduler;
+import com.bloxbean.cardano.yaci.node.runtime.sync.HeaderFanIn;
+import com.bloxbean.cardano.yaci.node.runtime.sync.MultiPeerHeaderListener;
 import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
 import com.bloxbean.cardano.yaci.node.api.events.MemPoolTransactionReceivedEvent;
 import com.bloxbean.cardano.yaci.node.api.events.NodeStartedEvent;
 import com.bloxbean.cardano.yaci.node.api.events.RollbackEvent;
 import com.bloxbean.cardano.yaci.node.api.events.SyncStatusChangedEvent;
+import com.bloxbean.cardano.yaci.node.runtime.appmsg.AppMessageMemPool;
+import com.bloxbean.cardano.yaci.node.runtime.appmsg.DefaultAppMessageMemPool;
+import com.bloxbean.cardano.yaci.node.runtime.appmsg.YaciAppMessageHandler;
+import com.bloxbean.cardano.yaci.node.runtime.appmsg.auth.OpenAuthenticator;
+import com.bloxbean.cardano.yaci.node.runtime.appmsg.auth.PermissionedAuthenticator;
+import com.bloxbean.cardano.yaci.node.api.appmsg.MessageAuthenticator;
+import com.bloxbean.cardano.yaci.core.network.server.AgentFactory;
+import com.bloxbean.cardano.yaci.core.protocol.appmsg.model.AppMessage;
+import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.AppMsgSubmissionAgent;
+import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.AppMsgSubmissionConfig;
+import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.AppMsgSubmissionServerAgent;
 import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
 import com.bloxbean.cardano.yaci.node.runtime.plugins.PluginManager;
 import com.bloxbean.cardano.yaci.node.api.plugin.StorageFilter;
@@ -114,11 +132,19 @@ public class YaciNode implements NodeAPI {
     private final ChainState chainState;
 
     // Client sync component - now using pipelined sync for parallel ChainSync and BlockFetch
-    private PeerClient peerClient;
+    private PeerClient peerClient;  // Primary peer client (backward compat / first upstream)
     private boolean isInitialSyncComplete = false;
     // Pipelining state
     private PipelineConfig pipelineConfig;
     private boolean isPipelinedMode = false;
+
+    // Multi-peer support
+    private final List<PeerClient> peerClients = new CopyOnWriteArrayList<>();
+    private PeerPool peerPool;
+    private HeaderFanIn headerFanIn;
+    private BodyFetchScheduler bodyFetchScheduler;
+    private ChainSelectionStrategy chainSelectionStrategy;
+    private PeerDiscoveryService peerDiscoveryService;
 
     // Pipeline managers
     private HeaderSyncManager headerSyncManager;
@@ -174,6 +200,16 @@ public class YaciNode implements NodeAPI {
     private UtxoEventHandler utxoEventHandler;
     private UtxoEventHandlerAsync utxoEventHandlerAsync;
     private ScheduledFuture<?> utxoLagTask;
+
+    // App-layer messaging components
+    private AppMessageMemPool appMessageMemPool;
+    private MessageAuthenticator appMessageAuthenticator;
+    private YaciAppMessageHandler appMessageHandler;
+
+    // App-layer consensus & ledger (M2)
+    private com.bloxbean.cardano.yaci.node.api.consensus.AppConsensus appConsensus;
+    private com.bloxbean.cardano.yaci.node.api.ledger.AppLedger appLedger;
+    private final List<com.bloxbean.cardano.yaci.node.runtime.appmsg.AppBlockProducer> appBlockProducers = new ArrayList<>();
 
     public YaciNode(YaciNodeConfig config) {
         this(config, RuntimeOptions.defaults());
@@ -361,6 +397,11 @@ public class YaciNode implements NodeAPI {
                 startBlockProducer();
             }
 
+            // Start app block producers if app-layer is enabled with topics
+            if (config.isEnableAppLayer() && !appBlockProducers.isEmpty()) {
+                startAppBlockProducers();
+            }
+
             // Initialize slot-to-time calculator from genesis data.
             // Done after startBlockProducer() so resolvedGenesisTimestamp is authoritative.
             initSlotTimeCalculator();
@@ -508,11 +549,34 @@ public class YaciNode implements NodeAPI {
                     .useBlockingMode(false)
                     .build();
 
+            // Build agent factories list for additional protocols (e.g., app-layer)
+            List<AgentFactory> agentFactories = new ArrayList<>();
+            if (config.isEnableAppLayer()) {
+                initAppLayerComponents();
+                AppMsgSubmissionConfig appMsgConfig = AppMsgSubmissionConfig.builder()
+                        .batchSize(10)
+                        .useBlockingMode(true)
+                        .build();
+                agentFactories.add(() -> {
+                    var serverAgent = new AppMsgSubmissionServerAgent(appMsgConfig);
+                    serverAgent.addListener(appMessageHandler);
+                    return serverAgent;
+                });
+                log.info("App-layer messaging enabled (auth={}, mempool-size={})",
+                        config.getAppLayerAuthMode(), config.getAppMessageMemPoolMaxSize());
+            }
+
+            // Use app-layer version table when enabled, so connecting Yaci clients can negotiate V100
+            var serverVersionTable = config.isEnableAppLayer()
+                    ? N2NVersionTableConstant.v11AndAboveWithAppLayer(protocolMagic, false, 0, false)
+                    : N2NVersionTableConstant.v11AndAbove(protocolMagic, false, 0, false);
+
             nodeServer = new NodeServer(serverPort,
-                    N2NVersionTableConstant.v11AndAbove(protocolMagic, false, 0, false),
+                    serverVersionTable,
                     chainState,
                     txSubmissionHandler,
-                    txSubmissionConfig);
+                    txSubmissionConfig,
+                    agentFactories);
 
             Thread serverThread = new Thread(() -> {
                 try {
@@ -539,6 +603,201 @@ public class YaciNode implements NodeAPI {
             log.error("Failed to start NodeServer", e);
             throw new RuntimeException("Failed to start server", e);
         }
+    }
+
+    /**
+     * Initialize app-layer messaging components (authenticator, mempool, handler)
+     * and M2 consensus/ledger/block-production components.
+     * Called once when app-layer is enabled, before starting the server.
+     */
+    private void initAppLayerComponents() {
+        if (appMessageMemPool != null) return; // already initialized
+
+        // Create authenticator based on config
+        String authMode = config.getAppLayerAuthMode();
+        if ("permissioned".equalsIgnoreCase(authMode)) {
+            appMessageAuthenticator = new PermissionedAuthenticator(
+                    config.getAppLayerAllowedKeys() != null
+                            ? new java.util.HashSet<>(config.getAppLayerAllowedKeys())
+                            : null);
+        } else {
+            appMessageAuthenticator = new OpenAuthenticator();
+        }
+
+        // Create mempool
+        appMessageMemPool = new DefaultAppMessageMemPool(config.getAppMessageMemPoolMaxSize());
+
+        // Create handler
+        appMessageHandler = new YaciAppMessageHandler(appMessageMemPool, appMessageAuthenticator, eventBus);
+
+        // Schedule periodic TTL eviction
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                appMessageMemPool.removeExpired(System.currentTimeMillis() / 1000);
+            } catch (Exception e) {
+                log.warn("App message TTL eviction error: {}", e.getMessage());
+            }
+        }, 30, 30, TimeUnit.SECONDS);
+
+        log.info("App-layer components initialized (auth={}, maxPoolSize={})",
+                authMode, config.getAppMessageMemPoolMaxSize());
+
+        // --- M2: Consensus, Ledger, Validation, Block Production ---
+        initAppConsensusAndLedger();
+    }
+
+    /**
+     * Schedule periodic sync of app messages from the local mempool to a client-side
+     * AppMsgSubmissionAgent, so the peer's server can pull them via Protocol 100.
+     */
+    private void scheduleAppMessageSync(AppMsgSubmissionAgent agent, String peerId) {
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                if (appMessageMemPool == null || appMessageMemPool.size() == 0) return;
+                List<AppMessage> pending = appMessageMemPool.getMessages(50);
+                int enqueued = 0;
+                for (AppMessage msg : pending) {
+                    if (agent.enqueueMessage(msg)) {
+                        enqueued++;
+                    }
+                }
+                if (enqueued > 0) {
+                    log.debug("Synced {} app message(s) to agent for peer {}", enqueued, peerId);
+                }
+            } catch (Exception e) {
+                log.warn("App message sync error for peer {}: {}", peerId, e.getMessage());
+            }
+        }, 1, 1, TimeUnit.SECONDS);
+    }
+
+    /**
+     * Initialize M2 consensus, ledger, validation listeners, and block producers.
+     */
+    private void initAppConsensusAndLedger() {
+        // Create consensus implementation
+        String consensusMode = config.getAppConsensusMode();
+        if ("multisig".equalsIgnoreCase(consensusMode)) {
+            var params = com.bloxbean.cardano.yaci.node.api.consensus.ConsensusParams.builder()
+                    .threshold(config.getAppConsensusThreshold())
+                    .totalSigners(config.getAppConsensusTotalSigners())
+                    .build();
+            // Convert allowed keys from hex strings to byte arrays
+            List<byte[]> allowedKeys = new ArrayList<>();
+            if (config.getAppLayerAllowedKeys() != null) {
+                for (String hexKey : config.getAppLayerAllowedKeys()) {
+                    allowedKeys.add(HexUtil.decodeHexString(hexKey));
+                }
+            }
+            appConsensus = new com.bloxbean.cardano.yaci.node.runtime.consensus.MultiSigConsensus(allowedKeys, params);
+            log.info("App consensus: multisig (threshold={}/{})", params.getThreshold(), params.getTotalSigners());
+        } else {
+            appConsensus = new com.bloxbean.cardano.yaci.node.runtime.consensus.SingleSignerConsensus();
+            log.info("App consensus: single-signer");
+        }
+
+        // Create ledger
+        if (config.isAppLedgerEnabled()) {
+            String ledgerPath = config.getAppLedgerPath();
+            if (ledgerPath == null || ledgerPath.isBlank()) {
+                // Derive from rocksDB path or use in-memory
+                if (config.isUseRocksDB() && config.getRocksDBPath() != null) {
+                    ledgerPath = config.getRocksDBPath() + "/app-ledger";
+                }
+            }
+            if (ledgerPath != null && !ledgerPath.isBlank()) {
+                appLedger = new com.bloxbean.cardano.yaci.node.runtime.ledger.RocksDBAppLedger(ledgerPath);
+                log.info("App ledger: RocksDB (path={})", ledgerPath);
+            } else {
+                appLedger = new com.bloxbean.cardano.yaci.node.runtime.ledger.InMemoryAppLedger();
+                log.info("App ledger: in-memory");
+            }
+        } else {
+            appLedger = new com.bloxbean.cardano.yaci.node.runtime.ledger.InMemoryAppLedger();
+            log.info("App ledger: in-memory (ledger persistence disabled)");
+        }
+
+        // Register consensus listener
+        var consensusListener = new com.bloxbean.cardano.yaci.node.runtime.consensus.DefaultAppConsensusListener(appConsensus);
+        AnnotationListenerRegistrar.register(eventBus, consensusListener, SubscriptionOptions.builder().build());
+
+        // Register validation listener (accept-all by default)
+        var validator = new com.bloxbean.cardano.yaci.node.runtime.validation.app.DefaultAppDataValidator();
+        var validationListener = new com.bloxbean.cardano.yaci.node.runtime.validation.app.DefaultAppValidationListener(validator);
+        AnnotationListenerRegistrar.register(eventBus, validationListener, SubscriptionOptions.builder().build());
+
+        // Create block producers for configured topics
+        List<String> topics = config.getAppTopics();
+        if (topics != null && !topics.isEmpty()) {
+            for (String topic : topics) {
+                var producer = new com.bloxbean.cardano.yaci.node.runtime.appmsg.AppBlockProducer(
+                        appMessageMemPool, appLedger, appConsensus, eventBus,
+                        scheduler, topic, config.getAppBlockIntervalMs());
+                appBlockProducers.add(producer);
+                log.info("App block producer created for topic '{}' (interval={}ms)", topic, config.getAppBlockIntervalMs());
+            }
+        }
+
+        log.info("App-layer M2 components initialized (consensus={}, ledger={}, topics={})",
+                consensusMode, appLedger.getClass().getSimpleName(),
+                topics != null ? topics : "[]");
+    }
+
+    /**
+     * Start all app block producers.
+     */
+    private void startAppBlockProducers() {
+        for (var producer : appBlockProducers) {
+            producer.start();
+        }
+        if (!appBlockProducers.isEmpty()) {
+            log.info("Started {} app block producer(s)", appBlockProducers.size());
+        }
+    }
+
+    /**
+     * Stop all app block producers and close the app ledger.
+     */
+    private void stopAppBlockProducers() {
+        for (var producer : appBlockProducers) {
+            producer.stop();
+        }
+        appBlockProducers.clear();
+        if (appLedger != null) {
+            try {
+                appLedger.close();
+            } catch (Exception e) {
+                log.warn("Error closing app ledger: {}", e.getMessage());
+            }
+            appLedger = null;
+        }
+    }
+
+    /**
+     * Get the app-message handler. Useful for local message submission.
+     */
+    public YaciAppMessageHandler getAppMessageHandler() {
+        return appMessageHandler;
+    }
+
+    /**
+     * Get the app-message mempool.
+     */
+    public AppMessageMemPool getAppMessageMemPool() {
+        return appMessageMemPool;
+    }
+
+    /**
+     * Get the app ledger.
+     */
+    public com.bloxbean.cardano.yaci.node.api.ledger.AppLedger getAppLedger() {
+        return appLedger;
+    }
+
+    /**
+     * Get the app consensus implementation.
+     */
+    public com.bloxbean.cardano.yaci.node.api.consensus.AppConsensus getAppConsensus() {
+        return appConsensus;
     }
 
     /**
@@ -805,13 +1064,15 @@ public class YaciNode implements NodeAPI {
                     PublishOptions.builder().build());
         }
 
-        // Forward to upstream node if connected (relay mode)
-        if (peerClient != null && peerClient.isRunning()) {
-            try {
-                peerClient.submitTxBytes(txHash, txCbor, TxBodyType.CONWAY);
-                log.debug("Transaction {} forwarded to upstream node", txHash);
-            } catch (Exception e) {
-                log.warn("Failed to forward transaction {} to upstream node: {}", txHash, e.getMessage());
+        // Forward to upstream nodes if connected (relay mode)
+        for (PeerClient pc : peerClients) {
+            if (pc != null && pc.isRunning()) {
+                try {
+                    pc.submitTxBytes(txHash, txCbor, TxBodyType.CONWAY);
+                    log.debug("Transaction {} forwarded to upstream peer", txHash);
+                } catch (Exception e) {
+                    log.warn("Failed to forward transaction {} to upstream peer: {}", txHash, e.getMessage());
+                }
             }
         }
 
@@ -1230,50 +1491,111 @@ public class YaciNode implements NodeAPI {
     }
 
     /**
-     * Start the client sync component using either pipelined or sequential sync
+     * Start the client sync component using either pipelined or sequential sync.
+     * Supports multiple upstream peers when configured via {@code upstreams} list.
      */
     private void startClientSync() {
         try {
             boolean usePipeline = config.isEnablePipelinedSync();
-            log.info("Starting {} client sync with {}:{}...",
-                    usePipeline ? "pipelined" : "sequential", remoteCardanoHost, remoteCardanoPort);
             isSyncing.set(true);
             isPipelinedMode = usePipeline;
 
+            // Resolve effective upstream list (upstreams config or single remote host/port)
+            List<UpstreamConfig> upstreams = config.getEffectiveUpstreams();
+            boolean multiPeer = upstreams.size() > 1;
+
+            log.info("Starting {} client sync with {} upstream peer(s)...",
+                    usePipeline ? "pipelined" : "sequential", upstreams.size());
+            for (UpstreamConfig u : upstreams) {
+                log.info("  Upstream: {}:{} (type={})", u.getHost(), u.getPort(), u.getType());
+            }
+
             // Get local tips to determine sync strategy
-            // Use header_tip as primary reference for restart efficiency
             ChainTip headerTip = chainState.getHeaderTip();
             ChainTip bodyTip = chainState.getTip();
-
-            // Use header_tip if available, fall back to body_tip
             ChainTip localTip = headerTip != null ? headerTip : bodyTip;
 
             log.info("Local header_tip: {}, body_tip: {}, using: {} for sync",
                      headerTip, bodyTip, localTip != null ? "slot " + localTip.getSlot() : "genesis");
 
-            // Initialize last known tip
             lastKnownChainTip = localTip;
-
-            // Determine starting point for sync (will use header_tip when available)
             Point startPoint = determineStartPoint(localTip);
-            log.info("Starting pipelined sync from point: {}", startPoint);
+            log.info("Starting sync from point: {}", startPoint);
 
-            // Find remote tip to understand sync scope
-            TipFinder tipFinder = new TipFinder(remoteCardanoHost, remoteCardanoPort, startPoint, protocolMagic);
-            remoteTip = tipFinder.find()
-                    .doFinally(signalType -> tipFinder.shutdown())
-                    .block(Duration.ofSeconds(5));
+            // Initialize chain selection strategy (k from genesis securityParam)
+            long securityParam = 2160; // default for mainnet/preprod
+            if (genesisConfig != null && genesisConfig.getShelleyGenesisData() != null) {
+                long k = genesisConfig.getShelleyGenesisData().securityParam();
+                if (k > 0) securityParam = k;
+            }
+            chainSelectionStrategy = new PraosChainSelection(securityParam);
+            log.info("Chain selection strategy: PraosChainSelection (k={})", securityParam);
 
-            // Create PeerClient
-            if (peerClient == null) {
-                peerClient = new PeerClient(remoteCardanoHost, remoteCardanoPort, protocolMagic, startPoint);
-                // Note: Connection will be established in pipeline or sequential mode below
+            // Initialize PeerPool
+            peerPool = new PeerPool(chainSelectionStrategy);
+            headerFanIn = new HeaderFanIn(peerPool, chainState, eventBus, chainSelectionStrategy);
+            bodyFetchScheduler = new BodyFetchScheduler(peerPool);
+
+            // Find remote tip from primary upstream (non-fatal: YACI peers may have no chain data)
+            UpstreamConfig primary = upstreams.get(0);
+            try {
+                TipFinder tipFinder = new TipFinder(primary.getHost(), primary.getPort(), startPoint, protocolMagic);
+                remoteTip = tipFinder.find()
+                        .doFinally(signalType -> tipFinder.shutdown())
+                        .block(Duration.ofSeconds(5));
+            } catch (Exception e) {
+                log.warn("TipFinder failed for primary upstream {}:{} - falling back to sequential sync: {}",
+                        primary.getHost(), primary.getPort(), e.getMessage());
+                remoteTip = null;
+                isPipelinedMode = false;
             }
 
-            if (isPipelinedMode) {
+            // Initialize app-layer components early if enabled (needed before creating PeerClients)
+            if (config.isEnableAppLayer()) {
+                initAppLayerComponents();
+            }
+
+            // Create PeerClient for each upstream and add to pool
+            for (UpstreamConfig upstream : upstreams) {
+                // Use app-layer version table when enabled; L1 peers will ignore V100
+                // and negotiate V14, so this is safe for all peer types.
+                var clientVersionTable = config.isEnableAppLayer()
+                        ? N2NVersionTableConstant.v11AndAboveWithAppLayer(protocolMagic)
+                        : N2NVersionTableConstant.v11AndAbove(protocolMagic);
+                PeerClient pc = new PeerClient(upstream.getHost(), upstream.getPort(), startPoint, clientVersionTable);
+
+                // Signal intent to use app-layer protocol; version negotiation
+                // in AppProtocolManager.onHandshakeComplete() handles the rest.
+                if (config.isEnableAppLayer()) {
+                    pc.getAppProtocolManager().enableAppMsg();
+                }
+
+                peerClients.add(pc);
+                peerPool.addPeer(upstream);
+            }
+
+            // Primary peerClient = first one (backward compat for HeaderSyncManager/BodyFetchManager)
+            peerClient = peerClients.get(0);
+
+            if (isPipelinedMode && remoteTip != null) {
                 startPipelinedClientSync(localTip, remoteTip, startPoint);
             } else {
                 startSequentialClientSync(startPoint);
+            }
+
+            // Connect additional peers (index 1+) for multi-peer mode
+            if (multiPeer) {
+                connectAdditionalPeers(startPoint);
+            }
+
+            // Start peer discovery service if enabled
+            if (config.isPeerDiscoveryEnabled() && headerFanIn != null) {
+                peerDiscoveryService = new PeerDiscoveryService(
+                        peerPool, headerFanIn, eventBus, peerClients,
+                        protocolMagic,
+                        config.getPeerDiscoveryMaxPeers(),
+                        config.getPeerDiscoveryIntervalSeconds());
+                peerDiscoveryService.start(startPoint);
             }
 
         } catch (Exception e) {
@@ -1281,6 +1603,49 @@ public class YaciNode implements NodeAPI {
             isSyncing.set(false);
             isPipelinedMode = false;
             throw new RuntimeException("Failed to start client sync", e);
+        }
+    }
+
+    /**
+     * Connect additional upstream peers (beyond the primary) for multi-peer sync.
+     * Each additional peer runs its own ChainSync and feeds headers into HeaderFanIn.
+     */
+    private void connectAdditionalPeers(Point startPoint) {
+        List<UpstreamConfig> upstreams = config.getEffectiveUpstreams();
+        for (int i = 1; i < upstreams.size(); i++) {
+            UpstreamConfig upstream = upstreams.get(i);
+            PeerClient pc = peerClients.get(i);
+            String peerId = upstream.peerId();
+
+            try {
+                // Create a listener that feeds headers into HeaderFanIn for this peer
+                BlockChainDataListener fanInListener = new MultiPeerHeaderListener(
+                        peerId, headerFanIn, peerPool, eventBus);
+
+                pc.connect(fanInListener, null);
+                pc.enableTxSubmission();
+                pc.startHeaderSync(startPoint, true);
+
+                // Schedule app message sync via PeerClient's internal agent
+                if (config.isEnableAppLayer()) {
+                    pc.getAppProtocolManager().getAppMsgSubmissionAgent()
+                            .ifPresent(agent -> scheduleAppMessageSync(agent, peerId));
+                }
+
+                // Mark connected in pool
+                peerPool.getPeer(peerId).ifPresent(conn -> {
+                    conn.markConnected();
+                    EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
+                    eventBus.publish(new PeerConnectedEvent(peerId, upstream.getHost(),
+                                    upstream.getPort(), upstream.getType()),
+                            meta, PublishOptions.builder().build());
+                });
+
+                log.info("Additional peer connected: {} ({})", peerId, upstream.getType());
+            } catch (Exception e) {
+                log.warn("Failed to connect additional peer {}: {}", peerId, e.getMessage());
+                peerPool.getPeer(peerId).ifPresent(PeerConnection::recordFailure);
+            }
         }
     }
 
@@ -1328,19 +1693,43 @@ public class YaciNode implements NodeAPI {
                 this  // Pass YaciNode reference for rollback coordination
         );
 
+        // Wire HeaderFanIn for multi-peer chain selection (primary peer)
+        if (headerFanIn != null && !config.getEffectiveUpstreams().isEmpty()) {
+            String primaryPeerId = config.getEffectiveUpstreams().get(0).peerId();
+            pipelineListener.setHeaderFanIn(headerFanIn, primaryPeerId);
+
+            // Mark primary peer as connected in pool
+            peerPool.getPeer(primaryPeerId).ifPresent(conn -> {
+                conn.markConnected();
+                EventMetadata meta = EventMetadata.builder().origin("node-runtime").build();
+                var primaryUpstream = config.getEffectiveUpstreams().get(0);
+                eventBus.publish(new PeerConnectedEvent(primaryPeerId, primaryUpstream.getHost(),
+                                primaryUpstream.getPort(), primaryUpstream.getType()),
+                        meta, PublishOptions.builder().build());
+            });
+        }
+
         // Connect using existing PeerClient.connect() method with pipeline listener
         peerClient.connect(pipelineListener, null); // TxSubmission handled separately if needed
         peerClient.enableTxSubmission(); // Initiate TxSubmission N2N protocol (sends Init message)
 
+        // Schedule app message sync via PeerClient's internal agent
+        if (config.isEnableAppLayer()) {
+            String primaryPeerId2 = config.getEffectiveUpstreams().get(0).peerId();
+            peerClient.getAppProtocolManager().getAppMsgSubmissionAgent()
+                    .ifPresent(agent -> scheduleAppMessageSync(agent, primaryPeerId2));
+        }
+
         // Start header-only sync
         peerClient.startHeaderSync(startPoint, true); // Enable pipelining for headers
-        log.info("🔗 ==> Header sync started with pipelining enabled");
+        log.info("Header sync started with pipelining enabled");
 
         // Start body fetch manager monitoring
         bodyFetchManager.start();
-        log.info("📦 ==> Body fetch manager started for range-based fetching");
+        log.info("Body fetch manager started for range-based fetching");
 
-        log.info("🚀 Pipeline startup complete - HeaderSync and BodyFetch active");
+        log.info("Pipeline startup complete - HeaderSync and BodyFetch active (peers: {})",
+                peerClients.size());
     }
 
     /**
@@ -1413,6 +1802,13 @@ public class YaciNode implements NodeAPI {
         // Connect using existing PeerClient.connect() method with pipeline listener
         peerClient.connect(pipelineListener, null); // TxSubmission handled separately if needed
         peerClient.enableTxSubmission(); // Initiate TxSubmission N2N protocol (sends Init message)
+
+        // Schedule app message sync via PeerClient's internal agent
+        if (config.isEnableAppLayer()) {
+            String primaryPeerId = config.getEffectiveUpstreams().get(0).peerId();
+            peerClient.getAppProtocolManager().getAppMsgSubmissionAgent()
+                    .ifPresent(agent -> scheduleAppMessageSync(agent, primaryPeerId));
+        }
 
         // Start traditional sync from tip or point
         peerClient.startSync(startPoint);
@@ -1495,15 +1891,23 @@ public class YaciNode implements NodeAPI {
         if (isRunning.compareAndSet(true, false)) {
             log.info("Stopping Yaci Node...");
 
-            // Stop client sync
+            // Stop client sync — stop all peer clients
             if (isSyncing.get()) {
-                try {
-                    if (peerClient != null && peerClient.isRunning()) {
-                        log.info("Stopping PeerClient...");
-                        peerClient.stop();
+                for (PeerClient pc : peerClients) {
+                    try {
+                        if (pc != null && pc.isRunning()) {
+                            pc.stop();
+                        }
+                    } catch (Exception e) {
+                        log.warn("Error stopping peerClient", e);
                     }
-                } catch (Exception e) {
-                    log.warn("Error stopping peerClient", e);
+                }
+                peerClients.clear();
+                if (peerDiscoveryService != null) {
+                    try { peerDiscoveryService.close(); } catch (Exception ignored) {}
+                }
+                if (peerPool != null) {
+                    peerPool.shutdown();
                 }
                 isSyncing.set(false);
             }
@@ -1512,6 +1916,9 @@ public class YaciNode implements NodeAPI {
             if (blockProducer != null && blockProducer.isRunning()) {
                 blockProducer.stop();
             }
+
+            // Stop app block producers and close app ledger
+            stopAppBlockProducers();
 
             // Stop server
             if (isServerRunning.get()) {
@@ -1778,6 +2185,27 @@ public class YaciNode implements NodeAPI {
 
     public YaciNodeConfig getConfig() {
         return config;
+    }
+
+    /**
+     * Get the list of all peer clients (multi-peer mode).
+     */
+    public List<PeerClient> getPeerClients() {
+        return List.copyOf(peerClients);
+    }
+
+    /**
+     * Get the PeerPool (multi-peer mode). May be null if not yet started.
+     */
+    public PeerPool getPeerPool() {
+        return peerPool;
+    }
+
+    /**
+     * Get the HeaderFanIn (multi-peer mode). May be null if not yet started.
+     */
+    public HeaderFanIn getHeaderFanIn() {
+        return headerFanIn;
     }
 
     @Override

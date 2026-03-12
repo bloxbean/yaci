@@ -64,6 +64,21 @@ yaci:
         enabled: false
         addresses: []
         payment-credentials: []
+    # Multi-peer upstream (optional — overrides remote.host/port when set)
+    # upstreams:
+    #   - host: "preprod-node.world.dev.cardano.org"
+    #     port: 30000
+    #     type: cardano
+    #   - host: "localhost"
+    #     port: 32000
+    #     type: cardano
+
+    # Peer discovery via PeerSharing protocol
+    peer-discovery:
+      enabled: false
+      interval-seconds: 60
+      max-peers: 20
+
     block-producer:
       enabled: false
       block-time-millis: 0
@@ -71,6 +86,22 @@ yaci:
       genesis-timestamp: 0
       slot-length-millis: 0
       tx-evaluation: true
+
+    # App-layer messaging (CIP-0137 inspired)
+    app-layer:
+      enabled: false
+      auth-mode: open
+      allowed-keys: []
+      mempool-max-size: 1000
+      default-ttl-seconds: 600
+      # Consensus & ledger (M2)
+      consensus-mode: single-signer     # single-signer | multisig
+      block-interval-ms: 5000
+      consensus-threshold: 1
+      consensus-total-signers: 1
+      ledger-enabled: true
+      ledger-path:                       # defaults to <storage.path>/app-ledger
+      topics: []                         # topics to produce blocks for
 
 "%native":
   quarkus:

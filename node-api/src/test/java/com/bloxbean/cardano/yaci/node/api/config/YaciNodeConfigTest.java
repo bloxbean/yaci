@@ -76,7 +76,7 @@ class YaciNodeConfigTest {
         
         assertThatThrownBy(config::validate)
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Remote host must be specified when client is enabled");
+                .hasMessageContaining("Either 'upstreams' list or 'remoteHost' must be specified when client is enabled");
     }
 
     @Test
@@ -149,6 +149,46 @@ class YaciNodeConfigTest {
         assertThat(config.getHeaderPipelineDepth()).isEqualTo(20); // Smaller values for testing
         
         assertThatCode(config::validate).doesNotThrowAnyException();
+    }
+
+    @Test
+    void appLayerM2Defaults() {
+        YaciNodeConfig config = YaciNodeConfig.builder()
+                .enableServer(true)
+                .serverPort(13337)
+                .enableAppLayer(true)
+                .build();
+
+        assertThat(config.getAppConsensusMode()).isEqualTo("single-signer");
+        assertThat(config.getAppBlockIntervalMs()).isEqualTo(5000);
+        assertThat(config.getAppConsensusThreshold()).isEqualTo(1);
+        assertThat(config.getAppConsensusTotalSigners()).isEqualTo(1);
+        assertThat(config.isAppLedgerEnabled()).isTrue();
+        assertThat(config.getAppLedgerPath()).isNull();
+        assertThat(config.getAppTopics()).isEmpty();
+    }
+
+    @Test
+    void appLayerM2CustomConfig() {
+        YaciNodeConfig config = YaciNodeConfig.builder()
+                .enableServer(true)
+                .serverPort(13337)
+                .enableAppLayer(true)
+                .appConsensusMode("multisig")
+                .appBlockIntervalMs(2000)
+                .appConsensusThreshold(2)
+                .appConsensusTotalSigners(3)
+                .appLedgerEnabled(true)
+                .appLedgerPath("/tmp/app-ledger")
+                .appTopics(java.util.List.of("topic-a", "topic-b"))
+                .build();
+
+        assertThat(config.getAppConsensusMode()).isEqualTo("multisig");
+        assertThat(config.getAppBlockIntervalMs()).isEqualTo(2000);
+        assertThat(config.getAppConsensusThreshold()).isEqualTo(2);
+        assertThat(config.getAppConsensusTotalSigners()).isEqualTo(3);
+        assertThat(config.getAppLedgerPath()).isEqualTo("/tmp/app-ledger");
+        assertThat(config.getAppTopics()).containsExactly("topic-a", "topic-b");
     }
 
     @Test

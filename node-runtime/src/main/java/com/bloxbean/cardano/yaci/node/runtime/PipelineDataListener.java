@@ -12,6 +12,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
+import com.bloxbean.cardano.yaci.node.runtime.sync.HeaderFanIn;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -32,6 +33,8 @@ public class PipelineDataListener implements BlockChainDataListener {
     private final HeaderSyncManager headerSyncManager;
     private final BodyFetchManager bodyFetchManager;
     private final YaciNode yaciNode;
+    private HeaderFanIn headerFanIn;
+    private String peerId;
 
     /**
      * Create a new PipelineDataListener
@@ -50,6 +53,15 @@ public class PipelineDataListener implements BlockChainDataListener {
         log.info("PipelineDataListener initialized for parallel header/body processing");
     }
 
+    /**
+     * Set the HeaderFanIn for multi-peer mode. When set, headers from the primary peer
+     * are also fed into the fan-in for deduplication and chain selection.
+     */
+    public void setHeaderFanIn(HeaderFanIn headerFanIn, String peerId) {
+        this.headerFanIn = headerFanIn;
+        this.peerId = peerId;
+    }
+
     // ================================================================
     // ChainSync Events - Delegate to HeaderSyncManager
     // ================================================================
@@ -59,8 +71,13 @@ public class PipelineDataListener implements BlockChainDataListener {
         // Delegate header processing to HeaderSyncManager
         headerSyncManager.rollforward(tip, blockHeader, originalHeaderBytes);
 
-        //TODO remove this log
-//        log.info("Rollforward to header: {} at slot: {}", blockHeader.getHeaderBody().getBlockNumber(), blockHeader.getHeaderBody().getSlot());
+        // Feed into HeaderFanIn for multi-peer chain selection (if enabled)
+        if (headerFanIn != null && blockHeader != null && blockHeader.getHeaderBody() != null) {
+            headerFanIn.onHeaderReceived(peerId, tip,
+                    blockHeader.getHeaderBody().getBlockHash(),
+                    blockHeader.getHeaderBody().getBlockNumber(),
+                    blockHeader.getHeaderBody().getSlot());
+        }
 
         // Resume BodyFetchManager if paused and headers are flowing after intersection
         yaciNode.resumeBodyFetchOnHeaderFlow();
@@ -70,6 +87,14 @@ public class PipelineDataListener implements BlockChainDataListener {
     public void rollforwardByronEra(Tip tip, ByronBlockHead byronBlockHead, byte[] originalHeaderBytes) {
         // Delegate Byron header processing to HeaderSyncManager
         headerSyncManager.rollforwardByronEra(tip, byronBlockHead, originalHeaderBytes);
+
+        // Feed into HeaderFanIn for multi-peer chain selection (if enabled)
+        if (headerFanIn != null && byronBlockHead != null) {
+            headerFanIn.onHeaderReceived(peerId, tip,
+                    byronBlockHead.getBlockHash(),
+                    byronBlockHead.getConsensusData().getDifficulty().longValue(),
+                    byronBlockHead.getConsensusData().getSlotId().getSlot());
+        }
 
         // Resume BodyFetchManager if paused and headers are flowing after intersection
         yaciNode.resumeBodyFetchOnHeaderFlow();

@@ -12,6 +12,7 @@ import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
+import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -30,6 +31,8 @@ import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxs;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -64,6 +67,9 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
     // Tx submission queue size (0 = use agent default)
     private int txMaxQueueSize;
+
+    // App protocol manager (handles Protocol 100+ agents)
+    private AppProtocolManager appProtocolManager;
 
     // Keep alive tracking
     private int lastKeepAliveResponseCookie = 0;
@@ -103,10 +109,19 @@ public class N2NPeerFetcher implements Fetcher<Block> {
      * Application controls sync strategy by choosing the starting point
      */
     public N2NPeerFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable) {
+        this(host, port, wellKnownPoint, versionTable, new AppProtocolManager());
+    }
+
+    /**
+     * Constructor with an externally-provided AppProtocolManager.
+     */
+    public N2NPeerFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable,
+                           AppProtocolManager appProtocolManager) {
         this.host = host;
         this.port = port;
         this.versionTable = versionTable;
         this.wellKnownPoint = wellKnownPoint;
+        this.appProtocolManager = appProtocolManager;
 
         init();
     }
@@ -120,9 +135,14 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
         blockFetchAgent.resetPoints(wellKnownPoint, wellKnownPoint);
         setupAgentListeners();
+        appProtocolManager.setupListeners();
 
-        n2nClient = new TCPNodeClient(host, port, handshakeAgent, keepAliveAgent,
-                chainSyncAgent, blockFetchAgent, txSubmissionAgent);
+        // Build agent array: standard agents + app protocol agents
+        List<Agent<?>> allAgents = new ArrayList<>(List.of(
+                keepAliveAgent, chainSyncAgent, blockFetchAgent, txSubmissionAgent));
+        allAgents.addAll(appProtocolManager.getAgents());
+        n2nClient = new TCPNodeClient(host, port, handshakeAgent,
+                allAgents.toArray(new Agent<?>[0]));
     }
 
     private void setupAgentListeners() {
@@ -136,6 +156,9 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
                 //We don't need to start chain sync here, as it will be started by the application
                 //by invoking startXXX() methods.
+                // Enable app-layer protocols based on negotiated version (both first and reconnection)
+                appProtocolManager.onHandshakeComplete(handshakeAgent.getProtocolVersion());
+
                 if (firstTimeHandshake) {
                     firstTimeHandshake = false;
                     log.info("First time handshake completed. Waiting for explicit sync start.");
@@ -232,6 +255,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
                 }
             }
         });
+
     }
 
     // ========================================
@@ -517,6 +541,13 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
     public void enableTxSubmission() {
         txSubmissionAgent.sendNextMessage();
+    }
+
+    /**
+     * Get the app protocol manager for external access (e.g., PeerClient).
+     */
+    public AppProtocolManager getAppProtocolManager() {
+        return appProtocolManager;
     }
 
     // ========================================

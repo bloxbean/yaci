@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.core.common.Constants;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -71,6 +72,43 @@ public class YaciNodeConfig implements NodeConfig {
     private String bootstrapBlockfrostBaseUrl;
     private String bootstrapKoiosBaseUrl;
     private String network;                 // "mainnet", "preprod", "preview" — used for provider URL auto-detection
+
+    // Multi-peer upstream configuration
+    @Builder.Default
+    private List<UpstreamConfig> upstreams = new ArrayList<>();
+
+    // Peer discovery configuration
+    private boolean peerDiscoveryEnabled;
+    @Builder.Default
+    private int peerDiscoveryIntervalSeconds = 60;
+    @Builder.Default
+    private int peerDiscoveryMaxPeers = 20;
+
+    // App-layer messaging configuration (CIP-0137 inspired)
+    private boolean enableAppLayer;
+    @Builder.Default
+    private String appLayerAuthMode = "open";       // "open" | "permissioned"
+    @Builder.Default
+    private List<String> appLayerAllowedKeys = new ArrayList<>();
+    @Builder.Default
+    private int appMessageMemPoolMaxSize = 1000;
+    @Builder.Default
+    private long appMessageDefaultTtlSeconds = 600;
+
+    // App-layer consensus & ledger configuration (M2)
+    @Builder.Default
+    private String appConsensusMode = "single-signer";  // "single-signer" | "multisig"
+    @Builder.Default
+    private int appBlockIntervalMs = 5000;
+    @Builder.Default
+    private int appConsensusThreshold = 1;
+    @Builder.Default
+    private int appConsensusTotalSigners = 1;
+    private String appLedgerPath;                        // null = derive from rocksDBPath + "/app-ledger"
+    @Builder.Default
+    private boolean appLedgerEnabled = true;
+    @Builder.Default
+    private List<String> appTopics = new ArrayList<>();  // Topics to produce blocks for
 
     // Genesis-derived configuration
     @Builder.Default
@@ -277,11 +315,30 @@ public class YaciNodeConfig implements NodeConfig {
     @Override
     public void validate() {
         if (enableClient) {
-            if (remoteHost == null || remoteHost.trim().isEmpty()) {
-                throw new IllegalArgumentException("Remote host must be specified when client is enabled");
+            boolean hasUpstreams = upstreams != null && !upstreams.isEmpty();
+            boolean hasSingleRemote = remoteHost != null && !remoteHost.trim().isEmpty();
+
+            if (!hasUpstreams && !hasSingleRemote) {
+                throw new IllegalArgumentException(
+                        "Either 'upstreams' list or 'remoteHost' must be specified when client is enabled");
             }
-            if (remotePort <= 0 || remotePort > 65535) {
-                throw new IllegalArgumentException("Remote port must be between 1 and 65535");
+
+            if (hasSingleRemote && !hasUpstreams) {
+                if (remotePort <= 0 || remotePort > 65535) {
+                    throw new IllegalArgumentException("Remote port must be between 1 and 65535");
+                }
+            }
+
+            if (hasUpstreams) {
+                for (UpstreamConfig upstream : upstreams) {
+                    if (upstream.getHost() == null || upstream.getHost().trim().isEmpty()) {
+                        throw new IllegalArgumentException("Upstream host must not be empty");
+                    }
+                    if (upstream.getPort() <= 0 || upstream.getPort() > 65535) {
+                        throw new IllegalArgumentException(
+                                "Upstream port must be between 1 and 65535 for " + upstream.getHost());
+                    }
+                }
             }
         }
 
@@ -296,9 +353,6 @@ public class YaciNodeConfig implements NodeConfig {
         }
 
         if (enableBlockProducer) {
-            if (enableClient) {
-                throw new IllegalArgumentException("Block producer mode cannot be used with client mode");
-            }
             if (!enableServer) {
                 throw new IllegalArgumentException("Block producer mode requires server to be enabled");
             }
@@ -337,6 +391,26 @@ public class YaciNodeConfig implements NodeConfig {
                 throw new IllegalArgumentException("Selective body fetch ratio must be non-negative");
             }
         }
+    }
+
+    /**
+     * Returns the effective list of upstream peers.
+     * If {@code upstreams} is configured, returns it directly.
+     * Otherwise, creates a single-entry list from the legacy {@code remoteHost/remotePort} fields.
+     * This provides backward compatibility with single-peer configurations.
+     */
+    public List<UpstreamConfig> getEffectiveUpstreams() {
+        if (upstreams != null && !upstreams.isEmpty()) {
+            return upstreams;
+        }
+        if (remoteHost != null && !remoteHost.trim().isEmpty() && remotePort > 0) {
+            return List.of(UpstreamConfig.builder()
+                    .host(remoteHost)
+                    .port(remotePort)
+                    .type(PeerType.CARDANO)
+                    .build());
+        }
+        return List.of();
     }
 
     @Override
