@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.node.api.NodeAPI;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
 import com.bloxbean.cardano.yaci.node.runtime.YaciNode;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionEvaluationService;
+import io.quarkus.arc.ClientProxy;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -61,9 +62,7 @@ public class EvaluationResource {
             return errorResponse("Transaction CBOR bytes required");
         }
 
-        if (!(nodeAPI instanceof YaciNode yaciNode)) {
-            return errorResponse("Script evaluation not available");
-        }
+        YaciNode yaciNode = (YaciNode) ClientProxy.unwrap(nodeAPI);
 
         TransactionEvaluationService evalService = yaciNode.getTransactionEvalService();
         if (evalService == null) {
