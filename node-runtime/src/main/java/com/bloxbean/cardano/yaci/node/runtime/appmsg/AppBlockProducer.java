@@ -12,6 +12,8 @@ import com.bloxbean.cardano.yaci.node.api.events.AppDataFinalizedEvent;
 import com.bloxbean.cardano.yaci.node.api.events.AppDataValidateEvent;
 import com.bloxbean.cardano.yaci.node.api.ledger.AppBlock;
 import com.bloxbean.cardano.yaci.node.api.ledger.AppLedger;
+import com.bloxbean.cardano.yaci.node.runtime.consensus.AppConsensusCoordinator;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -24,7 +26,9 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Produces app blocks by periodically draining the app message mempool.
- * Flow: drain mempool → validate each message → build block → consensus → store → publish events.
+ * <p>
+ * When a coordinator is set, delegates block finalization to it (consensus coordination).
+ * Otherwise, uses the legacy direct-store path (backward compatible for tests).
  */
 @Slf4j
 public class AppBlockProducer {
@@ -38,6 +42,10 @@ public class AppBlockProducer {
     private final int blockIntervalMs;
 
     private final Set<String> producedMessageIds = new HashSet<>();
+
+    /** Optional coordinator for consensus-based block distribution. */
+    @Setter
+    private AppConsensusCoordinator coordinator;
 
     private ScheduledFuture<?> scheduledTask;
     private long nextBlockNumber = 0;
@@ -105,12 +113,18 @@ public class AppBlockProducer {
      * Exposed as package-private for testing.
      */
     void produceBlock() {
+        // Proposer guard: only produce if this node is the proposer for this block
+        if (!consensus.isProposerForBlock(nextBlockNumber)) {
+            log.debug("Not proposer for block #{} topic '{}'", nextBlockNumber, topicId);
+            return;
+        }
+
         if (!consensus.canPropose()) {
             log.debug("Cannot propose block for topic '{}' at this time", topicId);
             return;
         }
 
-        // Get messages for this topic, excluding already-produced ones
+        // Get messages for this topic, excluding already-produced ones and consensus messages
         List<AppMessage> allMessages = memPool.getMessagesForTopic(topicId);
         List<AppMessage> candidates = new ArrayList<>();
         for (AppMessage msg : allMessages) {
@@ -129,7 +143,7 @@ public class AppBlockProducer {
             return;
         }
 
-        // Build block
+        // Build candidate block
         byte[] stateHash = AppBlock.computeStateHash(validMessages);
         long timestamp = System.currentTimeMillis();
         byte[] blockHash = AppBlock.computeBlockHash(nextBlockNumber, topicId, stateHash, prevBlockHash, timestamp);
@@ -144,56 +158,65 @@ public class AppBlockProducer {
                 .blockHash(blockHash)
                 .build();
 
-        // Create consensus proof
-        ConsensusProof proof = consensus.createProof(block);
+        if (coordinator != null) {
+            // Delegate to coordinator for consensus-based finalization and gossip
+            coordinator.proposeBlock(block);
 
-        // Rebuild block with proof
-        block = AppBlock.builder()
-                .blockNumber(nextBlockNumber)
-                .topicId(topicId)
-                .messages(validMessages)
-                .stateHash(stateHash)
-                .timestamp(timestamp)
-                .prevBlockHash(prevBlockHash)
-                .blockHash(blockHash)
-                .consensusProof(proof)
-                .build();
-
-        // Consensus check via event
-        if (eventBus != null) {
-            AppBlockConsensusEvent consensusEvent = new AppBlockConsensusEvent(block);
-            eventBus.publish(consensusEvent,
-                    EventMetadata.builder().origin("app-block-producer").build(),
-                    PublishOptions.builder().build());
-
-            if (consensusEvent.isRejected()) {
-                log.warn("App block #{} rejected by consensus for topic '{}': {}",
-                        nextBlockNumber, topicId, consensusEvent.rejections());
-                return;
+            // Track produced messages and remove from mempool
+            for (AppMessage msg : validMessages) {
+                producedMessageIds.add(msg.getMessageIdHex());
+                memPool.removeMessage(msg.getMessageId());
             }
+
+            // Sync tip from coordinator (coordinator manages its own tip state)
+            nextBlockNumber = coordinator.getNextBlockNumber();
+            prevBlockHash = coordinator.getPrevBlockHash();
+        } else {
+            // Legacy direct-store path (backward compatible)
+            ConsensusProof proof = consensus.createProof(block);
+
+            block = AppBlock.builder()
+                    .blockNumber(nextBlockNumber)
+                    .topicId(topicId)
+                    .messages(validMessages)
+                    .stateHash(stateHash)
+                    .timestamp(timestamp)
+                    .prevBlockHash(prevBlockHash)
+                    .blockHash(blockHash)
+                    .consensusProof(proof)
+                    .build();
+
+            // Consensus check via event
+            if (eventBus != null) {
+                AppBlockConsensusEvent consensusEvent = new AppBlockConsensusEvent(block);
+                eventBus.publish(consensusEvent,
+                        EventMetadata.builder().origin("app-block-producer").build(),
+                        PublishOptions.builder().build());
+
+                if (consensusEvent.isRejected()) {
+                    log.warn("App block #{} rejected by consensus for topic '{}': {}",
+                            nextBlockNumber, topicId, consensusEvent.rejections());
+                    return;
+                }
+            }
+
+            ledger.storeBlock(block);
+
+            for (AppMessage msg : validMessages) {
+                producedMessageIds.add(msg.getMessageIdHex());
+                memPool.removeMessage(msg.getMessageId());
+            }
+
+            long producedBlock = nextBlockNumber;
+            nextBlockNumber++;
+            prevBlockHash = blockHash;
+
+            log.info("App block #{} produced for topic '{}': messages={}, hash={}",
+                    producedBlock, topicId, validMessages.size(),
+                    com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(blockHash));
+
+            publishEvents(block);
         }
-
-        // Store in ledger
-        ledger.storeBlock(block);
-
-        // Track produced messages and remove from mempool.
-        // By this point messages have been gossiped (sync runs every 1s, block interval >= 3s).
-        // The block in AppLedger is now the durable record.
-        for (AppMessage msg : validMessages) {
-            producedMessageIds.add(msg.getMessageIdHex());
-            memPool.removeMessage(msg.getMessageId());
-        }
-
-        long producedBlock = nextBlockNumber;
-        nextBlockNumber++;
-        prevBlockHash = blockHash;
-
-        log.info("App block #{} produced for topic '{}': messages={}, hash={}",
-                producedBlock, topicId, validMessages.size(),
-                com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(blockHash));
-
-        // Publish events
-        publishEvents(block);
     }
 
     private List<AppMessage> validateMessages(List<AppMessage> candidates) {

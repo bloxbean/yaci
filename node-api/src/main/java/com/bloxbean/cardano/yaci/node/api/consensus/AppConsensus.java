@@ -47,4 +47,42 @@ public interface AppConsensus {
      * @return the consensus parameters
      */
     ConsensusParams params();
+
+    /**
+     * @return the local node's public key (encoded)
+     */
+    byte[] getLocalPublicKey();
+
+    /**
+     * Sign arbitrary data with the local node's private key.
+     *
+     * @param data the data to sign
+     * @return the signature bytes
+     */
+    byte[] sign(byte[] data);
+
+    /**
+     * Whether this node is the proposer for the given block number.
+     * For SingleSigner, always true. For MultiSig, uses round-robin over allowed keys.
+     *
+     * @param blockNumber the block number to check
+     * @return true if this node should propose the block
+     */
+    default boolean isProposerForBlock(long blockNumber) {
+        return canPropose();
+    }
+
+    /**
+     * Check if a given public key is the expected proposer for a block number.
+     * Used to validate incoming proposals from peers.
+     * For SingleSigner: always true (any proposer accepted).
+     * For MultiSig: checks round-robin against sorted allowedPublicKeys.
+     *
+     * @param blockNumber the block number
+     * @param proposerKey the public key of the proposer
+     * @return true if this key is the expected proposer for the block
+     */
+    default boolean isExpectedProposer(long blockNumber, byte[] proposerKey) {
+        return true;
+    }
 }

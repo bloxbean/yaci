@@ -181,6 +181,12 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.app-layer.topics")
     java.util.Optional<java.util.List<String>> appTopics;
 
+    @ConfigProperty(name = "yaci.node.app-layer.signing-key")
+    java.util.Optional<String> appSigningKey;
+
+    @ConfigProperty(name = "yaci.node.app-layer.block-producer-enabled", defaultValue = "true")
+    boolean appBlockProducerEnabled;
+
     // Bootstrap config
     @ConfigProperty(name = "yaci.node.bootstrap.enabled", defaultValue = "false")
     boolean bootstrapEnabled;
@@ -320,6 +326,8 @@ public class YaciNodeProducer {
                 .appLedgerEnabled(appLedgerEnabled)
                 .appLedgerPath(appLedgerPath.orElse(null))
                 .appTopics(appTopics.orElse(java.util.List.of()))
+                .appSigningKey(appSigningKey.orElse(null))
+                .appBlockProducerEnabled(appBlockProducerEnabled)
                 .build();
 
         // Validate configuration

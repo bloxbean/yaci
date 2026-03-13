@@ -1,10 +1,12 @@
 package com.bloxbean.cardano.yaci.node.runtime.consensus;
 
+import com.bloxbean.cardano.client.crypto.KeyGenUtil;
+import com.bloxbean.cardano.client.crypto.Keys;
+import com.bloxbean.cardano.client.crypto.api.SigningProvider;
+import com.bloxbean.cardano.client.crypto.config.CryptoConfiguration;
 import com.bloxbean.cardano.yaci.node.api.consensus.*;
 import com.bloxbean.cardano.yaci.node.api.ledger.AppBlock;
 import lombok.extern.slf4j.Slf4j;
-
-import java.security.*;
 
 /**
  * SingleSigner consensus: the proposer node is the sole authority.
@@ -13,8 +15,10 @@ import java.security.*;
 @Slf4j
 public class SingleSignerConsensus implements AppConsensus {
 
-    private final KeyPair keyPair;
+    private final byte[] privateKey; // 32-byte raw Ed25519 seed
+    private final byte[] publicKey;  // 32-byte raw Ed25519 public key
     private final ConsensusParams params;
+    private final SigningProvider signingProvider;
 
     public SingleSignerConsensus() {
         this(ConsensusParams.builder().build());
@@ -22,13 +26,26 @@ public class SingleSignerConsensus implements AppConsensus {
 
     public SingleSignerConsensus(ConsensusParams params) {
         try {
-            KeyPairGenerator kpg = KeyPairGenerator.getInstance("Ed25519");
-            this.keyPair = kpg.generateKeyPair();
-            this.params = params;
-            log.info("SingleSignerConsensus initialized");
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("Ed25519 not available", e);
+            Keys keys = KeyGenUtil.generateKey();
+            this.privateKey = keys.getSkey().getBytes();
+            this.publicKey = keys.getVkey().getBytes();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to generate Ed25519 key pair", e);
         }
+        this.params = params;
+        this.signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider();
+        log.info("SingleSignerConsensus initialized");
+    }
+
+    /**
+     * Create with a pre-existing key pair (e.g., from config).
+     */
+    public SingleSignerConsensus(byte[] privateKey, byte[] publicKey, ConsensusParams params) {
+        this.privateKey = privateKey;
+        this.publicKey = publicKey;
+        this.params = params;
+        this.signingProvider = CryptoConfiguration.INSTANCE.getSigningProvider();
+        log.info("SingleSignerConsensus initialized with provided key");
     }
 
     @Override
@@ -38,22 +55,13 @@ public class SingleSignerConsensus implements AppConsensus {
 
     @Override
     public ConsensusProof createProof(AppBlock block) {
-        try {
-            Signature sig = Signature.getInstance("Ed25519");
-            sig.initSign(keyPair.getPrivate());
-            sig.update(block.getBlockHash());
-            byte[] signature = sig.sign();
-            byte[] publicKey = keyPair.getPublic().getEncoded();
-            return ConsensusProof.singleSigner(publicKey, signature);
-        } catch (Exception e) {
-            log.error("Failed to create consensus proof", e);
-            return ConsensusProof.singleSigner(new byte[0], new byte[0]);
-        }
+        byte[] signature = signingProvider.sign(block.getBlockHash(), privateKey);
+        return ConsensusProof.singleSigner(publicKey, signature);
     }
 
     @Override
     public boolean verifyProof(AppBlock block, ConsensusProof proof) {
-        // SingleSigner: always accepts
+        // SingleSigner: always accepts as long as there's a signature
         return proof != null && proof.signatureCount() > 0;
     }
 
@@ -65,5 +73,15 @@ public class SingleSignerConsensus implements AppConsensus {
     @Override
     public ConsensusParams params() {
         return params;
+    }
+
+    @Override
+    public byte[] getLocalPublicKey() {
+        return publicKey;
+    }
+
+    @Override
+    public byte[] sign(byte[] data) {
+        return signingProvider.sign(data, privateKey);
     }
 }

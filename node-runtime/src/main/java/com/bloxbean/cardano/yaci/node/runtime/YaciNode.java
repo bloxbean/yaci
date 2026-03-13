@@ -103,6 +103,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -210,6 +212,7 @@ public class YaciNode implements NodeAPI {
     private com.bloxbean.cardano.yaci.node.api.consensus.AppConsensus appConsensus;
     private com.bloxbean.cardano.yaci.node.api.ledger.AppLedger appLedger;
     private final List<com.bloxbean.cardano.yaci.node.runtime.appmsg.AppBlockProducer> appBlockProducers = new ArrayList<>();
+    private final java.util.Map<String, com.bloxbean.cardano.yaci.node.runtime.consensus.AppConsensusCoordinator> appConsensusCoordinators = new java.util.HashMap<>();
 
     public YaciNode(YaciNodeConfig config) {
         this(config, RuntimeOptions.defaults());
@@ -397,9 +400,20 @@ public class YaciNode implements NodeAPI {
                 startBlockProducer();
             }
 
-            // Start app block producers if app-layer is enabled with topics
+            // Start app consensus coordinators (needed for BOTH producers and followers)
+            if (config.isEnableAppLayer() && !appConsensusCoordinators.isEmpty()) {
+                for (var coordinator : appConsensusCoordinators.values()) {
+                    coordinator.start();
+                }
+                log.info("Started {} app consensus coordinator(s)", appConsensusCoordinators.size());
+            }
+
+            // Start app block producers if enabled
             if (config.isEnableAppLayer() && !appBlockProducers.isEmpty()) {
-                startAppBlockProducers();
+                for (var producer : appBlockProducers) {
+                    producer.start();
+                }
+                log.info("Started {} app block producer(s)", appBlockProducers.size());
             }
 
             // Initialize slot-to-time calculator from genesis data.
@@ -651,18 +665,28 @@ public class YaciNode implements NodeAPI {
      * AppMsgSubmissionAgent, so the peer's server can pull them via Protocol 100.
      */
     private void scheduleAppMessageSync(AppMsgSubmissionAgent agent, String peerId) {
+        Set<String> enqueuedIds = ConcurrentHashMap.newKeySet();
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                if (appMessageMemPool == null || appMessageMemPool.size() == 0) return;
+                if (appMessageMemPool == null || appMessageMemPool.size() == 0) {
+                    enqueuedIds.clear();
+                    return;
+                }
                 List<AppMessage> pending = appMessageMemPool.getMessages(50);
                 int enqueued = 0;
                 for (AppMessage msg : pending) {
+                    if (enqueuedIds.contains(msg.getMessageIdHex())) continue;
                     if (agent.enqueueMessage(msg)) {
+                        enqueuedIds.add(msg.getMessageIdHex());
                         enqueued++;
                     }
                 }
                 if (enqueued > 0) {
                     log.debug("Synced {} app message(s) to agent for peer {}", enqueued, peerId);
+                }
+                // Prevent unbounded growth
+                if (enqueuedIds.size() > 500) {
+                    enqueuedIds.clear();
                 }
             } catch (Exception e) {
                 log.warn("App message sync error for peer {}: {}", peerId, e.getMessage());
@@ -676,6 +700,16 @@ public class YaciNode implements NodeAPI {
     private void initAppConsensusAndLedger() {
         // Create consensus implementation
         String consensusMode = config.getAppConsensusMode();
+
+        // Resolve signing key: from config or auto-generate
+        byte[] signingPrivateKey = null;
+        byte[] signingPublicKey = null;
+        if (config.getAppSigningKey() != null && !config.getAppSigningKey().isBlank()) {
+            signingPrivateKey = HexUtil.decodeHexString(config.getAppSigningKey());
+            signingPublicKey = com.bloxbean.cardano.client.crypto.KeyGenUtil.getPublicKeyFromPrivateKey(signingPrivateKey);
+            log.info("App consensus using configured signing key");
+        }
+
         if ("multisig".equalsIgnoreCase(consensusMode)) {
             var params = com.bloxbean.cardano.yaci.node.api.consensus.ConsensusParams.builder()
                     .threshold(config.getAppConsensusThreshold())
@@ -688,12 +722,24 @@ public class YaciNode implements NodeAPI {
                     allowedKeys.add(HexUtil.decodeHexString(hexKey));
                 }
             }
-            appConsensus = new com.bloxbean.cardano.yaci.node.runtime.consensus.MultiSigConsensus(allowedKeys, params);
+            if (signingPrivateKey != null) {
+                appConsensus = new com.bloxbean.cardano.yaci.node.runtime.consensus.MultiSigConsensus(
+                        signingPrivateKey, signingPublicKey, allowedKeys, params);
+            } else {
+                appConsensus = new com.bloxbean.cardano.yaci.node.runtime.consensus.MultiSigConsensus(allowedKeys, params);
+            }
             log.info("App consensus: multisig (threshold={}/{})", params.getThreshold(), params.getTotalSigners());
         } else {
-            appConsensus = new com.bloxbean.cardano.yaci.node.runtime.consensus.SingleSignerConsensus();
+            if (signingPrivateKey != null) {
+                appConsensus = new com.bloxbean.cardano.yaci.node.runtime.consensus.SingleSignerConsensus(
+                        signingPrivateKey, signingPublicKey,
+                        com.bloxbean.cardano.yaci.node.api.consensus.ConsensusParams.builder().build());
+            } else {
+                appConsensus = new com.bloxbean.cardano.yaci.node.runtime.consensus.SingleSignerConsensus();
+            }
             log.info("App consensus: single-signer");
         }
+        log.info("App consensus public key: {}", HexUtil.encodeHexString(appConsensus.getLocalPublicKey()));
 
         // Create ledger
         if (config.isAppLedgerEnabled()) {
@@ -725,16 +771,32 @@ public class YaciNode implements NodeAPI {
         var validationListener = new com.bloxbean.cardano.yaci.node.runtime.validation.app.DefaultAppValidationListener(validator);
         AnnotationListenerRegistrar.register(eventBus, validationListener, SubscriptionOptions.builder().build());
 
-        // Create block producers for configured topics
+        // Create coordinators and block producers for configured topics
         List<String> topics = config.getAppTopics();
         if (topics != null && !topics.isEmpty()) {
             for (String topic : topics) {
-                var producer = new com.bloxbean.cardano.yaci.node.runtime.appmsg.AppBlockProducer(
-                        appMessageMemPool, appLedger, appConsensus, eventBus,
-                        scheduler, topic, config.getAppBlockIntervalMs());
-                appBlockProducers.add(producer);
-                log.info("App block producer created for topic '{}' (interval={}ms)", topic, config.getAppBlockIntervalMs());
+                // Always create coordinator (needed for both proposer and follower)
+                var coordinator = new com.bloxbean.cardano.yaci.node.runtime.consensus.AppConsensusCoordinator(
+                        appConsensus, appLedger, appMessageMemPool, eventBus, topic, scheduler);
+                appConsensusCoordinators.put(topic, coordinator);
+
+                // Only create block producer if enabled
+                if (config.isAppBlockProducerEnabled()) {
+                    var producer = new com.bloxbean.cardano.yaci.node.runtime.appmsg.AppBlockProducer(
+                            appMessageMemPool, appLedger, appConsensus, eventBus,
+                            scheduler, topic, config.getAppBlockIntervalMs());
+                    producer.setCoordinator(coordinator);
+                    appBlockProducers.add(producer);
+                    log.info("App block producer + coordinator created for topic '{}' (interval={}ms)",
+                            topic, config.getAppBlockIntervalMs());
+                } else {
+                    log.info("App consensus coordinator created for topic '{}' (follower mode — no block producer)",
+                            topic);
+                }
             }
+
+            // Always wire coordinators to handler for consensus message routing
+            appMessageHandler.setCoordinators(appConsensusCoordinators);
         }
 
         log.info("App-layer M2 components initialized (consensus={}, ledger={}, topics={})",
@@ -743,7 +805,7 @@ public class YaciNode implements NodeAPI {
     }
 
     /**
-     * Start all app block producers.
+     * Start all app block producers. Coordinators are started separately in start().
      */
     private void startAppBlockProducers() {
         for (var producer : appBlockProducers) {
@@ -755,13 +817,17 @@ public class YaciNode implements NodeAPI {
     }
 
     /**
-     * Stop all app block producers and close the app ledger.
+     * Stop all app block producers, coordinators, and close the app ledger.
      */
     private void stopAppBlockProducers() {
         for (var producer : appBlockProducers) {
             producer.stop();
         }
         appBlockProducers.clear();
+        for (var coordinator : appConsensusCoordinators.values()) {
+            coordinator.stop();
+        }
+        appConsensusCoordinators.clear();
         if (appLedger != null) {
             try {
                 appLedger.close();

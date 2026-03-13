@@ -109,6 +109,9 @@ public class YaciNodeConfig implements NodeConfig {
     private boolean appLedgerEnabled = true;
     @Builder.Default
     private List<String> appTopics = new ArrayList<>();  // Topics to produce blocks for
+    private String appSigningKey;                         // Hex-encoded 32-byte Ed25519 private key seed (null = auto-generate)
+    @Builder.Default
+    private boolean appBlockProducerEnabled = true;       // false = follower-only (receive finalized blocks but don't produce)
 
     // Genesis-derived configuration
     @Builder.Default
