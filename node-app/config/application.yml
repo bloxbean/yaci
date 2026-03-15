@@ -68,6 +68,15 @@
 #         block-prune-batch-size: 500000     # Entries per prune pass
 #         block-prune-interval-seconds: 300
 
+# Script Evaluator
+# ---------------------
+# Choose the script evaluator for the /utils/txs/evaluate endpoint.
+#
+# yaci:
+#   node:
+#     block-producer:
+#       script-evaluator: aiken   # aiken (default) or scalus
+
 # Bootstrap State Mode
 # ---------------------
 # Enable bootstrap to skip full chain sync and start from a specific block.

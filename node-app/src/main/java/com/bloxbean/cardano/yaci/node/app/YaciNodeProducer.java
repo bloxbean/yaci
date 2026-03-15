@@ -12,7 +12,7 @@ import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.runtime.YaciNode;
-import com.bloxbean.cardano.yaci.node.ledgerrules.impl.AikenTxEvaluation;
+import com.bloxbean.cardano.yaci.node.ledgerrules.impl.AikenTxEvaluator;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper;
 import com.bloxbean.cardano.yaci.node.ledgerrules.impl.YaciScriptSupplier;
@@ -140,6 +140,9 @@ public class YaciNodeProducer {
 
     @ConfigProperty(name = "yaci.node.block-producer.tx-evaluation", defaultValue = "true")
     boolean txEvaluationEnabled;
+
+    @ConfigProperty(name = "yaci.node.block-producer.script-evaluator", defaultValue = "aiken")
+    String scriptEvaluator;
 
     // Bootstrap config
     @ConfigProperty(name = "yaci.node.bootstrap.enabled", defaultValue = "false")
@@ -374,14 +377,16 @@ public class YaciNodeProducer {
             yaciNode.setTransactionEvaluator(evaluator);
 
             // Also create a script evaluator for the /utils/txs/evaluate endpoint
-//            TransactionEvaluator transactionEvaluator =
-//                    ScalusTransactionFactory.createEvaluator(pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig, networkId);
-
-            TransactionEvaluator transactionEvaluator = new AikenTxEvaluation(() -> pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig);
+            TransactionEvaluator transactionEvaluator;
+            if ("scalus".equalsIgnoreCase(scriptEvaluator)) {
+                transactionEvaluator = ScalusTransactionFactory.createEvaluator(pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig, networkId);
+            } else {
+                transactionEvaluator = new AikenTxEvaluator(() -> pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig);
+            }
 
             yaciNode.setScriptEvaluator(transactionEvaluator);
 
-            log.info("Transaction evaluator initialized (networkId={})", networkId);
+            log.info("Transaction evaluator initialized (networkId={}, evaluator={})", networkId, scriptEvaluator);
         } catch (Exception e) {
             log.warn("Failed to initialize transaction evaluator: {}", e.getMessage());
         }

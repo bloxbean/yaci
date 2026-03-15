@@ -14,13 +14,13 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-public class AikenTxEvaluation implements TransactionEvaluator {
+public class AikenTxEvaluator implements TransactionEvaluator {
     private ProtocolParamsSupplier protocolParamsSupplier;
     private ScriptSupplier scriptSupplier;
     private SlotConfig slotConfig;
 
-    public AikenTxEvaluation(ProtocolParamsSupplier protocolParamsSupplier,
-                             ScriptSupplier scriptSupplier, SlotConfig slotConfig) {
+    public AikenTxEvaluator(ProtocolParamsSupplier protocolParamsSupplier,
+                            ScriptSupplier scriptSupplier, SlotConfig slotConfig) {
         this.protocolParamsSupplier = protocolParamsSupplier;
         this.scriptSupplier = scriptSupplier;
         this.slotConfig = slotConfig;
