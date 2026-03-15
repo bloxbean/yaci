@@ -10,7 +10,5 @@ import java.math.BigInteger;
  */
 public record AmountDto(
         @JsonProperty("unit") String unit,
-        @JsonProperty("policy_id") String policyId,
-        @JsonProperty("asset_name") String assetName,
         @JsonProperty("quantity") BigInteger quantity
 ) {}

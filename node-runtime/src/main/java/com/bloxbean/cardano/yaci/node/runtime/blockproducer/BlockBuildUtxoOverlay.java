@@ -1,10 +1,10 @@
 package com.bloxbean.cardano.yaci.node.runtime.blockproducer;
 
-import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.client.transaction.spec.Transaction;
 import com.bloxbean.cardano.client.transaction.spec.TransactionInput;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.Outpoint;
+import com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -32,9 +32,7 @@ public class BlockBuildUtxoOverlay {
             if (spent.contains(outpoint)) {
                 return null; // Already consumed in this block
             }
-            return utxoState.getUtxo(outpoint)
-                    .map(UtxoMapper::toCclUtxo)
-                    .orElse(null);
+            return utxoState.getUtxo(outpoint).orElse(null);
         };
     }
 

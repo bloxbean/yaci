@@ -14,6 +14,7 @@ public record Utxo(
         List<AssetAmount> assets,          // other assets (policyId, name, quantity)
         String datumHash,                  // optional
         byte[] inlineDatum,                // optional
+        String scriptRef,                  // optional — hex-encoded script reference CBOR
         String referenceScriptHash,        // optional
         boolean collateralReturn,          // true if collateral return output
         long slot,                         // created at slot

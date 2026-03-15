@@ -8,14 +8,15 @@ import com.bloxbean.cardano.yaci.node.api.config.RuntimeOptions;
 import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
 import com.bloxbean.cardano.yaci.node.app.bootstrap.BootstrapConfigParser;
 import com.bloxbean.cardano.client.common.model.SlotConfig;
-import com.bloxbean.cardano.client.common.model.SlotConfigs;
 import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.runtime.YaciNode;
+import com.bloxbean.cardano.yaci.node.ledgerrules.impl.AikenTxEvaluation;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper;
-import com.bloxbean.cardano.yaci.node.scalusbridge.ScalusTransactionValidatorFactory;
+import com.bloxbean.cardano.yaci.node.ledgerrules.impl.YaciScriptSupplier;
+import com.bloxbean.cardano.yaci.node.scalusbridge.ScalusTransactionFactory;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -356,34 +357,29 @@ public class YaciNodeProducer {
                     ProtocolParamsMapper.fromNodeProtocolParam(genesis.getProtocolParameters());
 
             long magic = yaciConfig.getProtocolMagic();
-            SlotConfig slotConfig;
-            //TODO -- We should be able to derive slot config from genesis data instead of hardcoding for mainnet/preprod/preview
-            // Only gap is how to determine zero slot which depends on shelley start slot.
-            if (magic == Constants.MAINNET_PROTOCOL_MAGIC) {
-                slotConfig = SlotConfigs.mainnet();
-            } else if (magic == Constants.PREPROD_PROTOCOL_MAGIC) {
-                slotConfig = SlotConfigs.preprod();
-            } else if (magic == Constants.PREVIEW_PROTOCOL_MAGIC) {
-                slotConfig = SlotConfigs.preview();
-            } else {
-                long genesisTs = yaciConfig.getGenesisTimestamp() > 0
-                        ? yaciConfig.getGenesisTimestamp()
-                        : genesis.getSystemStartEpochMillis() > 0
-                                ? genesis.getSystemStartEpochMillis()
-                                : System.currentTimeMillis();
-                slotConfig = new SlotConfig(yaciConfig.getSlotLengthMillis(), 0, genesisTs);
-            }
+
+            long genesisTs = yaciConfig.getGenesisTimestamp() > 0
+                    ? yaciConfig.getGenesisTimestamp()
+                    : genesis.getSystemStartEpochMillis() > 0
+                    ? genesis.getSystemStartEpochMillis()
+                    : System.currentTimeMillis();
+            var slotConfig = new SlotConfig(yaciConfig.getSlotLengthMillis(), 0, genesisTs);
+
+            log.info("Yaci Node slot config: {}", slotConfig);
 
             int networkId = magic == Constants.MAINNET_PROTOCOL_MAGIC ? 1 : 0;
 
             TransactionValidator evaluator =
-                    ScalusTransactionValidatorFactory.create(pp, slotConfig, networkId);
+                    ScalusTransactionFactory.createValidator(pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig, networkId);
             yaciNode.setTransactionEvaluator(evaluator);
 
             // Also create a script evaluator for the /utils/txs/evaluate endpoint
-            TransactionEvaluator scriptEvaluator =
-                    ScalusTransactionValidatorFactory.createEvaluator(pp, slotConfig, networkId);
-            yaciNode.setScriptEvaluator(scriptEvaluator);
+//            TransactionEvaluator transactionEvaluator =
+//                    ScalusTransactionFactory.createEvaluator(pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig, networkId);
+
+            TransactionEvaluator transactionEvaluator = new AikenTxEvaluation(() -> pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig);
+
+            yaciNode.setScriptEvaluator(transactionEvaluator);
 
             log.info("Transaction evaluator initialized (networkId={})", networkId);
         } catch (Exception e) {

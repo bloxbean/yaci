@@ -22,7 +22,7 @@ class UtxoMapperTest {
                 List.of(
                         new AssetAmount("aabb00", "546f6b656e", BigInteger.valueOf(100))
                 ),
-                null, null, null, false, 10, 1, "blockhash"
+                null, null, null, null, false, 10, 1, "blockhash"
         );
 
         var ccl = UtxoMapper.toCclUtxo(yaciUtxo);
@@ -51,6 +51,7 @@ class UtxoMapperTest {
                 List.of(),
                 "datumhash123",
                 datumCbor,
+                null,
                 "scripthash456",
                 false, 20, 2, "blockhash2"
         );
@@ -74,7 +75,7 @@ class UtxoMapperTest {
                 "addr_test1...",
                 BigInteger.valueOf(10_000_000),
                 null,
-                null, null, null, false, 0, 0, ""
+                null, null, null, null, false, 0, 0, ""
         );
 
         var ccl = UtxoMapper.toCclUtxo(yaciUtxo);

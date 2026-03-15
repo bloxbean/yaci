@@ -33,6 +33,9 @@ dependencies {
     annotationProcessor(project(':events-processor'))
     annotationProcessor "com.google.auto.service:auto-service:1.1.1"
 
+    compileOnly libs.lombok
+    annotationProcessor libs.lombok
+
     testImplementation 'io.quarkus:quarkus-junit5'
     testImplementation 'io.rest-assured:rest-assured'
 

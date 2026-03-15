@@ -12,7 +12,9 @@ dependencies {
     api project(':ledger-rules')
 
     implementation libs.scala3.library
-    implementation libs.scalus.bloxbean.ccl
+    implementation(libs.scalus.bloxbean.ccl) {
+        exclude group: 'com.bloxbean.cardano'
+    }
     implementation libs.scalus.cardano.ledger
 }
 

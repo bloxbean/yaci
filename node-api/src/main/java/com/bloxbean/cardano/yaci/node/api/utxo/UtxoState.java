@@ -54,6 +54,13 @@ public interface UtxoState {
     }
 
     /**
+     * Return the script reference CBOR (hex) for a given script hash, or empty if not found.
+     */
+    default Optional<byte[]> getScriptRefBytesByHash(String scriptHashHex) {
+        return Optional.empty();
+    }
+
+    /**
      * Whether UTXO state is enabled and actively maintained.
      */
     boolean isEnabled();

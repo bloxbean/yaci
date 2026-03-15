@@ -137,7 +137,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
                     new ColumnFamilyDescriptor(
                             UtxoCfNames.UTXO_BLOCK_DELTA.getBytes(),
                             tuningEnabled ? utxoDeltaOpts : new ColumnFamilyOptions()),
-                    new ColumnFamilyDescriptor(UtxoCfNames.UTXO_META.getBytes())
+                    new ColumnFamilyDescriptor(UtxoCfNames.UTXO_META.getBytes()),
+                    new ColumnFamilyDescriptor(UtxoCfNames.SCRIPT_REF.getBytes())
             );
 
             // Open database
