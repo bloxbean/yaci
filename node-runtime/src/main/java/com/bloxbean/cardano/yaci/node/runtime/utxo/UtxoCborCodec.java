@@ -2,7 +2,6 @@ package com.bloxbean.cardano.yaci.node.runtime.utxo;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.model.Amount;
-import com.bloxbean.cardano.yaci.core.model.TransactionOutput;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
@@ -14,9 +13,9 @@ import java.util.List;
  * Minimal CBOR codec for UTXO storage values.
  * Keys:
  * 0 addr(bstr), 1 lovelace(uint), 2 assets([pol(28), name(bstr), qty(uint)]),
- * 3 datumHash(bstr32, opt), 4 inlineDatum(bstr, opt), 5 scriptRef(bstr, opt),
- * 6 referenceScriptHash(bstr28, opt), 7 isCollateralReturn(bool),
- * 8 slot(uint), 9 blockNumber(uint), 10 blockHash(bstr32)
+ * 3 datumHash(bstr32, opt), 4 inlineDatum(bstr, opt),
+ * 5 referenceScriptHash(bstr28, opt), 6 isCollateralReturn(bool),
+ * 7 slot(uint), 8 blockNumber(uint), 9 blockHash(bstr32)
  */
 final class UtxoCborCodec {
     private UtxoCborCodec() {}
@@ -26,7 +25,6 @@ final class UtxoCborCodec {
                                    List<Amount> assets,
                                    String datumHash,
                                    byte[] inlineDatum,
-                                   String scriptRefHex,
                                    byte[] referenceScriptHash,
                                    boolean collateralReturn,
                                    long slot,
@@ -51,23 +49,22 @@ final class UtxoCborCodec {
 
         if (datumHash != null) map.put(new UnsignedInteger(3), new ByteString(HexUtil.decodeHexString(datumHash)));
         if (inlineDatum != null) map.put(new UnsignedInteger(4), new ByteString(inlineDatum));
-        if (scriptRefHex != null) map.put(new UnsignedInteger(5), new ByteString(HexUtil.decodeHexString(scriptRefHex)));
-        if (referenceScriptHash != null) map.put(new UnsignedInteger(6), new ByteString(referenceScriptHash));
-        map.put(new UnsignedInteger(7), collateralReturn ? SimpleValue.TRUE : SimpleValue.FALSE);
-        map.put(new UnsignedInteger(8), new UnsignedInteger(slot));
-        map.put(new UnsignedInteger(9), new UnsignedInteger(blockNumber));
-        if (blockHashHex != null) map.put(new UnsignedInteger(10), new ByteString(HexUtil.decodeHexString(blockHashHex)));
+        if (referenceScriptHash != null) map.put(new UnsignedInteger(5), new ByteString(referenceScriptHash));
+        map.put(new UnsignedInteger(6), collateralReturn ? SimpleValue.TRUE : SimpleValue.FALSE);
+        map.put(new UnsignedInteger(7), new UnsignedInteger(slot));
+        map.put(new UnsignedInteger(8), new UnsignedInteger(blockNumber));
+        if (blockHashHex != null) map.put(new UnsignedInteger(9), new ByteString(HexUtil.decodeHexString(blockHashHex)));
 
         return CborSerializationUtil.serialize(map, true);
     }
 
     /**
      * Unwrap the original UTXO record bytes from a spent record.
-     * Spent records are CBOR maps with key 6 = original UTXO, key 1 = spent slot.
+     * Spent records are CBOR maps with key 1 = spent slot, key 2 = original UTXO.
      */
     static byte[] unwrapSpentUtxo(byte[] spentRecordBytes) {
         Map m = (Map) CborSerializationUtil.deserializeOne(spentRecordBytes);
-        DataItem di = m.get(new UnsignedInteger(6));
+        DataItem di = m.get(new UnsignedInteger(2));
         return CborSerializationUtil.serialize(di, true);
     }
 
@@ -77,7 +74,7 @@ final class UtxoCborCodec {
      */
     static StoredUtxo decodeSpentUtxoRecord(byte[] spentRecordBytes) {
         Map m = (Map) CborSerializationUtil.deserializeOne(spentRecordBytes);
-        DataItem di = m.get(new UnsignedInteger(6));
+        DataItem di = m.get(new UnsignedInteger(2));
         return decodeUtxoRecordFromDataItem((Map) di);
     }
 
@@ -105,17 +102,25 @@ final class UtxoCborCodec {
         String datumHash = null;
         DataItem d3 = map.get(new UnsignedInteger(3));
         if (d3 instanceof ByteString bs) datumHash = HexUtil.encodeHexString(bs.getBytes());
+
         byte[] inlineDatum = null;
         DataItem d4 = map.get(new UnsignedInteger(4));
         if (d4 instanceof ByteString bs4) inlineDatum = bs4.getBytes();
-        boolean collateral = SimpleValue.TRUE.equals(map.get(new UnsignedInteger(7)));
-        long slot = CborSerializationUtil.toLong(map.get(new UnsignedInteger(8)));
-        long blockNumber = CborSerializationUtil.toLong(map.get(new UnsignedInteger(9)));
-        String blockHash = null;
-        DataItem d10 = map.get(new UnsignedInteger(10));
-        if (d10 instanceof ByteString bs10) blockHash = HexUtil.encodeHexString(bs10.getBytes());
 
-        return new StoredUtxo(address, lovelace, assets, datumHash, inlineDatum, collateral, slot, blockNumber, blockHash);
+        String referenceScriptHash = null;
+        DataItem d5 = map.get(new UnsignedInteger(5));
+        if (d5 instanceof ByteString bs5) referenceScriptHash = HexUtil.encodeHexString(bs5.getBytes());
+
+        boolean collateral = SimpleValue.TRUE.equals(map.get(new UnsignedInteger(6)));
+
+        long slot = CborSerializationUtil.toLong(map.get(new UnsignedInteger(7)));
+        long blockNumber = CborSerializationUtil.toLong(map.get(new UnsignedInteger(8)));
+
+        String blockHash = null;
+        DataItem d9 = map.get(new UnsignedInteger(9));
+        if (d9 instanceof ByteString bs9) blockHash = HexUtil.encodeHexString(bs9.getBytes());
+
+        return new StoredUtxo(address, lovelace, assets, datumHash, inlineDatum, referenceScriptHash, collateral, slot, blockNumber, blockHash);
     }
 
     static class StoredUtxo {
@@ -124,6 +129,7 @@ final class UtxoCborCodec {
         final List<Amount> assets;
         final String datumHash;
         final byte[] inlineDatum;
+        final String referenceScriptHash;
         final boolean collateralReturn;
         final long slot;
         final long blockNumber;
@@ -132,12 +138,14 @@ final class UtxoCborCodec {
         StoredUtxo(String address, BigInteger lovelace,
                    List<Amount> assets,
                    String datumHash, byte[] inlineDatum,
+                   String referenceScriptHash,
                    boolean collateralReturn, long slot, long blockNumber, String blockHash) {
             this.address = address;
             this.lovelace = lovelace;
             this.assets = assets;
             this.datumHash = datumHash;
             this.inlineDatum = inlineDatum;
+            this.referenceScriptHash = referenceScriptHash;
             this.collateralReturn = collateralReturn;
             this.slot = slot;
             this.blockNumber = blockNumber;

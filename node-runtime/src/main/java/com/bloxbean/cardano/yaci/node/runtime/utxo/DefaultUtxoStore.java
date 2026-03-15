@@ -400,7 +400,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                             byte[] prev = ctx.getUnspent(key);
                             if (prev != null) {
                                 Map spentMap = new Map();
-                                spentMap.put(new UnsignedInteger(6), CborSerializationUtil.deserializeOne(prev));
+                                spentMap.put(new UnsignedInteger(2), CborSerializationUtil.deserializeOne(prev));
                                 spentMap.put(new UnsignedInteger(1), new UnsignedInteger(slot));
                                 byte[] spentVal = CborSerializationUtil.serialize(spentMap, true);
                                 batch.put(cfSpent, key, spentVal);
@@ -477,7 +477,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                             byte[] prev = ctx.getUnspent(key);
                             if (prev != null) {
                                 Map spentMap = new Map();
-                                spentMap.put(new UnsignedInteger(6), CborSerializationUtil.deserializeOne(prev));
+                                spentMap.put(new UnsignedInteger(2), CborSerializationUtil.deserializeOne(prev));
                                 spentMap.put(new UnsignedInteger(1), new UnsignedInteger(slot));
                                 byte[] spentVal = CborSerializationUtil.serialize(spentMap, true);
                                 batch.put(cfSpent, key, spentVal);
