@@ -118,6 +118,35 @@ java -Dquarkus.profile=devnet -jar build/quarkus-app/quarkus-run.jar
 | `yaci.node.remote.protocol-magic` | 1 | Network protocol magic |
 | `yaci.node.storage.path` | ./chainstate | RocksDB storage directory |
 | `yaci.node.block-producer.block-time-millis` | 2000 (1000 in devnet) | Block production interval |
+| `yaci.node.block-producer.script-evaluator` | `aiken` | Plutus script evaluator (`aiken` or `scalus`) |
+
+### Script Evaluator
+
+The node supports two Plutus script evaluators for the `/utils/txs/evaluate` endpoint:
+
+| Evaluator | Default in | Description |
+|-----------|-----------|-------------|
+| `aiken` | JVM (jar) | Uses Aiken's UPLC evaluator via JNA. Does not work with native image. |
+| `scalus` | Native image | Pure JVM evaluator. Works in both JVM and native image modes. |
+
+When using `bin/yaci-node.sh`, the script automatically selects the appropriate evaluator:
+- **Native binary** → `scalus`
+- **JVM (jar)** → `aiken`
+
+To override, set the property in `config/application.yml`:
+
+```yaml
+yaci:
+  node:
+    block-producer:
+      script-evaluator: scalus   # or aiken
+```
+
+Or pass it as a system property:
+
+```bash
+-Dyaci.node.block-producer.script-evaluator=scalus
+```
 
 ### Config Files
 
@@ -126,6 +155,61 @@ java -Dquarkus.profile=devnet -jar build/quarkus-app/quarkus-run.jar
 | `config/shelley-genesis.json` | Shelley genesis (networkMagic, epochLength, initialFunds) |
 | `config/byron-genesis.json` | Byron genesis (optional, nonAvvmBalances) |
 | `config/protocol-param.json` | Protocol parameters (includes PlutusV1/V2/V3 cost models) |
+
+## Testing
+
+The node-app has three test tiers: unit, integration, and end-to-end (e2e).
+
+### Unit Tests
+
+```bash
+./gradlew :node-app:test
+```
+
+Runs standard unit tests. The `integration` and `e2e` tags are automatically excluded.
+
+### Integration Tests
+
+```bash
+./gradlew :node-app:integrationTest
+```
+
+Runs tests tagged with `@Tag("integration")`. These require a running devnet instance (`cd node-app && ./start-devnet.sh`).
+
+### E2E Tests
+
+End-to-end tests exercise the full node-app (transaction submission, script evaluation, REST APIs, devnet features). The tests auto-start a devnet instance via `@QuarkusTest` — no manual setup needed.
+
+**Run (auto-start devnet):**
+
+```bash
+./gradlew :node-app:e2eTest
+```
+
+**Run against an external instance:**
+
+```bash
+./gradlew :node-app:e2eTest -Dyaci.e2e.baseUrl=http://localhost:8080/api/v1/
+```
+
+**Test coverage (35 tests across 7 classes):**
+
+| Class | Coverage |
+|-------|----------|
+| `SimplePaymentE2ETest` | ADA transfers, multi-output transactions, CIP-20 metadata |
+| `AlwaysTrueScriptE2ETest` | PlutusV2 always-true script lock and unlock |
+| `ReferenceScriptV2E2ETest` | PlutusV2 reference script attach and spend |
+| `ReferenceScriptV3E2ETest` | PlutusV3 reference script attach and spend |
+| `NativeScriptMintE2ETest` | Native script token minting, transfer, and burn |
+| `ApiEndpointsE2ETest` | REST API validation (blocks, UTXOs, transactions, epochs, protocol params) |
+| `DevnetApiE2ETest` | Devnet APIs (fund, snapshot/restore, time advance, rollback, genesis download) |
+
+**Adding new e2e tests:**
+
+1. Extend `BaseE2ETest`
+2. Annotate the class with `@Tag("e2e")`
+3. Implement `getAccountBaseIndex()` returning a unique range (check existing classes to avoid collisions)
+4. Use `fundAddress()` and `waitForTransaction()` helpers from `BaseE2ETest`
 
 ## REST API Endpoints
 

@@ -8,10 +8,7 @@ import com.bloxbean.cardano.yaci.node.api.utxo.model.Outpoint;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Service that resolves UTxOs and delegates to {@link TransactionEvaluator}
@@ -55,13 +52,12 @@ public class TransactionEvaluationService {
 
         for (TransactionInput input : allInputs) {
             Outpoint op = new Outpoint(input.getTransactionId(), input.getIndex());
-            var resolved = utxoState.getUtxo(op)
-                    .map(UtxoMapper::toCclUtxo)
-                    .orElse(null);
-            if (resolved == null) {
+            var yaciUtxo = utxoState.getUtxo(op).orElse(null);
+            if (yaciUtxo == null) {
                 throw new IllegalArgumentException("UTXO not found: " + op.txHash() + "#" + op.index());
             }
-            inputUtxos.add(resolved);
+
+            inputUtxos.add(UtxoMapper.toCclUtxo(yaciUtxo));
         }
 
         return evaluator.evaluate(txCbor, inputUtxos);

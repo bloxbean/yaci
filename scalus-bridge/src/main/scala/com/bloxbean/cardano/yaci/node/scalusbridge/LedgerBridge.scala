@@ -6,11 +6,13 @@ import scalus.cardano.ledger.{Transaction as ScalusTx, *}
 import scalus.cardano.ledger.rules.*
 
 import java.util
-import scala.jdk.CollectionConverters.*
 
 /**
  * Java-friendly facade for Scalus ledger validation (CardanoMutator.transit).
  * Accepts only Java/CCL types, returns TransitResult.
+ *
+ * Note: Script evaluation (ExUnits computation) is handled directly by
+ * ScalusBasedTransactionEvaluator using scalus.bloxbean.ScalusTransactionEvaluator.
  */
 object LedgerBridge:
 
@@ -22,7 +24,7 @@ object LedgerBridge:
       protocolParams: CclProtocolParams,
       inputUtxos: util.Set[Utxo],
       currentSlot: Long,
-      slotConfig: SlotConfigHandle,
+      slotConfig: SlotConfig,
       networkId: Int
   ): TransitResult =
     validate(txCbor, protocolParams, inputUtxos, currentSlot, slotConfig, networkId, null)
@@ -44,7 +46,7 @@ object LedgerBridge:
       protocolParams: CclProtocolParams,
       inputUtxos: util.Set[Utxo],
       currentSlot: Long,
-      slotConfig: SlotConfigHandle,
+      slotConfig: SlotConfig,
       networkId: Int,
       scriptSupplier: ScriptSupplier
   ): TransitResult =
@@ -57,9 +59,7 @@ object LedgerBridge:
       val scalusUtxos = UtxoBridge.convert(inputUtxos, scriptSupplier)
 
       val network = ProtocolParamsBridge.toNetwork(networkId)
-
-      val sc = if slotConfig != null then slotConfig.inner else SlotConfig.preview
-
+      val sc = if slotConfig != null then slotConfig else throw new RuntimeException("SlotConfig not found");
       val env = UtxoEnv(currentSlot, scalusParams, CertState.empty, network)
 
       val context = Context(
@@ -90,45 +90,3 @@ object LedgerBridge:
     catch
       case e: Exception =>
         new TransitResult(false, "Validation error: " + e.getMessage, e.getClass.getSimpleName)
-
-  /**
-   * Evaluate Plutus scripts in a transaction and compute execution units (ExUnits).
-   * Uses EvaluatorMode.EvaluateAndComputeCost to actually run scripts and measure costs.
-   *
-   * @param txCbor         serialized transaction CBOR bytes
-   * @param protocolParams CCL ProtocolParams
-   * @param inputUtxos     set of resolved input UTxOs (CCL Utxo)
-   * @param currentSlot    current slot
-   * @param slotConfig     opaque SlotConfigHandle from SlotConfigBridge
-   * @param networkId      0 = testnet, 1 = mainnet
-   * @return Java List of EvaluationEntry with computed ExUnits per redeemer
-   * @throws Exception on evaluation failure
-   */
-  def evaluate(
-      txCbor: Array[Byte],
-      protocolParams: CclProtocolParams,
-      inputUtxos: util.Set[Utxo],
-      currentSlot: Long,
-      slotConfig: SlotConfigHandle,
-      networkId: Int
-  ): util.List[EvaluationEntry] =
-    val scalusParams = ProtocolParamsBridge.toScalusProtocolParams(protocolParams)
-    given ProtocolVersion = ProtocolParamsBridge.extractProtocolVersion(protocolParams)
-
-    val scalusTx = ScalusTx.fromCbor(txCbor)
-    val scalusUtxos = UtxoBridge.convert(inputUtxos, null)
-    val sc = if slotConfig != null then slotConfig.inner else SlotConfig.preview
-
-    // Create evaluator with EvaluateAndComputeCost mode
-    val maxExUnits = scalusParams.maxTxExecutionUnits
-    val majorVersion = MajorProtocolVersion(ProtocolParamsBridge.extractProtocolVersion(protocolParams).major)
-    val costModels = scalus.bloxbean.Interop.getCostModels(protocolParams)
-    val evaluator = PlutusScriptEvaluator(sc, maxExUnits, majorVersion, costModels, EvaluatorMode.EvaluateAndComputeCost)
-
-    val redeemers: scala.collection.immutable.Seq[Redeemer] = evaluator.evalPlutusScripts(scalusTx, scalusUtxos)
-
-    val entries = redeemers.map { r =>
-      val tagStr = r.tag.toString.toLowerCase
-      new EvaluationEntry(tagStr, r.index, r.exUnits.memory, r.exUnits.steps)
-    }
-    entries.asJava

@@ -4,6 +4,11 @@ import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.events.impl.NoopEventBus;
+import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
+import com.bloxbean.cardano.yaci.node.api.utxo.model.Outpoint;
+import com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo;
+import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
+import com.bloxbean.cardano.yaci.node.ledgerrules.ValidationResult;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
 import com.bloxbean.cardano.yaci.node.runtime.chain.InMemoryChainState;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
@@ -13,7 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
@@ -205,7 +210,7 @@ class BlockProducerTest {
     private BlockProducer createBlockProducer(int blockTimeMillis, boolean lazy) {
         return new BlockProducer(
                 chainState, memPool, null, new NoopEventBus(), scheduler,
-                blockTimeMillis, lazy, System.currentTimeMillis(), 1000, null);
+                blockTimeMillis, lazy, System.currentTimeMillis(), 1000, null, new DummyTransactionValidationService(null, null), null);
     }
 
     private byte[] buildSampleTxCbor() {
@@ -234,5 +239,22 @@ class BlockProducerTest {
         tx.add(SimpleValue.NULL);
 
         return CborSerializationUtil.serialize(tx);
+    }
+
+    class DummyTransactionValidationService extends TransactionValidationService {
+
+        public DummyTransactionValidationService(TransactionValidator validator, UtxoState utxoState) {
+            super(validator, utxoState);
+        }
+
+        @Override
+        public ValidationResult validate(byte[] txCbor) {
+            return ValidationResult.success();
+        }
+
+        @Override
+        public ValidationResult validate(byte[] txCbor, Function<Outpoint, Utxo> resolver) {
+            return  ValidationResult.success();
+        }
     }
 }

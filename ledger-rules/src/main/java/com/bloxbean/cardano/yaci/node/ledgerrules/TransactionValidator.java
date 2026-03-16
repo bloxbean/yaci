@@ -32,8 +32,8 @@ public interface TransactionValidator {
             return validate(transaction.serialize(), inputUtxos);
         } catch (Exception e) {
             return ValidationResult.failure(new ValidationError(
-                    "SerializationError",
-                    "Failed to serialize transaction: " + e.getMessage(),
+                    "Validator Error",
+                    "Failed to validate transaction: " + e.getMessage(),
                     ValidationError.Phase.PHASE_1));
         }
     }

@@ -6,6 +6,8 @@ import com.bloxbean.cardano.client.transaction.spec.Transaction;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.ledgerrules.ValidationError;
 import com.bloxbean.cardano.yaci.node.ledgerrules.ValidationResult;
+import scalus.bloxbean.ScriptSupplier;
+import scalus.cardano.ledger.SlotConfig;
 
 import java.util.Set;
 
@@ -16,15 +18,25 @@ import java.util.Set;
 public class ScalusBasedTransactionValidator implements TransactionValidator {
 
     private final ProtocolParams protocolParams;
-    private final SlotConfigHandle slotConfig;
+    private final ScriptSupplier scriptSupplier;
+    private final SlotConfig scalusSlotConfig;
     private final int networkId;
 
     public ScalusBasedTransactionValidator(ProtocolParams protocolParams,
-                                           SlotConfigHandle slotConfig,
+                                           com.bloxbean.cardano.client.api.ScriptSupplier scriptSupplier,
+                                           com.bloxbean.cardano.client.common.model.SlotConfig slotConfig,
                                            int networkId) {
         this.protocolParams = protocolParams;
-        this.slotConfig = slotConfig;
+        if (scriptSupplier != null)
+            this.scriptSupplier = new ScalusScriptSupplier(scriptSupplier);
+        else
+            this.scriptSupplier = null;
         this.networkId = networkId;
+
+        this.scalusSlotConfig = new scalus.cardano.ledger.SlotConfig(
+                slotConfig.getZeroTime(),
+                slotConfig.getZeroSlot(),
+                slotConfig.getSlotLength());
     }
 
     @Override
@@ -40,11 +52,10 @@ public class ScalusBasedTransactionValidator implements TransactionValidator {
             } catch (Exception e) {
                 // If we can't deserialize to extract slot, use 0 and let Scalus handle it
             }
-
-            SlotConfigHandle sc = slotConfig != null ? slotConfig : SlotConfigBridge.preview();
-
+            
             TransitResult result = LedgerBridge.validate(
-                    txCbor, protocolParams, inputUtxos, currentSlot, sc, networkId);
+                    txCbor, protocolParams, inputUtxos, currentSlot, 
+                    scalusSlotConfig, networkId, scriptSupplier);
 
             if (!result.isSuccess()) {
                 ValidationError error = mapError(result);

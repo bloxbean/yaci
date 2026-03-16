@@ -1,8 +1,8 @@
 package com.bloxbean.cardano.yaci.node.runtime.blockproducer;
 
-import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.Outpoint;
+import com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -26,24 +26,24 @@ class BlockBuildUtxoOverlayTest {
     @Test
     void resolver_returnsUtxo_whenNotSpent() {
         Outpoint op = new Outpoint("abc123", 0);
-        utxoState.put(op, new com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo(
+        utxoState.put(op, new Utxo(
                 op, "addr_test1...", BigInteger.valueOf(5_000_000),
-                List.of(), null, null, null, false, 10, 1, "bh"
+                List.of(), null, null, null, null, false, 10, 1, "bh"
         ));
 
         Function<Outpoint, Utxo> resolver = overlay.resolver();
         Utxo result = resolver.apply(op);
 
         assertThat(result).isNotNull();
-        assertThat(result.getTxHash()).isEqualTo("abc123");
+        assertThat(result.outpoint().txHash()).isEqualTo("abc123");
     }
 
     @Test
     void resolver_returnsNull_whenSpent() {
         Outpoint op = new Outpoint("abc123", 0);
-        utxoState.put(op, new com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo(
+        utxoState.put(op, new Utxo(
                 op, "addr_test1...", BigInteger.valueOf(5_000_000),
-                List.of(), null, null, null, false, 10, 1, "bh"
+                List.of(), null, null, null, null, false, 10, 1, "bh"
         ));
 
         // First resolve succeeds
@@ -69,9 +69,9 @@ class BlockBuildUtxoOverlayTest {
     @Test
     void reset_clearsSpentTracking() {
         Outpoint op = new Outpoint("abc123", 0);
-        utxoState.put(op, new com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo(
+        utxoState.put(op, new Utxo(
                 op, "addr_test1...", BigInteger.valueOf(5_000_000),
-                List.of(), null, null, null, false, 10, 1, "bh"
+                List.of(), null, null, null, null, false, 10, 1, "bh"
         ));
 
         byte[] txCbor = buildTxSpending("abc123", 0);
@@ -115,24 +115,24 @@ class BlockBuildUtxoOverlayTest {
      * Simple in-memory UtxoState for testing (avoids Mockito issues with Java 21).
      */
     private static class SimpleUtxoState implements UtxoState {
-        private final Map<Outpoint, com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo> store = new HashMap<>();
+        private final Map<Outpoint, Utxo> store = new HashMap<>();
 
-        void put(Outpoint op, com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo utxo) {
+        void put(Outpoint op, Utxo utxo) {
             store.put(op, utxo);
         }
 
         @Override
-        public List<com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo> getUtxosByAddress(String addr, int page, int pageSize) {
+        public List<Utxo> getUtxosByAddress(String addr, int page, int pageSize) {
             return List.of();
         }
 
         @Override
-        public List<com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo> getUtxosByPaymentCredential(String cred, int page, int pageSize) {
+        public List<Utxo> getUtxosByPaymentCredential(String cred, int page, int pageSize) {
             return List.of();
         }
 
         @Override
-        public Optional<com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo> getUtxo(Outpoint outpoint) {
+        public Optional<Utxo> getUtxo(Outpoint outpoint) {
             return Optional.ofNullable(store.get(outpoint));
         }
 

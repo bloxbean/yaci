@@ -3,12 +3,14 @@ package com.bloxbean.cardano.yaci.node.app.api.tx;
 import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.api.model.Amount;
 import com.bloxbean.cardano.client.api.model.Result;
-import com.bloxbean.cardano.client.backend.api.BackendService;
-import com.bloxbean.cardano.client.backend.blockfrost.service.BFBackendService;
-import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.client.function.helper.SignerProviders;
 import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
 import com.bloxbean.cardano.client.quicktx.Tx;
+import com.bloxbean.cardano.yaci.node.app.e2e.BaseE2ETest;
+import com.bloxbean.cardano.yaci.node.app.e2e.DevnetTestProfile;
+import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -17,27 +19,28 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Batch integration test: submit ~50 self-transfer transactions sequentially.
- * Each tx sends 1 ADA back to the sender address.
- *
- * <p>Requires a running devnet: {@code cd node-app && ./start-devnet.sh}
- *
- * <p>Run with: {@code ./gradlew :node-app:integrationTest --tests "TxBatchSubmissionIT"}
- */
+@QuarkusTest
+@TestProfile(DevnetTestProfile.class)
 @Tag("integration")
-public class TxBatchSubmissionIT {
-
-    private static final String MNEMONIC =
-            "wrist approve ethics forest knife treat noise great three simple prize happy "
-            + "toe dynamic number hunt trigger install wrong change decorate vendor glow erosion";
+public class TxBatchSubmissionIT extends BaseE2ETest {
 
     private static final int TX_COUNT = 50;
 
+    private Account sender;
+
+    @Override
+    protected int getAccountBaseIndex() {
+        return 80;
+    }
+
+    @BeforeAll
+    void fundSender() throws Exception {
+        sender = getAccount(0);
+        fundAddress(sender.enterpriseAddress(), 10000);
+    }
+
     @Test
     void submitBatchSelfTransfers() throws Exception {
-        BackendService backend = new BFBackendService("http://localhost:8080/api/v1/", "Dummy");
-        Account sender = new Account(Networks.testnet(), MNEMONIC);
         String senderAddr = sender.enterpriseAddress();
 
         List<String> submittedHashes = new ArrayList<>();
@@ -45,12 +48,12 @@ public class TxBatchSubmissionIT {
 
         for (int i = 0; i < TX_COUNT; i++) {
             try {
-                QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backend);
+                QuickTxBuilder txBuilder = new QuickTxBuilder(backendService);
                 Tx tx = new Tx()
                         .payToAddress(senderAddr, Amount.ada(1))
                         .from(senderAddr);
 
-                Result<String> result = quickTxBuilder.compose(tx)
+                Result<String> result = txBuilder.compose(tx)
                         .withSigner(SignerProviders.signerFrom(sender))
                         .complete();
 
