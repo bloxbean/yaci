@@ -1,5 +1,12 @@
+[versions]
+cardano-client-lib = "0.8.0-preview1"
+
 [libraries]
-cardano-client-core = "com.bloxbean.cardano:cardano-client-core:0.8.0-preview1"
+cardano-client-core = { module = "com.bloxbean.cardano:cardano-client-core", version.ref = "cardano-client-lib" }
+cardano-client-lib = { module = "com.bloxbean.cardano:cardano-client-lib", version.ref = "cardano-client-lib" }
+cardano-client-backend-blockfrost = { module = "com.bloxbean.cardano:cardano-client-backend-blockfrost", version.ref = "cardano-client-lib" }
+cardano-client-quicktx = { module = "com.bloxbean.cardano:cardano-client-quicktx", version.ref = "cardano-client-lib" }
+cardano-client-cip20 = { module = "com.bloxbean.cardano:cardano-client-cip20", version.ref = "cardano-client-lib" }
 cbor = "co.nstant.in:cbor:0.9"
 netty = "io.netty:netty-all:4.1.115.Final"
 project-reactor-core = "io.projectreactor:reactor-core:3.6.10"

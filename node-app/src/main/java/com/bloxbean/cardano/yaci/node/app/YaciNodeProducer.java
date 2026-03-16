@@ -345,8 +345,13 @@ public class YaciNodeProducer {
      * Initialize the Scalus-based transaction evaluator and inject it into the node.
      */
     private void initTransactionEvaluator(YaciNode yaciNode, YaciNodeConfig yaciConfig) {
+        // Load genesis config and protocol params — shared by both validator and evaluator
+        GenesisConfig genesis;
+        com.bloxbean.cardano.client.api.model.ProtocolParams pp;
+        SlotConfig slotConfig;
+        int networkId;
         try {
-            GenesisConfig genesis = GenesisConfig.load(
+            genesis = GenesisConfig.load(
                     yaciConfig.getShelleyGenesisFile(),
                     yaciConfig.getByronGenesisFile(),
                     yaciConfig.getProtocolParametersFile());
@@ -356,8 +361,7 @@ public class YaciNodeProducer {
                 return;
             }
 
-            com.bloxbean.cardano.client.api.model.ProtocolParams pp =
-                    ProtocolParamsMapper.fromNodeProtocolParam(genesis.getProtocolParameters());
+            pp = ProtocolParamsMapper.fromNodeProtocolParam(genesis.getProtocolParameters());
 
             long magic = yaciConfig.getProtocolMagic();
 
@@ -366,29 +370,49 @@ public class YaciNodeProducer {
                     : genesis.getSystemStartEpochMillis() > 0
                     ? genesis.getSystemStartEpochMillis()
                     : System.currentTimeMillis();
-            var slotConfig = new SlotConfig(yaciConfig.getSlotLengthMillis(), 0, genesisTs);
+            slotConfig = new SlotConfig(yaciConfig.getSlotLengthMillis(), 0, genesisTs);
 
             log.info("Yaci Node slot config: {}", slotConfig);
 
-            int networkId = magic == Constants.MAINNET_PROTOCOL_MAGIC ? 1 : 0;
+            networkId = magic == Constants.MAINNET_PROTOCOL_MAGIC ? 1 : 0;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to load genesis config for transaction evaluation. "
+                    + "Cannot start block producer without valid protocol parameters.", e);
+        }
 
+        // Initialize TransactionValidator (Scalus) — validates transactions on submission
+        boolean validatorInitialized = false;
+        try {
             TransactionValidator evaluator =
                     ScalusTransactionFactory.createValidator(pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig, networkId);
             yaciNode.setTransactionEvaluator(evaluator);
+            validatorInitialized = true;
+            log.info("Transaction validator initialized (networkId={})", networkId);
+        } catch (Exception e) {
+            log.error("Failed to initialize transaction validator (Scalus). "
+                    + "Transactions will NOT be validated on submission! Error: {}", e.getMessage(), e);
+        }
 
-            // Also create a script evaluator for the /utils/txs/evaluate endpoint
+        // Initialize TransactionEvaluator (Aiken/Scalus) — powers /utils/txs/evaluate endpoint
+        boolean evaluatorInitialized = false;
+        try {
             TransactionEvaluator transactionEvaluator;
             if ("scalus".equalsIgnoreCase(scriptEvaluator)) {
                 transactionEvaluator = ScalusTransactionFactory.createEvaluator(pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig, networkId);
             } else {
                 transactionEvaluator = new AikenTxEvaluator(() -> pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig);
             }
-
             yaciNode.setScriptEvaluator(transactionEvaluator);
-
-            log.info("Transaction evaluator initialized (networkId={}, evaluator={})", networkId, scriptEvaluator);
+            evaluatorInitialized = true;
+            log.info("Script evaluator initialized (networkId={}, evaluator={})", networkId, scriptEvaluator);
         } catch (Exception e) {
-            log.warn("Failed to initialize transaction evaluator: {}", e.getMessage());
+            log.error("Failed to initialize script evaluator ({}). "
+                    + "The /utils/txs/evaluate endpoint will not work. Error: {}", scriptEvaluator, e.getMessage(), e);
+        }
+
+        if (!validatorInitialized && !evaluatorInitialized) {
+            log.error("Neither transaction validator nor script evaluator could be initialized. "
+                    + "Plutus script transactions will not be validated!");
         }
     }
 

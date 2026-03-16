@@ -94,6 +94,12 @@
 
 
   {
+    "name": "com.bloxbean.cardano.client.api.model.ProtocolParams",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
     "name": "com.bloxbean.cardano.client.backend.model.TxContentUtxo",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
@@ -260,6 +266,12 @@
   },
   {
     "name": "com.bloxbean.cardano.yaci.node.app.api.genesis.dto.GenesisDto",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.scripts.dto.ScriptCborDto",
     "allDeclaredFields": true,
     "allDeclaredMethods": true,
     "allDeclaredConstructors": true

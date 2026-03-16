@@ -39,9 +39,10 @@ dependencies {
     testImplementation 'io.quarkus:quarkus-junit5'
     testImplementation 'io.rest-assured:rest-assured'
 
-    testImplementation "com.bloxbean.cardano:cardano-client-lib:0.7.1"
-    testImplementation "com.bloxbean.cardano:cardano-client-backend-blockfrost:0.7.1"
-    testImplementation "com.bloxbean.cardano:cardano-client-quicktx:0.7.1"
+    testImplementation libs.cardano.client.lib
+    testImplementation libs.cardano.client.backend.blockfrost
+    testImplementation libs.cardano.client.quicktx
+    testImplementation libs.cardano.client.cip20
 }
 
 application {
@@ -60,7 +61,18 @@ startScripts.enabled = false
 
 test {
     useJUnitPlatform {
-        excludeTags 'integration'
+        excludeTags 'integration', 'e2e'
+    }
+}
+
+tasks.register('e2eTest', Test) {
+    useJUnitPlatform {
+        includeTags 'e2e'
+    }
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    if (System.getProperty('yaci.e2e.baseUrl') != null) {
+        systemProperty 'yaci.e2e.baseUrl', System.getProperty('yaci.e2e.baseUrl')
     }
 }
 
@@ -70,6 +82,9 @@ tasks.register('integrationTest', Test) {
     }
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
+    if (System.getProperty('yaci.e2e.baseUrl') != null) {
+        systemProperty 'yaci.e2e.baseUrl', System.getProperty('yaci.e2e.baseUrl')
+    }
 }
 
 // --- Distribution packaging tasks ---
