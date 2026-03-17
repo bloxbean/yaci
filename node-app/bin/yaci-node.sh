@@ -50,7 +50,9 @@ fi
 if [ -f "$SCRIPT_DIR/yaci-node" ]; then
     # Native binary mode
     echo "Starting Yaci Node (native)${PROFILE:+ with profile: $PROFILE}..."
-    exec "$SCRIPT_DIR/yaci-node" $PROFILE_PROP "${PASSTHROUGH_ARGS[@]}"
+    exec "$SCRIPT_DIR/yaci-node" \
+        -Dyaci.node.block-producer.script-evaluator=scalus \
+        $PROFILE_PROP "${PASSTHROUGH_ARGS[@]}"
 elif [ -f "$SCRIPT_DIR/yaci-node.jar" ]; then
     # Uber-jar mode
     echo "Starting Yaci Node (JVM)${PROFILE:+ with profile: $PROFILE}..."

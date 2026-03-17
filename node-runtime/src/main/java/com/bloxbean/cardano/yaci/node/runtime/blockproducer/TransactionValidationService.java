@@ -10,10 +10,7 @@ import com.bloxbean.cardano.yaci.node.ledgerrules.ValidationError;
 import com.bloxbean.cardano.yaci.node.ledgerrules.ValidationResult;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Function;
 
 /**
@@ -41,7 +38,8 @@ public class TransactionValidationService {
     /**
      * Block production: custom resolver with spent-tracking overlay.
      */
-    public ValidationResult validate(byte[] txCbor, Function<Outpoint, Utxo> resolver) {
+    public ValidationResult validate(byte[] txCbor,
+            Function<Outpoint, com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo> resolver) {
         // Deserialize to extract input references for UTXO resolution
         Transaction transaction;
         try {
@@ -70,14 +68,15 @@ public class TransactionValidationService {
 
         for (TransactionInput input : allInputs) {
             Outpoint op = new Outpoint(input.getTransactionId(), input.getIndex());
-            Utxo resolved = resolver.apply(op);
-            if (resolved == null) {
+            var yaciUtxo = resolver.apply(op);
+            if (yaciUtxo == null) {
                 return ValidationResult.failure(new ValidationError(
                         "UtxoNotFound",
                         "UTXO not found: " + op.txHash() + "#" + op.index(),
                         ValidationError.Phase.PHASE_1));
             }
-            inputUtxos.add(resolved);
+
+            inputUtxos.add(UtxoMapper.toCclUtxo(yaciUtxo));
         }
 
         try {
@@ -91,9 +90,7 @@ public class TransactionValidationService {
         }
     }
 
-    private Utxo resolveFromUtxoState(Outpoint outpoint) {
-        return utxoState.getUtxo(outpoint)
-                .map(UtxoMapper::toCclUtxo)
-                .orElse(null);
+    private com.bloxbean.cardano.yaci.node.api.utxo.model.Utxo resolveFromUtxoState(Outpoint outpoint) {
+        return utxoState.getUtxo(outpoint).orElse(null);
     }
 }

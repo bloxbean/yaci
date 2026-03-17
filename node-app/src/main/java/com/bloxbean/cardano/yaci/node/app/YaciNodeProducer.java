@@ -10,14 +10,15 @@ import com.bloxbean.cardano.yaci.node.api.config.UpstreamConfig;
 import com.bloxbean.cardano.yaci.node.api.config.YaciNodeConfig;
 import com.bloxbean.cardano.yaci.node.app.bootstrap.BootstrapConfigParser;
 import com.bloxbean.cardano.client.common.model.SlotConfig;
-import com.bloxbean.cardano.client.common.model.SlotConfigs;
 import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.runtime.YaciNode;
+import com.bloxbean.cardano.yaci.node.ledgerrules.impl.AikenTxEvaluator;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper;
-import com.bloxbean.cardano.yaci.node.scalusbridge.ScalusTransactionValidatorFactory;
+import com.bloxbean.cardano.yaci.node.ledgerrules.impl.YaciScriptSupplier;
+import com.bloxbean.cardano.yaci.node.scalusbridge.ScalusTransactionFactory;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -186,6 +187,9 @@ public class YaciNodeProducer {
 
     @ConfigProperty(name = "yaci.node.app-layer.block-producer-enabled", defaultValue = "true")
     boolean appBlockProducerEnabled;
+
+    @ConfigProperty(name = "yaci.node.block-producer.script-evaluator", defaultValue = "aiken")
+    String scriptEvaluator;
 
     // Bootstrap config
     @ConfigProperty(name = "yaci.node.bootstrap.enabled", defaultValue = "false")
@@ -416,8 +420,13 @@ public class YaciNodeProducer {
      * Initialize the Scalus-based transaction evaluator and inject it into the node.
      */
     private void initTransactionEvaluator(YaciNode yaciNode, YaciNodeConfig yaciConfig) {
+        // Load genesis config and protocol params — shared by both validator and evaluator
+        GenesisConfig genesis;
+        com.bloxbean.cardano.client.api.model.ProtocolParams pp;
+        SlotConfig slotConfig;
+        int networkId;
         try {
-            GenesisConfig genesis = GenesisConfig.load(
+            genesis = GenesisConfig.load(
                     yaciConfig.getShelleyGenesisFile(),
                     yaciConfig.getByronGenesisFile(),
                     yaciConfig.getProtocolParametersFile());
@@ -427,42 +436,58 @@ public class YaciNodeProducer {
                 return;
             }
 
-            com.bloxbean.cardano.client.api.model.ProtocolParams pp =
-                    ProtocolParamsMapper.fromNodeProtocolParam(genesis.getProtocolParameters());
+            pp = ProtocolParamsMapper.fromNodeProtocolParam(genesis.getProtocolParameters());
 
             long magic = yaciConfig.getProtocolMagic();
-            SlotConfig slotConfig;
-            //TODO -- We should be able to derive slot config from genesis data instead of hardcoding for mainnet/preprod/preview
-            // Only gap is how to determine zero slot which depends on shelley start slot.
-            if (magic == Constants.MAINNET_PROTOCOL_MAGIC) {
-                slotConfig = SlotConfigs.mainnet();
-            } else if (magic == Constants.PREPROD_PROTOCOL_MAGIC) {
-                slotConfig = SlotConfigs.preprod();
-            } else if (magic == Constants.PREVIEW_PROTOCOL_MAGIC) {
-                slotConfig = SlotConfigs.preview();
-            } else {
-                long genesisTs = yaciConfig.getGenesisTimestamp() > 0
-                        ? yaciConfig.getGenesisTimestamp()
-                        : genesis.getSystemStartEpochMillis() > 0
-                                ? genesis.getSystemStartEpochMillis()
-                                : System.currentTimeMillis();
-                slotConfig = new SlotConfig(yaciConfig.getSlotLengthMillis(), 0, genesisTs);
-            }
 
-            int networkId = magic == Constants.MAINNET_PROTOCOL_MAGIC ? 1 : 0;
+            long genesisTs = yaciConfig.getGenesisTimestamp() > 0
+                    ? yaciConfig.getGenesisTimestamp()
+                    : genesis.getSystemStartEpochMillis() > 0
+                    ? genesis.getSystemStartEpochMillis()
+                    : System.currentTimeMillis();
+            slotConfig = new SlotConfig(yaciConfig.getSlotLengthMillis(), 0, genesisTs);
 
-            TransactionValidator evaluator =
-                    ScalusTransactionValidatorFactory.create(pp, slotConfig, networkId);
-            yaciNode.setTransactionEvaluator(evaluator);
+            log.info("Yaci Node slot config: {}", slotConfig);
 
-            // Also create a script evaluator for the /utils/txs/evaluate endpoint
-            TransactionEvaluator scriptEvaluator =
-                    ScalusTransactionValidatorFactory.createEvaluator(pp, slotConfig, networkId);
-            yaciNode.setScriptEvaluator(scriptEvaluator);
-
-            log.info("Transaction evaluator initialized (networkId={})", networkId);
+            networkId = magic == Constants.MAINNET_PROTOCOL_MAGIC ? 1 : 0;
         } catch (Exception e) {
-            log.warn("Failed to initialize transaction evaluator: {}", e.getMessage());
+            throw new RuntimeException("Failed to load genesis config for transaction evaluation. "
+                    + "Cannot start block producer without valid protocol parameters.", e);
+        }
+
+        // Initialize TransactionValidator (Scalus) — validates transactions on submission
+        boolean validatorInitialized = false;
+        try {
+            TransactionValidator evaluator =
+                    ScalusTransactionFactory.createValidator(pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig, networkId);
+            yaciNode.setTransactionEvaluator(evaluator);
+            validatorInitialized = true;
+            log.info("Transaction validator initialized (networkId={})", networkId);
+        } catch (Exception e) {
+            log.error("Failed to initialize transaction validator (Scalus). "
+                    + "Transactions will NOT be validated on submission! Error: {}", e.getMessage(), e);
+        }
+
+        // Initialize TransactionEvaluator (Aiken/Scalus) — powers /utils/txs/evaluate endpoint
+        boolean evaluatorInitialized = false;
+        try {
+            TransactionEvaluator transactionEvaluator;
+            if ("scalus".equalsIgnoreCase(scriptEvaluator)) {
+                transactionEvaluator = ScalusTransactionFactory.createEvaluator(pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig, networkId);
+            } else {
+                transactionEvaluator = new AikenTxEvaluator(() -> pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig);
+            }
+            yaciNode.setScriptEvaluator(transactionEvaluator);
+            evaluatorInitialized = true;
+            log.info("Script evaluator initialized (networkId={}, evaluator={})", networkId, scriptEvaluator);
+        } catch (Exception e) {
+            log.error("Failed to initialize script evaluator ({}). "
+                    + "The /utils/txs/evaluate endpoint will not work. Error: {}", scriptEvaluator, e.getMessage(), e);
+        }
+
+        if (!validatorInitialized && !evaluatorInitialized) {
+            log.error("Neither transaction validator nor script evaluator could be initialized. "
+                    + "Plutus script transactions will not be validated!");
         }
     }
 

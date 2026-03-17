@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.node.runtime.blockproducer;
 
-import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 import com.bloxbean.cardano.yaci.node.api.utxo.model.Outpoint;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;

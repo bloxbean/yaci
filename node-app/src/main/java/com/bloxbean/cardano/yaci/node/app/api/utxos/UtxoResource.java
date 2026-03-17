@@ -110,6 +110,8 @@ public class UtxoResource {
         var list = u.getUtxosByPaymentCredential(paymentCredential, page, count);
         List<UtxoDto> body = UtxoDtoMapper.toDtoList(list, nodeAPI::slotToUnixTime);
         return Response.ok(body).build();
-}
+    }
+
+
 }
 

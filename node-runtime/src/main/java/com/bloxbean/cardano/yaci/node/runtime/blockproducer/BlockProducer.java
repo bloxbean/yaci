@@ -46,7 +46,7 @@ public class BlockProducer {
     private final GenesisConfig genesisConfig;
 
     // Optional: transaction evaluator for block-time validation
-    private final TransactionValidationService transactionEvaluator;
+    private final TransactionValidationService transactionValidatorService;
     private final UtxoState utxoState;
 
     private ScheduledFuture<?> scheduledTask;
@@ -70,7 +70,7 @@ public class BlockProducer {
                          int blockTimeMillis, boolean lazy,
                          long genesisTimestamp, int slotLengthMillis,
                          GenesisConfig genesisConfig,
-                         TransactionValidationService transactionEvaluator,
+                         TransactionValidationService transactionValidatorService,
                          UtxoState utxoState) {
         this.chainState = chainState;
         this.memPool = memPool;
@@ -86,7 +86,7 @@ public class BlockProducer {
         this.genesisTimestamp = genesisTimestamp;
         this.slotLengthMillis = slotLengthMillis;
         this.genesisConfig = genesisConfig;
-        this.transactionEvaluator = transactionEvaluator;
+        this.transactionValidatorService = transactionValidatorService;
         this.utxoState = utxoState;
     }
 
@@ -214,17 +214,6 @@ public class BlockProducer {
     }
 
     private List<byte[]> drainMempool() {
-        if (transactionEvaluator == null || utxoState == null) {
-            // No evaluator — backwards-compatible: accept all
-            List<byte[]> txList = new ArrayList<>();
-            while (!memPool.isEmpty()) {
-                MemPoolTransaction mpt = memPool.getNextTransaction();
-                if (mpt == null) break;
-                txList.add(mpt.txBytes());
-            }
-            return txList;
-        }
-
         // Validate each tx with spent-tracking overlay
         BlockBuildUtxoOverlay overlay = new BlockBuildUtxoOverlay(utxoState);
         List<byte[]> txList = new ArrayList<>();
@@ -232,7 +221,7 @@ public class BlockProducer {
             MemPoolTransaction mpt = memPool.getNextTransaction();
             if (mpt == null) break;
 
-            ValidationResult result = transactionEvaluator.validate(
+            ValidationResult result = transactionValidatorService.validate(
                     mpt.txBytes(), overlay.resolver());
             if (result.valid()) {
                 txList.add(mpt.txBytes());

@@ -3,13 +3,11 @@ package com.bloxbean.cardano.yaci.node.runtime.utxo;
 import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.client.address.Address;
+import com.bloxbean.cardano.client.api.util.ReferenceScriptUtil;
 import com.bloxbean.cardano.client.crypto.Base58;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.yaci.core.common.Constants;
-import com.bloxbean.cardano.yaci.core.model.Amount;
-import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.model.Era;
-import com.bloxbean.cardano.yaci.core.model.TransactionBody;
+import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
@@ -62,6 +60,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     private ColumnFamilyHandle cfAddr;
     private ColumnFamilyHandle cfDelta;
     private ColumnFamilyHandle cfMeta;
+    private ColumnFamilyHandle cfScriptRef;
 
     private final int pruneDepth;
     private final int rollbackWindow;
@@ -99,6 +98,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         this.cfAddr = supplier.rocks().handle(UtxoCfNames.UTXO_ADDR);
         this.cfDelta = supplier.rocks().handle(UtxoCfNames.UTXO_BLOCK_DELTA);
         this.cfMeta = supplier.rocks().handle(UtxoCfNames.UTXO_META);
+        this.cfScriptRef = supplier.rocks().handle(UtxoCfNames.SCRIPT_REF);
 
         this.pruneDepth = getInt(config, "yaci.node.utxo.pruneDepth", 2160);
         this.rollbackWindow = getInt(config, "yaci.node.utxo.rollbackWindow", 4320);
@@ -149,6 +149,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         this.cfAddr = ctx.handle(UtxoCfNames.UTXO_ADDR);
         this.cfDelta = ctx.handle(UtxoCfNames.UTXO_BLOCK_DELTA);
         this.cfMeta = ctx.handle(UtxoCfNames.UTXO_META);
+        this.cfScriptRef = ctx.handle(UtxoCfNames.SCRIPT_REF);
         this.processor = new DefaultUtxoProcessor(this.db);
         log.info("DefaultUtxoStore reinitialized after snapshot restore");
     }
@@ -290,6 +291,18 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         }
     }
 
+    @Override
+    public Optional<byte[]> getScriptRefBytesByHash(String scriptHashHex) {
+        if (!enabled || scriptHashHex == null) return Optional.empty();
+        try {
+            byte[] key = HexUtil.decodeHexString(scriptHashHex);
+            byte[] val = db.get(cfScriptRef, key);
+            return Optional.ofNullable(val);
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
     private void scanCfForTxHash(ColumnFamilyHandle cf, byte[] hashPrefix, String txHashHex, List<Utxo> results, boolean isSpent) {
         try (RocksIterator it = db.newIterator(cf)) {
             it.seek(hashPrefix);
@@ -327,7 +340,19 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                 amts.add(new AssetAmount(a.getPolicyId(), nameHex, a.getQuantity()));
             }
         }
-        return new Utxo(outpoint, stored.address, stored.lovelace, amts, stored.datumHash, stored.inlineDatum, null, stored.collateralReturn, stored.slot, stored.blockNumber, stored.blockHash);
+
+        String scriptRef = null;
+        if (stored.referenceScriptHash != null && !stored.referenceScriptHash.isEmpty()) {
+            scriptRef = getScriptRefBytesByHash(stored.referenceScriptHash)
+                    .map(HexUtil::encodeHexString)
+                    .orElse(null);
+        }
+
+        return new Utxo(outpoint, stored.address, stored.lovelace,
+                amts, stored.datumHash, stored.inlineDatum,
+                scriptRef, stored.referenceScriptHash,
+                stored.collateralReturn, stored.slot,
+                stored.blockNumber, stored.blockHash);
     }
 
     @Override
@@ -375,7 +400,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                             byte[] prev = ctx.getUnspent(key);
                             if (prev != null) {
                                 Map spentMap = new Map();
-                                spentMap.put(new UnsignedInteger(6), CborSerializationUtil.deserializeOne(prev));
+                                spentMap.put(new UnsignedInteger(2), CborSerializationUtil.deserializeOne(prev));
                                 spentMap.put(new UnsignedInteger(1), new UnsignedInteger(slot));
                                 byte[] spentVal = CborSerializationUtil.serialize(spentMap, true);
                                 batch.put(cfSpent, key, spentVal);
@@ -418,9 +443,17 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                                     continue;
                                 }
                             }
-                            byte[] val = UtxoCborCodec.encodeUtxoRecord(out.getAddress(), lovelace, amounts, out.getDatumHash(), out.getInlineDatum() != null ? HexUtil.decodeHexString(out.getInlineDatum()) : null, out.getScriptRef(), null, false, slot, blockNo, blockHash);
+
+                            byte[] referenceScriptHash = getReferenceScriptHash(out);
+                            byte[] val = UtxoCborCodec.encodeUtxoRecord(out.getAddress(), lovelace, amounts, out.getDatumHash(),
+                                    out.getInlineDatum() != null ? HexUtil.decodeHexString(out.getInlineDatum()) : null,
+                                    referenceScriptHash, false, slot, blockNo, blockHash);
+
                             byte[] outKey = UtxoKeyUtil.outpointKey(tx.getTxHash(), outIdx);
                             batch.put(cfUnspent, outKey, val);
+                            if (referenceScriptHash != null && out.getScriptRef() != null) {
+                                batch.put(cfScriptRef, referenceScriptHash, HexUtil.decodeHexString(out.getScriptRef()));
+                            }
                             //log.info("UTXO created: {}:{}", tx.getTxHash(), outIdx);
                             if (indexAddressHash) {
                                 byte[] addrHash = UtxoKeyUtil.addrHash28(out.getAddress());
@@ -444,7 +477,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                             byte[] prev = ctx.getUnspent(key);
                             if (prev != null) {
                                 Map spentMap = new Map();
-                                spentMap.put(new UnsignedInteger(6), CborSerializationUtil.deserializeOne(prev));
+                                spentMap.put(new UnsignedInteger(2), CborSerializationUtil.deserializeOne(prev));
                                 spentMap.put(new UnsignedInteger(1), new UnsignedInteger(slot));
                                 byte[] spentVal = CborSerializationUtil.serialize(spentMap, true);
                                 batch.put(cfSpent, key, spentVal);
@@ -473,9 +506,17 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                         if (amounts != null) for (Amount a : amounts)
                             if ("lovelace".equals(a.getUnit())) lovelace = a.getQuantity();
                         int outIdx = tx.getOutputs() != null ? tx.getOutputs().size() : 0;
-                        byte[] val = UtxoCborCodec.encodeUtxoRecord(out.getAddress(), lovelace, amounts, out.getDatumHash(), out.getInlineDatum() != null ? HexUtil.decodeHexString(out.getInlineDatum()) : null, out.getScriptRef(), null, true, slot, blockNo, blockHash);
+
+                        byte[] referenceScriptHash = getReferenceScriptHash(out);
+                        byte[] val = UtxoCborCodec.encodeUtxoRecord(out.getAddress(), lovelace, amounts, out.getDatumHash(),
+                                out.getInlineDatum() != null ? HexUtil.decodeHexString(out.getInlineDatum()) : null,
+                                referenceScriptHash, true, slot, blockNo, blockHash);
+
                         byte[] outKey = UtxoKeyUtil.outpointKey(tx.getTxHash(), outIdx);
                         batch.put(cfUnspent, outKey, val);
+                        if (referenceScriptHash != null && out.getScriptRef() != null) {
+                            batch.put(cfScriptRef, referenceScriptHash, HexUtil.decodeHexString(out.getScriptRef()));
+                        }
                         if (indexAddressHash) {
                             byte[] addrHash = UtxoKeyUtil.addrHash28(out.getAddress());
                             byte[] addrIdxKey = UtxoKeyUtil.addressIndexKey(addrHash, slot, tx.getTxHash(), outIdx);
@@ -529,6 +570,19 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         }
     }
 
+    private byte[] getReferenceScriptHash(TransactionOutput out) {
+        byte[] referenceScriptHash = null;
+        if (out.getScriptRef() != null) {
+            try {
+                var script = ReferenceScriptUtil.deserializeScriptRef(HexUtil.decodeHexString(out.getScriptRef()));
+                referenceScriptHash = script.getScriptHash();
+            } catch (Exception ex) {
+                log.warn("Invalid reference script : " + out.getScriptRef());
+            }
+        }
+        return referenceScriptHash;
+    }
+
     @Override
     public void storeGenesisUtxos(java.util.Map<String, BigInteger> shelleyFunds, long networkMagic, long slot, long blockNumber, String blockHash) {
         if (!enabled || shelleyFunds == null || shelleyFunds.isEmpty()) return;
@@ -557,7 +611,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                 }
 
                 // Encode UTXO record
-                byte[] val = UtxoCborCodec.encodeUtxoRecord(bech32Addr, lovelace, null, null, null, null, null, false, slot, blockNumber, blockHash);
+                byte[] val = UtxoCborCodec.encodeUtxoRecord(bech32Addr, lovelace, null, null, null, null, false, slot, blockNumber, blockHash);
                 byte[] outKey = UtxoKeyUtil.outpointKey(txHash, outputIndex);
                 batch.put(cfUnspent, outKey, val);
 
@@ -600,7 +654,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                 int outputIndex = 0;
 
                 // Store address as-is (base58 string, no bech32 conversion for Byron)
-                byte[] val = UtxoCborCodec.encodeUtxoRecord(byronAddress, lovelace, null, null, null, null, null, false, slot, blockNumber, blockHash);
+                byte[] val = UtxoCborCodec.encodeUtxoRecord(byronAddress, lovelace, null, null, null, null, false, slot, blockNumber, blockHash);
                 byte[] outKey = UtxoKeyUtil.outpointKey(txHash, outputIndex);
                 batch.put(cfUnspent, outKey, val);
 
@@ -642,7 +696,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
         String blockHash = "0000000000000000000000000000000000000000000000000000000000000000";
 
         try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
-            byte[] val = UtxoCborCodec.encodeUtxoRecord(address, BigInteger.valueOf(lovelace), null, null, null, null, null, false, slot, blockNumber, blockHash);
+            byte[] val = UtxoCborCodec.encodeUtxoRecord(address, BigInteger.valueOf(lovelace), null, null, null, null, false, slot, blockNumber, blockHash);
             byte[] outKey = UtxoKeyUtil.outpointKey(txHash, outputIndex);
             batch.put(cfUnspent, outKey, val);
 
@@ -698,7 +752,7 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
 
                 byte[] val = UtxoCborCodec.encodeUtxoRecord(
                         utxo.address(), utxo.lovelace(), amounts,
-                        utxo.datumHash(), inlineDatum, utxo.scriptRefCbor(),
+                        utxo.datumHash(), inlineDatum,
                         null, false, slot, blockNumber, blockHash);
 
                 byte[] outKey = UtxoKeyUtil.outpointKey(utxo.txHash(), utxo.outputIndex());
