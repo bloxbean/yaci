@@ -62,6 +62,22 @@ public class EpochNonceState {
     }
 
     /**
+     * Advance epoch if the given slot crosses an epoch boundary.
+     * Must be called BEFORE reading epochNonce so that VRF proofs use the correct nonce.
+     *
+     * @param slot the slot about to be produced
+     */
+    public void advanceEpochIfNeeded(long slot) {
+        int blockEpoch = (int) (slot / epochLength);
+        if (blockEpoch > currentEpoch) {
+            performTickn();
+            currentEpoch = blockEpoch;
+            log.info("Epoch transition to epoch {}, new epochNonce={}",
+                    currentEpoch, com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(epochNonce));
+        }
+    }
+
+    /**
      * Called after each block is produced. Evolves the nonce state.
      *
      * @param slot      the slot of the produced block
@@ -69,29 +85,19 @@ public class EpochNonceState {
      * @param vrfOutput 64-byte VRF output from the block's VRF proof
      */
     public void onBlockProduced(long slot, byte[] prevHash, byte[] vrfOutput) {
-        int blockEpoch = (int) (slot / epochLength);
-
-        // 1. Detect epoch boundary → TICKN transition
-        if (blockEpoch > currentEpoch) {
-            performTickn();
-            currentEpoch = blockEpoch;
-            log.info("Epoch transition to epoch {}, new epochNonce={}",
-                    currentEpoch, com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(epochNonce));
-        }
-
-        // 2. Compute eta: blake2b_256(blake2b_256("N" || vrfOutput))
+        // 1. Compute eta: blake2b_256(blake2b_256("N" || vrfOutput))
         byte[] eta = computeEta(vrfOutput);
 
-        // 3. Update evolving nonce: evolvingNonce ⭒ eta
+        // 2. Update evolving nonce: evolvingNonce ⭒ eta
         evolvingNonce = combineNonces(evolvingNonce, eta);
 
-        // 4. Freeze check: if block is before stability window, update candidate
+        // 3. Freeze check: if block is before stability window, update candidate
         long firstSlotNextEpoch = ((long) currentEpoch + 1) * epochLength;
         if (slot + stabilityWindow < firstSlotNextEpoch) {
             candidateNonce = evolvingNonce.clone();
         }
 
-        // 5. Update labNonce = prevHash (direct bytes, no re-hashing)
+        // 4. Update labNonce = prevHash (direct bytes, no re-hashing)
         labNonce = prevHash != null ? prevHash.clone() : null;
     }
 

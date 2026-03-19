@@ -3,7 +3,6 @@ package com.bloxbean.cardano.yaci.node.runtime;
 import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
-import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.network.server.NodeServer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -682,8 +681,13 @@ public class YaciNode implements NodeAPI {
                     }
                 }
 
-                log.info("Using SignedBlockBuilder with real VRF/KES crypto");
-                return new SignedBlockBuilder(keys, slotsPerKESPeriod, maxKESEvolutions, nonceState, nonceStore);
+                // Get protocol version from genesis
+                long protoMajor = shelleyData != null ? shelleyData.protocolMajor() : 10;
+                long protoMinor = shelleyData != null ? shelleyData.protocolMinor() : 2;
+
+                log.info("Using SignedBlockBuilder with real VRF/KES crypto, protocolVersion={}.{}", protoMajor, protoMinor);
+                return new SignedBlockBuilder(keys, slotsPerKESPeriod, maxKESEvolutions,
+                        nonceState, nonceStore, protoMajor, protoMinor);
             } catch (Exception e) {
                 log.warn("Failed to initialize SignedBlockBuilder, falling back to dummy signatures: {}", e.getMessage());
                 return new DevnetBlockBuilder();

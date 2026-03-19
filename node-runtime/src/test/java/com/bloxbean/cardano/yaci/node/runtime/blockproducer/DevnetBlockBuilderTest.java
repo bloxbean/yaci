@@ -130,7 +130,7 @@ class DevnetBlockBuilderTest {
     void buildBlock_conwayEra() {
         var result = builder.buildBlock(0, 0, null, List.of());
 
-        // Verify era tag is 6 (HFC index for Conway in cardano-node 10.6+)
+        // Verify era tag is 6 (Conway era ID)
         var di = CborSerializationUtil.deserializeOne(result.blockCbor());
         Array arr = (Array) di;
         int era = ((UnsignedInteger) arr.getDataItems().get(0)).getValue().intValue();
@@ -340,9 +340,8 @@ class DevnetBlockBuilderTest {
         byte[] blockCbor = result.blockCbor();
 
         // ---- Step 1: Extract raw bytes from the serialized block CBOR at byte level ----
-        // Block structure (tag-24 wrapped / wrapCBORinCBOR):
-        //   [era, 24(h'<inner_bytes>')]
-        // Block structure: [era, [header, txBodies, witnesses, auxData, invalidTxs]]
+        // Block structure (direct embedding, no tag-24):
+        //   [era, [header, txBodies, witnesses, auxData, invalidTxs]]
 
         int pos = 0;
 
@@ -354,17 +353,18 @@ class DevnetBlockBuilderTest {
         pos = skipCborItem(blockCbor, pos);
         System.out.println("After era, pos=" + pos);
 
-        // 1c. Skip inner array header (5-element array)
-        pos = skipCborArrayHeader(blockCbor, pos);
-        System.out.println("After inner array header, pos=" + pos);
-
-        // 1d. Skip header (complex nested structure)
-        pos = skipCborItem(blockCbor, pos);
-        System.out.println("After header, pos=" + pos);
-
-        // Use blockCbor and pos for the rest (rename for clarity)
+        // 1c. The inner content is directly embedded as a 5-element array (no tag-24 wrapping).
+        // Work directly within blockCbor from the current position.
         byte[] innerBytes = blockCbor;
         int ipos = pos;
+
+        // 1c. Skip inner array header (5-element array)
+        ipos = skipCborArrayHeader(innerBytes, ipos);
+        System.out.println("After inner array header, pos=" + ipos);
+
+        // 1d. Skip header (complex nested structure)
+        ipos = skipCborItem(innerBytes, ipos);
+        System.out.println("After header, pos=" + ipos);
 
         // 1f. Record txBodies bytes
         int txBodiesStart = ipos;
@@ -491,6 +491,33 @@ class DevnetBlockBuilderTest {
     // ---- CBOR byte-level parser methods ----
     // These walk the raw CBOR bytes to determine the byte extent of each data item
     // without deserializing. This mimics what the Haskell "decodeWithBytes" captures.
+
+    /**
+     * Extract the payload bytes from a Tag-24 (wrapCBORinCBOR) item at position pos.
+     * Format: Tag(24, ByteString(<payload>))
+     * Major type 6 (tag), additionalInfo=24 => initial byte 0xd8, next byte 0x18
+     * followed immediately by a ByteString (major type 2).
+     */
+    private byte[] extractTag24Content(byte[] data, int pos) {
+        int initialByte = data[pos] & 0xFF;
+        int majorType = initialByte >> 5;
+        assertEquals(6, majorType, "Expected CBOR tag (major type 6) at pos " + pos + ", got " + majorType);
+        int additionalInfo = initialByte & 0x1F;
+        // Tag 24 is encoded as 0xd8 0x18 (additionalInfo=24 => 1 extra byte for tag number)
+        assertEquals(24, additionalInfo, "Expected tag additionalInfo=24 (1-byte tag number) at pos " + pos);
+        int tagNumber = data[pos + 1] & 0xFF;
+        assertEquals(24, tagNumber, "Expected tag number 24 (wrapCBORinCBOR) at pos " + pos);
+        // Now pos+2 should be a ByteString (major type 2)
+        int bsPos = pos + 2;
+        int bsInitial = data[bsPos] & 0xFF;
+        int bsMajor = bsInitial >> 5;
+        assertEquals(2, bsMajor, "Expected ByteString (major type 2) after tag-24 at pos " + bsPos + ", got " + bsMajor);
+        int bsAdditional = bsInitial & 0x1F;
+        long length = readCborLength(data, bsPos, bsAdditional);
+        int headerSize = cborHeaderSize(bsAdditional);
+        int contentStart = bsPos + headerSize;
+        return Arrays.copyOfRange(data, contentStart, contentStart + (int) length);
+    }
 
     /**
      * Skip an array header and return the position after the header.

@@ -19,9 +19,18 @@ import java.util.List;
 @Slf4j
 public class DevnetBlockBuilder {
 
-    // HardFork combinator era index (cardano-node 10.6+): Byron=0, Shelley=1, ..., Babbage=5, Conway=6, Dijkstra=7
-    // Used for both BlockFetch WrappedBlock and ChainSync WrappedHeader
-    protected static final int CONWAY_ERA_ID = 6;
+    // Cardano N2N wire format uses TWO different era numbering schemes:
+    //
+    // BlockType (used in BlockFetch MsgBlock / Serialised blk):
+    //   Byron EBB=0, Byron Main=1, Shelley=2, Allegra=3, Mary=4, Alonzo=5, Babbage=6, Conway=7
+    //
+    // BlockHeaderType (used in ChainSync MsgRollForward / SerialisedHeader):
+    //   Byron=0, Shelley=1, Allegra=2, Mary=3, Alonzo=4, Babbage=5, Conway=6
+    //
+    // The difference exists because Byron has 2 block sub-types (EBB + Main) but 1 header type.
+    // This matches gouroboros constants: BlockTypeConway=7, BlockHeaderTypeConway=6.
+    protected static final int CONWAY_BLOCK_TYPE = 7;       // For BlockFetch blocks
+    protected static final int CONWAY_HEADER_TYPE = 6;      // For ChainSync headers
     private static final int HASH_LENGTH = 32;
     private static final int VKEY_LENGTH = 32;
     private static final int VRF_VKEY_LENGTH = 32;
@@ -30,9 +39,22 @@ public class DevnetBlockBuilder {
     private static final int KES_SIGNATURE_LENGTH = 448;
     private static final int OPCERT_SIGMA_LENGTH = 64;
 
-    // Conway protocol version
-    protected static final long PROTOCOL_MAJOR = 10;
-    protected static final long PROTOCOL_MINOR = 0;
+    // Conway protocol version defaults — must be >= the ledger's current protocolVersion
+    // from shelley-genesis.json. Override via constructor if genesis uses different values.
+    private static final long DEFAULT_PROTOCOL_MAJOR = 10;
+    private static final long DEFAULT_PROTOCOL_MINOR = 2;
+
+    protected final long protocolMajor;
+    protected final long protocolMinor;
+
+    public DevnetBlockBuilder() {
+        this(DEFAULT_PROTOCOL_MAJOR, DEFAULT_PROTOCOL_MINOR);
+    }
+
+    public DevnetBlockBuilder(long protocolMajor, long protocolMinor) {
+        this.protocolMajor = protocolMajor;
+        this.protocolMinor = protocolMinor;
+    }
 
     /**
      * Result of building a block: full block CBOR and wrapped header CBOR.
@@ -83,7 +105,7 @@ public class DevnetBlockBuilder {
         byte[] headerArrayBytes = CborSerializationUtil.serialize(headerArray);
         byte[] blockHash = Blake2bUtil.blake2bHash256(headerArrayBytes);
 
-        // Build full block: [eraId, [header, tx_bodies, witnesses, aux_data, invalid_txs]]
+        // Build block content array: [header, tx_bodies, witnesses, aux_data, invalid_txs]
         Array blockContentArray = new Array();
         blockContentArray.add(headerArray);
         blockContentArray.add(body.txBodiesArray());
@@ -91,16 +113,18 @@ public class DevnetBlockBuilder {
         blockContentArray.add(body.auxDataMap());
         blockContentArray.add(body.invalidTxsArray());
 
+        // Block format: [blockType, [header, tx_bodies, witnesses, aux_data, invalid_txs]]
+        // blockType=7 for Conway (BlockType numbering includes Byron EBB=0 + Main=1)
         Array fullBlock = new Array();
-        fullBlock.add(new UnsignedInteger(CONWAY_ERA_ID));
+        fullBlock.add(new UnsignedInteger(CONWAY_BLOCK_TYPE));
         fullBlock.add(blockContentArray);
         byte[] blockCbor = CborSerializationUtil.serialize(fullBlock);
 
         // Build wrapped header (ChainSync format):
-        //    [eraId, 24(h'<serialized_header_array>')]
-        //    eraId=6 for Conway (different from blockType=7 used in BlockFetch)
+        //    [headerType, 24(h'<serialized_header_array>')]
+        //    headerType=6 for Conway (BlockHeaderType numbering, Byron=1 entry)
         Array wrappedHeader = new Array();
-        wrappedHeader.add(new UnsignedInteger(CONWAY_ERA_ID));
+        wrappedHeader.add(new UnsignedInteger(CONWAY_HEADER_TYPE));
         ByteString headerByteString = new ByteString(headerArrayBytes);
         headerByteString.setTag(24L);
         wrappedHeader.add(headerByteString);
@@ -209,8 +233,8 @@ public class DevnetBlockBuilder {
         headerBody.add(opCert);
         // 9: protocolVersion [major, minor]
         Array protoVersion = new Array();
-        protoVersion.add(new UnsignedInteger(PROTOCOL_MAJOR));
-        protoVersion.add(new UnsignedInteger(PROTOCOL_MINOR));
+        protoVersion.add(new UnsignedInteger(protocolMajor));
+        protoVersion.add(new UnsignedInteger(protocolMinor));
         headerBody.add(protoVersion);
 
         // Header array: [header_body, signature]

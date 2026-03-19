@@ -93,10 +93,12 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
         }
 
         if (!getChannel().isWritable()) {
+            log.warn("BlockFetch: Channel not writable, deferring processing. Pending requests: {}", requestQueue.size());
             processing.set(false);
             return;
         }
 
+        boolean batchStarted = false;
         try {
             RequestRange request = requestQueue.poll();
             if (request == null) {
@@ -114,12 +116,12 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
             if (range.isEmpty()) {
                 log.warn("No blocks found in requested range {} → {}. Sending NoBlocks.", from, to);
                 sendToClient(new NoBlocks());
-                processNext();
                 return;
             }
 
             if (YaciConfig.INSTANCE.isBlockFetchCheckRangeExists()) {
                 // Preflight availability check (existence-only) to avoid mid-batch failures
+                boolean allAvailable = true;
                 for (Point point : range) {
                     byte[] hash = HexUtil.decodeHexString(point.getHash());
                     boolean exists = false;
@@ -130,14 +132,18 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
                     if (!exists) {
                         log.warn("Requested range contains missing body at {}. Sending NoBlocks.", point);
                         sendToClient(new NoBlocks());
-                        processNext();
-                        return;
+                        allAvailable = false;
+                        break;
                     }
+                }
+                if (!allAvailable) {
+                    return;
                 }
             }
 
             // All bodies available: send batch
             sendToClient(new StartBatch());
+            batchStarted = true;
 
             counter.incrementAndGet();
             log.info("BATCH STARTED: {} → {} -> batch NO: {} -> pending requests: {}", from, to, counter.get(), requestQueue.size());
@@ -145,11 +151,9 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
                 byte[] blockHash = HexUtil.decodeHexString(point.getHash());
                 byte[] blockBody = chainState.getBlock(blockHash);
 
-                //TODO -- Checking again here. Verify if it breaks protocol
                 if (blockBody == null) {
-                    log.error("Block missing after availability check. Point: {}", point);
-                    sendToClient(new NoBlocks());
-                    return;
+                    log.error("Block missing after availability check. Point: {}. Sending BatchDone to close batch.", point);
+                    break; // Exit loop — BatchDone will be sent in finally
                 }
 
                 var blockMessage = new MsgBlock(blockBody);
@@ -158,12 +162,17 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
 
             log.info("BATCH COMPLETED: {} → {} -> batch NO: {} -> pending requests: {}", from, to, counter.get(), requestQueue.size());
 
-            // Send BatchDone
-            sendToClient(new BatchDone());
-
         } catch (Exception e) {
             log.error("Error processing BlockFetch request", e);
         } finally {
+            // CRITICAL: Always send BatchDone if StartBatch was sent, to keep protocol state machine consistent
+            if (batchStarted) {
+                try {
+                    sendToClient(new BatchDone());
+                } catch (Exception e) {
+                    log.error("Failed to send BatchDone", e);
+                }
+            }
             processing.set(false);
             executor.submit(this::processNext);
         }
@@ -171,9 +180,12 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
 
     private void sendToClient(Message message) {
         if (getChannel().isWritable()) {
-            if (log.isDebugEnabled()) {
-                log.debug("Message size: {} bytes", message.serialize().length);
-            }
+            byte[] msgBytes = message.serialize();
+            log.info("Sending {} ({} bytes) to {} - first 20 hex: {}",
+                    message.getClass().getSimpleName(), msgBytes.length,
+                    getChannel().remoteAddress(),
+                    com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(
+                            java.util.Arrays.copyOf(msgBytes, Math.min(20, msgBytes.length))));
             writeMessage(message, null);
             currentState = currentState.nextState(message);
         } else {

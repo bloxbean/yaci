@@ -42,6 +42,13 @@ public class SignedBlockBuilder extends DevnetBlockBuilder {
      */
     public SignedBlockBuilder(BlockProducerKeys keys, long slotsPerKESPeriod, long maxKESEvolutions,
                               EpochNonceState epochNonceState, NonceStateStore nonceStore) {
+        this(keys, slotsPerKESPeriod, maxKESEvolutions, epochNonceState, nonceStore, 10, 2);
+    }
+
+    public SignedBlockBuilder(BlockProducerKeys keys, long slotsPerKESPeriod, long maxKESEvolutions,
+                              EpochNonceState epochNonceState, NonceStateStore nonceStore,
+                              long protocolMajor, long protocolMinor) {
+        super(protocolMajor, protocolMinor);
         this.keys = keys;
         this.blockSigner = new BlockSigner();
         this.epochNonceState = epochNonceState;
@@ -64,20 +71,23 @@ public class SignedBlockBuilder extends DevnetBlockBuilder {
         // 1. Compute block body
         BlockBodyResult body = computeBlockBody(transactions);
 
-        // 2. Get epoch nonce
+        // 2. Advance epoch FIRST (performs TICKN if crossing epoch boundary)
+        epochNonceState.advanceEpochIfNeeded(slot);
+
+        // 3. Get epoch nonce (now correct for this slot's epoch)
         byte[] epochNonce = epochNonceState.getEpochNonce();
 
-        // 3. Compute VRF proof
+        // 4. Compute VRF proof with correct nonce
         BlockSigner.VrfSignResult vrfResult = blockSigner.computeVrf(keys.getVrfSkey(), slot, epochNonce);
 
-        // 4. Build header body CBOR array
+        // 5. Build header body CBOR array
         Array headerBody = buildSignedHeaderBody(blockNumber, slot, prevHash,
                 body.bodySize(), body.bodyHash(), vrfResult);
 
-        // 5. Serialize header body for KES signing
+        // 6. Serialize header body for KES signing
         byte[] headerBodyCborBytes = CborSerializationUtil.serialize(headerBody);
 
-        // 6. Compute KES period and sign
+        // 7. Compute KES period and sign
         int kesPeriod = (int) (slot / slotsPerKESPeriod);
         int opcertKesPeriod = (int) keys.getOpCert().getKesPeriod();
         int relativePeriod = kesPeriod - opcertKesPeriod;
@@ -90,19 +100,19 @@ public class SignedBlockBuilder extends DevnetBlockBuilder {
         byte[] kesSig = blockSigner.signHeaderBody(keys.getKesSkey(), headerBodyCborBytes,
                 kesPeriod, opcertKesPeriod);
 
-        // 7. Assemble header: [headerBody, kesSig]
+        // 8. Assemble header: [headerBody, kesSig]
         Array headerArray = new Array();
         headerArray.add(headerBody);
         headerArray.add(new ByteString(kesSig));
 
-        // 8-10. Compute block hash, assemble full block and wrapped header
+        // 9. Compute block hash, assemble full block and wrapped header
         BlockBuildResult result = assembleBlock(headerArray, body, blockNumber, slot,
                 transactions != null ? transactions.size() : 0);
 
-        // 11. Evolve nonce state
+        // 10. Evolve nonce state
         epochNonceState.onBlockProduced(slot, prevHash, vrfResult.output());
 
-        // 12. Persist nonce state
+        // 11. Persist nonce state
         if (nonceStore != null) {
             nonceStore.storeEpochNonceState(epochNonceState.serialize());
         }
@@ -151,8 +161,8 @@ public class SignedBlockBuilder extends DevnetBlockBuilder {
         headerBody.add(opCertArray);
         // 9: protocolVersion [major, minor]
         Array protoVersion = new Array();
-        protoVersion.add(new UnsignedInteger(PROTOCOL_MAJOR));
-        protoVersion.add(new UnsignedInteger(PROTOCOL_MINOR));
+        protoVersion.add(new UnsignedInteger(protocolMajor));
+        protoVersion.add(new UnsignedInteger(protocolMinor));
         headerBody.add(protoVersion);
 
         return headerBody;

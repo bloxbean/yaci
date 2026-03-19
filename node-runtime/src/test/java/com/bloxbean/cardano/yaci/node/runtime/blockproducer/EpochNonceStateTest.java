@@ -48,27 +48,29 @@ class EpochNonceStateTest {
     }
 
     @Test
-    void onBlockProduced_epochBoundary_performsTickn() {
+    void advanceEpochIfNeeded_epochBoundary_performsTickn() {
         state.initFromGenesis("genesis".getBytes());
         byte[] epochZeroNonce = state.getEpochNonce().clone();
 
         // Produce a block in epoch 0
-        byte[] prevHash1 = Blake2bUtil.blake2bHash256("block0".getBytes());
         byte[] vrfOutput1 = new byte[64];
         vrfOutput1[0] = 0x01;
         state.onBlockProduced(0, null, vrfOutput1);
 
-        // Produce a block in epoch 1 (slot >= epochLength)
-        byte[] prevHash2 = Blake2bUtil.blake2bHash256("block1".getBytes());
-        byte[] vrfOutput2 = new byte[64];
-        vrfOutput2[0] = 0x02;
-        state.onBlockProduced(EPOCH_LENGTH, prevHash2, vrfOutput2);
+        // Advance epoch before producing block in epoch 1
+        state.advanceEpochIfNeeded(EPOCH_LENGTH);
 
         // Epoch should have transitioned
         assertEquals(1, state.getCurrentEpoch());
         // Epoch nonce should have changed (TICKN applied)
         assertFalse(java.util.Arrays.equals(epochZeroNonce, state.getEpochNonce()),
                 "Epoch nonce should change after TICKN transition");
+
+        // Now produce the block in epoch 1
+        byte[] prevHash2 = Blake2bUtil.blake2bHash256("block1".getBytes());
+        byte[] vrfOutput2 = new byte[64];
+        vrfOutput2[0] = 0x02;
+        state.onBlockProduced(EPOCH_LENGTH, prevHash2, vrfOutput2);
     }
 
     @Test
@@ -153,6 +155,7 @@ class EpochNonceStateTest {
         for (int epoch = 0; epoch < 3; epoch++) {
             long slot = epoch * EPOCH_LENGTH + 10;
             byte[] prevHash = Blake2bUtil.blake2bHash256(("block-" + epoch).getBytes());
+            state.advanceEpochIfNeeded(slot);
             state.onBlockProduced(slot, prevHash, vrfOutput);
         }
 
@@ -180,6 +183,7 @@ class EpochNonceStateTest {
 
         // Trigger epoch transition to use the candidate nonce
         byte[] prevHash3 = Blake2bUtil.blake2bHash256("epoch1".getBytes());
+        state.advanceEpochIfNeeded(EPOCH_LENGTH + 1);
         state.onBlockProduced(EPOCH_LENGTH + 1, prevHash3, vrfOutput);
 
         assertEquals(1, state.getCurrentEpoch());
