@@ -5,6 +5,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.NonceStateStore;
 import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbContext;
 import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbSupplier;
 import com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames;
@@ -34,10 +35,12 @@ import java.util.OptionalLong;
  * This implementation uses RocksDB directly without any caching layer.
  */
 @Slf4j
-public class DirectRocksDBChainState implements ChainState, AutoCloseable, RocksDbSupplier {
+public class DirectRocksDBChainState implements ChainState, AutoCloseable, RocksDbSupplier,
+        NonceStateStore {
 
     private static final byte[] TIP_KEY = "tip".getBytes(StandardCharsets.UTF_8);
     private static final byte[] HEADER_TIP_KEY = "header_tip".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] EPOCH_NONCE_STATE_KEY = "epoch_nonce_state".getBytes(StandardCharsets.UTF_8);
 
     private RocksDB db;
     private final String dbPath;
@@ -1335,6 +1338,27 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
     }
 
     // --- Era start slot tracking ---
+
+    // --- NonceStateStore implementation ---
+
+    @Override
+    public void storeEpochNonceState(byte[] serialized) {
+        try {
+            db.put(metadataHandle, EPOCH_NONCE_STATE_KEY, serialized);
+        } catch (RocksDBException e) {
+            log.error("Failed to store epoch nonce state", e);
+        }
+    }
+
+    @Override
+    public byte[] getEpochNonceState() {
+        try {
+            return db.get(metadataHandle, EPOCH_NONCE_STATE_KEY);
+        } catch (RocksDBException e) {
+            log.error("Failed to read epoch nonce state", e);
+            return null;
+        }
+    }
 
     private static final String ERA_START_SLOT_PREFIX = "era_";
     private static final String ERA_START_SLOT_SUFFIX = "_start_slot";

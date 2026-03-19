@@ -144,6 +144,15 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.block-producer.script-evaluator", defaultValue = "aiken")
     String scriptEvaluator;
 
+    @ConfigProperty(name = "yaci.node.block-producer.vrf-skey-file")
+    java.util.Optional<String> vrfSkeyFile;
+
+    @ConfigProperty(name = "yaci.node.block-producer.kes-skey-file")
+    java.util.Optional<String> kesSkeyFile;
+
+    @ConfigProperty(name = "yaci.node.block-producer.opcert-file")
+    java.util.Optional<String> opCertFile;
+
     // Bootstrap config
     @ConfigProperty(name = "yaci.node.bootstrap.enabled", defaultValue = "false")
     boolean bootstrapEnabled;
@@ -243,6 +252,9 @@ public class YaciNodeProducer {
                 .lazyBlockProduction(blockProducerLazy)
                 .genesisTimestamp(genesisTimestamp)
                 .slotLengthMillis(slotLengthMillis)
+                .vrfSkeyFile(vrfSkeyFile.orElse(null))
+                .kesSkeyFile(kesSkeyFile.orElse(null))
+                .opCertFile(opCertFile.orElse(null))
                 .shelleyGenesisFile(resolvedShelleyGenesis)
                 .byronGenesisFile(resolvedByronGenesis)
                 .alonzoGenesisFile(resolvedAlonzoGenesis)

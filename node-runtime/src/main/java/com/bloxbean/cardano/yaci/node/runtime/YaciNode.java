@@ -38,13 +38,7 @@ import com.bloxbean.cardano.yaci.node.api.bootstrap.BootstrapDataProvider;
 import com.bloxbean.cardano.yaci.node.api.bootstrap.BootstrapOutpoint;
 import com.bloxbean.cardano.yaci.node.runtime.bootstrap.BootstrapResult;
 import com.bloxbean.cardano.yaci.node.runtime.bootstrap.BootstrapService;
-import com.bloxbean.cardano.yaci.node.runtime.blockproducer.BlockProducer;
-import com.bloxbean.cardano.yaci.node.runtime.blockproducer.DevnetBlockBuilder;
-import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
-import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper;
-import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionEvaluationService;
-import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationException;
-import com.bloxbean.cardano.yaci.node.runtime.blockproducer.TransactionValidationService;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.*;
 import com.bloxbean.cardano.yaci.node.runtime.chain.BlockPruner;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMemPool;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DefaultMempoolEvictionPolicy;
@@ -600,8 +594,12 @@ public class YaciNode implements NodeAPI {
         resolvedGenesisTimestamp = genesisConfig.resolveAndPersistGenesisTimestamp(
                 config.getGenesisTimestamp(), freshStart, config.getShelleyGenesisFile());
 
+        // Choose block builder: if all three key files are configured, use SignedBlockBuilder
+        DevnetBlockBuilder blockBuilder = createBlockBuilder(freshStart);
+
         blockProducer = new BlockProducer(
                 chainState, memPool, nodeServer, eventBus, scheduler,
+                blockBuilder,
                 config.getBlockTimeMillis(),
                 config.isLazyBlockProduction(),
                 resolvedGenesisTimestamp,
@@ -627,6 +625,73 @@ public class YaciNode implements NodeAPI {
         }
 
         log.info("Block producer started");
+    }
+
+    /**
+     * Create the appropriate block builder based on configuration.
+     * If VRF, KES, and OpCert files are all configured, uses SignedBlockBuilder with real crypto.
+     * Otherwise falls back to DevnetBlockBuilder with dummy signatures.
+     */
+    private DevnetBlockBuilder createBlockBuilder(boolean freshStart) {
+        String vrfFile = config.getVrfSkeyFile();
+        String kesFile = config.getKesSkeyFile();
+        String opCertFilePath = config.getOpCertFile();
+
+        if (vrfFile != null && !vrfFile.isBlank()
+                && kesFile != null && !kesFile.isBlank()
+                && opCertFilePath != null && !opCertFilePath.isBlank()) {
+            try {
+                // Load keys
+                var keys = com.bloxbean.cardano.client.crypto.BlockProducerKeys.load(
+                        java.nio.file.Path.of(vrfFile),
+                        java.nio.file.Path.of(kesFile),
+                        java.nio.file.Path.of(opCertFilePath));
+
+                // Get genesis parameters
+                var shelleyData = genesisConfig.getShelleyGenesisData();
+                long slotsPerKESPeriod = shelleyData != null ? shelleyData.slotsPerKESPeriod() : 129600;
+                long maxKESEvolutions = shelleyData != null ? shelleyData.maxKESEvolutions() : 60;
+                long epochLength = shelleyData != null ? shelleyData.epochLength() : 600;
+                long securityParam = shelleyData != null ? shelleyData.securityParam() : 100;
+                double activeSlotsCoeff = genesisConfig.getActiveSlotsCoeff() > 0
+                        ? genesisConfig.getActiveSlotsCoeff() : 1.0;
+
+                // Initialize or restore nonce state
+                EpochNonceState nonceState = new EpochNonceState(epochLength, securityParam, activeSlotsCoeff);
+                NonceStateStore nonceStore = (chainState instanceof NonceStateStore)
+                        ? (NonceStateStore) chainState : null;
+
+                boolean restored = false;
+                if (!freshStart && nonceStore != null) {
+                    byte[] persisted = nonceStore.getEpochNonceState();
+                    if (persisted != null) {
+                        nonceState.restore(persisted);
+                        restored = true;
+                    }
+                }
+
+                if (!restored) {
+                    // Init from genesis file bytes
+                    String shelleyGenesisFile = config.getShelleyGenesisFile();
+                    if (shelleyGenesisFile != null) {
+                        byte[] genesisBytes = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(shelleyGenesisFile));
+                        nonceState.initFromGenesis(genesisBytes);
+                    } else {
+                        throw new IllegalStateException(
+                                "Shelley genesis file required for signed block production nonce initialization");
+                    }
+                }
+
+                log.info("Using SignedBlockBuilder with real VRF/KES crypto");
+                return new SignedBlockBuilder(keys, slotsPerKESPeriod, maxKESEvolutions, nonceState, nonceStore);
+            } catch (Exception e) {
+                log.warn("Failed to initialize SignedBlockBuilder, falling back to dummy signatures: {}", e.getMessage());
+                return new DevnetBlockBuilder();
+            }
+        }
+
+        log.info("Using DevnetBlockBuilder with dummy signatures (no key files configured)");
+        return new DevnetBlockBuilder();
     }
 
     /**

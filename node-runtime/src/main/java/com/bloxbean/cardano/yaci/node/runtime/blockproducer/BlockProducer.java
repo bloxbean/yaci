@@ -60,7 +60,7 @@ public class BlockProducer {
                          int blockTimeMillis, boolean lazy,
                          long genesisTimestamp, int slotLengthMillis,
                          GenesisConfig genesisConfig) {
-        this(chainState, memPool, nodeServer, eventBus, scheduler,
+        this(chainState, memPool, nodeServer, eventBus, scheduler, new DevnetBlockBuilder(),
                 blockTimeMillis, lazy, genesisTimestamp, slotLengthMillis,
                 genesisConfig, null, null);
     }
@@ -72,12 +72,25 @@ public class BlockProducer {
                          GenesisConfig genesisConfig,
                          TransactionValidationService transactionValidatorService,
                          UtxoState utxoState) {
+        this(chainState, memPool, nodeServer, eventBus, scheduler, new DevnetBlockBuilder(),
+                blockTimeMillis, lazy, genesisTimestamp, slotLengthMillis,
+                genesisConfig, transactionValidatorService, utxoState);
+    }
+
+    public BlockProducer(ChainState chainState, MemPool memPool, NodeServer nodeServer,
+                         EventBus eventBus, ScheduledExecutorService scheduler,
+                         DevnetBlockBuilder blockBuilder,
+                         int blockTimeMillis, boolean lazy,
+                         long genesisTimestamp, int slotLengthMillis,
+                         GenesisConfig genesisConfig,
+                         TransactionValidationService transactionValidatorService,
+                         UtxoState utxoState) {
         this.chainState = chainState;
         this.memPool = memPool;
         this.nodeServer = nodeServer;
         this.eventBus = eventBus;
         this.scheduler = scheduler;
-        this.blockBuilder = new DevnetBlockBuilder();
+        this.blockBuilder = blockBuilder;
         this.blockTimeMillis = blockTimeMillis;
         this.lazy = lazy;
         if (genesisTimestamp <= 0) {
@@ -266,7 +279,7 @@ public class BlockProducer {
         try {
             // Publish BlockProducedEvent (lightweight, no parsed block)
             eventBus.publish(
-                    new BlockProducedEvent(7, result.slot(), result.blockNumber(),
+                    new BlockProducedEvent(6, result.slot(), result.blockNumber(),
                             result.blockHash(), txCount),
                     meta, opts);
 

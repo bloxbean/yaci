@@ -1,9 +1,10 @@
 [versions]
-cardano-client-lib = "0.8.0-preview1"
+cardano-client-lib = "0.8.0-pre2-vrf-SNAPSHOT"
 
 [libraries]
 cardano-client-core = { module = "com.bloxbean.cardano:cardano-client-core", version.ref = "cardano-client-lib" }
 cardano-client-lib = { module = "com.bloxbean.cardano:cardano-client-lib", version.ref = "cardano-client-lib" }
+cardano-client-crypto-ext = { module = "com.bloxbean.cardano:cardano-client-crypto-ext", version.ref = "cardano-client-lib" }
 cardano-client-backend-blockfrost = { module = "com.bloxbean.cardano:cardano-client-backend-blockfrost", version.ref = "cardano-client-lib" }
 cardano-client-quicktx = { module = "com.bloxbean.cardano:cardano-client-quicktx", version.ref = "cardano-client-lib" }
 cardano-client-cip20 = { module = "com.bloxbean.cardano:cardano-client-cip20", version.ref = "cardano-client-lib" }

@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.node.runtime.blockproducer.NonceStateStore;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -13,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
 @Slf4j
-public class InMemoryChainState implements ChainState {
+public class InMemoryChainState implements ChainState, NonceStateStore {
     // Use hex string keys instead of byte[] to ensure proper equals/hashCode behavior
     private Map<String, byte[]> blockStore = new ConcurrentHashMap<>();
     private Map<String, byte[]> blockHeaderStore = new ConcurrentHashMap<>();
@@ -26,6 +27,7 @@ public class InMemoryChainState implements ChainState {
 
     private ChainTip tip;
     private ChainTip headerTip;
+    private volatile byte[] epochNonceState;
 
     @Override
     public void storeBlock(byte[] blockHash, Long blockNumber, Long slot, byte[] block) {
@@ -240,7 +242,7 @@ public class InMemoryChainState implements ChainState {
 
         try {
             long fromSlot = from.getSlot();
-            
+
             // Get all available slots starting from the fromSlot in order
             List<Long> sortedSlots = blockNumberBySlot.keySet().stream()
                     .filter(slot -> slot >= fromSlot)
@@ -255,7 +257,7 @@ public class InMemoryChainState implements ChainState {
             // Get the last slot and its corresponding block
             Long lastSlot = sortedSlots.get(sortedSlots.size() - 1);
             Long lastBlockNumber = blockNumberBySlot.get(lastSlot);
-            
+
             if (lastBlockNumber != null) {
                 byte[] lastBlockHash = blockHashByNumber.get(lastBlockNumber);
                 if (lastBlockHash != null) {
@@ -285,5 +287,17 @@ public class InMemoryChainState implements ChainState {
             }
         }
         return null;
+    }
+
+    // --- NonceStateStore implementation ---
+
+    @Override
+    public void storeEpochNonceState(byte[] serialized) {
+        this.epochNonceState = serialized;
+    }
+
+    @Override
+    public byte[] getEpochNonceState() {
+        return epochNonceState;
     }
 }

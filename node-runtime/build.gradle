@@ -12,6 +12,7 @@ dependencies {
     implementation libs.reload4j
 
     implementation libs.cardano.client.core
+    implementation libs.cardano.client.crypto.ext
     api project(':ledger-rules')
     implementation libs.jackson.databind
 

@@ -60,6 +60,11 @@ public class YaciNodeConfig implements NodeConfig {
     private String protocolParametersFile; // Path to protocol params JSON
     private boolean txEvaluationEnabled;   // Enable ledger rule validation for submitted transactions
 
+    // Block producer crypto key files (for signed blocks)
+    private String vrfSkeyFile;            // Path to VRF secret key file (TextEnvelope JSON)
+    private String kesSkeyFile;            // Path to KES secret key file (TextEnvelope JSON)
+    private String opCertFile;             // Path to operational certificate file (TextEnvelope JSON)
+
     // Bootstrap configuration (lightweight relay mode)
     private boolean enableBootstrap;
     @Builder.Default

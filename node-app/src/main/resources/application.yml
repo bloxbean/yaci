@@ -102,6 +102,9 @@ yaci:
         lazy: false
         genesis-timestamp: 0
         slot-length-millis: 0
+        vrf-skey-file: config/network/devnet/vrf.skey
+        kes-skey-file: config/network/devnet/kes.skey
+        opcert-file: config/network/devnet/opcert.cert
 
 "%mainnet":
   yaci:
