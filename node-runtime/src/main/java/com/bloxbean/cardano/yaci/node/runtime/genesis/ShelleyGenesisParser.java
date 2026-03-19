@@ -21,6 +21,8 @@ import java.util.Map;
 public class ShelleyGenesisParser {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    public static final int DEFAULT_PROTOCOL_MAJOR_VERSION = 10;
+    public static final int DEFAULT_PROTOCOL_MINOR_VERSION = 0;
 
     public static ShelleyGenesisData parse(File file) throws IOException {
         JsonNode root = MAPPER.readTree(file);
@@ -45,12 +47,19 @@ public class ShelleyGenesisParser {
         long slotsPerKESPeriod = root.path("slotsPerKESPeriod").asLong(0);
         long updateQuorum = root.path("updateQuorum").asLong(0);
 
-        log.info("Parsed shelley genesis: networkMagic={}, initialFunds={} entries, epochLength={}, systemStart={}, activeSlotsCoeff={}",
-                networkMagic, initialFunds.size(), epochLength, systemStart, activeSlotsCoeff);
+        // Parse protocolParams.protocolVersion
+        JsonNode protoParams = root.path("protocolParams");
+        JsonNode protoVersion = protoParams.path("protocolVersion");
+        long protocolMajor = protoVersion.path("major").asLong(DEFAULT_PROTOCOL_MAJOR_VERSION);
+        long protocolMinor = protoVersion.path("minor").asLong(DEFAULT_PROTOCOL_MINOR_VERSION);
+
+        log.info("Parsed shelley genesis: networkMagic={}, initialFunds={} entries, epochLength={}, systemStart={}, activeSlotsCoeff={}, protocolVersion={}.{}",
+                networkMagic, initialFunds.size(), epochLength, systemStart, activeSlotsCoeff, protocolMajor, protocolMinor);
 
         return new ShelleyGenesisData(initialFunds, networkMagic, epochLength, slotLength,
                 systemStart, maxLovelaceSupply, activeSlotsCoeff,
-                securityParam, maxKESEvolutions, slotsPerKESPeriod, updateQuorum);
+                securityParam, maxKESEvolutions, slotsPerKESPeriod, updateQuorum,
+                protocolMajor, protocolMinor);
     }
 
     /**
