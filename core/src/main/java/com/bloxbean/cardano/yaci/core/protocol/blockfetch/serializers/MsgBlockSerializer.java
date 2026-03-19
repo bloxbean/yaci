@@ -31,7 +31,7 @@ public enum MsgBlockSerializer implements Serializer<MsgBlock> {
         Array array = new Array();
         array.add(new UnsignedInteger(KEY_VALUE));
 
-        // Wrap block data with CBOR tag 24 (IANA tag for embedded CBOR)
+        // Wrap block data with CBOR tag 24 (required by Haskell fromCBOR @ByteString)
         ByteString blockData = new ByteString(object.getBytes());
         blockData.setTag(new Tag(24));
         array.add(blockData);
