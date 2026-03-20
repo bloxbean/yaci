@@ -684,9 +684,14 @@ public class YaciNode implements NodeAPI {
                 }
             }
 
-            // 5. Get protocol version from genesis
-            long protoMajor = shelleyData.protocolMajor() > 0 ? shelleyData.protocolMajor() : 10;
-            long protoMinor = shelleyData.protocolMinor();
+            // 5. Get protocol version from protocol-param.json
+            long protoMajor = genesisConfig.getProtocolVersionMajor();
+            long protoMinor = genesisConfig.getProtocolVersionMinor();
+            if (protoMajor <= 0) {
+                throw new IllegalStateException(
+                        "Protocol version not found in protocol-param.json. "
+                        + "Configure 'protocol-parameters-file' with current network protocol parameters.");
+            }
 
             // 6. Create SignedBlockBuilder with shared EpochNonceState
             var signedBlockBuilder = new SignedBlockBuilder(keys, slotsPerKESPeriod, maxKESEvolutions,
@@ -923,9 +928,14 @@ public class YaciNode implements NodeAPI {
                     }
                 }
 
-                // Get protocol version from genesis
-                long protoMajor = shelleyData != null ? shelleyData.protocolMajor() : 10;
-                long protoMinor = shelleyData != null ? shelleyData.protocolMinor() : 2;
+                // Get protocol version from protocol-param.json
+                long protoMajor = genesisConfig.getProtocolVersionMajor();
+                long protoMinor = genesisConfig.getProtocolVersionMinor();
+                if (protoMajor <= 0) {
+                    throw new IllegalStateException(
+                            "Protocol version not found in protocol-param.json. "
+                            + "Configure 'protocol-parameters-file' with current network protocol parameters.");
+                }
 
                 log.info("Using SignedBlockBuilder with real VRF/KES crypto, protocolVersion={}.{}", protoMajor, protoMinor);
                 return new SignedBlockBuilder(keys, slotsPerKESPeriod, maxKESEvolutions,
