@@ -50,6 +50,7 @@ yaci:
       path: "./chainstate"
     genesis:
       shelley-genesis-file: config/network/preprod/shelley-genesis.json
+      shelley-genesis-hash: "162d29c4e1cf6b8a84f2d692e67a3ac6bc7851bc3e6e4afe64d15778bed8bd86"
       byron-genesis-file: config/network/preprod/byron-genesis.json
       alonzo-genesis-file: config/network/preprod/alonzo-genesis.json
       conway-genesis-file: config/network/preprod/conway-genesis.json
@@ -92,6 +93,7 @@ yaci:
         protocol-magic: 42
       genesis:
         shelley-genesis-file: config/network/devnet/shelley-genesis.json
+        shelley-genesis-hash: ""
         byron-genesis-file: config/network/devnet/byron-genesis.json
         alonzo-genesis-file: config/network/devnet/alonzo-genesis.json
         conway-genesis-file: config/network/devnet/conway-genesis.json
@@ -116,6 +118,7 @@ yaci:
         protocol-magic: 764824073
       genesis:
         shelley-genesis-file: config/network/mainnet/shelley-genesis.json
+        shelley-genesis-hash: "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81"
         byron-genesis-file: config/network/mainnet/byron-genesis.json
         alonzo-genesis-file: config/network/mainnet/alonzo-genesis.json
         conway-genesis-file: config/network/mainnet/conway-genesis.json
@@ -126,9 +129,12 @@ yaci:
     node:
       network: preview
       remote:
+        host: preview-node.play.dev.cardano.org
+        port: 3001
         protocol-magic: 2
       genesis:
         shelley-genesis-file: config/network/preview/shelley-genesis.json
+        shelley-genesis-hash: "363498d1024f84bb39d3fa9593ce391483cb40d479b87233f868d6e57c3a400d"
         byron-genesis-file: config/network/preview/byron-genesis.json
         alonzo-genesis-file: config/network/preview/alonzo-genesis.json
         conway-genesis-file: config/network/preview/conway-genesis.json
