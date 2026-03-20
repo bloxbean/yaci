@@ -25,16 +25,16 @@ import java.util.List;
  * Eliminates code duplication between {@link DevnetBlockProducer} and {@link SlotLeaderBlockProducer}.
  */
 @Slf4j
-final class BlockProducerHelper {
+public final class BlockProducerHelper {
 
     private BlockProducerHelper() {}
 
-    static void storeBlock(ChainState chainState, DevnetBlockBuilder.BlockBuildResult result) {
+    public static void storeBlock(ChainState chainState, DevnetBlockBuilder.BlockBuildResult result) {
         chainState.storeBlock(result.blockHash(), result.blockNumber(), result.slot(), result.blockCbor());
         chainState.storeBlockHeader(result.blockHash(), result.blockNumber(), result.slot(), result.wrappedHeaderCbor());
     }
 
-    static void publishEvent(EventBus eventBus, DevnetBlockBuilder.BlockBuildResult result,
+    public static void publishEvent(EventBus eventBus, DevnetBlockBuilder.BlockBuildResult result,
                               int txCount, String origin) {
         if (eventBus == null) return;
 
@@ -63,7 +63,7 @@ final class BlockProducerHelper {
         }
     }
 
-    static void notifyServer(NodeServer nodeServer) {
+    public static void notifyServer(NodeServer nodeServer) {
         if (nodeServer == null) return;
         try {
             nodeServer.notifyNewDataAvailable();
@@ -72,7 +72,7 @@ final class BlockProducerHelper {
         }
     }
 
-    static List<byte[]> drainMempool(MemPool memPool,
+    public static List<byte[]> drainMempool(MemPool memPool,
                                       TransactionValidationService validatorService,
                                       UtxoState utxoState) {
         if (validatorService == null || utxoState == null) {

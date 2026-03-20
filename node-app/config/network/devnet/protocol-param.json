@@ -14,7 +14,7 @@
   "decentralisation_param": 0,
   "extra_entropy": null,
   "protocol_major_ver": 10,
-  "protocol_minor_ver": 0,
+  "protocol_minor_ver": 2,
   "min_utxo": "4310",
   "min_pool_cost": "170000000",
   "nonce": "7e93f6338fc6804a9a4485d11182ea02ad9f5e5063e0cda8d60735ecc1d55ccd",

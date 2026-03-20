@@ -85,6 +85,14 @@ public class YaciNodeConfig implements NodeConfig {
     private String bootstrapKoiosBaseUrl;
     private String network;                 // "mainnet", "preprod", "preview" — used for provider URL auto-detection
 
+    // Epoch fast-forward configuration
+    @Builder.Default
+    private int startEpoch = 0;            // Target epoch for fast-forward on fresh start (0 = disabled)
+
+    // Past time travel mode: defer block production until /epochs/shift is called
+    @Builder.Default
+    private boolean pastTimeTravelMode = false;
+
     // Genesis-derived configuration
     @Builder.Default
     private long epochLength = 432000;     // Slots per epoch (from shelley-genesis.json epochLength)
@@ -323,11 +331,11 @@ public class YaciNodeConfig implements NodeConfig {
             if (!enableBlockProducer) {
                 throw new IllegalArgumentException("Slot leader mode requires block producer to be enabled");
             }
-            if (!enableClient) {
-                throw new IllegalArgumentException("Slot leader mode requires client to be enabled (to sync chain)");
+            if (!enableClient && !devMode) {
+                throw new IllegalArgumentException("Slot leader mode requires client to be enabled (to sync chain), unless dev-mode is enabled");
             }
-            if (stakeDataProviderUrl == null || stakeDataProviderUrl.isBlank()) {
-                throw new IllegalArgumentException("Slot leader mode requires stake-data-provider-url");
+            if ((stakeDataProviderUrl == null || stakeDataProviderUrl.isBlank()) && !devMode) {
+                throw new IllegalArgumentException("Slot leader mode requires stake-data-provider-url (unless dev-mode is enabled)");
             }
             if (vrfSkeyFile == null || vrfSkeyFile.isBlank()
                     || kesSkeyFile == null || kesSkeyFile.isBlank()
@@ -338,6 +346,15 @@ public class YaciNodeConfig implements NodeConfig {
 
         if (devMode && !enableBlockProducer) {
             throw new IllegalArgumentException("Dev mode requires block producer to be enabled");
+        }
+
+        if (pastTimeTravelMode) {
+            if (!devMode) {
+                throw new IllegalArgumentException("Past time travel mode requires dev mode to be enabled");
+            }
+            if (!enableBlockProducer) {
+                throw new IllegalArgumentException("Past time travel mode requires block producer to be enabled");
+            }
         }
 
         if (useRocksDB && (rocksDBPath == null || rocksDBPath.trim().isEmpty())) {

@@ -71,6 +71,8 @@ yaci:
       lazy: false
       genesis-timestamp: 0
       slot-length-millis: 0
+      start-epoch: 0
+      past-time-travel-mode: false
       tx-evaluation: true
 
 "%native":
@@ -104,6 +106,34 @@ yaci:
         lazy: false
         genesis-timestamp: 0
         slot-length-millis: 0
+        vrf-skey-file: config/network/devnet/vrf.skey
+        kes-skey-file: config/network/devnet/kes.skey
+        opcert-file: config/network/devnet/opcert.cert
+
+"%devnet-slotleader":
+  yaci:
+    node:
+      network: devnet
+      auto-sync-start: true
+      dev-mode: true
+      client:
+        enabled: false
+      remote:
+        protocol-magic: 42
+      genesis:
+        shelley-genesis-file: config/network/devnet/shelley-genesis.json
+        shelley-genesis-hash: ""
+        byron-genesis-file: config/network/devnet/byron-genesis.json
+        alonzo-genesis-file: config/network/devnet/alonzo-genesis.json
+        conway-genesis-file: config/network/devnet/conway-genesis.json
+        protocol-parameters-file: config/network/devnet/protocol-param.json
+      block-producer:
+        enabled: true
+        slot-leader-mode: true
+        lazy: false
+        genesis-timestamp: 0
+        slot-length-millis: 0
+        start-epoch: 0
         vrf-skey-file: config/network/devnet/vrf.skey
         kes-skey-file: config/network/devnet/kes.skey
         opcert-file: config/network/devnet/opcert.cert

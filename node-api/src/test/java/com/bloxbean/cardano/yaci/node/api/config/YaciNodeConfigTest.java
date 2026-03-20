@@ -152,6 +152,70 @@ class YaciNodeConfigTest {
     }
 
     @Test
+    void devnetDefault_shouldCreateValidConfiguration() {
+        YaciNodeConfig config = YaciNodeConfig.devnetDefault(13337);
+
+        assertThat(config).isNotNull();
+        assertThat(config.isClientEnabled()).isFalse();
+        assertThat(config.isServerEnabled()).isTrue();
+        assertThat(config.isEnableBlockProducer()).isTrue();
+        assertThat(config.isDevMode()).isTrue();
+        assertThat(config.getProtocolMagic()).isEqualTo(42);
+        assertThat(config.isPastTimeTravelMode()).isFalse();
+
+        assertThatCode(config::validate).doesNotThrowAnyException();
+    }
+
+    @Test
+    void validate_pastTimeTravelMode_shouldPassWhenDevModeAndBlockProducerEnabled() {
+        YaciNodeConfig config = YaciNodeConfig.builder()
+                .enableClient(false)
+                .enableServer(true)
+                .serverPort(13337)
+                .enableBlockProducer(true)
+                .devMode(true)
+                .pastTimeTravelMode(true)
+                .protocolMagic(42)
+                .build();
+
+        assertThatCode(config::validate).doesNotThrowAnyException();
+    }
+
+    @Test
+    void validate_pastTimeTravelMode_shouldThrowWhenDevModeDisabled() {
+        YaciNodeConfig config = YaciNodeConfig.builder()
+                .enableClient(false)
+                .enableServer(true)
+                .serverPort(13337)
+                .enableBlockProducer(true)
+                .devMode(false)
+                .pastTimeTravelMode(true)
+                .protocolMagic(42)
+                .build();
+
+        assertThatThrownBy(config::validate)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Past time travel mode requires dev mode");
+    }
+
+    @Test
+    void validate_pastTimeTravelMode_shouldThrowWhenBlockProducerDisabled() {
+        YaciNodeConfig config = YaciNodeConfig.builder()
+                .enableClient(false)
+                .enableServer(true)
+                .serverPort(13337)
+                .enableBlockProducer(false)
+                .devMode(true)
+                .pastTimeTravelMode(true)
+                .protocolMagic(42)
+                .build();
+
+        // devMode without blockProducer fails first
+        assertThatThrownBy(config::validate)
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void toString_shouldIncludeKeyConfigurationDetails() {
         YaciNodeConfig config = YaciNodeConfig.preprodDefault();
         

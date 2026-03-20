@@ -695,7 +695,7 @@
     },
     "protocolVersion": {
         "major": 10,
-        "minor": 0
+        "minor": 2
     },
     "stakeAddressDeposit": 2000000,
     "stakePoolDeposit": 500000000,

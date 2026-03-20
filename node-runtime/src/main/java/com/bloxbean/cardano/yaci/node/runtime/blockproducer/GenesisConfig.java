@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.node.runtime.genesis.ByronGenesisData;
 import com.bloxbean.cardano.yaci.node.runtime.genesis.ByronGenesisParser;
 import com.bloxbean.cardano.yaci.node.runtime.genesis.ShelleyGenesisData;
 import com.bloxbean.cardano.yaci.node.runtime.genesis.ShelleyGenesisParser;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,8 @@ public class GenesisConfig {
     private final Map<String, BigInteger> byronBalances;
     private final ShelleyGenesisData shelleyGenesisData;
     private final ByronGenesisData byronGenesisData;
+
+    private transient JsonNode parsedProtocolParameters;
 
     private GenesisConfig(Map<String, BigInteger> initialFunds, String protocolParameters,
                           Map<String, BigInteger> byronBalances, ShelleyGenesisData shelleyGenesisData,
@@ -110,6 +113,47 @@ public class GenesisConfig {
 
     public boolean hasProtocolParameters() {
         return protocolParameters != null;
+    }
+
+    /**
+     * Parse the protocol version major from protocol parameters JSON.
+     * Supports both nested format (protocolVersion.major) and flat format (protocol_major_ver).
+     *
+     * @return protocol major version, or 0 if not available
+     */
+    public long getProtocolVersionMajor() {
+        return getProtocolVersionField("major", "protocol_major_ver");
+    }
+
+    /**
+     * Parse the protocol version minor from protocol parameters JSON.
+     * Supports both nested format (protocolVersion.minor) and flat format (protocol_minor_ver).
+     *
+     * @return protocol minor version, or 0 if not available
+     */
+    public long getProtocolVersionMinor() {
+        return getProtocolVersionField("minor", "protocol_minor_ver");
+    }
+
+    private long getProtocolVersionField(String nestedField, String flatField) {
+        var root = getParsedProtocolParameters();
+        if (root == null) return 0;
+        var nested = root.path("protocolVersion").path(nestedField);
+        if (!nested.isMissingNode()) return nested.asLong();
+        var flat = root.path(flatField);
+        if (!flat.isMissingNode()) return flat.asLong();
+        return 0;
+    }
+
+    private JsonNode getParsedProtocolParameters() {
+        if (parsedProtocolParameters != null) return parsedProtocolParameters;
+        if (protocolParameters == null) return null;
+        try {
+            parsedProtocolParameters = MAPPER.readTree(protocolParameters);
+        } catch (Exception e) {
+            log.warn("Failed to parse protocol parameters JSON: {}", e.getMessage());
+        }
+        return parsedProtocolParameters;
     }
 
     public long getNetworkMagic() {

@@ -165,6 +165,12 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.block-producer.initial-epoch", defaultValue = "-1")
     int initialEpoch;
 
+    @ConfigProperty(name = "yaci.node.block-producer.start-epoch", defaultValue = "0")
+    int startEpoch;
+
+    @ConfigProperty(name = "yaci.node.block-producer.past-time-travel-mode", defaultValue = "false")
+    boolean pastTimeTravelMode;
+
     // Bootstrap config
     @ConfigProperty(name = "yaci.node.bootstrap.enabled", defaultValue = "false")
     boolean bootstrapEnabled;
@@ -274,6 +280,8 @@ public class YaciNodeProducer {
                 .stakeDataProviderUrl(stakeDataProviderUrl.orElse(null))
                 .initialEpochNonce(initialEpochNonce.orElse(null))
                 .initialEpoch(initialEpoch)
+                .startEpoch(startEpoch)
+                .pastTimeTravelMode(pastTimeTravelMode)
                 .shelleyGenesisHash(shelleyGenesisHash.orElse(null))
                 .shelleyGenesisFile(resolvedShelleyGenesis)
                 .byronGenesisFile(resolvedByronGenesis)

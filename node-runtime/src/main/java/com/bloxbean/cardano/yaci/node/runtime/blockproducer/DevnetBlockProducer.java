@@ -44,6 +44,7 @@ public class DevnetBlockProducer implements BlockProducerService {
     private byte[] prevBlockHash;
     private long lastUsedSlot = -1;
     private volatile boolean running;
+    private volatile boolean forceSequentialSlots = false;
 
     public DevnetBlockProducer(ChainState chainState, MemPool memPool, NodeServer nodeServer,
                          EventBus eventBus, ScheduledExecutorService scheduler,
@@ -168,6 +169,15 @@ public class DevnetBlockProducer implements BlockProducerService {
      * in the UTXO store using tx_hash = blake2b(address) to match the Cardano
      * protocol convention used by yaci-store and wallets.
      */
+    /**
+     * Enable or disable sequential slot mode.
+     * When enabled, slots increment sequentially from lastUsedSlot instead of using wall-clock time.
+     * Used in past-time-travel mode where blocks must start at slot 0.
+     */
+    public void setForceSequentialSlots(boolean force) {
+        this.forceSequentialSlots = force;
+    }
+
     private void produceGenesisBlock() {
         long slot = calculateCurrentSlot();
 
@@ -225,6 +235,11 @@ public class DevnetBlockProducer implements BlockProducerService {
     }
 
     private long calculateCurrentSlot() {
+        if (forceSequentialSlots) {
+            // Past-time-travel mode: produce blocks sequentially, don't jump to wall-clock
+            lastUsedSlot = lastUsedSlot + 1;
+            return lastUsedSlot;
+        }
         long wallClockSlot = (System.currentTimeMillis() - genesisTimestamp) / slotLengthMillis;
         long slot = Math.max(wallClockSlot, lastUsedSlot + 1);
         lastUsedSlot = slot;

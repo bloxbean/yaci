@@ -157,14 +157,17 @@ public class SlotLeaderBlockProducer implements BlockProducerService {
             return;
         }
 
-        // 5. Get epoch nonce
+        // 5. Advance epoch nonce if we crossed an epoch boundary (must happen BEFORE reading nonce)
+        epochNonceState.advanceEpochIfNeeded(currentSlot);
+
+        // 6. Get epoch nonce
         byte[] epochNonce = epochNonceState.getEpochNonce();
         if (epochNonce == null) {
             log.warn("Epoch nonce not available, skipping leader check for slot {}", currentSlot);
             return;
         }
 
-        // 6. Check leader eligibility
+        // 7. Check leader eligibility
         BlockSigner.VrfSignResult vrfResult = slotLeaderCheck.checkAndProve(currentSlot, epochNonce, sigma);
         if (vrfResult == null) {
             return; // Not a leader for this slot
@@ -172,7 +175,7 @@ public class SlotLeaderBlockProducer implements BlockProducerService {
 
         log.info("SLOT LEADER! Elected for slot {} (epoch {})", currentSlot, currentEpoch);
 
-        // 7. Produce block
+        // 8. Produce block
         try {
             produceBlock(currentSlot, vrfResult, tip);
         } catch (Exception e) {

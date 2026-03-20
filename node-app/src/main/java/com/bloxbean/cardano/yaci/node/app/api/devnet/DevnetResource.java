@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.time.Instant;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -257,13 +258,14 @@ public class DevnetResource {
                     .build();
         }
 
-        // Validate exactly one of slots/seconds
+        // Validate exactly one of slots/seconds/epochs
         int paramCount = 0;
         if (request.slots() != null) paramCount++;
         if (request.seconds() != null) paramCount++;
+        if (request.epochs() != null) paramCount++;
         if (paramCount != 1) {
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(Map.of("error", "Exactly one of 'slots' or 'seconds' must be provided"))
+                    .entity(Map.of("error", "Exactly one of 'slots', 'seconds', or 'epochs' must be provided"))
                     .build();
         }
 
@@ -271,6 +273,12 @@ public class DevnetResource {
             TimeAdvanceResult result;
             if (request.slots() != null) {
                 result = nodeAPI.advanceTimeBySlots(request.slots());
+            } else if (request.epochs() != null) {
+                // Convert epochs to slots using configured epoch length
+                YaciNodeConfig config = (YaciNodeConfig) nodeAPI.getConfig();
+                long epochLength = config.getEpochLength();
+                int slots = (int) (request.epochs() * epochLength);
+                result = nodeAPI.advanceTimeBySlots(slots);
             } else {
                 result = nodeAPI.advanceTimeBySeconds(request.seconds());
             }
@@ -290,6 +298,75 @@ public class DevnetResource {
         } catch (Exception e) {
             return Response.serverError()
                     .entity(Map.of("error", "Time advance failed: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    // --- Epoch Shift (Past Time Travel Mode) ---
+
+    @POST
+    @Path("/epochs/shift")
+    public Response shiftEpochs(EpochShiftRequest request) {
+        try {
+            requireDevMode();
+        } catch (DevnetOnlyException e) {
+            return Response.status(Response.Status.FORBIDDEN)
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
+        }
+
+        try {
+            long shiftMillis = nodeAPI.shiftGenesisAndStartProducer(request.epochs());
+
+            YaciNodeConfig config = (YaciNodeConfig) nodeAPI.getConfig();
+            String systemStart = Instant.ofEpochMilli(config.getGenesisTimestamp()).toString();
+
+            return Response.ok(Map.of(
+                    "message", "Shifted genesis back by " + request.epochs() + " epochs and started block producer",
+                    "shift_millis", shiftMillis,
+                    "new_system_start", systemStart,
+                    "genesis_slot", 0
+            )).build();
+        } catch (IllegalArgumentException e) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
+        } catch (IllegalStateException e) {
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(Map.of("error", "Epoch shift failed: " + e.getMessage()))
+                    .build();
+        }
+    }
+
+    @POST
+    @Path("/epochs/catch-up")
+    public Response catchUpToWallClock() {
+        try {
+            requireDevMode();
+        } catch (DevnetOnlyException e) {
+            return Response.status(Response.Status.FORBIDDEN)
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
+        }
+
+        try {
+            TimeAdvanceResult result = nodeAPI.catchUpToWallClock();
+
+            String message = "Caught up to wall-clock: " + result.blocksProduced() + " blocks produced";
+            return Response.ok(new TimeAdvanceResponse(
+                    message, result.newSlot(), result.newBlockNumber(), result.blocksProduced()
+            )).build();
+        } catch (IllegalStateException e) {
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", e.getMessage()))
+                    .build();
+        } catch (Exception e) {
+            return Response.serverError()
+                    .entity(Map.of("error", "Catch-up failed: " + e.getMessage()))
                     .build();
         }
     }
