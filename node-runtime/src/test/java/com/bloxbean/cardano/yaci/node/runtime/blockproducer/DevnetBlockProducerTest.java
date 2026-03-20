@@ -23,12 +23,12 @@ import java.util.function.Function;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 
-class BlockProducerTest {
+class DevnetBlockProducerTest {
 
     private InMemoryChainState chainState;
     private MemPool memPool;
     private ScheduledExecutorService scheduler;
-    private BlockProducer blockProducer;
+    private DevnetBlockProducer blockProducer;
 
     @BeforeEach
     void setUp() {
@@ -47,7 +47,7 @@ class BlockProducerTest {
 
     @Test
     void start_producesGenesisBlock() {
-        blockProducer = createBlockProducer(2000, false);
+        blockProducer = createDevnetBlockProducer(2000, false);
         blockProducer.start();
 
         // Genesis block should have been produced
@@ -59,7 +59,7 @@ class BlockProducerTest {
 
     @Test
     void nonLazyMode_producesEmptyBlocksOnSchedule() throws Exception {
-        blockProducer = createBlockProducer(200, false);
+        blockProducer = createDevnetBlockProducer(200, false);
         blockProducer.start();
 
         // Wait for at least 2 scheduled blocks (genesis + 2 ticks)
@@ -72,7 +72,7 @@ class BlockProducerTest {
 
     @Test
     void lazyMode_skipsWhenMempoolEmpty() throws Exception {
-        blockProducer = createBlockProducer(200, true);
+        blockProducer = createDevnetBlockProducer(200, true);
         blockProducer.start();
 
         // Wait for a few ticks with empty mempool
@@ -86,7 +86,7 @@ class BlockProducerTest {
 
     @Test
     void lazyMode_producesWhenMempoolHasTransaction() throws Exception {
-        blockProducer = createBlockProducer(200, true);
+        blockProducer = createDevnetBlockProducer(200, true);
         blockProducer.start();
 
         // Add a transaction to the mempool
@@ -113,7 +113,7 @@ class BlockProducerTest {
         chainState.storeBlockHeader(block1.blockHash(), 1L, 10L, block1.wrappedHeaderCbor());
 
         // Now start block producer — it should resume from block 1
-        blockProducer = createBlockProducer(2000, false);
+        blockProducer = createDevnetBlockProducer(2000, false);
         blockProducer.start();
 
         // Verify it didn't overwrite existing data
@@ -125,7 +125,7 @@ class BlockProducerTest {
 
     @Test
     void mempoolDrain_transactionsAppearInProducedBlock() throws Exception {
-        blockProducer = createBlockProducer(300, false);
+        blockProducer = createDevnetBlockProducer(300, false);
         blockProducer.start();
 
         // Wait for genesis block
@@ -144,7 +144,7 @@ class BlockProducerTest {
 
     @Test
     void stop_stopsProduction() throws Exception {
-        blockProducer = createBlockProducer(100, false);
+        blockProducer = createDevnetBlockProducer(100, false);
         blockProducer.start();
         Thread.sleep(300);
 
@@ -189,7 +189,7 @@ class BlockProducerTest {
         assertThat(genesisConfig.hasInitialFunds()).isTrue();
         assertThat(genesisConfig.getInitialFunds()).hasSize(2);
 
-        blockProducer = new BlockProducer(
+        blockProducer = new DevnetBlockProducer(
                 chainState, memPool, null, new NoopEventBus(), scheduler,
                 2000, false, System.currentTimeMillis(), 1000, genesisConfig);
         blockProducer.start();
@@ -207,8 +207,8 @@ class BlockProducerTest {
         assertThat(block.getTransactionBodies()).isEmpty();
     }
 
-    private BlockProducer createBlockProducer(int blockTimeMillis, boolean lazy) {
-        return new BlockProducer(
+    private DevnetBlockProducer createDevnetBlockProducer(int blockTimeMillis, boolean lazy) {
+        return new DevnetBlockProducer(
                 chainState, memPool, null, new NoopEventBus(), scheduler,
                 blockTimeMillis, lazy, System.currentTimeMillis(), 1000, null, new DummyTransactionValidationService(null, null), null);
     }

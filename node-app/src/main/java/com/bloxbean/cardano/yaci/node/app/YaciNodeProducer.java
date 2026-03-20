@@ -153,6 +153,18 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.block-producer.opcert-file")
     java.util.Optional<String> opCertFile;
 
+    @ConfigProperty(name = "yaci.node.block-producer.slot-leader-mode", defaultValue = "false")
+    boolean slotLeaderMode;
+
+    @ConfigProperty(name = "yaci.node.block-producer.stake-data-provider-url")
+    java.util.Optional<String> stakeDataProviderUrl;
+
+    @ConfigProperty(name = "yaci.node.block-producer.initial-epoch-nonce")
+    java.util.Optional<String> initialEpochNonce;
+
+    @ConfigProperty(name = "yaci.node.block-producer.initial-epoch", defaultValue = "-1")
+    int initialEpoch;
+
     // Bootstrap config
     @ConfigProperty(name = "yaci.node.bootstrap.enabled", defaultValue = "false")
     boolean bootstrapEnabled;
@@ -190,6 +202,9 @@ public class YaciNodeProducer {
 
     @ConfigProperty(name = "yaci.node.genesis.conway-genesis-file")
     java.util.Optional<String> conwayGenesisFile;
+
+    @ConfigProperty(name = "yaci.node.genesis.shelley-genesis-hash")
+    java.util.Optional<String> shelleyGenesisHash;
 
     @ConfigProperty(name = "yaci.node.genesis.protocol-parameters-file")
     java.util.Optional<String> protocolParametersFile;
@@ -255,6 +270,11 @@ public class YaciNodeProducer {
                 .vrfSkeyFile(vrfSkeyFile.orElse(null))
                 .kesSkeyFile(kesSkeyFile.orElse(null))
                 .opCertFile(opCertFile.orElse(null))
+                .slotLeaderMode(slotLeaderMode)
+                .stakeDataProviderUrl(stakeDataProviderUrl.orElse(null))
+                .initialEpochNonce(initialEpochNonce.orElse(null))
+                .initialEpoch(initialEpoch)
+                .shelleyGenesisHash(shelleyGenesisHash.orElse(null))
                 .shelleyGenesisFile(resolvedShelleyGenesis)
                 .byronGenesisFile(resolvedByronGenesis)
                 .alonzoGenesisFile(resolvedAlonzoGenesis)

@@ -175,6 +175,16 @@ public interface NodeAPI {
     GenesisParameters getGenesisParameters();
 
     /**
+     * Get the current epoch nonce state as a map (for verification/debugging).
+     * Returns null if nonce tracking is not active.
+     *
+     * @return map with keys: epoch, nonce, evolving_nonce, candidate_nonce; or null
+     */
+    default java.util.Map<String, Object> getEpochNonceInfo() {
+        return null;
+    }
+
+    /**
      * Trigger a controlled rollback. Requires dev mode.
      * Rolls back chain state to the given slot, publishes RollbackEvent,
      * and notifies connected clients via n2n protocol.

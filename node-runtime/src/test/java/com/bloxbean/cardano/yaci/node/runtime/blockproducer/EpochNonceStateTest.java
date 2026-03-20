@@ -132,7 +132,7 @@ class EpochNonceStateTest {
         byte[] vrfOutput = new byte[64];
         vrfOutput[0] = 0x42;
 
-        byte[] eta = EpochNonceState.computeEta(vrfOutput);
+        byte[] eta = EpochNonceState.computeEtaPraos(vrfOutput);
         assertThat(eta).hasSize(32);
 
         // Verify: blake2b_256(blake2b_256("N" || vrfOutput))
@@ -161,6 +161,128 @@ class EpochNonceStateTest {
 
         assertEquals(2, state.getCurrentEpoch());
         assertThat(state.getEpochNonce()).hasSize(32);
+    }
+
+    @Test
+    void epochForSlot_withByronOffset_preprod() {
+        var s = new EpochNonceState(432000, 2160, 0.05);
+        s.setShelleyStartSlot(86400);  // preprod: 4 Byron epochs * 21600
+        assertEquals(4, s.epochForSlot(86400));    // first Shelley slot
+        assertEquals(4, s.epochForSlot(518399));   // last slot of epoch 4
+        assertEquals(5, s.epochForSlot(518400));   // first slot of epoch 5
+    }
+
+    @Test
+    void firstSlotOfEpoch_withByronOffset_preprod() {
+        var s = new EpochNonceState(432000, 2160, 0.05);
+        s.setShelleyStartSlot(86400);
+        assertEquals(86400, s.firstSlotOfEpoch(4));
+        assertEquals(518400, s.firstSlotOfEpoch(5));
+    }
+
+    @Test
+    void epochForSlot_noByron_unchanged() {
+        var s = new EpochNonceState(432000, 2160, 0.05);
+        // shelleyStartSlot=0 (default), formula unchanged
+        assertEquals(0, s.epochForSlot(0));
+        assertEquals(1, s.epochForSlot(432000));
+    }
+
+    @Test
+    void setShelleyStartSlot_roundsDownToByronBoundary() {
+        var s = new EpochNonceState(432000, 2160, 0.05);
+        // Pass a non-aligned slot (e.g. 86401 instead of 86400)
+        s.setShelleyStartSlot(86401);
+        // Should round down to 86400 (4 * 21600)
+        assertEquals(86400, s.getShelleyStartSlot());
+        // Epoch calculations should still be correct
+        assertEquals(4, s.epochForSlot(86400));
+        assertEquals(4, s.epochForSlot(518399));
+        assertEquals(5, s.epochForSlot(518400));
+    }
+
+    @Test
+    void setShelleyStartSlot_exactBoundaryUnchanged() {
+        var s = new EpochNonceState(432000, 2160, 0.05);
+        s.setShelleyStartSlot(86400);
+        assertEquals(86400, s.getShelleyStartSlot());
+    }
+
+    @Test
+    void setShelleyStartSlot_slot0_setsOnceAndPreventsReSet() {
+        // Preview/Sanchonet: no Byron era, first block at slot 0
+        var s = new EpochNonceState(86400, 432, 0.05);
+        assertFalse(s.isShelleyStartSlotSet());
+
+        // Set from first block at slot 0
+        s.setShelleyStartSlot(0);
+        assertTrue(s.isShelleyStartSlotSet());
+        assertEquals(0, s.getShelleyStartSlot());
+
+        // Subsequent calls should be no-ops (even with slot > 21600)
+        s.setShelleyStartSlot(21600);
+        assertEquals(0, s.getShelleyStartSlot());
+        s.setShelleyStartSlot(86400);
+        assertEquals(0, s.getShelleyStartSlot());
+
+        // Epoch calculations should remain correct
+        assertEquals(0, s.epochForSlot(0));
+        assertEquals(0, s.epochForSlot(86399));
+        assertEquals(1, s.epochForSlot(86400));
+    }
+
+    @Test
+    void setShelleyStartSlot_preprod_setsOnceFromNonZeroSlot() {
+        var s = new EpochNonceState(432000, 2160, 0.05);
+        assertFalse(s.isShelleyStartSlotSet());
+
+        s.setShelleyStartSlot(86400);
+        assertTrue(s.isShelleyStartSlotSet());
+        assertEquals(86400, s.getShelleyStartSlot());
+
+        // Subsequent calls should be no-ops
+        s.setShelleyStartSlot(518400);
+        assertEquals(86400, s.getShelleyStartSlot());
+    }
+
+    @Test
+    void epochForSlot_withByronOffset_mainnet() {
+        var s = new EpochNonceState(432000, 2160, 0.05);
+        s.setShelleyStartSlot(4492800);  // mainnet: 208 Byron epochs * 21600
+        assertEquals(208, s.epochForSlot(4492800));
+    }
+
+    @Test
+    void initFromGenesisHash_setsCorrectEpoch_withByronOffset() {
+        var s = new EpochNonceState(432000, 2160, 0.05);
+        s.setShelleyStartSlot(86400); // preprod
+        byte[] hash = Blake2bUtil.blake2bHash256("genesis".getBytes());
+        s.initFromGenesisHash(hash);
+        assertEquals(4, s.getCurrentEpoch());
+    }
+
+    @Test
+    void epochForSlot_withCustomByronK_preview() {
+        // Preview-like network: Byron k=432, byronSlotsPerEpoch=4320, Shelley epochLength=86400
+        var s = new EpochNonceState(86400, 432, 0.05, 4320);
+        // Suppose 10 Byron epochs before Shelley: 10 * 4320 = 43200
+        s.setShelleyStartSlot(43200);
+        assertEquals(43200, s.getShelleyStartSlot());
+        assertEquals(10, s.epochForSlot(43200));   // first Shelley slot
+        assertEquals(10, s.epochForSlot(129599));  // last slot of epoch 10
+        assertEquals(11, s.epochForSlot(129600));  // first slot of epoch 11
+        assertEquals(43200, s.firstSlotOfEpoch(10));
+        assertEquals(129600, s.firstSlotOfEpoch(11));
+    }
+
+    @Test
+    void setShelleyStartSlot_roundsToCustomByronEpochBoundary() {
+        // Byron k=432, byronSlotsPerEpoch=4320
+        var s = new EpochNonceState(86400, 432, 0.05, 4320);
+        // Pass a non-aligned slot (e.g. 43201 instead of 43200)
+        s.setShelleyStartSlot(43201);
+        // Should round down to 43200 (10 * 4320)
+        assertEquals(43200, s.getShelleyStartSlot());
     }
 
     @Test

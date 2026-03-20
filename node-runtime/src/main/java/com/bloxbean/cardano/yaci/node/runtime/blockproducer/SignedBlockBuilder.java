@@ -68,26 +68,45 @@ public class SignedBlockBuilder extends DevnetBlockBuilder {
     @Override
     public BlockBuildResult buildBlock(long blockNumber, long slot, byte[] prevHash,
                                        List<byte[]> transactions) {
+        // Advance epoch FIRST so VRF uses the correct nonce
+        epochNonceState.advanceEpochIfNeeded(slot);
+        byte[] epochNonce = epochNonceState.getEpochNonce();
+        BlockSigner.VrfSignResult vrfResult = blockSigner.computeVrf(keys.getVrfSkey(), slot, epochNonce);
+        return buildBlockInternal(blockNumber, slot, prevHash, transactions, vrfResult);
+    }
+
+    /**
+     * Build a block using a pre-computed VRF result (from SlotLeaderCheck).
+     * Avoids redundant VRF computation when the leader check already proved the slot.
+     *
+     * @param blockNumber     the block number
+     * @param slot            the slot number
+     * @param prevHash        previous block hash (null for genesis)
+     * @param transactions    list of complete transaction CBOR bytes
+     * @param precomputedVrf  VRF result from SlotLeaderCheck.checkAndProve()
+     * @return BlockBuildResult
+     */
+    public BlockBuildResult buildBlock(long blockNumber, long slot, byte[] prevHash,
+                                       List<byte[]> transactions,
+                                       BlockSigner.VrfSignResult precomputedVrf) {
+        epochNonceState.advanceEpochIfNeeded(slot);
+        return buildBlockInternal(blockNumber, slot, prevHash, transactions, precomputedVrf);
+    }
+
+    private BlockBuildResult buildBlockInternal(long blockNumber, long slot, byte[] prevHash,
+                                                 List<byte[]> transactions,
+                                                 BlockSigner.VrfSignResult vrfResult) {
         // 1. Compute block body
         BlockBodyResult body = computeBlockBody(transactions);
 
-        // 2. Advance epoch FIRST (performs TICKN if crossing epoch boundary)
-        epochNonceState.advanceEpochIfNeeded(slot);
-
-        // 3. Get epoch nonce (now correct for this slot's epoch)
-        byte[] epochNonce = epochNonceState.getEpochNonce();
-
-        // 4. Compute VRF proof with correct nonce
-        BlockSigner.VrfSignResult vrfResult = blockSigner.computeVrf(keys.getVrfSkey(), slot, epochNonce);
-
-        // 5. Build header body CBOR array
+        // 2. Build header body CBOR array
         Array headerBody = buildSignedHeaderBody(blockNumber, slot, prevHash,
                 body.bodySize(), body.bodyHash(), vrfResult);
 
-        // 6. Serialize header body for KES signing
+        // 3. Serialize header body for KES signing
         byte[] headerBodyCborBytes = CborSerializationUtil.serialize(headerBody);
 
-        // 7. Compute KES period and sign
+        // 4. Compute KES period and sign
         int kesPeriod = (int) (slot / slotsPerKESPeriod);
         int opcertKesPeriod = (int) keys.getOpCert().getKesPeriod();
         int relativePeriod = kesPeriod - opcertKesPeriod;
@@ -100,24 +119,38 @@ public class SignedBlockBuilder extends DevnetBlockBuilder {
         byte[] kesSig = blockSigner.signHeaderBody(keys.getKesSkey(), headerBodyCborBytes,
                 kesPeriod, opcertKesPeriod);
 
-        // 8. Assemble header: [headerBody, kesSig]
+        // 5. Assemble header: [headerBody, kesSig]
         Array headerArray = new Array();
         headerArray.add(headerBody);
         headerArray.add(new ByteString(kesSig));
 
-        // 9. Compute block hash, assemble full block and wrapped header
+        // 6. Compute block hash, assemble full block and wrapped header
         BlockBuildResult result = assembleBlock(headerArray, body, blockNumber, slot,
                 transactions != null ? transactions.size() : 0);
 
-        // 10. Evolve nonce state
+        // 7. Evolve nonce state
         epochNonceState.onBlockProduced(slot, prevHash, vrfResult.output());
 
-        // 11. Persist nonce state
+        // 8. Persist nonce state
         if (nonceStore != null) {
             nonceStore.storeEpochNonceState(epochNonceState.serialize());
         }
 
         return result;
+    }
+
+    /**
+     * Get the hex-encoded issuer verification key (cold vkey from opcert).
+     */
+    public String getIssuerVkeyHex() {
+        return HexUtil.encodeHexString(issuerVkey);
+    }
+
+    /**
+     * Get the shared BlockSigner instance (for reuse in SlotLeaderCheck).
+     */
+    public BlockSigner getBlockSigner() {
+        return blockSigner;
     }
 
     /**

@@ -1,24 +1,14 @@
 package com.bloxbean.cardano.yaci.node.runtime.blockproducer;
 
-import com.bloxbean.cardano.yaci.node.ledgerrules.ValidationResult;
-import com.bloxbean.cardano.yaci.core.model.Block;
-import com.bloxbean.cardano.yaci.core.model.Era;
-import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
 import com.bloxbean.cardano.yaci.core.network.server.NodeServer;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.events.api.EventBus;
-import com.bloxbean.cardano.yaci.events.api.EventMetadata;
-import com.bloxbean.cardano.yaci.events.api.PublishOptions;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
-import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
-import com.bloxbean.cardano.yaci.node.api.events.BlockProducedEvent;
-import com.bloxbean.cardano.yaci.node.api.model.MemPoolTransaction;
 import com.bloxbean.cardano.yaci.node.runtime.chain.MemPool;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -30,7 +20,7 @@ import java.util.concurrent.TimeUnit;
  * at a configured interval.
  */
 @Slf4j
-public class BlockProducer {
+public class DevnetBlockProducer implements BlockProducerService {
 
     private final ChainState chainState;
     private final MemPool memPool;
@@ -55,7 +45,7 @@ public class BlockProducer {
     private long lastUsedSlot = -1;
     private volatile boolean running;
 
-    public BlockProducer(ChainState chainState, MemPool memPool, NodeServer nodeServer,
+    public DevnetBlockProducer(ChainState chainState, MemPool memPool, NodeServer nodeServer,
                          EventBus eventBus, ScheduledExecutorService scheduler,
                          int blockTimeMillis, boolean lazy,
                          long genesisTimestamp, int slotLengthMillis,
@@ -65,7 +55,7 @@ public class BlockProducer {
                 genesisConfig, null, null);
     }
 
-    public BlockProducer(ChainState chainState, MemPool memPool, NodeServer nodeServer,
+    public DevnetBlockProducer(ChainState chainState, MemPool memPool, NodeServer nodeServer,
                          EventBus eventBus, ScheduledExecutorService scheduler,
                          int blockTimeMillis, boolean lazy,
                          long genesisTimestamp, int slotLengthMillis,
@@ -77,7 +67,7 @@ public class BlockProducer {
                 genesisConfig, transactionValidatorService, utxoState);
     }
 
-    public BlockProducer(ChainState chainState, MemPool memPool, NodeServer nodeServer,
+    public DevnetBlockProducer(ChainState chainState, MemPool memPool, NodeServer nodeServer,
                          EventBus eventBus, ScheduledExecutorService scheduler,
                          DevnetBlockBuilder blockBuilder,
                          int blockTimeMillis, boolean lazy,
@@ -227,34 +217,11 @@ public class BlockProducer {
     }
 
     private List<byte[]> drainMempool() {
-        // Validate each tx with spent-tracking overlay
-        BlockBuildUtxoOverlay overlay = new BlockBuildUtxoOverlay(utxoState);
-        List<byte[]> txList = new ArrayList<>();
-        while (!memPool.isEmpty()) {
-            MemPoolTransaction mpt = memPool.getNextTransaction();
-            if (mpt == null) break;
-
-            ValidationResult result = transactionValidatorService.validate(
-                    mpt.txBytes(), overlay.resolver());
-            if (result.valid()) {
-                txList.add(mpt.txBytes());
-                overlay.markSpent(mpt.txBytes());
-            } else {
-                String txHashHex = HexUtil.encodeHexString(mpt.txHash());
-                String errorMsg = result.firstErrorMessage("unknown error");
-                log.warn("Dropping invalid tx {} during block production: {}", txHashHex, errorMsg);
-            }
-        }
-        return txList;
+        return BlockProducerHelper.drainMempool(memPool, transactionValidatorService, utxoState);
     }
 
-    /**
-     * Store block in ChainState. storeBlock first (which also writes to blockHeaderStore),
-     * then storeBlockHeader to overwrite with the correct wrapped header bytes.
-     */
     private void storeBlock(DevnetBlockBuilder.BlockBuildResult result) {
-        chainState.storeBlock(result.blockHash(), result.blockNumber(), result.slot(), result.blockCbor());
-        chainState.storeBlockHeader(result.blockHash(), result.blockNumber(), result.slot(), result.wrappedHeaderCbor());
+        BlockProducerHelper.storeBlock(chainState, result);
     }
 
     private long calculateCurrentSlot() {
@@ -265,33 +232,7 @@ public class BlockProducer {
     }
 
     private void publishEvent(DevnetBlockBuilder.BlockBuildResult result, int txCount) {
-        if (eventBus == null) return;
-
-        String hashHex = HexUtil.encodeHexString(result.blockHash());
-        EventMetadata meta = EventMetadata.builder()
-                .origin("block-producer")
-                .slot(result.slot())
-                .blockNo(result.blockNumber())
-                .blockHash(hashHex)
-                .build();
-        PublishOptions opts = PublishOptions.builder().build();
-
-        try {
-            // Publish BlockProducedEvent (lightweight, no parsed block)
-            eventBus.publish(
-                    new BlockProducedEvent(6, result.slot(), result.blockNumber(),
-                            result.blockHash(), txCount),
-                    meta, opts);
-
-            // Publish BlockAppliedEvent so UTXO store and other listeners can process the block
-            Block block = BlockSerializer.INSTANCE.deserialize(result.blockCbor());
-            eventBus.publish(
-                    new BlockAppliedEvent(Era.Conway, result.slot(), result.blockNumber(),
-                            hashHex, block),
-                    meta, opts);
-        } catch (Exception e) {
-            log.debug("Failed to publish block events: {}", e.getMessage());
-        }
+        BlockProducerHelper.publishEvent(eventBus, result, txCount, "block-producer");
     }
 
     /**
@@ -343,12 +284,6 @@ public class BlockProducer {
     }
 
     private void notifyServer() {
-        if (nodeServer != null) {
-            try {
-                nodeServer.notifyNewDataAvailable();
-            } catch (Exception e) {
-                log.warn("Failed to notify server of new block: {}", e.getMessage());
-            }
-        }
+        BlockProducerHelper.notifyServer(nodeServer);
     }
 }

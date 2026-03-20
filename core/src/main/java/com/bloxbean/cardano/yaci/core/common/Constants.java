@@ -61,4 +61,7 @@ public class Constants {
     public static final String SANCHONET_PUBLIC_RELAY_ADDR = "sanchonet-node.play.dev.cardano.org";
     public static final int SANCHONET_PUBLIC_RELAY_PORT = 3001;
 
+    /** Byron epoch length in slots (21,600 slots = 10k/f with k=2160, f=0.2) */
+    public static final long BYRON_SLOTS_PER_EPOCH = 21600;
+
 }

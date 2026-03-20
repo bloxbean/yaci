@@ -53,6 +53,7 @@ public class YaciNodeConfig implements NodeConfig {
     private boolean lazyBlockProduction;
     private long genesisTimestamp;
     private int slotLengthMillis;
+    private String shelleyGenesisHash;     // Hex-encoded blake2b-256 of shelley-genesis.json (optional, overrides file hashing)
     private String shelleyGenesisFile;     // Path to shelley-genesis.json
     private String byronGenesisFile;       // Path to byron-genesis.json (optional, for relay mode)
     private String alonzoGenesisFile;      // Path to alonzo-genesis.json (optional)
@@ -64,6 +65,13 @@ public class YaciNodeConfig implements NodeConfig {
     private String vrfSkeyFile;            // Path to VRF secret key file (TextEnvelope JSON)
     private String kesSkeyFile;            // Path to KES secret key file (TextEnvelope JSON)
     private String opCertFile;             // Path to operational certificate file (TextEnvelope JSON)
+
+    // Slot leader mode (public network block production)
+    private boolean slotLeaderMode;                // Enable Praos slot leader selection instead of devnet fixed-interval
+    private String stakeDataProviderUrl;            // yaci-store base URL for stake data (e.g. http://localhost:8080/api/v1)
+    private String initialEpochNonce;               // Hex-encoded 32-byte nonce for bootstrap seeding
+    @Builder.Default
+    private int initialEpoch = -1;                  // Epoch number for the seed nonce (-1 = not set)
 
     // Bootstrap configuration (lightweight relay mode)
     private boolean enableBootstrap;
@@ -301,14 +309,31 @@ public class YaciNodeConfig implements NodeConfig {
         }
 
         if (enableBlockProducer) {
-            if (enableClient) {
-                throw new IllegalArgumentException("Block producer mode cannot be used with client mode");
+            if (!slotLeaderMode && enableClient) {
+                throw new IllegalArgumentException("Devnet block producer mode cannot be used with client mode");
             }
             if (!enableServer) {
                 throw new IllegalArgumentException("Block producer mode requires server to be enabled");
             }
             // blockTimeMillis == 0 is valid: means auto-derive from genesis in YaciNode
             // slotLengthMillis == 0 is valid: means auto-derive from genesis in YaciNode
+        }
+
+        if (slotLeaderMode) {
+            if (!enableBlockProducer) {
+                throw new IllegalArgumentException("Slot leader mode requires block producer to be enabled");
+            }
+            if (!enableClient) {
+                throw new IllegalArgumentException("Slot leader mode requires client to be enabled (to sync chain)");
+            }
+            if (stakeDataProviderUrl == null || stakeDataProviderUrl.isBlank()) {
+                throw new IllegalArgumentException("Slot leader mode requires stake-data-provider-url");
+            }
+            if (vrfSkeyFile == null || vrfSkeyFile.isBlank()
+                    || kesSkeyFile == null || kesSkeyFile.isBlank()
+                    || opCertFile == null || opCertFile.isBlank()) {
+                throw new IllegalArgumentException("Slot leader mode requires VRF, KES, and OpCert key files");
+            }
         }
 
         if (devMode && !enableBlockProducer) {

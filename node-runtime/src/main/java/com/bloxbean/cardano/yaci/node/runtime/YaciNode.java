@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.node.runtime;
 
 import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
+import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.Era;
@@ -11,6 +12,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableCon
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
+import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.events.api.*;
 import com.bloxbean.cardano.yaci.events.api.config.EventsOptions;
@@ -127,8 +129,10 @@ public class YaciNode implements NodeAPI {
     // MemPool for transaction handling
     private final MemPool memPool;
 
-    // Block producer (devnet mode)
-    private BlockProducer blockProducer;
+    // Block producer (devnet or slot-leader mode)
+    private BlockProducerService blockProducerService;
+    private DevnetBlockProducer devnetBlockProducer; // kept for devnet-specific methods (produceEmptyBlocksToSlot, etc.)
+    private EpochNonceState epochNonceState; // shared nonce state (accessible for REST endpoint)
     private GenesisConfig genesisConfig;
     private long resolvedGenesisTimestamp;
     private SlotTimeCalculator slotTimeCalculator;
@@ -354,6 +358,12 @@ public class YaciNode implements NodeAPI {
                 startBlockProducer();
             }
 
+            // Initialize epoch nonce tracking for relay/client mode (lightweight, always useful for verification).
+            // In block-producer mode, nonce tracking is already initialized by startBlockProducer().
+            if (!config.isEnableBlockProducer() && config.isEnableClient()) {
+                initNonceTracking();
+            }
+
             // Initialize slot-to-time calculator from genesis data.
             // Done after startBlockProducer() so resolvedGenesisTimestamp is authoritative.
             initSlotTimeCalculator();
@@ -535,57 +545,25 @@ public class YaciNode implements NodeAPI {
     }
 
     /**
-     * Start the block producer for devnet mode
+     * Start the block producer — branches between devnet and slot-leader modes.
      */
     private void startBlockProducer() {
+        if (config.isSlotLeaderMode()) {
+            startSlotLeaderBlockProducer();
+        } else {
+            startDevnetBlockProducer();
+        }
+    }
+
+    /**
+     * Start the block producer for devnet mode (unconditional fixed-interval production).
+     */
+    private void startDevnetBlockProducer() {
         log.info("Starting block producer (devnet mode)...");
 
-        if (genesisConfig == null) {
-            genesisConfig = GenesisConfig.load(
-                    config.getShelleyGenesisFile(),
-                    config.getByronGenesisFile(),
-                    config.getProtocolParametersFile());
-
-            // Propagate epoch length from genesis to config so REST layer can use it
-            if (genesisConfig.getShelleyGenesisData() != null
-                    && genesisConfig.getShelleyGenesisData().epochLength() > 0) {
-                config.setEpochLength(genesisConfig.getShelleyGenesisData().epochLength());
-            }
-        }
-
-        // Auto-derive block time from genesis if blockTimeMillis == 0 (auto sentinel)
-        if (config.getBlockTimeMillis() <= 0) {
-            if (genesisConfig.getShelleyGenesisData() != null) {
-                double activeSlotsCoeff = genesisConfig.getActiveSlotsCoeff();
-                if (activeSlotsCoeff <= 0) activeSlotsCoeff = 1.0;
-                double slotLength = genesisConfig.getShelleyGenesisData().slotLength();
-                int derived = (int) (slotLength * 1000 / activeSlotsCoeff);
-                config.setBlockTimeMillis(derived);
-                log.info("Auto-derived blockTimeMillis={} from genesis (slotLength={}, activeSlotsCoeff={})",
-                        derived, slotLength, activeSlotsCoeff);
-            } else {
-                config.setBlockTimeMillis(1000);
-                log.info("No genesis data available, using default blockTimeMillis=1000");
-            }
-        } else {
-            log.info("Using explicit blockTimeMillis={}", config.getBlockTimeMillis());
-        }
-
-        // Auto-derive slotLengthMillis from genesis slotLength
-        if (config.getSlotLengthMillis() <= 0) {
-            if (genesisConfig.getShelleyGenesisData() != null
-                    && genesisConfig.getShelleyGenesisData().slotLength() > 0) {
-                int derivedSlotLength = (int) (genesisConfig.getShelleyGenesisData().slotLength() * 1000);
-                config.setSlotLengthMillis(derivedSlotLength);
-                log.info("Auto-derived slotLengthMillis={} from genesis slotLength={}",
-                        derivedSlotLength, genesisConfig.getShelleyGenesisData().slotLength());
-            } else {
-                config.setSlotLengthMillis(1000);
-                log.info("No genesis data available, using default slotLengthMillis=1000");
-            }
-        } else {
-            log.info("Using explicit slotLengthMillis={}", config.getSlotLengthMillis());
-        }
+        loadAndPropagateGenesisConfig();
+        autoDeriveBlockTimeMillis();
+        autoDeriveSlotLengthMillis();
 
         boolean freshStart = chainState.getTip() == null;
 
@@ -596,7 +574,7 @@ public class YaciNode implements NodeAPI {
         // Choose block builder: if all three key files are configured, use SignedBlockBuilder
         DevnetBlockBuilder blockBuilder = createBlockBuilder(freshStart);
 
-        blockProducer = new BlockProducer(
+        devnetBlockProducer = new DevnetBlockProducer(
                 chainState, memPool, nodeServer, eventBus, scheduler,
                 blockBuilder,
                 config.getBlockTimeMillis(),
@@ -606,7 +584,8 @@ public class YaciNode implements NodeAPI {
                 genesisConfig,
                 transactionEvaluator,
                 getUtxoState());
-        blockProducer.start();
+        blockProducerService = devnetBlockProducer;
+        devnetBlockProducer.start();
 
         // Store genesis UTXOs directly in UTXO store using blake2b(address) tx hash convention.
         // Only on fresh start (not restart) — genesis block was just produced above.
@@ -623,7 +602,265 @@ public class YaciNode implements NodeAPI {
             rocksState.setEraStartSlot(Era.Conway.value, 0);
         }
 
-        log.info("Block producer started");
+        log.info("Block producer started (devnet mode)");
+    }
+
+    /**
+     * Start the slot-leader block producer for public networks (Ouroboros Praos).
+     */
+    private void startSlotLeaderBlockProducer() {
+        log.info("Starting block producer (slot-leader mode)...");
+
+        loadAndPropagateGenesisConfig();
+        autoDeriveSlotLengthMillis();
+
+        var shelleyData = genesisConfig.getShelleyGenesisData();
+        if (shelleyData == null) {
+            throw new IllegalStateException("Shelley genesis data required for slot-leader mode");
+        }
+
+        // Resolve genesis timestamp from genesis systemStart (not the devnet auto-persist pattern)
+        resolvedGenesisTimestamp = genesisConfig.getSystemStartEpochMillis();
+        if (resolvedGenesisTimestamp <= 0) {
+            throw new IllegalStateException("systemStart required in shelley-genesis.json for slot-leader mode");
+        }
+
+        long epochLength = shelleyData.epochLength();
+        long securityParam = shelleyData.securityParam();
+        double activeSlotsCoeff = genesisConfig.getActiveSlotsCoeff();
+        long slotsPerKESPeriod = shelleyData.slotsPerKESPeriod();
+        long maxKESEvolutions = shelleyData.maxKESEvolutions();
+
+        try {
+            // 1. Load keys
+            var keys = com.bloxbean.cardano.client.crypto.BlockProducerKeys.load(
+                    java.nio.file.Path.of(config.getVrfSkeyFile()),
+                    java.nio.file.Path.of(config.getKesSkeyFile()),
+                    java.nio.file.Path.of(config.getOpCertFile()));
+
+            // 2. Derive pool hash
+            String poolHash = SlotLeaderBlockProducer.derivePoolHash(keys.getOpCert());
+            log.info("Pool hash: {}", poolHash);
+
+            // 3. Initialize shared EpochNonceState (era-aware)
+            long byronSlotsPerEpoch = genesisConfig.getByronGenesisData() != null
+                    ? genesisConfig.getByronGenesisData().epochLength() : Constants.BYRON_SLOTS_PER_EPOCH;
+            epochNonceState = new EpochNonceState(epochLength, securityParam, activeSlotsCoeff, byronSlotsPerEpoch);
+            // Read shelley start slot from persisted era data (available after prior sync)
+            if (chainState instanceof DirectRocksDBChainState rocksState) {
+                rocksState.getFirstNonByronEraStartSlot()
+                        .ifPresent(epochNonceState::setShelleyStartSlot);
+            }
+            NonceStateStore nonceStore = (chainState instanceof NonceStateStore)
+                    ? (NonceStateStore) chainState : null;
+
+            // 4. Seed nonce: restore from persistence > config seed > genesis init
+            boolean nonceRestored = false;
+            if (nonceStore != null) {
+                byte[] persisted = nonceStore.getEpochNonceState();
+                if (persisted != null) {
+                    epochNonceState.restore(persisted);
+                    nonceRestored = true;
+                    log.info("Nonce state restored from persistence");
+                }
+            }
+
+            if (!nonceRestored && config.getInitialEpochNonce() != null
+                    && !config.getInitialEpochNonce().isBlank()
+                    && config.getInitialEpoch() >= 0) {
+                byte[] nonce = HexUtil.decodeHexString(config.getInitialEpochNonce());
+                epochNonceState.seedFromExternal(config.getInitialEpoch(), nonce);
+                nonceRestored = true;
+                log.info("Nonce state seeded from config: epoch={}", config.getInitialEpoch());
+            }
+
+            if (!nonceRestored) {
+                byte[] genesisHash = resolveGenesisHash();
+                if (genesisHash != null) {
+                    epochNonceState.initFromGenesisHash(genesisHash);
+                } else {
+                    throw new IllegalStateException(
+                            "Shelley genesis hash required for nonce initialization in slot-leader mode");
+                }
+            }
+
+            // 5. Get protocol version from genesis
+            long protoMajor = shelleyData.protocolMajor() > 0 ? shelleyData.protocolMajor() : 10;
+            long protoMinor = shelleyData.protocolMinor();
+
+            // 6. Create SignedBlockBuilder with shared EpochNonceState
+            var signedBlockBuilder = new SignedBlockBuilder(keys, slotsPerKESPeriod, maxKESEvolutions,
+                    epochNonceState, nonceStore, protoMajor, protoMinor);
+
+            // 7. Create & register NonceEvolutionListener
+            String issuerVkeyHex = signedBlockBuilder.getIssuerVkeyHex();
+            var nonceListener = new NonceEvolutionListener(epochNonceState, nonceStore, issuerVkeyHex);
+            AnnotationListenerRegistrar.register(eventBus, nonceListener,
+                    com.bloxbean.cardano.yaci.events.api.SubscriptionOptions.builder().build());
+            log.info("NonceEvolutionListener registered (skipping own blocks with issuerVkey={})", issuerVkeyHex);
+
+            // 8. Create StakeDataProvider
+            var stakeDataProvider = new YaciStoreStakeDataProvider(config.getStakeDataProviderUrl());
+
+            // 9. Create SlotLeaderCheck (shares BlockSigner with SignedBlockBuilder)
+            var slotLeaderCheck = new SlotLeaderCheck(
+                    keys.getVrfSkey(),
+                    java.math.BigDecimal.valueOf(activeSlotsCoeff),
+                    signedBlockBuilder.getBlockSigner());
+
+            // 10. Create & start SlotLeaderBlockProducer
+            int slotLengthMillis = config.getSlotLengthMillis();
+            var slotLeaderProducer = new SlotLeaderBlockProducer(
+                    chainState, memPool, nodeServer, eventBus, scheduler,
+                    signedBlockBuilder, epochNonceState, slotLeaderCheck, stakeDataProvider,
+                    poolHash, resolvedGenesisTimestamp, slotLengthMillis,
+                    transactionEvaluator, getUtxoState());
+
+            blockProducerService = slotLeaderProducer;
+            slotLeaderProducer.start();
+
+            log.info("Block producer started (slot-leader mode, pool={}, slotLength={}ms)", poolHash, slotLengthMillis);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to start slot-leader block producer", e);
+        }
+    }
+
+    private void loadAndPropagateGenesisConfig() {
+        if (genesisConfig == null) {
+            genesisConfig = GenesisConfig.load(
+                    config.getShelleyGenesisFile(),
+                    config.getByronGenesisFile(),
+                    config.getProtocolParametersFile());
+
+            if (genesisConfig.getShelleyGenesisData() != null
+                    && genesisConfig.getShelleyGenesisData().epochLength() > 0) {
+                config.setEpochLength(genesisConfig.getShelleyGenesisData().epochLength());
+            }
+        }
+    }
+
+    /**
+     * Initialize epoch nonce tracking for relay/client mode.
+     * Sets up EpochNonceState and NonceEvolutionListener so that the epoch nonce
+     * evolves as synced blocks arrive. Useful for verification even without block production.
+     */
+    private void initNonceTracking() {
+        if (genesisConfig == null || genesisConfig.getShelleyGenesisData() == null) {
+            log.debug("Nonce tracking not initialized: no shelley genesis data");
+            return;
+        }
+
+        try {
+            var shelleyData = genesisConfig.getShelleyGenesisData();
+            long epochLength = shelleyData.epochLength();
+            long securityParam = shelleyData.securityParam();
+            double activeSlotsCoeff = genesisConfig.getActiveSlotsCoeff();
+            if (activeSlotsCoeff <= 0) activeSlotsCoeff = 0.05; // default for public networks
+
+            long byronSlotsPerEpoch = genesisConfig.getByronGenesisData() != null
+                    ? genesisConfig.getByronGenesisData().epochLength() : Constants.BYRON_SLOTS_PER_EPOCH;
+            epochNonceState = new EpochNonceState(epochLength, securityParam, activeSlotsCoeff, byronSlotsPerEpoch);
+            // Read shelley start slot from persisted era data (available after prior sync)
+            if (chainState instanceof DirectRocksDBChainState rocksState) {
+                rocksState.getFirstNonByronEraStartSlot()
+                        .ifPresent(epochNonceState::setShelleyStartSlot);
+            }
+            NonceStateStore nonceStore = (chainState instanceof NonceStateStore)
+                    ? (NonceStateStore) chainState : null;
+
+            // Restore from persistence or seed
+            boolean restored = false;
+            if (nonceStore != null) {
+                byte[] persisted = nonceStore.getEpochNonceState();
+                if (persisted != null) {
+                    epochNonceState.restore(persisted);
+                    restored = true;
+                    log.info("Nonce tracking restored from persistence: epoch={}", epochNonceState.getCurrentEpoch());
+                }
+            }
+
+            if (!restored) {
+                byte[] genesisHash = resolveGenesisHash();
+                if (genesisHash != null) {
+                    epochNonceState.initFromGenesisHash(genesisHash);
+                } else {
+                    log.debug("Nonce tracking not initialized: no shelley genesis hash available");
+                    epochNonceState = null;
+                    return;
+                }
+            }
+
+            // Register listener — no own-block skipping (null issuerVkey) since we're not producing
+            var nonceListener = new NonceEvolutionListener(epochNonceState, nonceStore, null);
+            AnnotationListenerRegistrar.register(eventBus, nonceListener,
+                    com.bloxbean.cardano.yaci.events.api.SubscriptionOptions.builder().build());
+
+            log.info("Epoch nonce tracking initialized for relay mode (epochLength={}, k={}, f={})",
+                    epochLength, securityParam, activeSlotsCoeff);
+        } catch (Exception e) {
+            log.warn("Failed to initialize nonce tracking: {}", e.getMessage());
+            epochNonceState = null;
+        }
+    }
+
+    /**
+     * Resolve the shelley genesis hash: use configured hash if available, otherwise hash the file.
+     */
+    private byte[] resolveGenesisHash() {
+        String configHash = config.getShelleyGenesisHash();
+        if (configHash != null && !configHash.isBlank()) {
+            log.info("Using configured shelley-genesis-hash: {}", configHash);
+            return HexUtil.decodeHexString(configHash);
+        }
+
+        String shelleyGenesisFile = config.getShelleyGenesisFile();
+        if (shelleyGenesisFile != null) {
+            try {
+                byte[] genesisBytes = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(shelleyGenesisFile));
+                byte[] hash = Blake2bUtil.blake2bHash256(genesisBytes);
+                log.info("Derived shelley-genesis hash from file: {}", HexUtil.encodeHexString(hash));
+                return hash;
+            } catch (Exception e) {
+                log.error("Failed to read shelley genesis file: {}", e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private void autoDeriveBlockTimeMillis() {
+        if (config.getBlockTimeMillis() <= 0) {
+            if (genesisConfig.getShelleyGenesisData() != null) {
+                double activeSlotsCoeff = genesisConfig.getActiveSlotsCoeff();
+                if (activeSlotsCoeff <= 0) activeSlotsCoeff = 1.0;
+                double slotLength = genesisConfig.getShelleyGenesisData().slotLength();
+                int derived = (int) (slotLength * 1000 / activeSlotsCoeff);
+                config.setBlockTimeMillis(derived);
+                log.info("Auto-derived blockTimeMillis={} from genesis (slotLength={}, activeSlotsCoeff={})",
+                        derived, slotLength, activeSlotsCoeff);
+            } else {
+                config.setBlockTimeMillis(1000);
+                log.info("No genesis data available, using default blockTimeMillis=1000");
+            }
+        } else {
+            log.info("Using explicit blockTimeMillis={}", config.getBlockTimeMillis());
+        }
+    }
+
+    private void autoDeriveSlotLengthMillis() {
+        if (config.getSlotLengthMillis() <= 0) {
+            if (genesisConfig.getShelleyGenesisData() != null
+                    && genesisConfig.getShelleyGenesisData().slotLength() > 0) {
+                int derivedSlotLength = (int) (genesisConfig.getShelleyGenesisData().slotLength() * 1000);
+                config.setSlotLengthMillis(derivedSlotLength);
+                log.info("Auto-derived slotLengthMillis={} from genesis slotLength={}",
+                        derivedSlotLength, genesisConfig.getShelleyGenesisData().slotLength());
+            } else {
+                config.setSlotLengthMillis(1000);
+                log.info("No genesis data available, using default slotLengthMillis=1000");
+            }
+        } else {
+            log.info("Using explicit slotLengthMillis={}", config.getSlotLengthMillis());
+        }
     }
 
     /**
@@ -656,7 +893,14 @@ public class YaciNode implements NodeAPI {
                         ? genesisConfig.getActiveSlotsCoeff() : 1.0;
 
                 // Initialize or restore nonce state
-                EpochNonceState nonceState = new EpochNonceState(epochLength, securityParam, activeSlotsCoeff);
+                long byronSlotsPerEpoch = genesisConfig.getByronGenesisData() != null
+                        ? genesisConfig.getByronGenesisData().epochLength() : Constants.BYRON_SLOTS_PER_EPOCH;
+                EpochNonceState nonceState = new EpochNonceState(epochLength, securityParam, activeSlotsCoeff, byronSlotsPerEpoch);
+                // Read shelley start slot from persisted era data (available after prior sync)
+                if (chainState instanceof DirectRocksDBChainState rocksState) {
+                    rocksState.getFirstNonByronEraStartSlot()
+                            .ifPresent(nonceState::setShelleyStartSlot);
+                }
                 NonceStateStore nonceStore = (chainState instanceof NonceStateStore)
                         ? (NonceStateStore) chainState : null;
 
@@ -670,14 +914,12 @@ public class YaciNode implements NodeAPI {
                 }
 
                 if (!restored) {
-                    // Init from genesis file bytes
-                    String shelleyGenesisFile = config.getShelleyGenesisFile();
-                    if (shelleyGenesisFile != null) {
-                        byte[] genesisBytes = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(shelleyGenesisFile));
-                        nonceState.initFromGenesis(genesisBytes);
+                    byte[] genesisHash = resolveGenesisHash();
+                    if (genesisHash != null) {
+                        nonceState.initFromGenesisHash(genesisHash);
                     } else {
                         throw new IllegalStateException(
-                                "Shelley genesis file required for signed block production nonce initialization");
+                                "Shelley genesis hash required for signed block production nonce initialization");
                     }
                 }
 
@@ -800,6 +1042,24 @@ public class YaciNode implements NodeAPI {
 
     public TransactionEvaluationService getTransactionEvalService() {
         return transactionEvalService;
+    }
+
+    public EpochNonceState getEpochNonceState() {
+        return epochNonceState;
+    }
+
+    @Override
+    public java.util.Map<String, Object> getEpochNonceInfo() {
+        if (epochNonceState == null) return null;
+        var map = new java.util.LinkedHashMap<String, Object>();
+        map.put("epoch", epochNonceState.getCurrentEpoch());
+        byte[] nonce = epochNonceState.getEpochNonce();
+        map.put("nonce", nonce != null ? HexUtil.encodeHexString(nonce) : null);
+        byte[] evolving = epochNonceState.getEvolvingNonce();
+        map.put("evolving_nonce", evolving != null ? HexUtil.encodeHexString(evolving) : null);
+        byte[] candidate = epochNonceState.getCandidateNonce();
+        map.put("candidate_nonce", candidate != null ? HexUtil.encodeHexString(candidate) : null);
+        return map;
     }
 
     /**
@@ -934,9 +1194,9 @@ public class YaciNode implements NodeAPI {
                 targetSlot, currentTip.getSlot(), currentTip.getBlockNumber());
 
         // 1. Stop block producer
-        boolean wasRunning = blockProducer.isRunning();
+        boolean wasRunning = blockProducerService.isRunning();
         if (wasRunning) {
-            blockProducer.stop();
+            blockProducerService.stop();
         }
 
         try {
@@ -972,7 +1232,7 @@ public class YaciNode implements NodeAPI {
             }
 
             // 6. Reset block producer to resume from new tip
-            blockProducer.resetToChainTip();
+            blockProducerService.resetToChainTip();
 
             // Update last known tip
             lastKnownChainTip = chainState.getTip();
@@ -983,7 +1243,7 @@ public class YaciNode implements NodeAPI {
         } finally {
             // 7. Resume block producer
             if (wasRunning) {
-                blockProducer.start();
+                blockProducerService.start();
             }
         }
     }
@@ -996,7 +1256,7 @@ public class YaciNode implements NodeAPI {
         if (!config.isDevMode()) {
             throw new IllegalStateException(operation + " requires dev mode (yaci.node.dev-mode=true)");
         }
-        if (blockProducer == null) {
+        if (devnetBlockProducer == null) {
             throw new IllegalStateException(operation + " requires block producer to be running");
         }
     }
@@ -1021,8 +1281,8 @@ public class YaciNode implements NodeAPI {
         }
 
         // Pause block producer during snapshot
-        boolean wasRunning = blockProducer.isRunning();
-        if (wasRunning) blockProducer.stop();
+        boolean wasRunning = blockProducerService.isRunning();
+        if (wasRunning) blockProducerService.stop();
 
         try {
             Files.createDirectories(snapshotDir);
@@ -1044,7 +1304,7 @@ public class YaciNode implements NodeAPI {
         } catch (Exception e) {
             throw new RuntimeException("Failed to create snapshot '" + name + "'", e);
         } finally {
-            if (wasRunning) blockProducer.start();
+            if (wasRunning) blockProducerService.start();
         }
     }
 
@@ -1069,8 +1329,8 @@ public class YaciNode implements NodeAPI {
         log.info("Restoring snapshot '{}'...", name);
 
         // 1. Stop block producer
-        boolean wasRunning = blockProducer.isRunning();
-        if (wasRunning) blockProducer.stop();
+        boolean wasRunning = blockProducerService.isRunning();
+        if (wasRunning) blockProducerService.stop();
 
         try {
             // 2. Restore DB from snapshot
@@ -1087,7 +1347,7 @@ public class YaciNode implements NodeAPI {
             }
 
             // 4. Reset block producer to new chain tip
-            blockProducer.resetToChainTip();
+            blockProducerService.resetToChainTip();
 
             // 5. Notify server — connected clients get informed
             if (isServerRunning.get() && nodeServer != null) {
@@ -1112,7 +1372,7 @@ public class YaciNode implements NodeAPI {
                     newTip != null ? newTip.getBlockNumber() : "null");
         } finally {
             // 6. Resume block producer
-            if (wasRunning) blockProducer.start();
+            if (wasRunning) blockProducerService.start();
         }
     }
 
@@ -1205,11 +1465,11 @@ public class YaciNode implements NodeAPI {
         long targetSlot = currentSlot + slots;
 
         // Stop scheduled block producer, produce rapid blocks, resume
-        boolean wasRunning = blockProducer.isRunning();
-        if (wasRunning) blockProducer.stop();
+        boolean wasRunning = devnetBlockProducer.isRunning();
+        if (wasRunning) devnetBlockProducer.stop();
 
         try {
-            int blocksProduced = blockProducer.produceEmptyBlocksToSlot(targetSlot);
+            int blocksProduced = devnetBlockProducer.produceEmptyBlocksToSlot(targetSlot);
 
             ChainTip newTip = chainState.getTip();
             lastKnownChainTip = newTip;
@@ -1219,7 +1479,7 @@ public class YaciNode implements NodeAPI {
                     newTip != null ? newTip.getBlockNumber() : 0,
                     blocksProduced);
         } finally {
-            if (wasRunning) blockProducer.start();
+            if (wasRunning) devnetBlockProducer.start();
         }
     }
 
@@ -1230,7 +1490,7 @@ public class YaciNode implements NodeAPI {
             throw new IllegalArgumentException("Seconds must be positive, got: " + seconds);
         }
 
-        int slotLengthMs = blockProducer.getSlotLengthMillis();
+        int slotLengthMs = devnetBlockProducer.getSlotLengthMillis();
         if (slotLengthMs <= 0) {
             throw new IllegalStateException("Slot length is not configured");
         }
@@ -1578,8 +1838,8 @@ public class YaciNode implements NodeAPI {
             }
 
             // Stop block producer
-            if (blockProducer != null && blockProducer.isRunning()) {
-                blockProducer.stop();
+            if (blockProducerService != null && blockProducerService.isRunning()) {
+                blockProducerService.stop();
             }
 
             // Stop server
