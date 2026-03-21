@@ -140,23 +140,24 @@ class WireFormatDebugTest {
         System.out.println("  VERIFIED: payload bytes == stored block CBOR");
         System.out.println();
 
-        // Layer 1: The HFC-wrapped block [era, [block_content...]]
+        // Layer 1: The HFC-wrapped block [blockType, [block_content...]]
+        // blockType=7 for Conway (BlockType numbering: Byron EBB=0, Main=1, ..., Conway=7)
         DataItem innerDI = CborSerializationUtil.deserializeOne(payloadBytes);
         assertInstanceOf(Array.class, innerDI, "Inner must be an Array");
         Array innerArray = (Array) innerDI;
-        assertEquals(2, innerArray.getDataItems().size(), "Inner array must have 2 elements: [era, [content...]]");
+        assertEquals(2, innerArray.getDataItems().size(), "Inner array must have 2 elements: [blockType, [content...]]");
 
         DataItem eraItem = innerArray.getDataItems().get(0);
         assertInstanceOf(UnsignedInteger.class, eraItem);
         long era = ((UnsignedInteger) eraItem).getValue().longValueExact();
-        assertEquals(6, era, "Era must be 6 (Conway)");
+        assertEquals(7, era, "Block type must be 7 (Conway BlockType for BlockFetch)");
 
         // Block content is directly embedded as an array (no tag-24 wrapping)
         DataItem contentItem = innerArray.getDataItems().get(1);
         assertInstanceOf(Array.class, contentItem, "Block content must be an Array (directly embedded)");
 
-        System.out.println("LAYER 1 (HFC block): [6, [content...]]");
-        System.out.println("  era = " + era);
+        System.out.println("LAYER 1 (HFC block): [7, [content...]]");
+        System.out.println("  blockType = " + era);
         System.out.println();
 
         // Layer 2: The block content [header, txBodies, witnesses, auxData, invalidTxs]
@@ -293,10 +294,11 @@ class WireFormatDebugTest {
         assertArrayEquals(storedBlock, extractedBytes,
                 "MsgBlock deserializer must extract the raw stored block bytes from tag24");
 
-        // The extracted bytes should parse as [era, [content...]]
+        // The extracted bytes should parse as [blockType, [content...]]
+        // blockType=7 for Conway (BlockType numbering: Byron EBB=0, Main=1, ..., Conway=7)
         Array blockArray = (Array) CborSerializationUtil.deserializeOne(extractedBytes);
         long era = ((UnsignedInteger) blockArray.getDataItems().get(0)).getValue().longValueExact();
-        assertEquals(6, era);
+        assertEquals(7, era, "Block type must be 7 (Conway BlockType for BlockFetch)");
 
         // Block content is directly embedded as an array (no inner tag-24)
         DataItem innerItem = blockArray.getDataItems().get(1);
@@ -306,7 +308,7 @@ class WireFormatDebugTest {
                 "Block content must have 5 elements: [header, txBodies, witnesses, auxData, invalidTxs]");
 
         System.out.println("VERIFIED: MsgBlock deserializer strips outer tag24, block content is directly embedded.");
-        System.out.println("  Extracted bytes = [6, [header, txBodies, ...]] which is the HFC format.");
+        System.out.println("  Extracted bytes = [7, [header, txBodies, ...]] which is the HFC format.");
     }
 
     @Test
@@ -354,7 +356,7 @@ class WireFormatDebugTest {
         // Parse inner to get content
         Array blockArray = (Array) CborSerializationUtil.deserializeOne(storedBlock);
         Array content = (Array) blockArray.getDataItems().get(1);
-        System.out.println("               82 06 85 [header, txBodies, witnesses, auxData, invalidTxs]");
+        System.out.println("               82 07 85 [header, txBodies, witnesses, auxData, invalidTxs]");
         System.out.println("               (" + content.getDataItems().size() + " elements)");
         System.out.println();
 
@@ -370,8 +372,8 @@ class WireFormatDebugTest {
 
         // storedBlock[0] should be 0x82 (array of 2)
         assertEquals((byte) 0x82, storedBlock[0], "Stored block first byte must be 0x82 (array of 2)");
-        // storedBlock[1] should be 0x06 (era = 6)
-        assertEquals((byte) 0x06, storedBlock[1], "Stored block second byte must be 0x06 (era 6)");
+        // storedBlock[1] should be 0x07 (Conway BlockType=7 for BlockFetch)
+        assertEquals((byte) 0x07, storedBlock[1], "Stored block second byte must be 0x07 (Conway BlockType=7 for BlockFetch)");
         // storedBlock[2] should be 0x85 (array of 5 = block content, directly embedded)
         assertEquals((byte) 0x85, storedBlock[2], "Stored block third byte must be 0x85 (array of 5, block content)");
 
@@ -379,7 +381,7 @@ class WireFormatDebugTest {
         System.out.println();
         System.out.println("CONCLUSION: The MsgBlock wire format has tag-24 wrapping around stored block:");
         System.out.println("  82 04 d8 18 59|5a XXXX <stored_block_bytes>");
-        System.out.println("  where <stored_block_bytes> = 82 06 85 ... [header, txBodies, witnesses, auxData, invalidTxs]");
+        System.out.println("  where <stored_block_bytes> = 82 07 85 ... [header, txBodies, witnesses, auxData, invalidTxs]");
     }
 
     /**

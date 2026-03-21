@@ -579,11 +579,8 @@ public class YaciNode implements NodeAPI {
         if (freshStart && config.getStartEpoch() > 0 && config.getGenesisTimestamp() <= 0) {
             var shelleyData = genesisConfig.getShelleyGenesisData();
             if (shelleyData != null) {
-                long epochLengthSlots = shelleyData.epochLength();
-                double slotLengthSec = shelleyData.slotLength();
-                long shiftMillis = (long) (config.getStartEpoch() * epochLengthSlots * slotLengthSec * 1000);
-                long shifted = System.currentTimeMillis() - shiftMillis;
-                config.setGenesisTimestamp(shifted);
+                long shiftMillis = computeEpochShiftMillis(config.getStartEpoch());
+                config.setGenesisTimestamp(System.currentTimeMillis() - shiftMillis);
                 log.info("Epoch fast-forward: shifted genesis timestamp back by {}ms for startEpoch={}",
                         shiftMillis, config.getStartEpoch());
             }
@@ -596,43 +593,21 @@ public class YaciNode implements NodeAPI {
         // Choose block builder: if all three key files are configured, use SignedBlockBuilder
         DevnetBlockBuilder blockBuilder = createBlockBuilder(freshStart);
 
-        devnetBlockProducer = new DevnetBlockProducer(
-                chainState, memPool, nodeServer, eventBus, scheduler,
-                blockBuilder,
-                config.getBlockTimeMillis(),
-                config.isLazyBlockProduction(),
-                resolvedGenesisTimestamp,
-                config.getSlotLengthMillis(),
-                genesisConfig,
-                transactionEvaluator,
-                getUtxoState());
-        blockProducerService = devnetBlockProducer;
-        devnetBlockProducer.start();
+        DevnetBlockProducer producer = createDevnetProducer(blockBuilder);
+        producer.start();
 
         // Epoch fast-forward: rapid catch-up producing empty blocks to current wall-clock slot
         if (freshStart && config.getStartEpoch() > 0) {
             long catchUpToSlot = (System.currentTimeMillis() - resolvedGenesisTimestamp) / config.getSlotLengthMillis();
             if (catchUpToSlot > 1) {
                 log.info("Epoch fast-forward: producing empty blocks from slot 1 to {}", catchUpToSlot);
-                int produced = devnetBlockProducer.produceEmptyBlocksToSlot(catchUpToSlot);
+                int produced = producer.produceEmptyBlocksToSlot(catchUpToSlot);
                 log.info("Epoch fast-forward complete: {} blocks produced", produced);
             }
         }
 
-        // Store genesis UTXOs directly in UTXO store using blake2b(address) tx hash convention.
-        // Only on fresh start (not restart) — genesis block was just produced above.
-        if (freshStart && genesisConfig.hasInitialFunds() && utxoStore != null) {
-            var tip = chainState.getTip();
-            String blockHash = tip != null ? HexUtil.encodeHexString(tip.getBlockHash()) : "";
-            long slot = tip != null ? tip.getSlot() : 0;
-            utxoStore.storeGenesisUtxos(genesisConfig.getInitialFunds(),
-                    config.getProtocolMagic(), slot, 0, blockHash);
-        }
-
-        // For devnet block producer mode, era starts at Conway from slot 0
-        if (freshStart && chainState instanceof DirectRocksDBChainState rocksState) {
-            rocksState.setEraStartSlot(Era.Conway.value, 0);
-        }
+        storeGenesisUtxosIfNeeded(freshStart);
+        setConwayEraStartIfFreshStart(freshStart);
 
         log.info("Block producer started (devnet mode)");
     }
@@ -657,11 +632,8 @@ public class YaciNode implements NodeAPI {
         if (config.isDevMode()) {
             // Epoch fast-forward: shift genesis timestamp backwards for target epoch
             if (freshStart && config.getStartEpoch() > 0 && config.getGenesisTimestamp() <= 0) {
-                long epochLengthSlots = shelleyData.epochLength();
-                double slotLengthSec = shelleyData.slotLength();
-                long shiftMillis = (long) (config.getStartEpoch() * epochLengthSlots * slotLengthSec * 1000);
-                long shifted = System.currentTimeMillis() - shiftMillis;
-                config.setGenesisTimestamp(shifted);
+                long shiftMillis = computeEpochShiftMillis(config.getStartEpoch());
+                config.setGenesisTimestamp(System.currentTimeMillis() - shiftMillis);
                 log.info("Epoch fast-forward: shifted genesis timestamp back by {}ms for startEpoch={}",
                         shiftMillis, config.getStartEpoch());
             }
@@ -776,19 +748,8 @@ public class YaciNode implements NodeAPI {
                 log.info("Genesis block produced (slot-leader devnet): hash={}",
                         HexUtil.encodeHexString(genesisResult.blockHash()));
 
-                // Store genesis UTXOs
-                if (genesisConfig.hasInitialFunds() && utxoStore != null) {
-                    var tip = chainState.getTip();
-                    String blockHash = tip != null ? HexUtil.encodeHexString(tip.getBlockHash()) : "";
-                    long slot = tip != null ? tip.getSlot() : 0;
-                    utxoStore.storeGenesisUtxos(genesisConfig.getInitialFunds(),
-                            config.getProtocolMagic(), slot, 0, blockHash);
-                }
-
-                // Set Conway era start
-                if (chainState instanceof DirectRocksDBChainState rocksState) {
-                    rocksState.setEraStartSlot(Era.Conway.value, 0);
-                }
+                storeGenesisUtxosIfNeeded(freshStart);
+                setConwayEraStartIfFreshStart(freshStart);
 
                 BlockProducerHelper.publishEvent(eventBus, genesisResult, 0, "slot-leader-genesis");
                 BlockProducerHelper.notifyServer(nodeServer);
@@ -982,6 +943,60 @@ public class YaciNode implements NodeAPI {
         } else {
             log.info("Using explicit slotLengthMillis={}", config.getSlotLengthMillis());
         }
+    }
+
+    /**
+     * Store genesis UTXOs in the UTXO store using blake2b(address) tx hash convention.
+     * Must be called AFTER genesis block is stored in chainState (so getTip() returns the correct hash/slot).
+     */
+    private void storeGenesisUtxosIfNeeded(boolean freshStart) {
+        if (freshStart && genesisConfig.hasInitialFunds() && utxoStore != null) {
+            var tip = chainState.getTip();
+            String blockHash = tip != null ? HexUtil.encodeHexString(tip.getBlockHash()) : "";
+            long slot = tip != null ? tip.getSlot() : 0;
+            utxoStore.storeGenesisUtxos(genesisConfig.getInitialFunds(),
+                    config.getProtocolMagic(), slot, 0, blockHash);
+        }
+    }
+
+    /**
+     * Set Conway era start at slot 0 for devnet block producer mode on fresh start.
+     */
+    private void setConwayEraStartIfFreshStart(boolean freshStart) {
+        if (freshStart && chainState instanceof DirectRocksDBChainState rocksState) {
+            rocksState.setEraStartSlot(Era.Conway.value, 0);
+        }
+    }
+
+    /**
+     * Compute the epoch shift in milliseconds for fast-forwarding genesis timestamp.
+     * Does NOT set config.genesisTimestamp — callers apply the shift themselves.
+     */
+    private long computeEpochShiftMillis(int epochs) {
+        var shelleyData = genesisConfig.getShelleyGenesisData();
+        long epochLengthSlots = shelleyData.epochLength();
+        double slotLengthSec = shelleyData.slotLength();
+        return (long) (epochs * epochLengthSlots * slotLengthSec * 1000);
+    }
+
+    /**
+     * Create a DevnetBlockProducer and assign it to both devnetBlockProducer and blockProducerService fields.
+     * Does NOT call start() — caller controls configuration and start timing.
+     */
+    private DevnetBlockProducer createDevnetProducer(DevnetBlockBuilder blockBuilder) {
+        var producer = new DevnetBlockProducer(
+                chainState, memPool, nodeServer, eventBus, scheduler,
+                blockBuilder,
+                config.getBlockTimeMillis(),
+                config.isLazyBlockProduction(),
+                resolvedGenesisTimestamp,
+                config.getSlotLengthMillis(),
+                genesisConfig,
+                transactionEvaluator,
+                getUtxoState());
+        devnetBlockProducer = producer;
+        blockProducerService = producer;
+        return producer;
     }
 
     /**
@@ -1651,9 +1666,7 @@ public class YaciNode implements NodeAPI {
             throw new IllegalStateException("Shelley genesis data required for epoch shift");
         }
 
-        long epochLengthSlots = shelleyData.epochLength();
-        double slotLengthSec = shelleyData.slotLength();
-        long shiftMillis = (long) (epochs * epochLengthSlots * slotLengthSec * 1000);
+        long shiftMillis = computeEpochShiftMillis(epochs);
         long shifted = System.currentTimeMillis() - shiftMillis;
         config.setGenesisTimestamp(shifted);
         log.info("Past time travel: shifted genesis timestamp back by {}ms for {} epochs", shiftMillis, epochs);
@@ -1681,34 +1694,13 @@ public class YaciNode implements NodeAPI {
         // Create block builder and start producer
         DevnetBlockBuilder blockBuilder = createBlockBuilder(freshStart);
 
-        devnetBlockProducer = new DevnetBlockProducer(
-                chainState, memPool, nodeServer, eventBus, scheduler,
-                blockBuilder,
-                config.getBlockTimeMillis(),
-                config.isLazyBlockProduction(),
-                resolvedGenesisTimestamp,
-                config.getSlotLengthMillis(),
-                genesisConfig,
-                transactionEvaluator,
-                getUtxoState());
-        blockProducerService = devnetBlockProducer;
+        DevnetBlockProducer producer = createDevnetProducer(blockBuilder);
         // Sequential mode: genesis at slot 0, blocks at 1, 2, 3... (no wall-clock jump)
-        devnetBlockProducer.setForceSequentialSlots(true);
-        devnetBlockProducer.start();
+        producer.setForceSequentialSlots(true);
+        producer.start();
 
-        // Store genesis UTXOs
-        if (freshStart && genesisConfig.hasInitialFunds() && utxoStore != null) {
-            var tip = chainState.getTip();
-            String blockHash = tip != null ? HexUtil.encodeHexString(tip.getBlockHash()) : "";
-            long slot = tip != null ? tip.getSlot() : 0;
-            utxoStore.storeGenesisUtxos(genesisConfig.getInitialFunds(),
-                    config.getProtocolMagic(), slot, 0, blockHash);
-        }
-
-        // Set Conway era start from slot 0
-        if (freshStart && chainState instanceof DirectRocksDBChainState rocksState) {
-            rocksState.setEraStartSlot(Era.Conway.value, 0);
-        }
+        storeGenesisUtxosIfNeeded(freshStart);
+        setConwayEraStartIfFreshStart(freshStart);
 
         log.info("Past time travel: block producer started after {}ms genesis shift ({} epochs)", shiftMillis, epochs);
         return shiftMillis;

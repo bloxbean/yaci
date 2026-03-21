@@ -130,11 +130,17 @@ class DevnetBlockBuilderTest {
     void buildBlock_conwayEra() {
         var result = builder.buildBlock(0, 0, null, List.of());
 
-        // Verify era tag is 6 (Conway era ID)
+        // blockCbor uses BlockType numbering (includes Byron EBB=0 + Main=1): Conway=7
         var di = CborSerializationUtil.deserializeOne(result.blockCbor());
         Array arr = (Array) di;
-        int era = ((UnsignedInteger) arr.getDataItems().get(0)).getValue().intValue();
-        assertEquals(6, era);
+        int blockType = ((UnsignedInteger) arr.getDataItems().get(0)).getValue().intValue();
+        assertEquals(7, blockType, "blockCbor block type must be 7 (Conway BlockType for BlockFetch)");
+
+        // wrappedHeaderCbor uses BlockHeaderType numbering (Byron=1 entry only): Conway=6
+        var hdi = CborSerializationUtil.deserializeOne(result.wrappedHeaderCbor());
+        Array harr = (Array) hdi;
+        int headerType = ((UnsignedInteger) harr.getDataItems().get(0)).getValue().intValue();
+        assertEquals(6, headerType, "wrappedHeaderCbor header type must be 6 (Conway BlockHeaderType for ChainSync)");
     }
 
     /**

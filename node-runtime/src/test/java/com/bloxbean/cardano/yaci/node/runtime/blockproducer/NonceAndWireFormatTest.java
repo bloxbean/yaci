@@ -301,13 +301,14 @@ class NonceAndWireFormatTest {
         assertEquals((byte) 0xd8, msgBlockWire[2], "MsgBlock wire[2] must be 0xd8 (tag follows)");
         assertEquals((byte) 0x18, msgBlockWire[3], "MsgBlock wire[3] must be 0x18 (tag 24)");
 
-        // Stored block: [6, [header, ...]]
+        // Stored block: [7, [header, ...]]
+        // blockType=7 for Conway (BlockType numbering: Byron EBB=0, Main=1, ..., Conway=7)
         assertEquals((byte) 0x82, blockCbor[0], "blockCbor[0] must be 0x82 (array of 2)");
-        assertEquals((byte) 0x06, blockCbor[1], "blockCbor[1] must be 0x06 (era 6 = Conway)");
+        assertEquals((byte) 0x07, blockCbor[1], "blockCbor[1] must be 0x07 (Conway BlockType=7 for BlockFetch)");
         assertEquals((byte) 0x85, blockCbor[2], "blockCbor[2] must be 0x85 (array of 5 = block content)");
 
         System.out.println("  MsgBlock wire: [0x82=arr(2), 0x04=uint(4), 0xd8 0x18=tag(24), ...]");
-        System.out.println("  blockCbor:     [0x82=arr(2), 0x06=uint(6), 0x85=arr(5), ...]");
+        System.out.println("  blockCbor:     [0x82=arr(2), 0x07=uint(7), 0x85=arr(5), ...]");
         System.out.println("  Structure: VERIFIED");
         System.out.println();
 

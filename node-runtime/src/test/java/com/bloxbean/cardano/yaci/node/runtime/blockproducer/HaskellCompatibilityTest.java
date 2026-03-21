@@ -108,18 +108,19 @@ class HaskellCompatibilityTest {
         System.out.println("  wrappedHeaderCbor length=" + result.wrappedHeaderCbor().length);
 
         // =====================================================================
-        // STEP 2: Verify block structure [era, 24(h'<inner>')] — tag-24 wrapped
+        // STEP 2: Verify block structure [blockType, [block_content...]]
+        // blockType=7 for Conway (BlockType numbering: Byron EBB=0, Main=1, ..., Conway=7)
         // =====================================================================
         DataItem blockDI = CborSerializationUtil.deserializeOne(result.blockCbor());
         assertInstanceOf(Array.class, blockDI, "Top-level block CBOR must be an array");
         Array blockArray = (Array) blockDI;
-        assertEquals(2, blockArray.getDataItems().size(), "Block array must have 2 elements: [era, tag24(content)]");
+        assertEquals(2, blockArray.getDataItems().size(), "Block array must have 2 elements: [blockType, content]");
 
-        // Element 0: era ID
+        // Element 0: block type (BlockType numbering for BlockFetch)
         DataItem eraItem = blockArray.getDataItems().get(0);
         assertInstanceOf(UnsignedInteger.class, eraItem, "First element must be era integer");
         long eraId = ((UnsignedInteger) eraItem).getValue().longValueExact();
-        assertEquals(6, eraId, "Era ID must be 6 (Conway)");
+        assertEquals(7, eraId, "Era ID must be 7 (Conway BlockType for BlockFetch)");
 
         // Element 1: block content array (directly embedded, no tag-24 wrapping)
         DataItem innerItem = blockArray.getDataItems().get(1);
@@ -128,7 +129,7 @@ class HaskellCompatibilityTest {
         assertEquals(5, blockContent.getDataItems().size(),
                 "Block content must have 5 elements: [header, txBodies, witnesses, auxData, invalidTxs]");
 
-        System.out.println("=== STEP 2 PASSED: Block structure [era=6, 24(h'...')] verified ===");
+        System.out.println("=== STEP 2 PASSED: Block structure [blockType=7, [content...]] verified ===");
         System.out.println("  Inner content has " + blockContent.getDataItems().size() + " elements");
 
         // Extract the header array: [headerBody, kesSig]
