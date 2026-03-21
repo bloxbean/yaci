@@ -209,10 +209,13 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 return;
             }
 
-            // On first RequestNext after FindIntersect, initialize lastSentPoint to the intersection
-            // so the normal "find next block" logic works correctly.
+            // Per Cardano ChainSync protocol: after FindIntersect, the first RequestNext
+            // must return Rollbackward to the intersection point. This confirms the cursor
+            // position before forward sync begins, and is essential for reconnection scenarios
+            // where the server may have rolled back while the client was offline.
             if (lastSentPoint == null) {
-                lastSentPoint = intersectedPoint;
+                handleRollback();
+                return;
             }
 
             // Check if we need to handle rollback scenario
