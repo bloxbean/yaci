@@ -180,12 +180,14 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
 
     private void sendToClient(Message message) {
         if (getChannel().isWritable()) {
-            byte[] msgBytes = message.serialize();
-            log.info("Sending {} ({} bytes) to {} - first 20 hex: {}",
-                    message.getClass().getSimpleName(), msgBytes.length,
-                    getChannel().remoteAddress(),
-                    com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(
-                            java.util.Arrays.copyOf(msgBytes, Math.min(20, msgBytes.length))));
+            if (log.isDebugEnabled()) {
+                byte[] msgBytes = message.serialize();
+                log.debug("Sending {} ({} bytes) to {} - first 20 hex: {}",
+                        message.getClass().getSimpleName(), msgBytes.length,
+                        getChannel().remoteAddress(),
+                        HexUtil.encodeHexString(
+                                java.util.Arrays.copyOf(msgBytes, Math.min(20, msgBytes.length))));
+            }
             writeMessage(message, null);
             currentState = currentState.nextState(message);
         } else {

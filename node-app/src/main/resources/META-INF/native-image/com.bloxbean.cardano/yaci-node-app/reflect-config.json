@@ -331,6 +331,12 @@
     "allDeclaredConstructors": true
   },
   {
+    "name": "com.bloxbean.cardano.yaci.node.app.api.devnet.dto.EpochShiftRequest",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
     "name": "com.bloxbean.cardano.yaci.node.api.model.SnapshotInfo",
     "allDeclaredFields": true,
     "allDeclaredMethods": true,
@@ -380,6 +386,18 @@
   },
   {
     "name": "org.rocksdb.RocksDB",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "org.rocksdb.RocksDBException",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "org.rocksdb.Status",
     "allDeclaredFields": true,
     "allDeclaredMethods": true,
     "allDeclaredConstructors": true
@@ -491,6 +509,12 @@
     "allDeclaredConstructors": true
   },
   {
+    "name": "com.bloxbean.cardano.yaci.node.runtime.blockproducer.NonceEvolutionListener_EventBindings",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
     "name": "com.bloxbean.cardano.yaci.node.runtime.validation.DefaultTransactionValidatorListener_EventBindings",
     "allDeclaredFields": true,
     "allDeclaredMethods": true,
@@ -522,6 +546,12 @@
   },
   {
     "name": "com.bloxbean.cardano.yaci.node.runtime.utxo.UtxoEventHandlerAsync",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.bloxbean.cardano.yaci.node.runtime.blockproducer.NonceEvolutionListener",
     "allDeclaredFields": true,
     "allDeclaredMethods": true,
     "allDeclaredConstructors": true

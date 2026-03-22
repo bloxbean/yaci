@@ -128,7 +128,7 @@ public abstract class Agent<T extends AgentListener> {
                 if (future.isSuccess()) {
                     if (onSuccess != null) onSuccess.run();
                 } else {
-                    log.error("Failed to send message for protocol {}: {}", getProtocolId(), future.cause().getMessage());
+                    log.error("Failed to send message for protocol {}", getProtocolId(), future.cause());
                 }
             });
         }
@@ -168,8 +168,8 @@ public abstract class Agent<T extends AgentListener> {
                         }
                         log.debug("Segment {}/{} sent successfully", segmentIndex + 1, totalSegments);
                     } else {
-                        log.error("Failed to send segment {}/{} for protocol {}: {}",
-                                 segmentIndex + 1, totalSegments, getProtocolId(), future.cause().getMessage());
+                        log.error("Failed to send segment {}/{} for protocol {}",
+                                 segmentIndex + 1, totalSegments, getProtocolId(), future.cause());
                     }
                 });
             }

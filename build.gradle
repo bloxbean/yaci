@@ -11,24 +11,17 @@ repositories {
     mavenCentral()
     mavenLocal()
     maven {
-        url = uri("https://central.sonatype.com/repository/maven-snapshots")
-        content {
-            snapshotsOnly()
-        }
+        url "https://central.sonatype.com/repository/maven-snapshots/"
     }
 }
 
 compileJava {
-    sourceCompatibility = '21'
-    targetCompatibility = '21'
+    sourceCompatibility = '25'
+    targetCompatibility = '25'
 
     options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
 }
 
-
-artifacts {
-    archives jar
-}
 
 dependencies {
     api project(':node-api')
@@ -128,10 +121,10 @@ subprojects {
     repositories {
         mavenLocal()
         mavenCentral()
+        maven {
+            url "https://central.sonatype.com/repository/maven-snapshots/"
+        }
     }
-
-    //Jars are with yaci prefix
-    archivesBaseName = 'yaci-' + project.name
 
     // def commit_id=getCheckedOutGitCommitHash()
     if (project.version.endsWith("-SNAPSHOT")) {
@@ -140,6 +133,10 @@ subprojects {
 
     // Only configure library-specific settings for non-application modules
     if (!(project.name in nonLibraryModules)) {
+        //Jars are with yaci prefix
+        tasks.named('jar') {
+            archiveBaseName = 'yaci-' + project.name
+        }
         dependencies {
             api libs.slf4j.api
 
@@ -148,6 +145,7 @@ subprojects {
 
             testImplementation libs.junit.jupiter.api
             testRuntimeOnly libs.junit.jupiter.engine
+            testRuntimeOnly libs.junit.platform.launcher
             testImplementation libs.harmcrest.library
             testImplementation libs.mockito.inline
             testImplementation libs.mockito.junit.jupiter
@@ -159,8 +157,8 @@ subprojects {
         }
 
         compileJava {
-            sourceCompatibility = '21'
-            targetCompatibility = '21'
+            sourceCompatibility = '25'
+            targetCompatibility = '25'
 
             options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
         }
@@ -177,12 +175,6 @@ subprojects {
         task javadocJar(type: Jar, dependsOn: javadoc) {
             archiveClassifier = "javadoc"
             from javadoc.destinationDir
-        }
-
-        artifacts {
-            archives jar
-            archives sourceJar
-            archives javadocJar
         }
 
         testSets {
