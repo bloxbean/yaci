@@ -50,8 +50,8 @@ application {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
 }
 
 // Disable default application plugin dist tasks (incompatible with Quarkus)
@@ -61,7 +61,7 @@ startScripts.enabled = false
 
 test {
     useJUnitPlatform {
-        excludeTags 'integration', 'e2e'
+        excludeTags 'integration', 'e2e', 'haskell-sync'
     }
 }
 
@@ -73,6 +73,22 @@ tasks.register('e2eTest', Test) {
     classpath = sourceSets.test.runtimeClasspath
     if (System.getProperty('yaci.e2e.baseUrl') != null) {
         systemProperty 'yaci.e2e.baseUrl', System.getProperty('yaci.e2e.baseUrl')
+    }
+}
+
+tasks.register('haskellSyncTest', Test) {
+    useJUnitPlatform {
+        includeTags 'haskell-sync'
+    }
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    // These tests wait for multi-epoch sync — allow up to 10 minutes
+    systemProperty 'junit.jupiter.execution.timeout.default', '10m'
+    if (System.getProperty('cardano.node.version') != null) {
+        systemProperty 'cardano.node.version', System.getProperty('cardano.node.version')
+    }
+    if (System.getProperty('yaci.uber.jar') != null) {
+        systemProperty 'yaci.uber.jar', System.getProperty('yaci.uber.jar')
     }
 }
 

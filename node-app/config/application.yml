@@ -71,12 +71,12 @@
 # Script Evaluator
 # ---------------------
 # Choose the script evaluator for the /utils/txs/evaluate endpoint.
-# Default: aiken (JVM/jar), scalus (native image via yaci-node.sh)
+# Default: scalus. aiken (JVM/jar), scalus (native image via yaci-node.sh)
 #
 # yaci:
 #   node:
 #     block-producer:
-#       script-evaluator: aiken   # aiken or scalus
+#       script-evaluator: scalus   # scalus or aiken
 
 # Bootstrap State Mode
 # ---------------------

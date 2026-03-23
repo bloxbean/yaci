@@ -123,7 +123,9 @@ public class NodeServer {
      * Each agent can decide based on its current state whether to react to this notification.
      */
     public void notifyNewDataAvailable() {
-        log.debug("Notifying {} sessions about new data availability", sessions.size());
+        if (log.isTraceEnabled()) {
+            log.trace("Notifying {} sessions about new data availability", sessions.size());
+        }
 
         for (NodeServerSession session : sessions.values()) {
             try {

@@ -186,6 +186,12 @@
     "allDeclaredFields" : true
   },
   {
+    "name" : "org.rocksdb.RocksDBException",
+    "allDeclaredConstructors" : true,
+    "allDeclaredMethods" : true,
+    "allDeclaredFields" : true
+  },
+  {
     "name" : "org.rocksdb.RocksIterator",
     "allDeclaredConstructors" : true,
     "allDeclaredMethods" : true,

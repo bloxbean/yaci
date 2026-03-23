@@ -12,6 +12,7 @@ dependencies {
     implementation libs.reload4j
 
     implementation libs.cardano.client.core
+    implementation libs.cardano.client.crypto.ext
     api project(':ledger-rules')
     implementation libs.jackson.databind
 
@@ -22,8 +23,8 @@ dependencies {
 }
 
 java {
-    sourceCompatibility = 21
-    targetCompatibility = 21
+    sourceCompatibility = 25
+    targetCompatibility = 25
 }
 
 publishing {

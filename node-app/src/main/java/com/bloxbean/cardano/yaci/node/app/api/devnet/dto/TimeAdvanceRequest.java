@@ -4,5 +4,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 public record TimeAdvanceRequest(
     @JsonProperty("slots") Integer slots,
-    @JsonProperty("seconds") Integer seconds
+    @JsonProperty("seconds") Integer seconds,
+    @JsonProperty("epochs") Integer epochs
 ) {}

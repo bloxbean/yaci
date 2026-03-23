@@ -13,6 +13,7 @@ import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 import com.bloxbean.cardano.yaci.node.runtime.YaciNode;
 import com.bloxbean.cardano.yaci.node.ledgerrules.impl.AikenTxEvaluator;
+import com.bloxbean.cardano.yaci.node.ledgerrules.impl.JulcTxEvaluator;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.GenesisConfig;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.ProtocolParamsMapper;
 import com.bloxbean.cardano.yaci.node.ledgerrules.impl.YaciScriptSupplier;
@@ -141,8 +142,35 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.block-producer.tx-evaluation", defaultValue = "true")
     boolean txEvaluationEnabled;
 
-    @ConfigProperty(name = "yaci.node.block-producer.script-evaluator", defaultValue = "aiken")
+    @ConfigProperty(name = "yaci.node.block-producer.script-evaluator", defaultValue = "scalus")
     String scriptEvaluator;
+
+    @ConfigProperty(name = "yaci.node.block-producer.vrf-skey-file")
+    java.util.Optional<String> vrfSkeyFile;
+
+    @ConfigProperty(name = "yaci.node.block-producer.kes-skey-file")
+    java.util.Optional<String> kesSkeyFile;
+
+    @ConfigProperty(name = "yaci.node.block-producer.opcert-file")
+    java.util.Optional<String> opCertFile;
+
+    @ConfigProperty(name = "yaci.node.block-producer.slot-leader-mode", defaultValue = "false")
+    boolean slotLeaderMode;
+
+    @ConfigProperty(name = "yaci.node.block-producer.stake-data-provider-url")
+    java.util.Optional<String> stakeDataProviderUrl;
+
+    @ConfigProperty(name = "yaci.node.block-producer.initial-epoch-nonce")
+    java.util.Optional<String> initialEpochNonce;
+
+    @ConfigProperty(name = "yaci.node.block-producer.initial-epoch", defaultValue = "-1")
+    int initialEpoch;
+
+    @ConfigProperty(name = "yaci.node.block-producer.start-epoch", defaultValue = "0")
+    int startEpoch;
+
+    @ConfigProperty(name = "yaci.node.block-producer.past-time-travel-mode", defaultValue = "false")
+    boolean pastTimeTravelMode;
 
     // Bootstrap config
     @ConfigProperty(name = "yaci.node.bootstrap.enabled", defaultValue = "false")
@@ -181,6 +209,9 @@ public class YaciNodeProducer {
 
     @ConfigProperty(name = "yaci.node.genesis.conway-genesis-file")
     java.util.Optional<String> conwayGenesisFile;
+
+    @ConfigProperty(name = "yaci.node.genesis.shelley-genesis-hash")
+    java.util.Optional<String> shelleyGenesisHash;
 
     @ConfigProperty(name = "yaci.node.genesis.protocol-parameters-file")
     java.util.Optional<String> protocolParametersFile;
@@ -243,6 +274,16 @@ public class YaciNodeProducer {
                 .lazyBlockProduction(blockProducerLazy)
                 .genesisTimestamp(genesisTimestamp)
                 .slotLengthMillis(slotLengthMillis)
+                .vrfSkeyFile(vrfSkeyFile.orElse(null))
+                .kesSkeyFile(kesSkeyFile.orElse(null))
+                .opCertFile(opCertFile.orElse(null))
+                .slotLeaderMode(slotLeaderMode)
+                .stakeDataProviderUrl(stakeDataProviderUrl.orElse(null))
+                .initialEpochNonce(initialEpochNonce.orElse(null))
+                .initialEpoch(initialEpoch)
+                .startEpoch(startEpoch)
+                .pastTimeTravelMode(pastTimeTravelMode)
+                .shelleyGenesisHash(shelleyGenesisHash.orElse(null))
                 .shelleyGenesisFile(resolvedShelleyGenesis)
                 .byronGenesisFile(resolvedByronGenesis)
                 .alonzoGenesisFile(resolvedAlonzoGenesis)
@@ -399,6 +440,8 @@ public class YaciNodeProducer {
             TransactionEvaluator transactionEvaluator;
             if ("scalus".equalsIgnoreCase(scriptEvaluator)) {
                 transactionEvaluator = ScalusTransactionFactory.createEvaluator(pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig, networkId);
+            } else if ("julc".equalsIgnoreCase(scriptEvaluator)) {
+                transactionEvaluator = new JulcTxEvaluator(() -> pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig);
             } else {
                 transactionEvaluator = new AikenTxEvaluator(() -> pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig);
             }

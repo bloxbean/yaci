@@ -17,6 +17,8 @@ import java.util.Map;
  * @param maxKESEvolutions  max KES key evolutions
  * @param slotsPerKESPeriod slots per KES period
  * @param updateQuorum      governance update quorum
+ * @param protocolMajor     genesis protocol version major
+ * @param protocolMinor     genesis protocol version minor
  */
 public record ShelleyGenesisData(
         Map<String, BigInteger> initialFunds,
@@ -29,5 +31,7 @@ public record ShelleyGenesisData(
         long securityParam,
         long maxKESEvolutions,
         long slotsPerKESPeriod,
-        long updateQuorum
+        long updateQuorum,
+        long protocolMajor,
+        long protocolMinor
 ) {}

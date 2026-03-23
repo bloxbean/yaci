@@ -953,21 +953,40 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
      */
     private boolean isStaleBlock(long blockNumber, long slot, String hash, boolean isEbb) {
         try {
+            // If the header for this block already exists in chainstate, the block body
+            // is always accepted. This handles body-backfill where HeaderSyncManager has
+            // already synced headers (advancing the tip) and BodyFetchManager fetches
+            // bodies backwards from genesis. Without this check, blocks behind the tip
+            // would be incorrectly rejected as "stale".
+            try {
+                byte[] headerBytes = chainState.getBlockHeader(HexUtil.decodeHexString(hash));
+                if (headerBytes != null) {
+                    if (log.isDebugEnabled())
+                        log.debug("Header exists for block #{} at slot {} (hash={}), accepting body for backfill",
+                                blockNumber, slot, hash.substring(0, Math.min(16, hash.length())));
+                    return false;
+                }
+            } catch (Exception e) {
+                // Header lookup failed — fall through to other checks
+                if (log.isDebugEnabled())
+                    log.debug("Header lookup failed for block #{}: {}", blockNumber, e.getMessage());
+            }
+
             // Get current tip to understand the current state
             ChainTip currentTip = chainState.getTip();
 
             if (currentTip == null) {
                 // If no tip exists:
                 // - Allow Byron EBB at genesis (blockNumber may be 0)
-                // - Allow main block #1
+                // - Allow main block #0 or #1 as the first block
                 if (isEbb) {
                     if (log.isDebugEnabled())
                         log.debug("No tip exists, allowing Byron EBB at slot {} (blockNo={})", slot, blockNumber);
                     return false;
                 }
-                if (blockNumber == 1) {
+                if (blockNumber <= 1) {
                     if (log.isDebugEnabled())
-                        log.debug("No tip exists, allowing main block #1 at slot {}", slot);
+                        log.debug("No tip exists, allowing block #{} at slot {} as first block", blockNumber, slot);
                     return false;
                 }
                 if (log.isDebugEnabled())

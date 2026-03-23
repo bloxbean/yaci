@@ -9,28 +9,52 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.List;
 
 /**
- * Builds structurally valid Conway-era (era 7) CBOR blocks for devnet block production.
+ * Builds structurally valid Conway-era CBOR blocks for devnet block production.
  * No real cryptography — uses dummy zero-filled byte arrays of correct lengths.
  * <p>
  * Produces two outputs per block:
- * - Full block CBOR for ChainState.storeBlock(): [7, [header, tx_bodies, witnesses, aux_data, invalid_txs]]
- * - Wrapped header CBOR for ChainState.storeBlockHeader(): [7, h'serialized_header_array']
+ * - Full block CBOR for ChainState.storeBlock(): [6, [header, tx_bodies, witnesses, aux_data, invalid_txs]]
+ * - Wrapped header CBOR for ChainState.storeBlockHeader(): [6, 24(h'serialized_header_array')]
  */
 @Slf4j
 public class DevnetBlockBuilder {
 
-    private static final int CONWAY_ERA = 7;
+    // Cardano N2N wire format uses TWO different era numbering schemes:
+    //
+    // BlockType (used in BlockFetch MsgBlock / Serialised blk):
+    //   Byron EBB=0, Byron Main=1, Shelley=2, Allegra=3, Mary=4, Alonzo=5, Babbage=6, Conway=7
+    //
+    // BlockHeaderType (used in ChainSync MsgRollForward / SerialisedHeader):
+    //   Byron=0, Shelley=1, Allegra=2, Mary=3, Alonzo=4, Babbage=5, Conway=6
+    //
+    // The difference exists because Byron has 2 block sub-types (EBB + Main) but 1 header type.
+    // This matches gouroboros constants: BlockTypeConway=7, BlockHeaderTypeConway=6.
+    protected static final int CONWAY_BLOCK_TYPE = 7;       // For BlockFetch blocks
+    protected static final int CONWAY_HEADER_TYPE = 6;      // For ChainSync headers
     private static final int HASH_LENGTH = 32;
     private static final int VKEY_LENGTH = 32;
     private static final int VRF_VKEY_LENGTH = 32;
     private static final int VRF_PROOF_LENGTH = 80;
-    private static final int VRF_OUTPUT_LENGTH = 32;
+    private static final int VRF_OUTPUT_LENGTH = 64;
     private static final int KES_SIGNATURE_LENGTH = 448;
     private static final int OPCERT_SIGMA_LENGTH = 64;
 
-    // Conway protocol version
-    private static final long PROTOCOL_MAJOR = 10;
-    private static final long PROTOCOL_MINOR = 0;
+    // Conway protocol version defaults — must be >= the ledger's current protocolVersion
+    // from shelley-genesis.json. Override via constructor if genesis uses different values.
+    private static final long DEFAULT_PROTOCOL_MAJOR = 10;
+    private static final long DEFAULT_PROTOCOL_MINOR = 2;
+
+    protected final long protocolMajor;
+    protected final long protocolMinor;
+
+    public DevnetBlockBuilder() {
+        this(DEFAULT_PROTOCOL_MAJOR, DEFAULT_PROTOCOL_MINOR);
+    }
+
+    public DevnetBlockBuilder(long protocolMajor, long protocolMinor) {
+        this.protocolMajor = protocolMajor;
+        this.protocolMinor = protocolMinor;
+    }
 
     /**
      * Result of building a block: full block CBOR and wrapped header CBOR.
@@ -55,7 +79,83 @@ public class DevnetBlockBuilder {
      */
     public BlockBuildResult buildBlock(long blockNumber, long slot, byte[] prevHash,
                                        List<byte[]> transactions) {
-        // 1. Split transactions into parallel arrays
+        // 1. Compute block body
+        BlockBodyResult body = computeBlockBody(transactions);
+
+        // 2. Build header array: [[header_body], signature]
+        Array headerArray = buildHeaderArray(blockNumber, slot, prevHash, body.bodySize(), body.bodyHash());
+
+        // 3-5. Compute block hash, assemble full block and wrapped header
+        return assembleBlock(headerArray, body, blockNumber, slot, transactions != null ? transactions.size() : 0);
+    }
+
+    /**
+     * Compute block hash, assemble full block CBOR and wrapped header CBOR from a header array and body.
+     *
+     * @param headerArray  the CBOR header array [headerBody, signature]
+     * @param body         the block body result
+     * @param blockNumber  the block number (for logging and result)
+     * @param slot         the slot number (for logging and result)
+     * @param txCount      transaction count (for logging)
+     * @return BlockBuildResult with full block, wrapped header, and computed block hash
+     */
+    protected BlockBuildResult assembleBlock(Array headerArray, BlockBodyResult body,
+                                              long blockNumber, long slot, int txCount) {
+        // Compute block hash = blake2b-256(serialized header array)
+        byte[] headerArrayBytes = CborSerializationUtil.serialize(headerArray);
+        byte[] blockHash = Blake2bUtil.blake2bHash256(headerArrayBytes);
+
+        // Build block content array: [header, tx_bodies, witnesses, aux_data, invalid_txs]
+        Array blockContentArray = new Array();
+        blockContentArray.add(headerArray);
+        blockContentArray.add(body.txBodiesArray());
+        blockContentArray.add(body.txWitnessesArray());
+        blockContentArray.add(body.auxDataMap());
+        blockContentArray.add(body.invalidTxsArray());
+
+        // Block format: [blockType, [header, tx_bodies, witnesses, aux_data, invalid_txs]]
+        // blockType=7 for Conway (BlockType numbering includes Byron EBB=0 + Main=1)
+        Array fullBlock = new Array();
+        fullBlock.add(new UnsignedInteger(CONWAY_BLOCK_TYPE));
+        fullBlock.add(blockContentArray);
+        byte[] blockCbor = CborSerializationUtil.serialize(fullBlock);
+
+        // Build wrapped header (ChainSync format):
+        //    [headerType, 24(h'<serialized_header_array>')]
+        //    headerType=6 for Conway (BlockHeaderType numbering, Byron=1 entry)
+        Array wrappedHeader = new Array();
+        wrappedHeader.add(new UnsignedInteger(CONWAY_HEADER_TYPE));
+        ByteString headerByteString = new ByteString(headerArrayBytes);
+        headerByteString.setTag(24L);
+        wrappedHeader.add(headerByteString);
+        byte[] wrappedHeaderCbor = CborSerializationUtil.serialize(wrappedHeader);
+
+        log.debug("Built block #{} at slot {} with {} txs, bodySize={}, blockHash={}",
+                blockNumber, slot, txCount, body.bodySize(), HexUtil.encodeHexString(blockHash));
+
+        return new BlockBuildResult(blockCbor, wrappedHeaderCbor, blockHash, blockNumber, slot);
+    }
+
+    /**
+     * Result of computing the block body from transactions.
+     */
+    public record BlockBodyResult(
+            Array txBodiesArray,
+            Array txWitnessesArray,
+            Map auxDataMap,
+            Array invalidTxsArray,
+            long bodySize,
+            byte[] bodyHash
+    ) {
+    }
+
+    /**
+     * Compute the block body arrays and body hash from a list of transactions.
+     *
+     * @param transactions list of complete transaction CBOR bytes
+     * @return BlockBodyResult with parallel arrays and computed body hash
+     */
+    protected BlockBodyResult computeBlockBody(List<byte[]> transactions) {
         Array txBodiesArray = new Array();
         Array txWitnessesArray = new Array();
         Map auxDataMap = new Map();
@@ -67,49 +167,28 @@ public class DevnetBlockBuilder {
             }
         }
 
-        // 2. Serialize the block body array (tx_bodies, witnesses, aux_data, invalid_txs)
-        //    for computing body hash
-        Array bodyContentArray = new Array();
-        bodyContentArray.add(txBodiesArray);
-        bodyContentArray.add(txWitnessesArray);
-        bodyContentArray.add(auxDataMap);
-        bodyContentArray.add(invalidTxsArray);
-        byte[] bodyBytes = CborSerializationUtil.serialize(bodyContentArray);
-        long bodySize = bodyBytes.length;
-        byte[] bodyHash = Blake2bUtil.blake2bHash256(bodyBytes);
+        // Alonzo/Conway segregated witness body hash (two-level):
+        // 1. Hash each component individually
+        // 2. Concatenate the four 32-byte hashes
+        // 3. Hash the 128-byte concatenation
+        byte[] txBodiesBytes = CborSerializationUtil.serialize(txBodiesArray);
+        byte[] txWitnessesBytes = CborSerializationUtil.serialize(txWitnessesArray);
+        byte[] auxDataBytes = CborSerializationUtil.serialize(auxDataMap);
+        byte[] invalidTxsBytes = CborSerializationUtil.serialize(invalidTxsArray);
 
-        // 3. Build header array: [[header_body], signature]
-        Array headerArray = buildHeaderArray(blockNumber, slot, prevHash, bodySize, bodyHash);
+        byte[] h1 = Blake2bUtil.blake2bHash256(txBodiesBytes);
+        byte[] h2 = Blake2bUtil.blake2bHash256(txWitnessesBytes);
+        byte[] h3 = Blake2bUtil.blake2bHash256(auxDataBytes);
+        byte[] h4 = Blake2bUtil.blake2bHash256(invalidTxsBytes);
+        byte[] combined = new byte[128];
+        System.arraycopy(h1, 0, combined, 0, 32);
+        System.arraycopy(h2, 0, combined, 32, 32);
+        System.arraycopy(h3, 0, combined, 64, 32);
+        System.arraycopy(h4, 0, combined, 96, 32);
+        byte[] bodyHash = Blake2bUtil.blake2bHash256(combined);
+        long bodySize = txBodiesBytes.length + txWitnessesBytes.length + auxDataBytes.length + invalidTxsBytes.length;
 
-        // 4. Compute block hash = blake2b-256(serialized header array)
-        byte[] headerArrayBytes = CborSerializationUtil.serialize(headerArray);
-        byte[] blockHash = Blake2bUtil.blake2bHash256(headerArrayBytes);
-
-        // 5. Build full block: [era, [header, tx_bodies, witnesses, aux_data, invalid_txs]]
-        Array blockContentArray = new Array();
-        blockContentArray.add(headerArray);
-        blockContentArray.add(txBodiesArray);
-        blockContentArray.add(txWitnessesArray);
-        blockContentArray.add(auxDataMap);
-        blockContentArray.add(invalidTxsArray);
-
-        Array fullBlock = new Array();
-        fullBlock.add(new UnsignedInteger(CONWAY_ERA));
-        fullBlock.add(blockContentArray);
-        byte[] blockCbor = CborSerializationUtil.serialize(fullBlock);
-
-        // 6. Build wrapped header: [era, h'<serialized_header_array>']
-        //    BlockHeaderSerializer.deserializeDI() expects a ByteString containing serialized header array
-        Array wrappedHeader = new Array();
-        wrappedHeader.add(new UnsignedInteger(CONWAY_ERA));
-        wrappedHeader.add(new ByteString(headerArrayBytes));
-        byte[] wrappedHeaderCbor = CborSerializationUtil.serialize(wrappedHeader);
-
-        log.debug("Built block #{} at slot {} with {} txs, bodySize={}, blockHash={}",
-                blockNumber, slot, transactions != null ? transactions.size() : 0,
-                bodySize, HexUtil.encodeHexString(blockHash));
-
-        return new BlockBuildResult(blockCbor, wrappedHeaderCbor, blockHash, blockNumber, slot);
+        return new BlockBodyResult(txBodiesArray, txWitnessesArray, auxDataMap, invalidTxsArray, bodySize, bodyHash);
     }
 
     /**
@@ -118,7 +197,7 @@ public class DevnetBlockBuilder {
      * [blockNumber, slot, prevHash, issuerVkey, vrfVkey, vrfResult,
      * blockBodySize, blockBodyHash, operationalCert, protocolVersion]
      */
-    private Array buildHeaderArray(long blockNumber, long slot, byte[] prevHash,
+    protected Array buildHeaderArray(long blockNumber, long slot, byte[] prevHash,
                                    long bodySize, byte[] bodyHash) {
         Array headerBody = new Array();
 
@@ -154,8 +233,8 @@ public class DevnetBlockBuilder {
         headerBody.add(opCert);
         // 9: protocolVersion [major, minor]
         Array protoVersion = new Array();
-        protoVersion.add(new UnsignedInteger(PROTOCOL_MAJOR));
-        protoVersion.add(new UnsignedInteger(PROTOCOL_MINOR));
+        protoVersion.add(new UnsignedInteger(protocolMajor));
+        protoVersion.add(new UnsignedInteger(protocolMinor));
         headerBody.add(protoVersion);
 
         // Header array: [header_body, signature]
@@ -170,7 +249,7 @@ public class DevnetBlockBuilder {
      * Split a complete transaction CBOR into the parallel block arrays.
      * Each tx is CBOR-encoded as: [body, witnesses, is_valid, aux_data]
      */
-    private void splitTransaction(byte[] txCbor, int index,
+    protected void splitTransaction(byte[] txCbor, int index,
                                   Array txBodiesArray, Array txWitnessesArray,
                                   Map auxDataMap) {
         try {

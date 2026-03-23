@@ -29,6 +29,10 @@ public final class WitnessUtil {
      * @throws CborException
      */
     public static List<byte[]> getWitnessRawData(byte[] blockBytes) throws CborException {
+        // Handle tag-24 (wrapCBORinCBOR) format
+        // TODO -- Remove if not required. It was identified during block production debugging
+       // blockBytes = TransactionBodyExtractor.unwrapTag24IfNeeded(blockBytes);
+
         ByteArrayInputStream stream = new ByteArrayInputStream(blockBytes);
         CborDecoder decoder = new CborDecoder(stream);
 

@@ -175,6 +175,16 @@ public interface NodeAPI {
     GenesisParameters getGenesisParameters();
 
     /**
+     * Get the current epoch nonce state as a map (for verification/debugging).
+     * Returns null if nonce tracking is not active.
+     *
+     * @return map with keys: epoch, nonce, evolving_nonce, candidate_nonce; or null
+     */
+    default java.util.Map<String, Object> getEpochNonceInfo() {
+        return null;
+    }
+
+    /**
      * Trigger a controlled rollback. Requires dev mode.
      * Rolls back chain state to the given slot, publishes RollbackEvent,
      * and notifies connected clients via n2n protocol.
@@ -266,4 +276,29 @@ public interface NodeAPI {
      * @return Unix timestamp in seconds, or 0 if timing data is not available
      */
     long slotToUnixTime(long slot);
+
+    /**
+     * Shift genesis timestamp back by a number of epochs and start block producer.
+     * Used in past-time-travel mode where block production is deferred.
+     * Requires past-time-travel-mode=true and dev mode.
+     *
+     * @param epochs number of epochs to shift genesis back
+     * @return the shift in milliseconds
+     * @throws IllegalStateException if not in past-time-travel mode or producer already started
+     */
+    default long shiftGenesisAndStartProducer(int epochs) {
+        throw new UnsupportedOperationException("shiftGenesisAndStartProducer not supported by this implementation");
+    }
+
+    /**
+     * Catch up to wall-clock slot by rapidly producing blocks.
+     * Used in past-time-travel mode after epoch shifts and tx injection are done.
+     * Requires dev mode.
+     *
+     * @return the time advance result
+     * @throws IllegalStateException if dev mode is not enabled or producer not running
+     */
+    default TimeAdvanceResult catchUpToWallClock() {
+        throw new UnsupportedOperationException("catchUpToWallClock not supported by this implementation");
+    }
 }

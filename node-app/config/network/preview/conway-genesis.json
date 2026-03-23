@@ -279,15 +279,15 @@
     1
   ],
   "constitution": {
-    "anchor": {
-      "dataHash": "ca41a91f399259bcefe57f9858e91f6d00e1a38d6d9c63d4052914ea7bd70cb2",
-      "url": "ipfs://bafkreifnwj6zpu3ixa4siz2lndqybyc5wnnt3jkwyutci4e2tmbnj3xrdm"
-    },
-    "script": "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64"
+      "anchor": {
+          "dataHash": "ca41a91f399259bcefe57f9858e91f6d00e1a38d6d9c63d4052914ea7bd70cb2",
+          "url": "ipfs://bafkreifnwj6zpu3ixa4siz2lndqybyc5wnnt3jkwyutci4e2tmbnj3xrdm"
+      },
+      "script": "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64"
   },
   "committee": {
     "members": {
-      "scriptHash-ff9babf23fef3f54ec29132c07a8e23807d7b395b143ecd8ff79f4c7": 1000
+        "scriptHash-ff9babf23fef3f54ec29132c07a8e23807d7b395b143ecd8ff79f4c7": 1000
     },
     "threshold": {
       "numerator": 2,
