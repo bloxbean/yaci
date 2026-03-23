@@ -555,5 +555,15 @@
     "allDeclaredFields": true,
     "allDeclaredMethods": true,
     "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.bloxbean.cardano.julc.vm.JulcVmProvider",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.bloxbean.cardano.julc.vm.java.JavaVmProvider",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
   }
 ]
