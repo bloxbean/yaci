@@ -16,7 +16,11 @@ import com.bloxbean.cardano.yaci.node.api.SyncPhase;
 import com.bloxbean.cardano.yaci.events.api.EventBus;
 import com.bloxbean.cardano.yaci.events.api.EventMetadata;
 import com.bloxbean.cardano.yaci.events.api.PublishOptions;
+import com.bloxbean.cardano.yaci.node.api.EpochParamProvider;
 import com.bloxbean.cardano.yaci.node.api.events.BlockConsensusEvent;
+import com.bloxbean.cardano.yaci.node.api.events.EpochTransitionEvent;
+import com.bloxbean.cardano.yaci.node.api.events.PostEpochTransitionEvent;
+import com.bloxbean.cardano.yaci.node.api.events.PreEpochTransitionEvent;
 import com.bloxbean.cardano.yaci.node.runtime.chain.DirectRocksDBChainState;
 import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
 import com.bloxbean.cardano.yaci.node.api.events.BlockReceivedEvent;
@@ -76,6 +80,10 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
     private volatile Point currentBatchFrom;
     private volatile Point currentBatchTo;
     private volatile int currentBatchSize;
+
+    // Epoch transition detection
+    private volatile EpochParamProvider epochParamProvider;
+    private volatile int previousEpoch = -1;
 
     // Rollback tracking to prevent storing stale blocks
     private volatile Point lastRollbackPoint = null;
@@ -167,6 +175,14 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
         if (log.isInfoEnabled()) {
             log.info("🚀 BodyFetchManager started with monitoring thread: {}", monitoringThread.getName());
         }
+    }
+
+    /**
+     * Set the epoch param provider for epoch transition detection.
+     * Must be called before start() if epoch transition events are needed.
+     */
+    public void setEpochParamProvider(EpochParamProvider provider) {
+        this.epochParamProvider = provider;
     }
 
     /**
@@ -508,6 +524,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             // successful store resets stale counter
             consecutiveStaleBlocks.set(0);
 
+            // Detect epoch transition and publish PreEpochTransitionEvent BEFORE BlockAppliedEvent
+            publishEpochTransitionEventsIfNeeded(slot, blockNumber);
+
             // Publish BlockApplied after storage
             EventMetadata appMeta = EventMetadata.builder()
                     .origin("node-runtime")
@@ -620,6 +639,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
                 slot,
                 blockBytes
             );
+
+            // Detect epoch transition and publish PreEpochTransitionEvent BEFORE BlockAppliedEvent
+            publishEpochTransitionEventsIfNeeded(slot, blockNumber);
 
             // Publish BlockApplied after storage
             EventMetadata appMeta = EventMetadata.builder()
@@ -734,6 +756,9 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
 
             // successful store resets stale counter
             consecutiveStaleBlocks.set(0);
+
+            // Detect epoch transition and publish PreEpochTransitionEvent BEFORE BlockAppliedEvent
+            publishEpochTransitionEventsIfNeeded(slot, blockNumber);
 
             // Publish BlockApplied after storage
             EventMetadata appMeta = EventMetadata.builder()
@@ -1210,5 +1235,53 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             }
         }
         return syncPhase == SyncPhase.STEADY_STATE;
+    }
+
+    /**
+     * Compute epoch number for a given slot, mirroring DefaultAccountStateStore.epochForSlot().
+     */
+    private int epochForSlot(long slot) {
+        if (epochParamProvider == null) return -1;
+        long epochLength = epochParamProvider.getEpochLength();
+        long shelleyStart = epochParamProvider.getShelleyStartSlot();
+        if (shelleyStart <= 0) return (int) (slot / epochLength);
+        long byronEpochLen = epochParamProvider.getByronSlotsPerEpoch();
+        long shelleyStartEpoch = shelleyStart / byronEpochLen;
+        return (int) (shelleyStartEpoch + (slot - shelleyStart) / epochLength);
+    }
+
+    /**
+     * Check if an epoch transition occurred and publish the three-phase epoch boundary events.
+     * Must be called BEFORE publishing BlockAppliedEvent.
+     *
+     * <p>Event order mirrors the Cardano ledger spec's EPOCH rule (shelley-ledger.pdf §17.4):</p>
+     * <ol>
+     *   <li>{@link PreEpochTransitionEvent}  — Reward calculation, AdaPot update, param finalization</li>
+     *   <li>{@link EpochTransitionEvent}     — <b>SNAP</b>: delegation/stake snapshot</li>
+     *   <li>{@link PostEpochTransitionEvent} — <b>POOLREAP</b>: pool deposit refunds</li>
+     * </ol>
+     */
+    private void publishEpochTransitionEventsIfNeeded(long slot, long blockNumber) {
+        if (epochParamProvider == null) return;
+        int currentEpoch = epochForSlot(slot);
+        if (currentEpoch < 0) return;
+
+        if (previousEpoch >= 0 && currentEpoch > previousEpoch) {
+            log.info("Epoch transition detected: {} -> {} at slot {}, block {}",
+                    previousEpoch, currentEpoch, slot, blockNumber);
+            EventMetadata meta = EventMetadata.builder()
+                    .origin("node-runtime")
+                    .slot(slot)
+                    .blockNo(blockNumber)
+                    .build();
+            PublishOptions opts = PublishOptions.builder().build();
+            eventBus.publish(new PreEpochTransitionEvent(previousEpoch, currentEpoch, slot, blockNumber),
+                    meta, opts);
+            eventBus.publish(new EpochTransitionEvent(previousEpoch, currentEpoch, slot, blockNumber),
+                    meta, opts);
+            eventBus.publish(new PostEpochTransitionEvent(previousEpoch, currentEpoch, slot, blockNumber),
+                    meta, opts);
+        }
+        previousEpoch = currentEpoch;
     }
 }

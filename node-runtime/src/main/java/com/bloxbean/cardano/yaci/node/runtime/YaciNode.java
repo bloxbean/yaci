@@ -55,6 +55,11 @@ import com.bloxbean.cardano.yaci.node.api.events.SyncStatusChangedEvent;
 import com.bloxbean.cardano.yaci.node.runtime.handlers.YaciTxSubmissionHandler;
 import com.bloxbean.cardano.yaci.node.runtime.plugins.PluginManager;
 import com.bloxbean.cardano.yaci.node.api.plugin.StorageFilter;
+import com.bloxbean.cardano.yaci.node.api.account.AccountStateStore;
+import com.bloxbean.cardano.yaci.node.api.account.AccountStateStoreContext;
+import com.bloxbean.cardano.yaci.node.api.account.LedgerStateProvider;
+import com.bloxbean.cardano.yaci.node.ledgerstate.AccountStateEventHandler;
+import com.bloxbean.cardano.yaci.node.runtime.account.AccountStateStoreDiscovery;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.AddressUtxoFilter;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.DefaultUtxoStore;
 import com.bloxbean.cardano.yaci.node.runtime.utxo.Prunable;
@@ -171,6 +176,9 @@ public class YaciNode implements NodeAPI {
     private UtxoEventHandler utxoEventHandler;
     private UtxoEventHandlerAsync utxoEventHandlerAsync;
     private ScheduledFuture<?> utxoLagTask;
+    private AccountStateStore accountStateStore;
+    private AccountStateEventHandler accountStateEventHandler;
+    private com.bloxbean.cardano.yaci.node.api.EpochParamProvider epochParamProvider;
 
     public YaciNode(YaciNodeConfig config) {
         this(config, RuntimeOptions.defaults());
@@ -284,6 +292,113 @@ public class YaciNode implements NodeAPI {
             log.warn("Failed to initialize UTXO store: {}", t.toString());
         }
 
+        // Phase 3b: Initialize Account State store if enabled (via SPI discovery)
+        try {
+            Object acctEnabledOpt = this.runtimeOptions.globals().get("yaci.node.account-state.enabled");
+            boolean acctEnabled = acctEnabledOpt instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(acctEnabledOpt));
+            if (acctEnabled) {
+                this.epochParamProvider = new com.bloxbean.cardano.yaci.node.runtime.config.DefaultEpochParamProvider(
+                        config.getProtocolParametersFile(), config.getShelleyGenesisFile());
+                var epochParamProvider = this.epochParamProvider;
+                var storeContext = new AccountStateStoreContext(
+                        chainState, this.runtimeOptions.globals(), log, epochParamProvider);
+                this.accountStateStore = AccountStateStoreDiscovery.discover(
+                        storeContext, Thread.currentThread().getContextClassLoader());
+                // Reconcile
+                try {
+                    this.accountStateStore.reconcile(chainState);
+                    log.info("Account state reconciliation complete at startup");
+                } catch (Throwable t) {
+                    log.warn("Account state reconciliation error: {}", t.toString());
+                }
+                // Wire UtxoState and optional epoch subsystems
+                if (this.accountStateStore instanceof com.bloxbean.cardano.yaci.node.ledgerstate.DefaultAccountStateStore defaultStore) {
+                    if (this.utxoStore instanceof UtxoState utxo) {
+                        defaultStore.setUtxoState(utxo);
+                    }
+
+                    // Enable epoch stake snapshot service if configured
+                    boolean snapshotAmountsEnabled = Boolean.parseBoolean(
+                            String.valueOf(this.runtimeOptions.globals().getOrDefault("yaci.node.epoch-snapshot.amounts-enabled", "false")));
+                    if (snapshotAmountsEnabled) {
+                        defaultStore.setStakeSnapshotService(
+                                new com.bloxbean.cardano.yaci.node.ledgerstate.EpochStakeSnapshotService(true));
+                        log.info("Epoch stake snapshot amounts enabled");
+                    }
+
+                    // Enable AdaPot tracker if configured
+                    boolean adaPotEnabled = Boolean.parseBoolean(
+                            String.valueOf(this.runtimeOptions.globals().getOrDefault("yaci.node.adapot.enabled", "false")));
+                    if (adaPotEnabled && chainState instanceof DirectRocksDBChainState rocks) {
+                        var rocksDb = (org.rocksdb.RocksDB) rocks.getDb();
+                        var cfHandle = (org.rocksdb.ColumnFamilyHandle) rocks.getColumnFamilyHandle(
+                                com.bloxbean.cardano.yaci.node.ledgerstate.AccountStateCfNames.ACCT_STATE);
+                        if (cfHandle != null) {
+                            var adaPotTracker = new com.bloxbean.cardano.yaci.node.ledgerstate.AdaPotTracker(
+                                    rocksDb, cfHandle, true);
+                            defaultStore.setAdaPotTracker(adaPotTracker);
+                            log.info("AdaPot tracker enabled");
+                        }
+                    }
+
+                    // Enable protocol param tracker if configured
+                    boolean epochParamsEnabled = Boolean.parseBoolean(
+                            String.valueOf(this.runtimeOptions.globals().getOrDefault("yaci.node.epoch-params.tracking-enabled", "false")));
+                    com.bloxbean.cardano.yaci.node.ledgerstate.EpochParamTracker paramTrackerInstance = null;
+                    if (epochParamsEnabled) {
+                        paramTrackerInstance = new com.bloxbean.cardano.yaci.node.ledgerstate.EpochParamTracker(
+                                epochParamProvider, true);
+                        defaultStore.setParamTracker(paramTrackerInstance);
+                        log.info("Epoch param tracker enabled");
+                    }
+
+                    // Enable reward calculator if configured
+                    boolean rewardsEnabled = Boolean.parseBoolean(
+                            String.valueOf(this.runtimeOptions.globals().getOrDefault("yaci.node.rewards.enabled", "false")));
+                    com.bloxbean.cardano.yaci.node.ledgerstate.EpochRewardCalculator rewardCalcInstance = null;
+                    if (rewardsEnabled && chainState instanceof DirectRocksDBChainState rocks) {
+                        var rocksDb = (org.rocksdb.RocksDB) rocks.getDb();
+                        var cfState = (org.rocksdb.ColumnFamilyHandle) rocks.getColumnFamilyHandle(
+                                com.bloxbean.cardano.yaci.node.ledgerstate.AccountStateCfNames.ACCT_STATE);
+                        var cfSnapshot = (org.rocksdb.ColumnFamilyHandle) rocks.getColumnFamilyHandle(
+                                com.bloxbean.cardano.yaci.node.ledgerstate.AccountStateCfNames.EPOCH_DELEG_SNAPSHOT);
+                        if (cfState != null && cfSnapshot != null) {
+                            rewardCalcInstance = new com.bloxbean.cardano.yaci.node.ledgerstate.EpochRewardCalculator(
+                                    rocksDb, cfState, cfSnapshot, true);
+                            rewardCalcInstance.setLedgerStateProvider(defaultStore);
+                            rewardCalcInstance.setAccountStateStore(defaultStore);
+                            defaultStore.setRewardCalculator(rewardCalcInstance);
+                            log.info("Epoch reward calculator enabled");
+                        }
+                    }
+
+                    // Wire epoch boundary processor if any subsystem is enabled
+                    if (adaPotEnabled || rewardsEnabled || epochParamsEnabled) {
+                        long magic = config.getProtocolMagic();
+                        defaultStore.setNetworkMagic(magic);
+                        var boundaryProcessor = new com.bloxbean.cardano.yaci.node.ledgerstate.EpochBoundaryProcessor(
+                                defaultStore.getAdaPotTracker(),
+                                rewardCalcInstance,
+                                paramTrackerInstance,
+                                epochParamProvider,
+                                magic);
+                        defaultStore.setEpochBoundaryProcessor(boundaryProcessor);
+                        log.info("Epoch boundary processor wired (adapot={}, rewards={}, params={})",
+                                adaPotEnabled, rewardsEnabled, epochParamsEnabled);
+                    }
+                }
+
+                // Register event handler
+                this.accountStateEventHandler = new AccountStateEventHandler(eventBus, this.accountStateStore);
+                log.info("Account state store initialized ({}); event handler registered",
+                        this.accountStateStore.getClass().getSimpleName());
+            } else {
+                log.info("Account state store not initialized (enabled={})", acctEnabled);
+            }
+        } catch (Throwable t) {
+            log.warn("Failed to initialize account state store: {}", t.toString());
+        }
+
         // Phase 4: Initialize block body pruning if configured and RocksDB is used
         try {
             int blockPruneDepth = (int) parseLong(this.runtimeOptions.globals().get("yaci.node.chain.block-body-prune-depth"), 0);
@@ -306,6 +421,14 @@ public class YaciNode implements NodeAPI {
     @Override
     public UtxoState getUtxoState() {
         return (utxoStore instanceof UtxoState u) ? u : null;
+    }
+
+    public LedgerStateProvider getLedgerStateProvider() {
+        return accountStateStore;
+    }
+
+    public AccountStateStore getAccountStateStore() {
+        return accountStateStore;
     }
 
     /**
@@ -351,6 +474,7 @@ public class YaciNode implements NodeAPI {
                 log.info("Genesis config loaded (protocolParams={}, shelleyData={})",
                         genesisConfig.hasProtocolParameters() ? "available" : "none",
                         genesisConfig.getShelleyGenesisData() != null ? "available" : "none");
+
             }
 
             // Start block producer if enabled (after server so we can notify)
@@ -548,6 +672,10 @@ public class YaciNode implements NodeAPI {
      * Start the block producer — branches between devnet and slot-leader modes.
      */
     private void startBlockProducer() {
+        // Wire epoch param provider for epoch transition detection in block producer path
+        if (this.epochParamProvider != null) {
+            com.bloxbean.cardano.yaci.node.runtime.blockproducer.BlockProducerHelper.setEpochParamProvider(this.epochParamProvider);
+        }
         if (config.isSlotLeaderMode()) {
             startSlotLeaderBlockProducer();
         } else {
@@ -1482,6 +1610,11 @@ public class YaciNode implements NodeAPI {
                 utxoStore.reinitialize();
             }
 
+            // 2c. Reinitialize account state store with new DB handles
+            if (accountStateStore != null) {
+                accountStateStore.reinitialize();
+            }
+
             // 3. Clear mempool
             if (memPool != null) {
                 memPool.clear();
@@ -1971,6 +2104,16 @@ public class YaciNode implements NodeAPI {
             );
             log.info("📦 BodyFetchManager created with gapThreshold={}, maxBatchSize={}",
                     gapThreshold, maxBatchSize);
+        }
+
+        // Wire epoch param provider for epoch transition detection
+        if (bodyFetchManager != null && this.epochParamProvider != null) {
+            bodyFetchManager.setEpochParamProvider(this.epochParamProvider);
+            // Initialize previousEpoch from chain state tip
+            var tip = chainState.getTip();
+            if (tip != null && tip.getSlot() > 0) {
+                log.info("BodyFetchManager: initializing epoch tracking from tip slot {}", tip.getSlot());
+            }
         }
 
         log.info("🔗 Pipeline managers initialized and ready");

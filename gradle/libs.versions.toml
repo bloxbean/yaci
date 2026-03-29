@@ -1,5 +1,5 @@
 [versions]
-cardano-client-lib = "0.8.0-preview2-vrf-SNAPSHOT"
+cardano-client-lib = "0.8.0-pre2-vrf-SNAPSHOT"
 julc="0.1.0-pre7"
 
 [libraries]
@@ -43,3 +43,5 @@ scalus-cardano-ledger = "org.scalus:scalus-cardano-ledger_3:0.16.0"
 scalus-bloxbean-ccl = "org.scalus:scalus-bloxbean-cardano-client-lib_3:0.16.0"
 
 aiken-java-binding = "com.bloxbean.cardano:aiken-java-binding:0.1.0"
+
+cf-rewards-calculation = "org.cardanofoundation:cf-rewards-calculation:1.0.0"

@@ -7,7 +7,7 @@ quarkus:
       type: uber-jar
       add-runner-suffix: false
   http:
-    port: 8080
+    port: 7070
     test-port: 0
   log:
     level: INFO
@@ -56,6 +56,16 @@ yaci:
       conway-genesis-file: config/network/preprod/conway-genesis.json
       protocol-parameters-file: config/network/preprod/protocol-param.json
     dev-mode: false
+    account-state:
+      enabled: true
+    epoch-snapshot:
+      amounts-enabled: true
+    adapot:
+      enabled: true
+    rewards:
+      enabled: true
+    epoch-params:
+      tracking-enabled: true
     chain:
       block-body-prune-depth: 0          # blocks to retain (0 = disabled)
       block-prune-batch-size: 500000     # entries per prune pass
@@ -100,6 +110,16 @@ yaci:
         alonzo-genesis-file: config/network/devnet/alonzo-genesis.json
         conway-genesis-file: config/network/devnet/conway-genesis.json
         protocol-parameters-file: config/network/devnet/protocol-param.json
+      account-state:
+        enabled: true
+      epoch-snapshot:
+        amounts-enabled: false          # UTXO balance aggregation in snapshots
+      adapot:
+        enabled: false                  # Treasury/reserves tracking
+      rewards:
+        enabled: false                  # Epoch reward calculation
+      epoch-params:
+        tracking-enabled: false         # Protocol param tracking from blocks
       block-producer:
         enabled: true
         block-time-millis: 0

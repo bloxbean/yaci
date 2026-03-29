@@ -145,7 +145,7 @@ tasks.register('nodeDistZip', Zip) {
     into("yaci-node-${distVersion}") {
         from(layout.buildDirectory.file('yaci-node.jar'))
         from('bin/yaci-node.sh') {
-            fileMode 0755
+            filePermissions { unix('755') }
         }
         from('bin/README.md')
         from('config') {
@@ -189,10 +189,10 @@ tasks.register('nodeNativeDistZip', Zip) {
 
     into("yaci-node-native-${distVersion}-${platform}") {
         from(layout.buildDirectory.file('yaci-node')) {
-            fileMode 0755
+            filePermissions { unix('755') }
         }
         from('bin/yaci-node.sh') {
-            fileMode 0755
+            filePermissions { unix('755') }
         }
         from('bin/README.md')
         from('config') {

@@ -9,8 +9,12 @@ import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.events.api.EventBus;
 import com.bloxbean.cardano.yaci.events.api.EventMetadata;
 import com.bloxbean.cardano.yaci.events.api.PublishOptions;
+import com.bloxbean.cardano.yaci.node.api.EpochParamProvider;
 import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
 import com.bloxbean.cardano.yaci.node.api.events.BlockProducedEvent;
+import com.bloxbean.cardano.yaci.node.api.events.EpochTransitionEvent;
+import com.bloxbean.cardano.yaci.node.api.events.PostEpochTransitionEvent;
+import com.bloxbean.cardano.yaci.node.api.events.PreEpochTransitionEvent;
 import com.bloxbean.cardano.yaci.node.api.model.MemPoolTransaction;
 import com.bloxbean.cardano.yaci.node.api.utxo.UtxoState;
 import com.bloxbean.cardano.yaci.node.ledgerrules.ValidationResult;
@@ -27,7 +31,19 @@ import java.util.List;
 @Slf4j
 public final class BlockProducerHelper {
 
+    // Shared epoch tracking for block producer paths.
+    // Single-threaded access (block production is sequential).
+    private static volatile int previousEpoch = -1;
+    private static volatile EpochParamProvider epochProvider;
+
     private BlockProducerHelper() {}
+
+    /**
+     * Set the epoch param provider for epoch transition detection in block producer mode.
+     */
+    public static void setEpochParamProvider(EpochParamProvider provider) {
+        epochProvider = provider;
+    }
 
     public static void storeBlock(ChainState chainState, DevnetBlockBuilder.BlockBuildResult result) {
         chainState.storeBlock(result.blockHash(), result.blockNumber(), result.slot(), result.blockCbor());
@@ -52,6 +68,9 @@ public final class BlockProducerHelper {
                     new BlockProducedEvent(6, result.slot(), result.blockNumber(),
                             result.blockHash(), txCount),
                     meta, opts);
+
+            // Detect epoch transition and publish PreEpochTransitionEvent BEFORE BlockAppliedEvent
+            publishEpochTransitionEventsIfNeeded(eventBus, result.slot(), result.blockNumber(), meta, opts);
 
             Block block = BlockSerializer.INSTANCE.deserialize(result.blockCbor());
             eventBus.publish(
@@ -102,5 +121,34 @@ public final class BlockProducerHelper {
             }
         }
         return txList;
+    }
+
+    private static void publishEpochTransitionEventsIfNeeded(EventBus eventBus, long slot, long blockNumber,
+                                                             EventMetadata meta, PublishOptions opts) {
+        if (epochProvider == null) return;
+        int currentEpoch = epochForSlot(slot);
+        if (currentEpoch < 0) return;
+
+        if (previousEpoch >= 0 && currentEpoch > previousEpoch) {
+            log.info("Epoch transition detected (block producer): {} -> {} at slot {}, block {}",
+                    previousEpoch, currentEpoch, slot, blockNumber);
+            eventBus.publish(new PreEpochTransitionEvent(previousEpoch, currentEpoch, slot, blockNumber),
+                    meta, opts);
+            eventBus.publish(new EpochTransitionEvent(previousEpoch, currentEpoch, slot, blockNumber),
+                    meta, opts);
+            eventBus.publish(new PostEpochTransitionEvent(previousEpoch, currentEpoch, slot, blockNumber),
+                    meta, opts);
+        }
+        previousEpoch = currentEpoch;
+    }
+
+    private static int epochForSlot(long slot) {
+        if (epochProvider == null) return -1;
+        long epochLength = epochProvider.getEpochLength();
+        long shelleyStart = epochProvider.getShelleyStartSlot();
+        if (shelleyStart <= 0) return (int) (slot / epochLength);
+        long byronEpochLen = epochProvider.getByronSlotsPerEpoch();
+        long shelleyStartEpoch = shelleyStart / byronEpochLen;
+        return (int) (shelleyStartEpoch + (slot - shelleyStart) / epochLength);
     }
 }

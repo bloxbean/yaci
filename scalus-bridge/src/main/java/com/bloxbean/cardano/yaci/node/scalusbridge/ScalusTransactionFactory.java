@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.node.scalusbridge;
 import com.bloxbean.cardano.client.api.ScriptSupplier;
 import com.bloxbean.cardano.client.api.model.ProtocolParams;
 import com.bloxbean.cardano.client.common.model.SlotConfig;
+import com.bloxbean.cardano.yaci.node.api.account.LedgerStateProvider;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionEvaluator;
 import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
 
@@ -12,9 +13,15 @@ import com.bloxbean.cardano.yaci.node.ledgerrules.TransactionValidator;
  */
 public class ScalusTransactionFactory {
 
-    public static TransactionValidator createValidator(ProtocolParams pp, ScriptSupplier scriptSupplier, 
+    public static TransactionValidator createValidator(ProtocolParams pp, ScriptSupplier scriptSupplier,
                                                        SlotConfig slotConfig, int networkId) {
         return new ScalusBasedTransactionValidator(pp, scriptSupplier, slotConfig, networkId);
+    }
+
+    public static TransactionValidator createValidator(ProtocolParams pp, ScriptSupplier scriptSupplier,
+                                                       SlotConfig slotConfig, int networkId,
+                                                       LedgerStateProvider ledgerStateProvider) {
+        return new ScalusBasedTransactionValidator(pp, scriptSupplier, slotConfig, networkId, ledgerStateProvider);
     }
 
     public static TransactionEvaluator createEvaluator(ProtocolParams pp, ScriptSupplier scriptSupplier,

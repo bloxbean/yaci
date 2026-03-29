@@ -5,7 +5,9 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.node.api.db.RocksDbAccess;
 import com.bloxbean.cardano.yaci.node.runtime.blockproducer.NonceStateStore;
+import com.bloxbean.cardano.yaci.node.ledgerstate.AccountStateCfNames;
 import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbContext;
 import com.bloxbean.cardano.yaci.node.runtime.db.RocksDbSupplier;
 import com.bloxbean.cardano.yaci.node.runtime.db.UtxoCfNames;
@@ -36,7 +38,7 @@ import java.util.OptionalLong;
  */
 @Slf4j
 public class DirectRocksDBChainState implements ChainState, AutoCloseable, RocksDbSupplier,
-        NonceStateStore {
+        NonceStateStore, RocksDbAccess {
 
     private static final byte[] TIP_KEY = "tip".getBytes(StandardCharsets.UTF_8);
     private static final byte[] HEADER_TIP_KEY = "header_tip".getBytes(StandardCharsets.UTF_8);
@@ -141,7 +143,11 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
                             UtxoCfNames.UTXO_BLOCK_DELTA.getBytes(),
                             tuningEnabled ? utxoDeltaOpts : new ColumnFamilyOptions()),
                     new ColumnFamilyDescriptor(UtxoCfNames.UTXO_META.getBytes()),
-                    new ColumnFamilyDescriptor(UtxoCfNames.SCRIPT_REF.getBytes())
+                    new ColumnFamilyDescriptor(UtxoCfNames.SCRIPT_REF.getBytes()),
+                    // Account state CFs
+                    new ColumnFamilyDescriptor(AccountStateCfNames.ACCT_STATE.getBytes()),
+                    new ColumnFamilyDescriptor(AccountStateCfNames.ACCT_DELTA.getBytes()),
+                    new ColumnFamilyDescriptor(AccountStateCfNames.EPOCH_DELEG_SNAPSHOT.getBytes())
             );
 
             // Open database
@@ -246,6 +252,18 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
     @Override
     public RocksDbContext rocks() {
         return new RocksDbContext(db, Collections.unmodifiableMap(cfByName));
+    }
+
+    // --- RocksDbAccess ---
+
+    @Override
+    public Object getDb() {
+        return db;
+    }
+
+    @Override
+    public Object getColumnFamilyHandle(String cfName) {
+        return cfByName.get(cfName);
     }
 
     @Override

@@ -61,6 +61,17 @@ public interface UtxoState {
     }
 
     /**
+     * Iterate over all unspent UTXOs.
+     * The consumer receives (address, lovelace) for each UTXO.
+     * Used for epoch-boundary stake distribution aggregation.
+     *
+     * @param consumer receives (bech32 address, lovelace amount) per UTXO
+     */
+    default void forEachUtxo(java.util.function.BiConsumer<String, java.math.BigInteger> consumer) {
+        // Default no-op — implementations override
+    }
+
+    /**
      * Whether UTXO state is enabled and actively maintained.
      */
     boolean isEnabled();

@@ -4,9 +4,9 @@
 # Quarkus automatically loads this file from the config/ directory.
 
 # HTTP port (default: 8080)
-# quarkus:
-#   http:
-#     port: 8080
+ quarkus:
+   http:
+     port: 7070
 
 # Genesis files (uncomment and point to local files to override bundled defaults)
 # yaci:

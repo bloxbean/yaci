@@ -103,6 +103,20 @@ public class YaciNodeProducer {
     @ConfigProperty(name = "yaci.node.utxo.applyAsync", defaultValue = "false")
     boolean utxoApplyAsync;
 
+    // Account state config
+    @ConfigProperty(name = "yaci.node.account-state.enabled", defaultValue = "false")
+    boolean accountStateEnabled;
+
+    // Epoch subsystem config
+    @ConfigProperty(name = "yaci.node.epoch-snapshot.amounts-enabled", defaultValue = "false")
+    boolean epochSnapshotAmountsEnabled;
+    @ConfigProperty(name = "yaci.node.adapot.enabled", defaultValue = "false")
+    boolean adapotEnabled;
+    @ConfigProperty(name = "yaci.node.rewards.enabled", defaultValue = "false")
+    boolean rewardsEnabled;
+    @ConfigProperty(name = "yaci.node.epoch-params.tracking-enabled", defaultValue = "false")
+    boolean epochParamsTrackingEnabled;
+
     // Block body pruning config
     @ConfigProperty(name = "yaci.node.chain.block-body-prune-depth", defaultValue = "0")
     int blockBodyPruneDepth;
@@ -325,6 +339,15 @@ public class YaciNodeProducer {
         globals.put("yaci.node.utxo.applyAsync", utxoApplyAsync);
         globals.put("yaci.node.tx-evaluation.enabled", txEvaluationEnabled);
 
+        // Account state
+        globals.put("yaci.node.account-state.enabled", accountStateEnabled);
+
+        // Epoch subsystems
+        globals.put("yaci.node.epoch-snapshot.amounts-enabled", epochSnapshotAmountsEnabled);
+        globals.put("yaci.node.adapot.enabled", adapotEnabled);
+        globals.put("yaci.node.rewards.enabled", rewardsEnabled);
+        globals.put("yaci.node.epoch-params.tracking-enabled", epochParamsTrackingEnabled);
+
         // Block pruning
         globals.put("yaci.node.chain.block-body-prune-depth", blockBodyPruneDepth);
         globals.put("yaci.node.chain.block-prune-batch-size", blockPruneBatchSize);
@@ -425,7 +448,8 @@ public class YaciNodeProducer {
         boolean validatorInitialized = false;
         try {
             TransactionValidator evaluator =
-                    ScalusTransactionFactory.createValidator(pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig, networkId);
+                    ScalusTransactionFactory.createValidator(pp, new YaciScriptSupplier(yaciNode.getUtxoState()), slotConfig, networkId,
+                            yaciNode.getLedgerStateProvider());
             yaciNode.setTransactionEvaluator(evaluator);
             validatorInitialized = true;
             log.info("Transaction validator initialized (networkId={})", networkId);

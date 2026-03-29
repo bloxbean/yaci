@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.node.scalusbridge
 
 import com.bloxbean.cardano.client.api.model.{ProtocolParams as CclProtocolParams, Utxo}
+import com.bloxbean.cardano.yaci.node.api.account.LedgerStateProvider
 import scalus.bloxbean.ScriptSupplier
 import scalus.cardano.ledger.{Transaction as ScalusTx, *}
 import scalus.cardano.ledger.rules.*
@@ -50,6 +51,31 @@ object LedgerBridge:
       networkId: Int,
       scriptSupplier: ScriptSupplier
   ): TransitResult =
+    validate(txCbor, protocolParams, inputUtxos, currentSlot, slotConfig, networkId, scriptSupplier, null)
+
+  /**
+   * Validate a transaction against full Cardano ledger rules with ledger state.
+   *
+   * @param txCbor              serialized transaction CBOR bytes
+   * @param protocolParams      CCL ProtocolParams
+   * @param inputUtxos          set of resolved input UTxOs (CCL Utxo)
+   * @param currentSlot         current slot (e.g. from validity start interval)
+   * @param slotConfig          opaque SlotConfigHandle from SlotConfigBridge
+   * @param networkId           0 = testnet, 1 = mainnet
+   * @param scriptSupplier      nullable ScriptSupplier for reference script resolution
+   * @param ledgerStateProvider nullable LedgerStateProvider for account/delegation state
+   * @return TransitResult with success/failure and error details
+   */
+  def validate(
+      txCbor: Array[Byte],
+      protocolParams: CclProtocolParams,
+      inputUtxos: util.Set[Utxo],
+      currentSlot: Long,
+      slotConfig: SlotConfig,
+      networkId: Int,
+      scriptSupplier: ScriptSupplier,
+      ledgerStateProvider: LedgerStateProvider
+  ): TransitResult =
     try
       val scalusParams = ProtocolParamsBridge.toScalusProtocolParams(protocolParams)
 
@@ -60,7 +86,13 @@ object LedgerBridge:
 
       val network = ProtocolParamsBridge.toNetwork(networkId)
       val sc = if slotConfig != null then slotConfig else throw new RuntimeException("SlotConfig not found");
-      val env = UtxoEnv(currentSlot, scalusParams, CertState.empty, network)
+
+      // Build CertState from ledger state provider if available
+      val (certState, totalDeposited) = if ledgerStateProvider != null then
+        CertStateBridge.build(ledgerStateProvider, scalusTx)
+      else (CertState.empty, Coin.zero)
+
+      val env = UtxoEnv(currentSlot, scalusParams, certState, network)
 
       val context = Context(
         Coin.zero,
@@ -71,8 +103,8 @@ object LedgerBridge:
 
       val state = State(
         scalusUtxos,
-        CertState.empty,
-        Coin.zero,   // deposited
+        certState,
+        totalDeposited,
         Coin.zero,   // fees
         new Array[io.bullet.borer.Dom.Element](0), // govState (empty)
         scala.collection.immutable.Map.empty,       // stakeDistribution

@@ -356,6 +356,23 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     }
 
     @Override
+    public void forEachUtxo(java.util.function.BiConsumer<String, BigInteger> consumer) {
+        if (!enabled || db == null) return;
+        try (RocksIterator it = db.newIterator(cfUnspent)) {
+            it.seekToFirst();
+            while (it.isValid()) {
+                try {
+                    var stored = UtxoCborCodec.decodeUtxoRecord(it.value());
+                    consumer.accept(stored.address, stored.lovelace);
+                } catch (Exception ex) {
+                    // Skip malformed records
+                }
+                it.next();
+            }
+        }
+    }
+
+    @Override
     public boolean isEnabled() {
         return enabled;
     }
@@ -390,6 +407,10 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
             List<UtxoDeltaCodec.OutRef> spentRefs = new ArrayList<>();
             int filteredOutputs = 0;
 
+            // Track outputs created within this block for intra-block spend detection.
+            // The pre-fetched ctx only sees cfUnspent state BEFORE this block's outputs.
+            java.util.HashMap<String, byte[]> intraBlockOutputs = new java.util.HashMap<>();
+
             for (int i = 0; i < txs.size(); i++) {
                 var tx = txs.get(i);
                 boolean invalid = invalidIdx.contains(i);
@@ -398,6 +419,18 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                         for (var in : tx.getInputs()) {
                             byte[] key = UtxoKeyUtil.outpointKey(in.getTransactionId(), in.getIndex());
                             byte[] prev = ctx.getUnspent(key);
+                            // Also check intra-block outputs (created earlier in this block)
+                            String intraKey = in.getTransactionId() + ":" + in.getIndex();
+                            if (prev == null) {
+                                prev = intraBlockOutputs.remove(intraKey);
+                                if (prev != null) {
+                                    // Intra-block spend: output was created and spent in same block.
+                                    // Delete from cfUnspent (was added to batch by earlier tx)
+                                    batch.delete(cfUnspent, key);
+                                }
+                            } else {
+                                intraBlockOutputs.remove(intraKey);
+                            }
                             if (prev != null) {
                                 Map spentMap = new Map();
                                 spentMap.put(new UnsignedInteger(2), CborSerializationUtil.deserializeOne(prev));
@@ -451,6 +484,8 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
 
                             byte[] outKey = UtxoKeyUtil.outpointKey(tx.getTxHash(), outIdx);
                             batch.put(cfUnspent, outKey, val);
+                            // Track for intra-block spend detection
+                            intraBlockOutputs.put(tx.getTxHash() + ":" + outIdx, val);
                             if (referenceScriptHash != null && out.getScriptRef() != null) {
                                 batch.put(cfScriptRef, referenceScriptHash, HexUtil.decodeHexString(out.getScriptRef()));
                             }
@@ -475,6 +510,15 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
                         for (var in : tx.getCollateralInputs()) {
                             byte[] key = UtxoKeyUtil.outpointKey(in.getTransactionId(), in.getIndex());
                             byte[] prev = ctx.getUnspent(key);
+                            String intraKey = in.getTransactionId() + ":" + in.getIndex();
+                            if (prev == null) {
+                                prev = intraBlockOutputs.remove(intraKey);
+                                if (prev != null) {
+                                    batch.delete(cfUnspent, key);
+                                }
+                            } else {
+                                intraBlockOutputs.remove(intraKey);
+                            }
                             if (prev != null) {
                                 Map spentMap = new Map();
                                 spentMap.put(new UnsignedInteger(2), CborSerializationUtil.deserializeOne(prev));
