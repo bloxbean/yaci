@@ -567,10 +567,28 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             }
 
         } catch (Exception e) {
+            // Check for continuity violation — indicates fork-induced index/body mismatch.
+            // Instead of cascading failure, treat as stale and let recovery handle it.
+            boolean isContinuityViolation = false;
+            if (e.getMessage() != null && e.getMessage().contains("CONTINUITY VIOLATION")) {
+                isContinuityViolation = true;
+            } else if (e.getCause() != null && e.getCause().getMessage() != null
+                    && e.getCause().getMessage().contains("CONTINUITY VIOLATION")) {
+                isContinuityViolation = true;
+            }
+            if (isContinuityViolation) {
+                log.warn("Continuity violation — treating as stale for recovery: {}",
+                        e.getMessage() != null ? e.getMessage().substring(0, Math.min(120, e.getMessage().length())) : "unknown");
+                if (consecutiveStaleBlocks.incrementAndGet() >= STALE_RECOVERY_THRESHOLD) {
+                    onStaleBlockObserved();
+                }
+                return; // Don't re-throw — let stale recovery handle it
+            }
+
             log.error("Failed to store complete block: {}",
                      block != null && block.getHeader() != null && block.getHeader().getHeaderBody() != null ?
                      block.getHeader().getHeaderBody().getBlockHash() : "unknown", e);
-            throw e; // Re-throw exception for proper error handling
+            throw e; // Re-throw non-continuity errors
         }
     }
 
@@ -986,6 +1004,23 @@ public class BodyFetchManager implements BlockChainDataListener, Runnable {
             try {
                 byte[] headerBytes = chainState.getBlockHeader(HexUtil.decodeHexString(hash));
                 if (headerBytes != null) {
+                    // Header exists — but also verify prerequisite: block N-1 body must exist.
+                    // After a fork/rollback, the header indices may point to a different hash
+                    // than the stored body. Without this check, storeBlock would fail with
+                    // CONTINUITY VIOLATION because getBlockByNumber(N-1) follows new indices
+                    // to a hash whose body doesn't exist.
+                    if (blockNumber > 1) {
+                        // Verify prerequisite: block N-1 body must exist.
+                        // This is the same check that storeBlock performs — doing it here prevents
+                        // the CONTINUITY VIOLATION exception and allows stale-block recovery instead.
+                        // The body read is cached by RocksDB, so the duplicate read in storeBlock is cheap.
+                        byte[] prevBlock = chainState.getBlockByNumber(blockNumber - 1);
+                        if (prevBlock == null) {
+                            log.warn("Header exists for block #{} but prerequisite block #{} body missing — treating as stale (possible fork mismatch)",
+                                    blockNumber, blockNumber - 1);
+                            return true;
+                        }
+                    }
                     if (log.isDebugEnabled())
                         log.debug("Header exists for block #{} at slot {} (hash={}), accepting body for backfill",
                                 blockNumber, slot, hash.substring(0, Math.min(16, hash.length())));

@@ -1657,21 +1657,20 @@ public class DefaultAccountStateStore implements AccountStateStore {
         // from dsAccounts via Map.extract, discarding sasStakePoolDelegation with it.
         // Re-registration starts fresh with sasStakePoolDelegation = SNothing (no delegation).
         // Also cleans the reverse index: removes credential from the pool's spsDelegators set.
+        //
+        // Always delete unconditionally — the delegation may exist in the uncommitted WriteBatch
+        // (e.g., delegation and deregistration in the same block) where db.get() won't find it.
         byte[] delegKey = poolDelegKey(ct, cred.getHash());
         byte[] delegPrev = db.get(cfState, delegKey);
-        if (delegPrev != null) {
-            batch.delete(cfState, delegKey);
-            deltaOps.add(new DeltaOp(OP_DELETE, delegKey, delegPrev));
-        }
+        batch.delete(cfState, delegKey);
+        deltaOps.add(new DeltaOp(OP_DELETE, delegKey, delegPrev)); // delegPrev may be null — rollback handles it
 
         // Remove DRep delegation (same behavior: Conway unregisterConwayAccount calls
         // unDelegReDelegDRep with Nothing, clearing the DRep delegation)
         byte[] drepKey = drepDelegKey(ct, cred.getHash());
         byte[] drepPrev = db.get(cfState, drepKey);
-        if (drepPrev != null) {
-            batch.delete(cfState, drepKey);
-            deltaOps.add(new DeltaOp(OP_DELETE, drepKey, drepPrev));
-        }
+        batch.delete(cfState, drepKey);
+        deltaOps.add(new DeltaOp(OP_DELETE, drepKey, drepPrev)); // drepPrev may be null
 
         // Write stake event
         byte[] eventKey = stakeEventKey(slot, txIdx, certIdx, ct, cred.getHash());

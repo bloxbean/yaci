@@ -481,6 +481,24 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
         }
     }
 
+    /**
+     * Check if a block body exists for the given block number, without reading the full body.
+     * Uses index lookups (number → slot → hash) then hasBlock (fillCache=false).
+     * Much cheaper than getBlockByNumber which reads the full block body.
+     */
+    public boolean hasBlockBodyByNumber(long blockNumber) {
+        try {
+            byte[] slotBytes = db.get(slotByNumberHandle, longToBytes(blockNumber));
+            if (slotBytes == null) return false;
+            long slot = bytesToLong(slotBytes);
+            byte[] blockHash = db.get(slotToHashHandle, longToBytes(slot));
+            if (blockHash == null) return false;
+            return hasBlock(blockHash);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     @Override
     public byte[] getBlockByNumber(Long blockNumber) {
         try {

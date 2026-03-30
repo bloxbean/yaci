@@ -128,9 +128,19 @@ public class EpochParamTracker implements EpochParamProvider {
      */
     public void applyEnactedParamChange(int epoch, ProtocolParamUpdate update) {
         if (!enabled || update == null) return;
-        pendingUpdates.merge(epoch, update, this::mergeUpdates);
-        log.info("Applied enacted ParameterChangeAction for epoch {}", epoch);
-        // Will be finalized in finalizeEpoch(epoch) which merges pending into epochParams
+        // Directly update epochParams (not pendingUpdates) because finalizeEpoch(epoch)
+        // has already run by the time governance enactment calls this method.
+        // The governance epoch processing runs AFTER param finalization in EpochBoundaryProcessor.
+        var prev = epochParams.get(epoch);
+        if (prev != null) {
+            epochParams.put(epoch, mergeUpdates(prev, update));
+        } else {
+            var prevEpoch = epoch > 0 ? epochParams.get(epoch - 1) : null;
+            epochParams.put(epoch, prevEpoch != null ? mergeUpdates(prevEpoch, update) : update);
+        }
+        // Persist the updated params
+        persistEpochParams(epoch, epochParams.get(epoch));
+        log.info("Applied enacted governance param change for epoch {} (direct update)", epoch);
     }
 
     /**
