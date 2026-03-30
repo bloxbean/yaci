@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.node.ledgerstate;
 
 import com.bloxbean.cardano.yaci.node.api.EpochParamProvider;
+import com.bloxbean.cardano.yaci.node.ledgerstate.governance.epoch.GovernanceEpochProcessor;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.cardanofoundation.rewards.calculation.domain.EpochCalculationResult;
@@ -37,6 +38,9 @@ public class EpochBoundaryProcessor {
     private final EpochParamProvider paramProvider;
     private final long networkMagic;
 
+    // Optional governance epoch processor (null = disabled, set after construction)
+    private volatile GovernanceEpochProcessor governanceEpochProcessor;
+
     // Expected AdaPot values for verification (loaded lazily from classpath JSON)
     private volatile Map<Integer, ExpectedAdaPot> expectedAdaPots;
 
@@ -50,6 +54,13 @@ public class EpochBoundaryProcessor {
         this.paramTracker = paramTracker;
         this.paramProvider = paramProvider;
         this.networkMagic = networkMagic;
+    }
+
+    /**
+     * Set the governance epoch processor for Conway-era governance state tracking.
+     */
+    public void setGovernanceEpochProcessor(GovernanceEpochProcessor processor) {
+        this.governanceEpochProcessor = processor;
     }
 
     /**
@@ -76,9 +87,21 @@ public class EpochBoundaryProcessor {
         // 2. Bootstrap AdaPot at the Shelley start epoch (before any reward calculation)
         bootstrapAdaPotIfNeeded(newEpoch);
 
-        // 3. Calculate rewards (requires AdaPot from previous epoch)
+        // 2.5. Conway governance epoch processing (ratify, enact, expire, refund)
+        //      Must run BEFORE reward calculation so treasury/deposit changes are reflected.
+        GovernanceEpochProcessor.GovernanceEpochResult govResult = null;
+        if (governanceEpochProcessor != null) {
+            try {
+                govResult = governanceEpochProcessor.processEpochBoundaryAndCommit(previousEpoch, newEpoch);
+            } catch (Exception e) {
+                log.error("Governance epoch processing failed for {} → {}: {}",
+                        previousEpoch, newEpoch, e.getMessage());
+            }
+        }
+
+        // 3. Calculate rewards (requires AdaPot from previous epoch, adjusted for governance)
         if (rewardCalculator != null && rewardCalculator.isEnabled() && newEpoch >= 2) {
-            calculateAndStoreRewards(previousEpoch, newEpoch);
+            calculateAndStoreRewards(previousEpoch, newEpoch, govResult);
         }
 
         long elapsed = System.currentTimeMillis() - start;
@@ -98,8 +121,10 @@ public class EpochBoundaryProcessor {
 
     /**
      * Run reward calculation and update AdaPot with the results.
+     * Governance treasury/deposit changes are applied to the AdaPot input BEFORE reward calculation.
      */
-    private void calculateAndStoreRewards(int previousEpoch, int newEpoch) {
+    private void calculateAndStoreRewards(int previousEpoch, int newEpoch,
+                                          GovernanceEpochProcessor.GovernanceEpochResult govResult) {
         // Get previous AdaPot
         BigInteger prevTreasury = BigInteger.ZERO;
         BigInteger prevReserves = BigInteger.ZERO;
@@ -107,8 +132,6 @@ public class EpochBoundaryProcessor {
         if (adaPotTracker != null && adaPotTracker.isEnabled()) {
             var prevPot = adaPotTracker.getAdaPot(previousEpoch);
             if (prevPot.isEmpty()) {
-                // After fast-sync, AdaPot for the previous epoch may not exist.
-                // Fall back to the latest available AdaPot (e.g., the bootstrap at epoch 4).
                 prevPot = adaPotTracker.getLatestAdaPot(previousEpoch);
                 if (prevPot.isPresent()) {
                     log.info("Using latest available AdaPot (not epoch {}) as previous", previousEpoch);
@@ -119,6 +142,19 @@ public class EpochBoundaryProcessor {
                 prevReserves = prevPot.get().reserves();
             } else {
                 log.warn("No AdaPot found for previous epoch {}, using zeros", previousEpoch);
+            }
+        }
+
+        // Apply governance-driven treasury changes BEFORE reward calculation:
+        // - Treasury withdrawals (enacted) reduce treasury
+        // - Donations increase treasury
+        // - Deposit refunds don't directly affect treasury (they reduce the deposit pot)
+        if (govResult != null) {
+            BigInteger govTreasuryDelta = govResult.treasuryDelta().add(govResult.donations());
+            if (govTreasuryDelta.signum() != 0) {
+                prevTreasury = prevTreasury.add(govTreasuryDelta);
+                log.info("Governance adjusted treasury for epoch {}: delta={} (withdrawals={}, donations={})",
+                        newEpoch, govTreasuryDelta, govResult.treasuryDelta(), govResult.donations());
             }
         }
 

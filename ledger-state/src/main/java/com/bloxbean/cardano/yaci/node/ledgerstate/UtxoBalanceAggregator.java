@@ -32,7 +32,7 @@ public class UtxoBalanceAggregator {
      * @return map from credential key to total lovelace balance
      */
     public Map<CredentialKey, BigInteger> aggregateBalances(UtxoState utxoState) {
-        return aggregateBalances(utxoState, null);
+        return aggregateBalances(utxoState, null, -1);
     }
 
     /**
@@ -41,10 +41,12 @@ public class UtxoBalanceAggregator {
      *
      * @param utxoState       the UTXO store to iterate
      * @param pointerResolver optional resolver for pointer addresses (may be null)
+     * @param maxSlot         only include UTXOs with slot ≤ maxSlot (-1 = no filter)
      * @return map from credential key to total lovelace balance
      */
     public Map<CredentialKey, BigInteger> aggregateBalances(UtxoState utxoState,
-                                                            PointerAddressResolver pointerResolver) {
+                                                            PointerAddressResolver pointerResolver,
+                                                            long maxSlot) {
         Map<CredentialKey, BigInteger> balances = new HashMap<>();
         long[] count = {0};
         long[] skipped = {0};
@@ -52,7 +54,8 @@ public class UtxoBalanceAggregator {
         long[] pointerFailed = {0};
         long start = System.currentTimeMillis();
 
-        utxoState.forEachUtxo((addressStr, lovelace) -> {
+        // Use slot-filtered iteration for consistent epoch boundary snapshot
+        java.util.function.BiConsumer<String, java.math.BigInteger> processor = (addressStr, lovelace) -> {
             count[0]++;
             if (lovelace == null || lovelace.signum() <= 0) return;
 
@@ -92,12 +95,19 @@ public class UtxoBalanceAggregator {
             } catch (Exception e) {
                 skipped[0]++;
             }
-        });
+        };
+
+        if (maxSlot > 0) {
+            utxoState.forEachUtxoAtSlot(maxSlot, processor);
+        } else {
+            utxoState.forEachUtxo(processor);
+        }
 
         long elapsed = System.currentTimeMillis() - start;
         log.info("UTXO balance aggregation complete: {} UTXOs processed, {} skipped, {} credentials, " +
                         "{} pointer resolved, {} pointer failed, {}ms",
                 count[0], skipped[0], balances.size(), pointerResolved[0], pointerFailed[0], elapsed);
+
         return balances;
     }
 

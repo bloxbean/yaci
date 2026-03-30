@@ -147,7 +147,8 @@ public class DirectRocksDBChainState implements ChainState, AutoCloseable, Rocks
                     // Account state CFs
                     new ColumnFamilyDescriptor(AccountStateCfNames.ACCT_STATE.getBytes()),
                     new ColumnFamilyDescriptor(AccountStateCfNames.ACCT_DELTA.getBytes()),
-                    new ColumnFamilyDescriptor(AccountStateCfNames.EPOCH_DELEG_SNAPSHOT.getBytes())
+                    new ColumnFamilyDescriptor(AccountStateCfNames.EPOCH_DELEG_SNAPSHOT.getBytes()),
+                    new ColumnFamilyDescriptor(AccountStateCfNames.EPOCH_PARAMS.getBytes())
             );
 
             // Open database

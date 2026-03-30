@@ -46,6 +46,26 @@ public interface EpochParamProvider {
     /** Protocol minor version for the given epoch. */
     default int getProtocolMinor(long epoch) { return 0; }
 
+    // --- Conway governance parameters ---
+
+    /** Governance action lifetime in epochs. Default: 6 (preprod/mainnet). */
+    default int getGovActionLifetime(long epoch) { return 6; }
+
+    /** DRep activity window in epochs. Default: 20 (preprod/mainnet). */
+    default int getDRepActivity(long epoch) { return 20; }
+
+    /** Governance action deposit in lovelace. Default: 100,000 ADA. */
+    default BigInteger getGovActionDeposit(long epoch) { return new BigInteger("100000000000"); }
+
+    /** DRep deposit in lovelace. Default: 500 ADA. */
+    default BigInteger getDRepDeposit(long epoch) { return new BigInteger("500000000"); }
+
+    /** Committee minimum size. Default: 7. */
+    default int getCommitteeMinSize(long epoch) { return 7; }
+
+    /** Committee maximum term length in epochs. Default: 146. */
+    default int getCommitteeMaxTermLength(long epoch) { return 146; }
+
     /** Security parameter k (finality confirmation depth). Default: 2160 (mainnet). */
     default long getSecurityParam() { return 2160; }
 

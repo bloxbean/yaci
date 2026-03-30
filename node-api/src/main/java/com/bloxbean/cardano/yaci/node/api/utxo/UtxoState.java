@@ -72,6 +72,22 @@ public interface UtxoState {
     }
 
     /**
+     * Iterate over unspent UTXOs created at or before {@code maxSlot},
+     * using a consistent point-in-time snapshot of the UTXO store.
+     * <p>
+     * This provides a deterministic view even if other threads are
+     * concurrently modifying the UTXO store (e.g., during fast-sync).
+     * Only UTXOs whose creation slot is ≤ maxSlot are included.
+     *
+     * @param maxSlot  only include UTXOs created at or before this slot
+     * @param consumer receives (bech32 address, lovelace amount) per UTXO
+     */
+    default void forEachUtxoAtSlot(long maxSlot, java.util.function.BiConsumer<String, java.math.BigInteger> consumer) {
+        // Default: delegate to unfiltered version (backward compatibility)
+        forEachUtxo(consumer);
+    }
+
+    /**
      * Whether UTXO state is enabled and actively maintained.
      */
     boolean isEnabled();

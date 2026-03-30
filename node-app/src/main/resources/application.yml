@@ -66,6 +66,8 @@ yaci:
       enabled: true
     epoch-params:
       tracking-enabled: true
+    governance:
+      enabled: true
     chain:
       block-body-prune-depth: 0          # blocks to retain (0 = disabled)
       block-prune-batch-size: 500000     # entries per prune pass

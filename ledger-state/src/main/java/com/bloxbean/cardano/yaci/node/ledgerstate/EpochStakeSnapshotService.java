@@ -42,13 +42,21 @@ public class EpochStakeSnapshotService {
     public Map<UtxoBalanceAggregator.CredentialKey, BigInteger> aggregateStakeBalances(
             UtxoState utxoState, PointerAddressResolver pointerResolver) {
         if (!enabled) return Map.of();
-        return aggregator.aggregateBalances(utxoState, pointerResolver);
+        return aggregator.aggregateBalances(utxoState, pointerResolver, -1);
     }
 
     /**
-     * Aggregate UTXO balances by stake credential (without pointer resolution).
+     * Aggregate UTXO balances by stake credential, only including UTXOs created at or before maxSlot.
+     * Uses a RocksDB snapshot for consistent point-in-time view.
+     *
+     * @param utxoState       the UTXO store
+     * @param pointerResolver optional resolver for pointer addresses
+     * @param maxSlot         only include UTXOs with slot ≤ maxSlot (-1 = no filter)
+     * @return map from credential key to lovelace balance, or empty map if disabled
      */
-    public Map<UtxoBalanceAggregator.CredentialKey, BigInteger> aggregateStakeBalances(UtxoState utxoState) {
-        return aggregateStakeBalances(utxoState, null);
+    public Map<UtxoBalanceAggregator.CredentialKey, BigInteger> aggregateStakeBalances(
+            UtxoState utxoState, PointerAddressResolver pointerResolver, long maxSlot) {
+        if (!enabled) return Map.of();
+        return aggregator.aggregateBalances(utxoState, pointerResolver, maxSlot);
     }
 }

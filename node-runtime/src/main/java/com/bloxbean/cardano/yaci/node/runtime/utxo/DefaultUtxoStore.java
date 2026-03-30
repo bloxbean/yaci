@@ -373,6 +373,33 @@ public final class DefaultUtxoStore implements UtxoState, UtxoStoreWriter, Pruna
     }
 
     @Override
+    public void forEachUtxoAtSlot(long maxSlot, java.util.function.BiConsumer<String, BigInteger> consumer) {
+        if (!enabled || db == null) return;
+        // Use a RocksDB snapshot for a consistent point-in-time view.
+        // This is cheap (just a reference count increment) and guarantees we don't see
+        // UTXOs being added/removed by concurrent block processing.
+        org.rocksdb.Snapshot snapshot = db.getSnapshot();
+        try (org.rocksdb.ReadOptions readOptions = new org.rocksdb.ReadOptions().setSnapshot(snapshot);
+             RocksIterator it = db.newIterator(cfUnspent, readOptions)) {
+            it.seekToFirst();
+            while (it.isValid()) {
+                try {
+                    var stored = UtxoCborCodec.decodeUtxoRecord(it.value());
+                    // Only include UTXOs created at or before the epoch's last slot
+                    if (stored.slot <= maxSlot) {
+                        consumer.accept(stored.address, stored.lovelace);
+                    }
+                } catch (Exception ex) {
+                    // Skip malformed records
+                }
+                it.next();
+            }
+        } finally {
+            db.releaseSnapshot(snapshot);
+        }
+    }
+
+    @Override
     public boolean isEnabled() {
         return enabled;
     }

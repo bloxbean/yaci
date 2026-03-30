@@ -2,39 +2,49 @@ package com.bloxbean.cardano.yaci.node.ledgerstate;
 
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.core.model.TransactionBody;
-import com.bloxbean.cardano.yaci.core.model.Update;
-import com.bloxbean.cardano.yaci.core.model.governance.ProposalProcedure;
-import com.bloxbean.cardano.yaci.core.model.governance.actions.GovAction;
-import com.bloxbean.cardano.yaci.core.model.governance.actions.ParameterChangeAction;
 import com.bloxbean.cardano.yaci.node.api.EpochParamProvider;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.RocksDB;
+import org.rocksdb.RocksDBException;
+import org.rocksdb.RocksIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.List;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Tracks protocol parameter updates from blocks and provides epoch-resolved params.
+ * Tracks protocol parameter updates and provides epoch-resolved params.
  * <p>
- * Two sources of parameter changes:
+ * Two sources of parameter changes depending on era:
  * <ul>
- *   <li><b>Pre-Conway:</b> {@link Update} field in transaction body containing
- *       {@link ProtocolParamUpdate} proposals. Effective at the specified epoch.</li>
- *   <li><b>Conway+:</b> {@link ParameterChangeAction} governance proposals.
- *       Ratified proposals take effect after the voting period.</li>
+ *   <li><b>Pre-Conway (Byron–Babbage):</b> {@code Update} field in transaction body containing
+ *       {@link ProtocolParamUpdate} proposals. Takes effect at the specified epoch + 1.</li>
+ *   <li><b>Conway+:</b> {@code ParameterChangeAction} governance proposals. These go through
+ *       voting → ratification → enactment. When enacted by {@code GovernanceEpochProcessor},
+ *       it calls {@link #applyEnactedParamChange(int, ProtocolParamUpdate)} to apply the
+ *       update for the target epoch.</li>
  * </ul>
  * <p>
- * This tracker accumulates proposed updates per epoch and merges them at epoch boundary
- * to produce a resolved set of protocol parameters. Falls back to the base
- * {@link EpochParamProvider} for any parameters not tracked from blocks.
+ * Falls back to the base {@link EpochParamProvider} for any parameters not tracked from blocks.
  */
 public class EpochParamTracker implements EpochParamProvider {
     private static final Logger log = LoggerFactory.getLogger(EpochParamTracker.class);
 
+    private static final ObjectMapper JSON = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
     private final EpochParamProvider baseProvider;
     private final boolean enabled;
+
+    // RocksDB persistence — dedicated column family (null = in-memory only, e.g. tests)
+    private final RocksDB db;
+    private final ColumnFamilyHandle cfEpochParams;
 
     // Accumulated per-epoch resolved params (epoch → merged update)
     private final ConcurrentHashMap<Integer, ProtocolParamUpdate> epochParams = new ConcurrentHashMap<>();
@@ -42,9 +52,29 @@ public class EpochParamTracker implements EpochParamProvider {
     // Pending proposals for next epoch (pre-Conway Update mechanism)
     private final ConcurrentHashMap<Integer, ProtocolParamUpdate> pendingUpdates = new ConcurrentHashMap<>();
 
-    public EpochParamTracker(EpochParamProvider baseProvider, boolean enabled) {
+    /**
+     * Create a tracker with RocksDB persistence. On construction, loads all persisted
+     * epoch params into the in-memory map so lookups work immediately after restart.
+     *
+     * @param baseProvider   Fallback provider for params not tracked from blocks
+     * @param enabled        Whether tracking is enabled
+     * @param db             RocksDB instance
+     * @param cfEpochParams  Dedicated column family for epoch params (key: epoch(4 BE), value: JSON bytes)
+     */
+    public EpochParamTracker(EpochParamProvider baseProvider, boolean enabled,
+                             RocksDB db, ColumnFamilyHandle cfEpochParams) {
         this.baseProvider = baseProvider;
         this.enabled = enabled;
+        this.db = db;
+        this.cfEpochParams = cfEpochParams;
+        if (enabled && db != null && cfEpochParams != null) {
+            loadPersistedParams();
+        }
+    }
+
+    /** Create a tracker without RocksDB persistence (in-memory only, for tests). */
+    public EpochParamTracker(EpochParamProvider baseProvider, boolean enabled) {
+        this(baseProvider, enabled, null, null);
     }
 
     public boolean isEnabled() {
@@ -52,7 +82,14 @@ public class EpochParamTracker implements EpochParamProvider {
     }
 
     /**
-     * Process a transaction body to extract protocol parameter update proposals.
+     * Process a transaction body to extract pre-Conway protocol parameter update proposals.
+     * <p>
+     * In pre-Conway eras, the {@code Update} field in the transaction body contains proposed
+     * parameter changes with a target epoch. These take effect at epoch + 1.
+     * <p>
+     * In Conway+, parameter changes come through governance (ParameterChangeAction proposals).
+     * These are NOT processed here — they go through ratification in GovernanceEpochProcessor
+     * and are applied via {@link #applyEnactedParamChange(int, ProtocolParamUpdate)}.
      */
     public void processTransaction(TransactionBody tx) {
         if (!enabled) return;
@@ -69,44 +106,60 @@ public class EpochParamTracker implements EpochParamProvider {
             log.debug("Tracked pre-Conway param update for epoch {} (proposal epoch {})",
                     effectiveEpoch, update.getEpoch());
         }
+        // Conway ParameterChangeAction proposals are handled by GovernanceEpochProcessor
+        // after ratification. They call applyEnactedParamChange() at epoch boundary.
+    }
 
-        // Conway: ProposalProcedures with ParameterChangeAction
-        List<ProposalProcedure> proposals = tx.getProposalProcedures();
-        if (proposals != null) {
-            for (var proposal : proposals) {
-                GovAction action = proposal.getGovAction();
-                if (action instanceof ParameterChangeAction pca && pca.getProtocolParamUpdate() != null) {
-                    // Conway proposals don't specify target epoch directly;
-                    // they become effective after ratification. For now, we store
-                    // the proposal for future epoch resolution.
-                    log.debug("Tracked Conway ParameterChangeAction proposal");
-                    // TODO: Track governance voting and ratification to determine effective epoch
-                }
-            }
-        }
+    /**
+     * Apply a ratified and enacted ParameterChangeAction for the given epoch.
+     * Called by GovernanceEpochProcessor when a ParameterChangeAction is enacted at epoch boundary.
+     * <p>
+     * In Conway+, the flow is:
+     * <ol>
+     *   <li>ParameterChangeAction proposal submitted</li>
+     *   <li>Voted on during voting window</li>
+     *   <li>Ratified at epoch N boundary (thresholds met)</li>
+     *   <li>Enacted at epoch N+1 boundary → this method is called with epoch=N+1</li>
+     *   <li>New params take effect for epoch N+1 onwards</li>
+     * </ol>
+     *
+     * @param epoch  The epoch at which the enacted params take effect
+     * @param update The protocol parameter update from the enacted ParameterChangeAction
+     */
+    public void applyEnactedParamChange(int epoch, ProtocolParamUpdate update) {
+        if (!enabled || update == null) return;
+        pendingUpdates.merge(epoch, update, this::mergeUpdates);
+        log.info("Applied enacted ParameterChangeAction for epoch {}", epoch);
+        // Will be finalized in finalizeEpoch(epoch) which merges pending into epochParams
     }
 
     /**
      * Finalize parameters for an epoch. Called at epoch boundary.
-     * Merges any pending updates into the resolved epoch params.
+     * Merges any pending updates into the resolved epoch params and persists to RocksDB.
      */
     public void finalizeEpoch(int epoch) {
         if (!enabled) return;
         var pending = pendingUpdates.remove(epoch);
         var prev = epoch > 0 ? epochParams.get(epoch - 1) : null;
 
+        ProtocolParamUpdate resolved = null;
         if (pending != null) {
             // Merge new update on top of previous epoch's params so unchanged fields carry forward.
-            // Without this merge, a hardfork update that only changes protocolVersion would lose
-            // previously set fields like decentralisation.
             if (prev != null) {
-                epochParams.put(epoch, mergeUpdates(prev, pending));
+                resolved = mergeUpdates(prev, pending);
             } else {
-                epochParams.put(epoch, pending);
+                resolved = pending;
             }
+            epochParams.put(epoch, resolved);
             log.info("Finalized protocol params for epoch {} from block updates", epoch);
         } else if (!epochParams.containsKey(epoch) && prev != null) {
-            epochParams.put(epoch, prev);
+            resolved = prev;
+            epochParams.put(epoch, resolved);
+        }
+
+        // Persist to RocksDB
+        if (resolved != null) {
+            persistEpochParams(epoch, resolved);
         }
     }
 
@@ -212,12 +265,103 @@ public class EpochParamTracker implements EpochParamProvider {
         return baseProvider.getProtocolMinor(epoch);
     }
 
+    // --- Conway governance parameters ---
+
+    @Override
+    public int getGovActionLifetime(long epoch) {
+        var update = epochParams.get((int) epoch);
+        if (update != null && update.getGovActionLifetime() != null) return update.getGovActionLifetime();
+        return baseProvider.getGovActionLifetime(epoch);
+    }
+
+    @Override
+    public int getDRepActivity(long epoch) {
+        var update = epochParams.get((int) epoch);
+        if (update != null && update.getDrepActivity() != null) return update.getDrepActivity();
+        return baseProvider.getDRepActivity(epoch);
+    }
+
+    @Override
+    public BigInteger getGovActionDeposit(long epoch) {
+        var update = epochParams.get((int) epoch);
+        if (update != null && update.getGovActionDeposit() != null) return update.getGovActionDeposit();
+        return baseProvider.getGovActionDeposit(epoch);
+    }
+
+    @Override
+    public BigInteger getDRepDeposit(long epoch) {
+        var update = epochParams.get((int) epoch);
+        if (update != null && update.getDrepDeposit() != null) return update.getDrepDeposit();
+        return baseProvider.getDRepDeposit(epoch);
+    }
+
+    @Override
+    public int getCommitteeMinSize(long epoch) {
+        var update = epochParams.get((int) epoch);
+        if (update != null && update.getCommitteeMinSize() != null) return update.getCommitteeMinSize();
+        return baseProvider.getCommitteeMinSize(epoch);
+    }
+
+    @Override
+    public int getCommitteeMaxTermLength(long epoch) {
+        var update = epochParams.get((int) epoch);
+        if (update != null && update.getCommitteeMaxTermLength() != null) return update.getCommitteeMaxTermLength();
+        return baseProvider.getCommitteeMaxTermLength(epoch);
+    }
+
+    // ===== RocksDB Persistence (dedicated epoch_params column family) =====
+
+    /** Key: epoch as 4-byte big-endian int */
+    private static byte[] epochKey(int epoch) {
+        return ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(epoch).array();
+    }
+
+    private void persistEpochParams(int epoch, ProtocolParamUpdate params) {
+        if (db == null || cfEpochParams == null) return;
+        try {
+            byte[] val = JSON.writeValueAsBytes(params);
+            db.put(cfEpochParams, epochKey(epoch), val);
+        } catch (Exception e) {
+            log.warn("Failed to persist epoch params for epoch {}: {}", epoch, e.getMessage());
+        }
+    }
+
+    /**
+     * Load all persisted epoch params from RocksDB into the in-memory map.
+     * Called once at construction to restore state after restart.
+     */
+    private void loadPersistedParams() {
+        int count = 0;
+        try (RocksIterator it = db.newIterator(cfEpochParams)) {
+            it.seekToFirst();
+            while (it.isValid()) {
+                byte[] key = it.key();
+                if (key.length != 4) { it.next(); continue; }
+
+                int epoch = ByteBuffer.wrap(key).order(ByteOrder.BIG_ENDIAN).getInt();
+                try {
+                    ProtocolParamUpdate params = JSON.readValue(it.value(), ProtocolParamUpdate.class);
+                    epochParams.put(epoch, params);
+                    count++;
+                } catch (Exception e) {
+                    log.warn("Failed to deserialize epoch params for epoch {}: {}", epoch, e.getMessage());
+                }
+                it.next();
+            }
+        }
+        if (count > 0) {
+            int minEpoch = epochParams.keySet().stream().mapToInt(Integer::intValue).min().orElse(-1);
+            int maxEpoch = epochParams.keySet().stream().mapToInt(Integer::intValue).max().orElse(-1);
+            log.info("Loaded {} persisted epoch params from RocksDB (epochs {}-{})", count, minEpoch, maxEpoch);
+        }
+    }
+
     /**
      * Merge two ProtocolParamUpdate instances. Non-null fields in {@code newer} override {@code older}.
      */
     private ProtocolParamUpdate mergeUpdates(ProtocolParamUpdate older, ProtocolParamUpdate newer) {
-        // Build a merged update — newer fields override older
         return ProtocolParamUpdate.builder()
+                // Pre-Conway fields
                 .minFeeA(newer.getMinFeeA() != null ? newer.getMinFeeA() : older.getMinFeeA())
                 .minFeeB(newer.getMinFeeB() != null ? newer.getMinFeeB() : older.getMinFeeB())
                 .maxBlockSize(newer.getMaxBlockSize() != null ? newer.getMaxBlockSize() : older.getMaxBlockSize())
@@ -234,6 +378,16 @@ public class EpochParamTracker implements EpochParamProvider {
                 .protocolMajorVer(newer.getProtocolMajorVer() != null ? newer.getProtocolMajorVer() : older.getProtocolMajorVer())
                 .protocolMinorVer(newer.getProtocolMinorVer() != null ? newer.getProtocolMinorVer() : older.getProtocolMinorVer())
                 .minPoolCost(newer.getMinPoolCost() != null ? newer.getMinPoolCost() : older.getMinPoolCost())
+                .adaPerUtxoByte(newer.getAdaPerUtxoByte() != null ? newer.getAdaPerUtxoByte() : older.getAdaPerUtxoByte())
+                // Conway governance fields
+                .govActionLifetime(newer.getGovActionLifetime() != null ? newer.getGovActionLifetime() : older.getGovActionLifetime())
+                .govActionDeposit(newer.getGovActionDeposit() != null ? newer.getGovActionDeposit() : older.getGovActionDeposit())
+                .drepDeposit(newer.getDrepDeposit() != null ? newer.getDrepDeposit() : older.getDrepDeposit())
+                .drepActivity(newer.getDrepActivity() != null ? newer.getDrepActivity() : older.getDrepActivity())
+                .committeeMinSize(newer.getCommitteeMinSize() != null ? newer.getCommitteeMinSize() : older.getCommitteeMinSize())
+                .committeeMaxTermLength(newer.getCommitteeMaxTermLength() != null ? newer.getCommitteeMaxTermLength() : older.getCommitteeMaxTermLength())
+                .poolVotingThresholds(newer.getPoolVotingThresholds() != null ? newer.getPoolVotingThresholds() : older.getPoolVotingThresholds())
+                .drepVotingThresholds(newer.getDrepVotingThresholds() != null ? newer.getDrepVotingThresholds() : older.getDrepVotingThresholds())
                 .build();
     }
 }

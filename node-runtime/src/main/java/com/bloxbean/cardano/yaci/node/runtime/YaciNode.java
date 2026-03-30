@@ -345,11 +345,19 @@ public class YaciNode implements NodeAPI {
                     boolean epochParamsEnabled = Boolean.parseBoolean(
                             String.valueOf(this.runtimeOptions.globals().getOrDefault("yaci.node.epoch-params.tracking-enabled", "false")));
                     com.bloxbean.cardano.yaci.node.ledgerstate.EpochParamTracker paramTrackerInstance = null;
-                    if (epochParamsEnabled) {
+                    if (epochParamsEnabled && chainState instanceof DirectRocksDBChainState rocks2) {
+                        var rocksDb2 = (org.rocksdb.RocksDB) rocks2.getDb();
+                        var cfEpochParams = (org.rocksdb.ColumnFamilyHandle) rocks2.getColumnFamilyHandle(
+                                com.bloxbean.cardano.yaci.node.ledgerstate.AccountStateCfNames.EPOCH_PARAMS);
+                        paramTrackerInstance = new com.bloxbean.cardano.yaci.node.ledgerstate.EpochParamTracker(
+                                epochParamProvider, true, rocksDb2, cfEpochParams);
+                        defaultStore.setParamTracker(paramTrackerInstance);
+                        log.info("Epoch param tracker enabled (with RocksDB persistence)");
+                    } else if (epochParamsEnabled) {
                         paramTrackerInstance = new com.bloxbean.cardano.yaci.node.ledgerstate.EpochParamTracker(
                                 epochParamProvider, true);
                         defaultStore.setParamTracker(paramTrackerInstance);
-                        log.info("Epoch param tracker enabled");
+                        log.info("Epoch param tracker enabled (in-memory only)");
                     }
 
                     // Enable reward calculator if configured
@@ -373,10 +381,11 @@ public class YaciNode implements NodeAPI {
                     }
 
                     // Wire epoch boundary processor if any subsystem is enabled
+                    com.bloxbean.cardano.yaci.node.ledgerstate.EpochBoundaryProcessor boundaryProcessor = null;
                     if (adaPotEnabled || rewardsEnabled || epochParamsEnabled) {
                         long magic = config.getProtocolMagic();
                         defaultStore.setNetworkMagic(magic);
-                        var boundaryProcessor = new com.bloxbean.cardano.yaci.node.ledgerstate.EpochBoundaryProcessor(
+                        boundaryProcessor = new com.bloxbean.cardano.yaci.node.ledgerstate.EpochBoundaryProcessor(
                                 defaultStore.getAdaPotTracker(),
                                 rewardCalcInstance,
                                 paramTrackerInstance,
@@ -385,6 +394,52 @@ public class YaciNode implements NodeAPI {
                         defaultStore.setEpochBoundaryProcessor(boundaryProcessor);
                         log.info("Epoch boundary processor wired (adapot={}, rewards={}, params={})",
                                 adaPotEnabled, rewardsEnabled, epochParamsEnabled);
+                    }
+
+                    // Wire governance subsystem if rewards/adapot are enabled
+                    boolean governanceEnabled = Boolean.parseBoolean(
+                            String.valueOf(this.runtimeOptions.globals().getOrDefault("yaci.node.governance.enabled", "false")));
+                    if (governanceEnabled && chainState instanceof DirectRocksDBChainState rocks) {
+                        var rocksDb = (org.rocksdb.RocksDB) rocks.getDb();
+                        var cfState = (org.rocksdb.ColumnFamilyHandle) rocks.getColumnFamilyHandle(
+                                com.bloxbean.cardano.yaci.node.ledgerstate.AccountStateCfNames.ACCT_STATE);
+                        var cfSnapshot = (org.rocksdb.ColumnFamilyHandle) rocks.getColumnFamilyHandle(
+                                com.bloxbean.cardano.yaci.node.ledgerstate.AccountStateCfNames.EPOCH_DELEG_SNAPSHOT);
+                        var cfDelta = (org.rocksdb.ColumnFamilyHandle) rocks.getColumnFamilyHandle(
+                                com.bloxbean.cardano.yaci.node.ledgerstate.AccountStateCfNames.ACCT_DELTA);
+
+                        if (cfState != null) {
+                            // Create governance subsystem components
+                            var govStore = new com.bloxbean.cardano.yaci.node.ledgerstate.governance.GovernanceStateStore(rocksDb, cfState);
+                            var govBlockProcessor = new com.bloxbean.cardano.yaci.node.ledgerstate.governance.GovernanceBlockProcessor(
+                                    govStore, paramTrackerInstance != null ? paramTrackerInstance : epochParamProvider);
+                            defaultStore.setGovernanceBlockProcessor(govBlockProcessor);
+
+                            // Wire governance epoch processor into boundary processor
+                            if (boundaryProcessor != null) {
+                                var tallyCalc = new com.bloxbean.cardano.yaci.node.ledgerstate.governance.ratification.VoteTallyCalculator();
+                                var ratEngine = new com.bloxbean.cardano.yaci.node.ledgerstate.governance.ratification.RatificationEngine(govStore, tallyCalc);
+                                var enactProc = new com.bloxbean.cardano.yaci.node.ledgerstate.governance.ratification.EnactmentProcessor(govStore, paramTrackerInstance);
+                                var dropService = new com.bloxbean.cardano.yaci.node.ledgerstate.governance.ratification.ProposalDropService();
+                                var drepDistCalc = new com.bloxbean.cardano.yaci.node.ledgerstate.governance.epoch.DRepDistributionCalculator(
+                                        rocksDb, cfState, cfSnapshot, govStore);
+                                var drepExpiryCalc = new com.bloxbean.cardano.yaci.node.ledgerstate.governance.epoch.DRepExpiryCalculator();
+
+                                var govEpochProcessor = new com.bloxbean.cardano.yaci.node.ledgerstate.governance.epoch.GovernanceEpochProcessor(
+                                        rocksDb, cfState, cfDelta,
+                                        govStore, drepDistCalc, drepExpiryCalc,
+                                        ratEngine, enactProc, dropService,
+                                        paramTrackerInstance != null ? paramTrackerInstance : epochParamProvider,
+                                        paramTrackerInstance,
+                                        defaultStore.getAdaPotTracker(),
+                                        defaultStore::resolvePoolStakeForEpoch,
+                                        defaultStore::storeRewardRest,
+                                        config.getConwayGenesisFile()
+                                );
+                                boundaryProcessor.setGovernanceEpochProcessor(govEpochProcessor);
+                            }
+                            log.info("Governance subsystem enabled (block processor + epoch processor)");
+                        }
                     }
                 }
 

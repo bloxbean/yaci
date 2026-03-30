@@ -116,6 +116,8 @@ public class YaciNodeProducer {
     boolean rewardsEnabled;
     @ConfigProperty(name = "yaci.node.epoch-params.tracking-enabled", defaultValue = "false")
     boolean epochParamsTrackingEnabled;
+    @ConfigProperty(name = "yaci.node.governance.enabled", defaultValue = "false")
+    boolean governanceEnabled;
 
     // Block body pruning config
     @ConfigProperty(name = "yaci.node.chain.block-body-prune-depth", defaultValue = "0")
@@ -347,6 +349,7 @@ public class YaciNodeProducer {
         globals.put("yaci.node.adapot.enabled", adapotEnabled);
         globals.put("yaci.node.rewards.enabled", rewardsEnabled);
         globals.put("yaci.node.epoch-params.tracking-enabled", epochParamsTrackingEnabled);
+        globals.put("yaci.node.governance.enabled", governanceEnabled);
 
         // Block pruning
         globals.put("yaci.node.chain.block-body-prune-depth", blockBodyPruneDepth);

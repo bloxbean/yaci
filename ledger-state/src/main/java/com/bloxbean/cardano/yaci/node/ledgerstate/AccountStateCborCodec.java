@@ -24,9 +24,9 @@ public final class AccountStateCborCodec {
         return CborSerializationUtil.serialize(map, true);
     }
 
-    record StakeAccount(BigInteger reward, BigInteger deposit) {}
+    public record StakeAccount(BigInteger reward, BigInteger deposit) {}
 
-    static StakeAccount decodeStakeAccount(byte[] bytes) {
+    public static StakeAccount decodeStakeAccount(byte[] bytes) {
         Map map = (Map) CborSerializationUtil.deserializeOne(bytes);
         BigInteger reward = CborSerializationUtil.toBigInteger(map.get(new UnsignedInteger(0)));
         BigInteger deposit = CborSerializationUtil.toBigInteger(map.get(new UnsignedInteger(1)));
@@ -69,9 +69,9 @@ public final class AccountStateCborCodec {
         return CborSerializationUtil.serialize(map, true);
     }
 
-    record DRepDelegationRecord(int drepType, String drepHash, long slot, int txIdx, int certIdx) {}
+    public record DRepDelegationRecord(int drepType, String drepHash, long slot, int txIdx, int certIdx) {}
 
-    static DRepDelegationRecord decodeDRepDelegation(byte[] bytes) {
+    public static DRepDelegationRecord decodeDRepDelegation(byte[] bytes) {
         Map map = (Map) CborSerializationUtil.deserializeOne(bytes);
         int drepType = CborSerializationUtil.toInt(map.get(new UnsignedInteger(0)));
         DataItem hashDi = map.get(new UnsignedInteger(1));
@@ -85,7 +85,7 @@ public final class AccountStateCborCodec {
     // --- Pool Registration (prefix 0x10): {0: deposit, 1: marginNum, 2: marginDen, 3: cost, 4: pledge, 5: rewardAccount(bstr), 6: owners(array of bstr)} ---
     // Backward-compatible: old format had only {0: deposit}.
 
-    record PoolRegistrationData(BigInteger deposit, BigInteger marginNum, BigInteger marginDen,
+    public record PoolRegistrationData(BigInteger deposit, BigInteger marginNum, BigInteger marginDen,
                                 BigInteger cost, BigInteger pledge, String rewardAccount, Set<String> owners) {}
 
     static byte[] encodePoolRegistration(PoolRegistrationData data) {
@@ -108,7 +108,7 @@ public final class AccountStateCborCodec {
         return CborSerializationUtil.serialize(map, true);
     }
 
-    static PoolRegistrationData decodePoolRegistration(byte[] bytes) {
+    public static PoolRegistrationData decodePoolRegistration(byte[] bytes) {
         Map map = (Map) CborSerializationUtil.deserializeOne(bytes);
         BigInteger deposit = CborSerializationUtil.toBigInteger(map.get(new UnsignedInteger(0)));
 
@@ -228,7 +228,7 @@ public final class AccountStateCborCodec {
 
     public record EpochDelegSnapshot(String poolHash, BigInteger amount) {}
 
-    static EpochDelegSnapshot decodeEpochDelegSnapshot(byte[] bytes) {
+    public static EpochDelegSnapshot decodeEpochDelegSnapshot(byte[] bytes) {
         Map map = (Map) CborSerializationUtil.deserializeOne(bytes);
         String poolHash = HexUtil.encodeHexString(((ByteString) map.get(new UnsignedInteger(0))).getBytes());
         DataItem amountDi = map.get(new UnsignedInteger(1));
@@ -333,5 +333,25 @@ public final class AccountStateCborCodec {
         DataItem poolDi = map.get(new UnsignedInteger(3));
         String poolHash = (poolDi instanceof ByteString bs) ? HexUtil.encodeHexString(bs.getBytes()) : null;
         return new AccumulatedReward(earnedEpoch, type, amount, poolHash);
+    }
+
+    // --- Reward Rest (prefix 0x56): {0: amount(uint), 1: earnedEpoch(uint), 2: slot(uint)} ---
+
+    public record RewardRest(BigInteger amount, int earnedEpoch, long slot) {}
+
+    public static byte[] encodeRewardRest(BigInteger amount, int earnedEpoch, long slot) {
+        Map map = new Map();
+        map.put(new UnsignedInteger(0), new UnsignedInteger(amount));
+        map.put(new UnsignedInteger(1), new UnsignedInteger(earnedEpoch));
+        map.put(new UnsignedInteger(2), new UnsignedInteger(slot));
+        return CborSerializationUtil.serialize(map, true);
+    }
+
+    public static RewardRest decodeRewardRest(byte[] bytes) {
+        Map map = (Map) CborSerializationUtil.deserializeOne(bytes);
+        BigInteger amount = CborSerializationUtil.toBigInteger(map.get(new UnsignedInteger(0)));
+        int earnedEpoch = CborSerializationUtil.toInt(map.get(new UnsignedInteger(1)));
+        long slot = CborSerializationUtil.toLong(map.get(new UnsignedInteger(2)));
+        return new RewardRest(amount, earnedEpoch, slot);
     }
 }
