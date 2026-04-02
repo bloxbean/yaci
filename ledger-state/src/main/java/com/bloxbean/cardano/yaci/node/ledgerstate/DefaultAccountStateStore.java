@@ -43,6 +43,7 @@ public class DefaultAccountStateStore implements AccountStateStore {
 
     static final byte PREFIX_POOL_PARAMS_HIST = 0x12; // pool params history: poolHash + epoch → PoolRegistrationData
     static final byte PREFIX_POOL_REG_SLOT = 0x13;   // pool registration slot: poolHash → slot (long BE)
+    static final byte PREFIX_ACCT_REG_SLOT = 0x14;   // stake account registration slot: credType + credHash → slot (long BE)
 
     // Epoch-scoped prefixes for reward calculation
     static final byte PREFIX_POOL_BLOCK_COUNT = 0x50;
@@ -97,8 +98,13 @@ public class DefaultAccountStateStore implements AccountStateStore {
     private volatile long networkMagic;
     private final PointerAddressResolver pointerAddressResolver = new PointerAddressResolver();
 
+    // Optional epoch snapshot exporter for debugging (NOOP when disabled)
+    private com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter snapshotExporter =
+            com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.NOOP;
+
     // Optional governance subsystem
     private volatile com.bloxbean.cardano.yaci.node.ledgerstate.governance.GovernanceBlockProcessor governanceBlockProcessor;
+
 
     // Supplier for re-initialization after snapshot restore
     private final CfSupplier cfSupplier;
@@ -194,6 +200,11 @@ public class DefaultAccountStateStore implements AccountStateStore {
         this.epochBoundaryProcessor = processor;
     }
 
+    public void setSnapshotExporter(com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter exporter) {
+        this.snapshotExporter = exporter != null ? exporter
+                : com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.NOOP;
+    }
+
     /**
      * Set the network magic (needed for reward calculation).
      */
@@ -235,6 +246,63 @@ public class DefaultAccountStateStore implements AccountStateStore {
             this.db = cfSupplier.db();
         }
         log.info("DefaultAccountStateStore reinitialized after snapshot restore");
+    }
+
+    /**
+     * One-time migration: populate PREFIX_ACCT_REG_SLOT from existing PREFIX_STAKE_EVENT entries.
+     * This enables stale delegation detection in snapshots for credentials that were registered
+     * before this feature was added. Idempotent — safe to run on every startup.
+     */
+    public void migrateAcctRegSlots() {
+        if (!enabled) return;
+        int written = 0;
+        // Track latest registration slot per credential from stake events
+        java.util.Map<String, long[]> latestRegSlots = new java.util.HashMap<>(); // credKey → [slot]
+        try (RocksIterator it = db.newIterator(cfState)) {
+            it.seek(new byte[]{PREFIX_STAKE_EVENT});
+            while (it.isValid()) {
+                byte[] key = it.key();
+                if (key.length < 14 || key[0] != PREFIX_STAKE_EVENT) break;
+                int eventType = AccountStateCborCodec.decodeStakeEvent(it.value());
+                if (eventType == AccountStateCborCodec.EVENT_REGISTRATION) {
+                    long evSlot = ByteBuffer.wrap(key, 1, 8).order(ByteOrder.BIG_ENDIAN).getLong();
+                    int evCredType = key[13] & 0xFF;
+                    String evCredHash = HexUtil.encodeHexString(Arrays.copyOfRange(key, 14, key.length));
+                    String credKey = evCredType + ":" + evCredHash;
+                    long[] existing = latestRegSlots.get(credKey);
+                    if (existing == null || evSlot > existing[0]) {
+                        latestRegSlots.put(credKey, new long[]{evSlot});
+                    }
+                }
+                it.next();
+            }
+        }
+        if (latestRegSlots.isEmpty()) return;
+
+        // Write PREFIX_ACCT_REG_SLOT for each, only if not already set or if newer
+        try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+            for (var entry : latestRegSlots.entrySet()) {
+                String credKey = entry.getKey();
+                long regSlot = entry.getValue()[0];
+                int colonIdx = credKey.indexOf(':');
+                int credType = Integer.parseInt(credKey.substring(0, colonIdx));
+                String credHash = credKey.substring(colonIdx + 1);
+                byte[] slotKey = acctRegSlotKey(credType, credHash);
+                byte[] existing = db.get(cfState, slotKey);
+                if (existing != null) {
+                    long existingSlot = ByteBuffer.wrap(existing).order(ByteOrder.BIG_ENDIAN).getLong();
+                    if (existingSlot >= regSlot) continue; // Already up to date
+                }
+                batch.put(cfState, slotKey, ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(regSlot).array());
+                written++;
+            }
+            if (written > 0) {
+                db.write(wo, batch);
+                log.info("Migrated {} PREFIX_ACCT_REG_SLOT entries from stake events", written);
+            }
+        } catch (Exception e) {
+            log.error("migrateAcctRegSlots failed: {}", e.toString());
+        }
     }
 
     // --- Key builders ---
@@ -916,10 +984,21 @@ public class DefaultAccountStateStore implements AccountStateStore {
         int credType = ((headerByte & 0x10) != 0) ? 1 : 0;
         String credHash = rewardAccountHex.substring(2, 58);
 
+        // Check if the stake credential is registered. Per Haskell spec,
+        // deposits for deregistered addresses go to treasury (return false).
+        // Use the account key (PREFIX_ACCT) which is deleted on deregistration.
+        byte[] acctKey = accountKey(credType, credHash);
+        byte[] acctVal = db.get(cfState, acctKey);
+        if (acctVal == null) {
+            return false; // Not registered → deposit goes to treasury
+        }
+
         byte[] key = rewardRestKey(spendableEpoch, type, credType, credHash);
         byte[] prev = db.get(cfState, key);
 
-        // If entry already exists for same key, add amounts
+        // If entry already exists for same key in committed state, add amounts.
+        // NOTE: Callers must pre-aggregate amounts per credential before calling this method,
+        // because db.get() can't see uncommitted WriteBatch entries from the same batch.
         BigInteger existing = BigInteger.ZERO;
         if (prev != null) {
             existing = AccountStateCborCodec.decodeRewardRest(prev).amount();
@@ -1263,7 +1342,7 @@ public class DefaultAccountStateStore implements AccountStateStore {
     @Override
     public void handleEpochTransition(int previousEpoch, int newEpoch) {
         if (!enabled) return;
-        // Process epoch boundary: rewards, adapot, protocol params (before SNAP)
+        // Process epoch boundary: rewards, adapot, protocol params, governance
         if (epochBoundaryProcessor != null) {
             try {
                 epochBoundaryProcessor.processEpochBoundary(previousEpoch, newEpoch);
@@ -1278,10 +1357,8 @@ public class DefaultAccountStateStore implements AccountStateStore {
     public void handleEpochTransitionSnapshot(int previousEpoch, int newEpoch) {
         if (!enabled) return;
         try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
-            // SNAP: Create delegation snapshot capturing state at END of previousEpoch.
-            // Labeled as previousEpoch to match yaci-store epoch_stake convention:
-            // epoch_stake.epoch=E means delegation/stake state at the END of epoch E.
-            createDelegationSnapshot(previousEpoch, batch);
+            // Snapshot already created in handleEpochTransition (between rewards and governance).
+            // Here we only prune old snapshots/events and credit reward_rest.
 
             // Prune old snapshots and stake events
             pruneOldSnapshots(newEpoch - SNAPSHOT_RETENTION_EPOCHS, batch);
@@ -1295,10 +1372,10 @@ public class DefaultAccountStateStore implements AccountStateStore {
             creditAndRemoveSpendableRewardRest(previousEpoch, batch);
 
             db.write(wo, batch);
-            log.info("Epoch transition {} -> {} completed (SNAP: snapshot, prune)", previousEpoch, newEpoch);
+            log.info("Epoch transition {} -> {} completed (prune, reward_rest credit)", previousEpoch, newEpoch);
 
         } catch (Exception ex) {
-            log.error("Epoch transition snapshot failed for {} -> {}: {}", previousEpoch, newEpoch, ex.toString());
+            log.error("Epoch transition post-snapshot failed for {} -> {}: {}", previousEpoch, newEpoch, ex.toString());
         }
     }
 
@@ -1616,6 +1693,15 @@ public class DefaultAccountStateStore implements AccountStateStore {
         return depositDelta;
     }
 
+    private static byte[] acctRegSlotKey(int credType, String credHash) {
+        byte[] hash = HexUtil.decodeHexString(credHash);
+        byte[] key = new byte[1 + 1 + hash.length];
+        key[0] = PREFIX_ACCT_REG_SLOT;
+        key[1] = (byte) credType;
+        System.arraycopy(hash, 0, key, 2, hash.length);
+        return key;
+    }
+
     private BigInteger registerStake(StakeCredential cred, BigInteger deposit,
                                      long slot, int txIdx, int certIdx,
                                      WriteBatch batch, List<DeltaOp> deltaOps) throws RocksDBException {
@@ -1625,6 +1711,32 @@ public class DefaultAccountStateStore implements AccountStateStore {
         byte[] val = AccountStateCborCodec.encodeStakeAccount(BigInteger.ZERO, deposit);
         batch.put(cfState, key, val);
         deltaOps.add(new DeltaOp(OP_PUT, key, prev));
+
+        // Re-registration after deregistration: clean up stale pool/DRep delegation entries.
+        // Per Haskell ledger (Deleg.hs): re-registration starts fresh with no delegation.
+        // deregisterStake already deletes these, but backups from older code may have stale entries.
+        if (prev == null) {
+            byte[] delegKey = poolDelegKey(ct, cred.getHash());
+            byte[] delegPrev = db.get(cfState, delegKey);
+            if (delegPrev != null) {
+                batch.delete(cfState, delegKey);
+                deltaOps.add(new DeltaOp(OP_DELETE, delegKey, delegPrev));
+            }
+            byte[] drepKey = drepDelegKey(ct, cred.getHash());
+            byte[] drepPrev = db.get(cfState, drepKey);
+            if (drepPrev != null) {
+                batch.delete(cfState, drepKey);
+                deltaOps.add(new DeltaOp(OP_DELETE, drepKey, drepPrev));
+            }
+        }
+
+        // Track registration slot — used by snapshot to detect stale delegations
+        // from before the last deregistration/re-registration cycle.
+        byte[] regSlotKey = acctRegSlotKey(ct, cred.getHash());
+        byte[] regSlotPrev = db.get(cfState, regSlotKey);
+        byte[] regSlotVal = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(slot).array();
+        batch.put(cfState, regSlotKey, regSlotVal);
+        deltaOps.add(new DeltaOp(OP_PUT, regSlotKey, regSlotPrev));
 
         // Write stake event
         byte[] eventKey = stakeEventKey(slot, txIdx, certIdx, ct, cred.getHash());
@@ -1829,7 +1941,28 @@ public class DefaultAccountStateStore implements AccountStateStore {
         }
     }
 
-    private void createDelegationSnapshot(int epoch, WriteBatch batch) throws RocksDBException {
+    /**
+     * Create and commit the delegation snapshot in its own WriteBatch.
+     * Called from EpochBoundaryProcessor between rewards and governance so the snapshot
+     * captures post-reward state and is available for DRep distribution calculation.
+     */
+    /**
+     * Create and commit the delegation snapshot. Returns the UTXO balance aggregation
+     * so it can be reused for DRep distribution calculation (which needs actual balances
+     * for ALL credentials, not just pool-delegated ones).
+     */
+    public java.util.Map<UtxoBalanceAggregator.CredentialKey, java.math.BigInteger> createAndCommitDelegationSnapshot(int epoch) {
+        java.util.Map<UtxoBalanceAggregator.CredentialKey, java.math.BigInteger> utxoBalances = null;
+        try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+            utxoBalances = createDelegationSnapshot(epoch, batch);
+            db.write(wo, batch);
+        } catch (Exception ex) {
+            log.error("Failed to create delegation snapshot for epoch {}: {}", epoch, ex.toString());
+        }
+        return utxoBalances;
+    }
+
+    private java.util.Map<UtxoBalanceAggregator.CredentialKey, java.math.BigInteger> createDelegationSnapshot(int epoch, WriteBatch batch) throws RocksDBException {
         byte[] epochBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(epoch).array();
         int count = 0;
         int skippedUnregistered = 0;
@@ -1939,6 +2072,11 @@ public class DefaultAccountStateStore implements AccountStateStore {
                     spendableRewardRest.values().stream().reduce(BigInteger.ZERO, BigInteger::add));
         }
 
+        // Collect entries for export (only allocate list when exporter is active)
+        final java.util.List<com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.StakeEntry> exportEntries =
+                (snapshotExporter != com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.NOOP)
+                        ? new java.util.ArrayList<>() : null;
+
         try (RocksIterator it = db.newIterator(cfState)) {
             it.seek(new byte[]{PREFIX_POOL_DELEG});
             while (it.isValid()) {
@@ -1994,6 +2132,19 @@ public class DefaultAccountStateStore implements AccountStateStore {
                     }
                 }
 
+                // Skip delegations that predate the credential's current registration.
+                // This catches stale delegations from before a deregistration/re-registration
+                // cycle, even when the deregistration stake event has been pruned.
+                byte[] acctRegSlotVal = db.get(cfState, acctRegSlotKey(credType, credHash));
+                if (acctRegSlotVal != null) {
+                    long acctRegSlot = ByteBuffer.wrap(acctRegSlotVal).order(ByteOrder.BIG_ENDIAN).getLong();
+                    if (deleg.slot() < acctRegSlot) {
+                        skippedDeregAfterDeleg++;
+                        it.next();
+                        continue;
+                    }
+                }
+
                 // Compute stake amount = UTXO balance + withdrawable rewards
                 java.math.BigInteger stakeAmount = java.math.BigInteger.ZERO;
                 if (utxoBalances != null) {
@@ -2022,6 +2173,14 @@ public class DefaultAccountStateStore implements AccountStateStore {
                 byte[] snapshotVal = AccountStateCborCodec.encodeEpochDelegSnapshot(deleg.poolHash(), stakeAmount);
                 batch.put(cfEpochSnapshot, snapshotKey, snapshotVal);
                 count++;
+
+                // Collect for export (only if exporter is active)
+                if (exportEntries != null) {
+                    exportEntries.add(new com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.StakeEntry(
+                            credType, credHash, deleg.poolHash(), stakeAmount));
+                }
+
+
                 it.next();
             }
         }
@@ -2031,6 +2190,12 @@ public class DefaultAccountStateStore implements AccountStateStore {
         log.info("Created delegation snapshot for epoch {} ({} delegations, amounts={}, skipped: {} unregistered, {} zero-balance, {} retired-pool, {} stale-delegation, {} dereg-after-deleg)",
                 epoch, count, utxoBalances != null, skippedUnregistered, skippedZeroBalance, skippedRetiredPool, skippedStaleDelegation, skippedDeregAfterDeleg);
 
+        // Export stake snapshot for debugging
+        if (exportEntries != null) {
+            snapshotExporter.exportStakeSnapshot(epoch, exportEntries);
+        }
+
+        return utxoBalances;
     }
 
     private void pruneOldSnapshots(int oldestToKeep, WriteBatch batch) throws RocksDBException {
@@ -2048,6 +2213,7 @@ public class DefaultAccountStateStore implements AccountStateStore {
             }
         }
     }
+
 
     /**
      * Prune stake events older than the given cutoff slot.

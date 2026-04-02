@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.node.ledgerstate.governance.epoch;
 
-import com.bloxbean.cardano.yaci.core.model.governance.DrepType;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.node.ledgerstate.AccountStateCborCodec;
 import com.bloxbean.cardano.yaci.node.ledgerstate.DefaultAccountStateStore;
@@ -42,8 +41,8 @@ public class DRepDistributionCalculator {
     private static final Logger log = LoggerFactory.getLogger(DRepDistributionCalculator.class);
 
     // DRep type constants (match DrepType enum ordinals and CBOR encoding)
-    private static final int DREP_KEY = 0;      // ADDR_KEYHASH
-    private static final int DREP_SCRIPT = 1;   // SCRIPTHASH
+    static final int DREP_KEY = 0;      // ADDR_KEYHASH
+    static final int DREP_SCRIPT = 1;   // SCRIPTHASH
     private static final int DREP_ABSTAIN = 2;  // ABSTAIN
     private static final int DREP_NO_CONF = 3;  // NO_CONFIDENCE
 
@@ -79,18 +78,33 @@ public class DRepDistributionCalculator {
      * @param snapshotEpoch     The epoch whose delegation snapshot to use for stake amounts.
      *                          This is the PREVIOUS epoch (epoch N-1), whose snapshot was taken
      *                          at the boundary between epoch N-1 and N.
-     * @param protocolVersion   Current protocol major version (affects v10 delegation ordering)
-     * @param maxBootstrapEpoch Last epoch of bootstrap phase (v9). Delegations from bootstrap
-     *                          phase remain valid in v10 regardless of ordering.
-     *                          Pass -1 if still in bootstrap or not yet determined.
+     * @param utxoBalances      Pre-aggregated UTXO balances per credential from the snapshot step.
+     *                          Used for DRep stake calculation (not pool-delegation-only).
+     *                          Pass null to fall back to epoch snapshot (pool-delegated only).
      * @return Map of DRep identifier to total delegated stake
      */
-    public Map<DRepDistKey, BigInteger> calculate(int snapshotEpoch, int protocolVersion,
-                                                   int maxBootstrapEpoch) throws RocksDBException {
+    public Map<DRepDistKey, BigInteger> calculate(int snapshotEpoch,
+                                                   Map<com.bloxbean.cardano.yaci.node.ledgerstate.UtxoBalanceAggregator.CredentialKey,
+                                                           BigInteger> utxoBalances,
+                                                   Map<String, BigInteger> spendableRewardRest) throws RocksDBException {
         Map<DRepDistKey, BigInteger> distribution = new HashMap<>();
 
-        // Pre-compute: active DRep states for filtering and v10 ordering check
-        Map<CredentialKey, DRepStateRecord> activeDReps = governanceStore.getActiveDRepStates();
+        // Pre-compute DRep states for delegation validation.
+        // Per Amaru (governance.rs lines 94-117): include DRep if registeredAt > previousDeregistration.
+        // This excludes deregistered DReps (previousDeregistration > registeredAt) but includes:
+        //   - Never-deregistered DReps (previousDeregistration = null)
+        //   - Re-registered DReps (registeredAt > previousDeregistration)
+        //   - Expired DReps (expiry is separate from deregistration)
+        Map<CredentialKey, DRepStateRecord> allDRepStates = governanceStore.getAllDRepStates();
+        Map<CredentialKey, DRepStateRecord> activeDReps = new HashMap<>();
+        for (var entry : allDRepStates.entrySet()) {
+            DRepStateRecord rec = entry.getValue();
+            Long prevDeregSlot = rec.previousDeregistrationSlot();
+            // Include if never deregistered OR registered after last deregistration
+            if (prevDeregSlot == null || rec.registeredAtSlot() > prevDeregSlot) {
+                activeDReps.put(entry.getKey(), rec);
+            }
+        }
 
         // Pre-compute: proposal deposits by return address credential
         // Only includes deposits for credentials that have a DRep delegation
@@ -112,9 +126,8 @@ public class DRepDistributionCalculator {
                 int drepType = deleg.drepType();
                 String drepHash = deleg.drepHash();
 
-                // Check if delegated-to DRep is valid (includes v10 ordering check)
-                DRepDistKey drepKey = resolveDRepKey(drepType, drepHash, activeDReps,
-                        deleg.slot(), protocolVersion, maxBootstrapEpoch);
+                // Check if delegated-to DRep is valid (must be registered, delegation after deregistration)
+                DRepDistKey drepKey = resolveDRepKey(drepType, drepHash, activeDReps, deleg.slot());
                 if (drepKey == null) {
                     it.next();
                     continue;
@@ -128,10 +141,22 @@ public class DRepDistributionCalculator {
                     continue;
                 }
 
-                // Get stake amount: UTXO balance from snapshot + unwithdraw rewards
-                BigInteger stake = getSnapshotStake(snapshotEpoch, credType, credHash);
+                // Get stake amount: UTXO balance + unwithdraw rewards.
+                // Use actual UTXO balances (all credentials) rather than pool delegation snapshot
+                // (which only has pool-delegated credentials). This matches Haskell/DBSync behavior.
+                BigInteger stake = BigInteger.ZERO;
+                if (utxoBalances != null) {
+                    var credentialKey = new com.bloxbean.cardano.yaci.node.ledgerstate.UtxoBalanceAggregator.CredentialKey(credType, credHash);
+                    stake = utxoBalances.getOrDefault(credentialKey, BigInteger.ZERO);
+                } else {
+                    stake = getSnapshotStake(snapshotEpoch, credType, credHash);
+                }
                 BigInteger rewards = AccountStateCborCodec.decodeStakeAccount(acctVal).reward();
-                BigInteger total = stake.add(rewards);
+                // Add spendable reward_rest (proposal refunds, treasury withdrawals)
+                String restKey = credType + ":" + credHash;
+                BigInteger rewardRest = (spendableRewardRest != null)
+                        ? spendableRewardRest.getOrDefault(restKey, BigInteger.ZERO) : BigInteger.ZERO;
+                BigInteger total = stake.add(rewards).add(rewardRest);
 
                 // Add proposal deposits for this credential (only if they have DRep delegation,
                 // which they do since we're iterating DRep delegations)
@@ -139,9 +164,8 @@ public class DRepDistributionCalculator {
                 BigInteger proposalDeposits = proposalDepositsByCredential.getOrDefault(credKey, BigInteger.ZERO);
                 total = total.add(proposalDeposits);
 
-                if (total.signum() > 0) {
-                    distribution.merge(drepKey, total, BigInteger::add);
-                }
+                // Include zero-amount DReps to match DBSync drep_distr
+                distribution.merge(drepKey, total, BigInteger::add);
 
                 it.next();
             }
@@ -156,57 +180,26 @@ public class DRepDistributionCalculator {
 
     /**
      * Resolve a DRep delegation target to a distribution key.
-     * Returns null if the DRep is not valid for distribution (unregistered/inactive).
-     * <p>
-     * Delegation validity depends on protocol version (per Amaru stake_distribution.rs lines 89-105):
-     * <ul>
-     *   <li><b>V9 (bootstrap):</b> Delegation is valid if it was made AFTER the DRep's previous
-     *       deregistration (if any). This handles re-registration: old delegations from before
-     *       deregistration should not count for the re-registered DRep.</li>
-     *   <li><b>V10+:</b> Delegation must come AFTER DRep's current registration.
-     *       Exception: DReps registered during bootstrap (v9) are grandfathered.</li>
-     * </ul>
-     *
-     * @param drepType           DRep credential type
-     * @param drepHash           DRep credential hash
-     * @param activeDReps        Active DRep states
-     * @param delegSlot          Slot when the delegation was made
-     * @param protocolVersion    Current protocol major version
-     * @param maxBootstrapEpoch  Last epoch of bootstrap phase (-1 if still in bootstrap)
+     * Returns null if the DRep is not registered, or if the delegation predates
+     * the DRep's previous deregistration (per Amaru stake_distribution.rs).
      */
     private DRepDistKey resolveDRepKey(int drepType, String drepHash,
                                        Map<CredentialKey, DRepStateRecord> activeDReps,
-                                       long delegSlot, int protocolVersion,
-                                       int maxBootstrapEpoch) {
+                                       long delegSlot) {
         return switch (drepType) {
             case DREP_KEY, DREP_SCRIPT -> {
-                // Regular DRep — must be registered and active
+                // Regular DRep — must be registered
                 CredentialKey ck = new CredentialKey(drepType, drepHash);
                 DRepStateRecord drepState = activeDReps.get(ck);
                 if (drepState == null) {
                     yield null;
                 }
 
-                if (protocolVersion < 10) {
-                    // V9 (bootstrap): delegation valid if it was made after DRep's previous
-                    // deregistration. If no previous deregistration, all delegations are valid.
-                    // Per Amaru: `if &Some(since) > previous_deregistration`
-                    Long prevDeregSlot = drepState.previousDeregistrationSlot();
-                    if (prevDeregSlot != null && delegSlot <= prevDeregSlot) {
-                        // Delegation predates the deregistration that preceded re-registration
-                        yield null;
-                    }
-                } else {
-                    // V10+: delegation must come after DRep registration (slot ordering)
-                    // Exception: DReps registered during bootstrap are grandfathered
-                    boolean drepRegisteredDuringBootstrap =
-                            drepState.protocolVersionAtRegistration() < 10;
-
-                    if (!drepRegisteredDuringBootstrap
-                            && delegSlot <= drepState.registeredAtSlot()) {
-                        // Delegation predates DRep registration — invalid in v10+
-                        yield null;
-                    }
+                // Per Amaru (stake_distribution.rs): delegation valid only if made AFTER
+                // the DRep's previous deregistration. This is a per-delegator check.
+                Long prevDeregSlot = drepState.previousDeregistrationSlot();
+                if (prevDeregSlot != null && delegSlot <= prevDeregSlot) {
+                    yield null;
                 }
 
                 yield new DRepDistKey(drepType, drepHash);

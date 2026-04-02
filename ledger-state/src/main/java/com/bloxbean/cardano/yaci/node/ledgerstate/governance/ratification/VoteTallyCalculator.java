@@ -10,6 +10,7 @@ import com.bloxbean.cardano.yaci.node.ledgerstate.governance.model.CommitteeMemb
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.MathContext;
+import java.util.Set;
 import java.util.*;
 
 /**
@@ -34,14 +35,18 @@ public class VoteTallyCalculator {
     /**
      * Compute DRep vote tallies for a proposal.
      *
-     * @param votes        Votes for this proposal (voterKey → vote value)
-     * @param drepDist     DRep distribution (drepKey → stake)
-     * @param actionType   The governance action type (affects AlwaysNoConfidence behavior)
+     * @param votes          Votes for this proposal (voterKey → vote value)
+     * @param drepDist       DRep distribution (drepKey → stake) — includes expired DReps
+     * @param actionType     The governance action type (affects AlwaysNoConfidence behavior)
+     * @param activeDRepKeys Set of DRep keys that are active (not expired). Only these count
+     *                       as NO when they haven't voted. Expired DReps are excluded from tally.
+     *                       Pass null to count ALL DReps (legacy behavior).
      * @return DRep tally result
      */
     public DRepTally computeDRepTally(Map<GovernanceStateStore.VoterKey, Integer> votes,
                                       Map<DRepDistKey, BigInteger> drepDist,
-                                      GovActionType actionType) {
+                                      GovActionType actionType,
+                                      Set<DRepDistKey> activeDRepKeys) {
         BigInteger yesStake = BigInteger.ZERO;
         BigInteger noStake = BigInteger.ZERO;
         BigInteger abstainStake = BigInteger.ZERO;
@@ -85,10 +90,14 @@ public class VoteTallyCalculator {
                 new DRepDistKey(DREP_ABSTAIN, "abstain"), BigInteger.ZERO);
         abstainStake = abstainStake.add(abstainDRepStake);
 
-        // DReps that didn't vote: counted as NO (their stake reduces the yes ratio)
+        // DReps that didn't vote: counted as NO (their stake reduces the yes ratio).
+        // Only ACTIVE DReps count — expired DReps are excluded from the tally entirely
+        // (matching Haskell/Amaru: st.is_active(epoch)).
         for (var drepEntry : drepDist.entrySet()) {
             DRepDistKey dk = drepEntry.getKey();
             if (dk.drepType() == DREP_ABSTAIN || dk.drepType() == DREP_NO_CONF) continue;
+            // Skip expired DReps — they don't count in the tally
+            if (activeDRepKeys != null && !activeDRepKeys.contains(dk)) continue;
             String drepId = dk.drepType() + ":" + dk.drepHash();
             if (!votedDReps.contains(drepId)) {
                 noStake = noStake.add(drepEntry.getValue());
@@ -278,7 +287,7 @@ public class VoteTallyCalculator {
      */
     public static boolean committeeThresholdMet(CommitteeTally tally, BigDecimal threshold) {
         int denominator = tally.yesCount + tally.noCount;
-        if (denominator == 0) return true;
+        if (denominator == 0) return false; // No eligible committee members → no quorum → fail
         if (threshold.compareTo(BigDecimal.ZERO) == 0) return true;
 
         BigDecimal ratio = BigDecimal.valueOf(tally.yesCount)

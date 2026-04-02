@@ -132,13 +132,25 @@ public class EnactmentProcessor {
             }
         }
 
-        // Add new members with term epochs
+        // Add new members with term epochs.
+        // Preserve any existing hot key authorization (may have been submitted before enrollment).
         if (uc.getNewMembersAndTerms() != null) {
             for (var entry : uc.getNewMembersAndTerms().entrySet()) {
                 Credential cred = entry.getKey();
                 int expiryEpoch = entry.getValue();
                 int ct = credTypeFromModel(cred);
-                CommitteeMemberRecord record = CommitteeMemberRecord.noHotKey(expiryEpoch);
+
+                // Check for existing record with hot key (from prior AuthCommitteeHotCert)
+                var existing = governanceStore.getCommitteeMember(ct, cred.getHash());
+                CommitteeMemberRecord record;
+                if (existing.isPresent() && existing.get().hasHotKey()) {
+                    // Preserve the hot key, update expiry
+                    record = new CommitteeMemberRecord(
+                            existing.get().hotCredType(), existing.get().hotHash(),
+                            expiryEpoch, false);
+                } else {
+                    record = CommitteeMemberRecord.noHotKey(expiryEpoch);
+                }
                 governanceStore.storeCommitteeMember(ct, cred.getHash(), record, batch, deltaOps);
             }
         }

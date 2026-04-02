@@ -27,6 +27,9 @@ dependencies {
     implementation(project(':scalus-bridge')) {
         exclude group: 'io.netty', module: 'netty-all'
     }
+    implementation(project(':epoch-export')) {
+        exclude group: 'io.netty', module: 'netty-all'
+    }
 
     implementation("com.google.auto.service:auto-service:1.1.1")
 

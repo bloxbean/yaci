@@ -45,3 +45,5 @@ scalus-bloxbean-ccl = "org.scalus:scalus-bloxbean-cardano-client-lib_3:0.16.0"
 aiken-java-binding = "com.bloxbean.cardano:aiken-java-binding:0.1.0"
 
 cf-rewards-calculation = "org.cardanofoundation:cf-rewards-calculation:1.0.0"
+
+duckdb-jdbc = "org.duckdb:duckdb_jdbc:1.5.1.0"

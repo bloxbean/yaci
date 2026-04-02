@@ -149,12 +149,15 @@ public class EpochRewardCalculator {
 
         log.info("Epoch {} reward inputs: snapshot={} entries, pools={}, blocks={}, fees={}, " +
                         "deregistered={}, lateDeregistered={}, registeredSinceLast={}, registeredUntilNow={}, " +
-                        "retiredPools={}, d={}, nOpt={}, activeStake={}",
+                        "retiredPools={}, d={}, nOpt={}, activeStake={}, rho={}, tau={}, a0={}, " +
+                        "prevTreasury={}, prevReserves={}",
                 epoch, stakeSnapshot.size(), poolStates.size(), totalBlocks, fees,
                 deregistered.size(), lateDeregistered.size(), registeredSinceLast.size(),
                 registeredUntilNow.size(), retiredPools.size(),
                 protocolParams.getDecentralisation(), protocolParams.getOptimalPoolCount(),
-                totalActiveStake);
+                totalActiveStake, protocolParams.getMonetaryExpandRate(),
+                protocolParams.getTreasuryGrowRate(), protocolParams.getPoolOwnerInfluence(),
+                prevTreasury, prevReserves);
 
         // 6. Shared pool reward addresses (mainnet pre-Allegra only)
         var sharedPoolRewardAddresses = SharedPoolRewardAddresses
@@ -217,8 +220,11 @@ public class EpochRewardCalculator {
                     epoch, leaderCount, memberCount, deniedCount);
         }
 
-        log.info("Reward calculation for epoch {} complete in {}ms: distributed={}, treasury={}, reserves={}",
+        log.info("Reward calculation for epoch {} complete in {}ms: distributed={}, undistributed={}, " +
+                        "rewardsPot={}, poolRewardsPot={}, treasury={}, reserves={}",
                 epoch, elapsed, result.getTotalDistributedRewards(),
+                result.getTotalUndistributedRewards(),
+                result.getTotalRewardsPot(), result.getTotalPoolRewardsPot(),
                 result.getTreasury(), result.getReserves());
 
         // 10. Distribute rewards — credit to stake credential balances

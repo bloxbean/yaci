@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.node.ledgerstate.governance;
 
 import com.bloxbean.cardano.yaci.core.model.governance.GovActionId;
+import com.bloxbean.cardano.yaci.node.ledgerstate.governance.epoch.DRepExpiryCalculator;
 import com.bloxbean.cardano.yaci.core.model.governance.GovActionType;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.node.ledgerstate.DefaultAccountStateStore.DeltaOp;
@@ -37,8 +38,10 @@ public class GovernanceStateStore {
     static final byte PREFIX_EPOCH_PROPOSALS_FLAG = 0x67;
     static final byte PREFIX_EPOCH_DONATIONS = 0x68;
     static final byte PREFIX_LAST_ENACTED = 0x69;
-    static final byte PREFIX_RATIFIED_IN_EPOCH = 0x6A;
+    static final byte PREFIX_RATIFIED_IN_EPOCH = 0x6A;  // Pending enactments: ratified proposals awaiting enact at next boundary
     static final byte PREFIX_COMMITTEE_THRESHOLD = 0x6B;
+    static final byte PREFIX_EXPIRED_IN_EPOCH = 0x6C;   // Pending drops: expired proposals awaiting removal at next boundary
+    static final byte PREFIX_PROPOSAL_SUBMISSION = 0x6D; // Permanent proposal submission metadata: slot → (epoch, govActionLifetime)
 
     // Delta op types — same values as DefaultAccountStateStore
     private static final byte OP_PUT = 0x01;
@@ -531,6 +534,138 @@ public class GovernanceStateStore {
     public boolean epochHadActiveProposals(int epoch) throws RocksDBException {
         byte[] val = db.get(cfState, epochProposalsFlagKey(epoch));
         return val != null && val[0] == 1;
+    }
+
+    // ===== Proposal Submission Metadata (permanent, for v9 DRep bonus) =====
+
+    /**
+     * Store proposal submission metadata. This is NEVER deleted — needed for v9 DRep bonus
+     * calculation even after the proposal is expired/ratified/removed.
+     * Key: PREFIX_PROPOSAL_SUBMISSION + slot(8 BE)
+     * Value: epoch(4 BE) + govActionLifetime(4 BE)
+     */
+    public void storeProposalSubmission(long slot, int epoch, int govActionLifetime,
+                                        WriteBatch batch, List<DeltaOp> deltaOps) throws RocksDBException {
+        byte[] key = new byte[9];
+        key[0] = PREFIX_PROPOSAL_SUBMISSION;
+        ByteBuffer.wrap(key, 1, 8).order(ByteOrder.BIG_ENDIAN).putLong(slot);
+        byte[] val = new byte[8];
+        ByteBuffer.wrap(val, 0, 4).order(ByteOrder.BIG_ENDIAN).putInt(epoch);
+        ByteBuffer.wrap(val, 4, 4).order(ByteOrder.BIG_ENDIAN).putInt(govActionLifetime);
+        batch.put(cfState, key, val);
+        deltaOps.add(new DeltaOp(OP_PUT, key, null));
+    }
+
+    /**
+     * Find the latest proposal submitted at or before the given slot.
+     * Scans PREFIX_PROPOSAL_SUBMISSION entries using seekForPrev.
+     */
+    public DRepExpiryCalculator.ProposalSubmissionInfo findLatestProposalUpToSlot(long maxSlot)
+            throws RocksDBException {
+        byte[] seekKey = new byte[9];
+        seekKey[0] = PREFIX_PROPOSAL_SUBMISSION;
+        ByteBuffer.wrap(seekKey, 1, 8).order(ByteOrder.BIG_ENDIAN).putLong(maxSlot);
+
+        try (RocksIterator it = db.newIterator(cfState)) {
+            it.seekForPrev(seekKey);
+            if (it.isValid()) {
+                byte[] key = it.key();
+                if (key.length == 9 && key[0] == PREFIX_PROPOSAL_SUBMISSION) {
+                    long slot = ByteBuffer.wrap(key, 1, 8).order(ByteOrder.BIG_ENDIAN).getLong();
+                    byte[] val = it.value();
+                    int epoch = ByteBuffer.wrap(val, 0, 4).order(ByteOrder.BIG_ENDIAN).getInt();
+                    int lifetime = ByteBuffer.wrap(val, 4, 4).order(ByteOrder.BIG_ENDIAN).getInt();
+                    return new DRepExpiryCalculator.ProposalSubmissionInfo(slot, epoch, lifetime);
+                }
+            }
+        }
+        return null;
+    }
+
+    // ===== Pending Enactments / Drops (Two-Phase Ratify/Enact) =====
+
+    /**
+     * Store a GovActionId as pending enactment (ratified at this boundary, to be enacted at next).
+     * Key: PREFIX_RATIFIED_IN_EPOCH(1) + txHash(32) + govIdx(2 BE)
+     * Value: empty (presence = pending)
+     */
+    public void storePendingEnactment(GovActionId id, WriteBatch batch, List<DeltaOp> deltaOps) throws RocksDBException {
+        byte[] key = pendingKey(PREFIX_RATIFIED_IN_EPOCH, id);
+        batch.put(cfState, key, new byte[]{1});
+        deltaOps.add(new DeltaOp(OP_PUT, key, null));
+    }
+
+    /**
+     * Store a GovActionId as pending drop (expired at this boundary, to be removed at next).
+     */
+    public void storePendingDrop(GovActionId id, WriteBatch batch, List<DeltaOp> deltaOps) throws RocksDBException {
+        byte[] key = pendingKey(PREFIX_EXPIRED_IN_EPOCH, id);
+        batch.put(cfState, key, new byte[]{1});
+        deltaOps.add(new DeltaOp(OP_PUT, key, null));
+    }
+
+    /**
+     * Get all pending enactments (ratified proposals from previous boundary).
+     */
+    public List<GovActionId> getPendingEnactments() throws RocksDBException {
+        return getPendingIds(PREFIX_RATIFIED_IN_EPOCH);
+    }
+
+    /**
+     * Get all pending drops (expired proposals from previous boundary).
+     */
+    public List<GovActionId> getPendingDrops() throws RocksDBException {
+        return getPendingIds(PREFIX_EXPIRED_IN_EPOCH);
+    }
+
+    /**
+     * Clear all pending enactments and drops (after processing them).
+     */
+    public void clearPending(WriteBatch batch, List<DeltaOp> deltaOps) throws RocksDBException {
+        clearPendingByPrefix(PREFIX_RATIFIED_IN_EPOCH, batch, deltaOps);
+        clearPendingByPrefix(PREFIX_EXPIRED_IN_EPOCH, batch, deltaOps);
+    }
+
+    private byte[] pendingKey(byte prefix, GovActionId id) {
+        byte[] txHash = com.bloxbean.cardano.yaci.core.util.HexUtil.decodeHexString(id.getTransactionId());
+        byte[] key = new byte[1 + txHash.length + 2];
+        key[0] = prefix;
+        System.arraycopy(txHash, 0, key, 1, txHash.length);
+        int govIdx = id.getGov_action_index();
+        key[1 + txHash.length] = (byte) (govIdx >> 8);
+        key[1 + txHash.length + 1] = (byte) govIdx;
+        return key;
+    }
+
+    private List<GovActionId> getPendingIds(byte prefix) throws RocksDBException {
+        List<GovActionId> result = new ArrayList<>();
+        try (var it = db.newIterator(cfState)) {
+            it.seek(new byte[]{prefix});
+            while (it.isValid()) {
+                byte[] key = it.key();
+                if (key.length < 35 || key[0] != prefix) break;
+                String txHash = com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(
+                        java.util.Arrays.copyOfRange(key, 1, 33));
+                int govIdx = ((key[33] & 0xFF) << 8) | (key[34] & 0xFF);
+                result.add(new GovActionId(txHash, govIdx));
+                it.next();
+            }
+        }
+        return result;
+    }
+
+    private void clearPendingByPrefix(byte prefix, WriteBatch batch, List<DeltaOp> deltaOps) throws RocksDBException {
+        try (var it = db.newIterator(cfState)) {
+            it.seek(new byte[]{prefix});
+            while (it.isValid()) {
+                byte[] key = it.key();
+                if (key[0] != prefix) break;
+                byte[] prev = it.value();
+                batch.delete(cfState, key);
+                deltaOps.add(new DeltaOp(OP_DELETE, key, prev));
+                it.next();
+            }
+        }
     }
 
     // ===== Utility =====

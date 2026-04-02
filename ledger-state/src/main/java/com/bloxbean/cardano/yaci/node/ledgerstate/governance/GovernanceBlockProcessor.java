@@ -26,6 +26,15 @@ public class GovernanceBlockProcessor {
     private static final Logger log = LoggerFactory.getLogger(GovernanceBlockProcessor.class);
 
     private final GovernanceStateStore governanceStore;
+
+    /** Get current consecutive dormant epoch count for v10 DRep registration */
+    private int getDormantCount() {
+        try {
+            return governanceStore.getDormantEpochs().size();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
     private final EpochParamProvider paramProvider;
 
     public GovernanceBlockProcessor(GovernanceStateStore governanceStore, EpochParamProvider paramProvider) {
@@ -46,6 +55,11 @@ public class GovernanceBlockProcessor {
 
         if (txs == null) return;
 
+        // Accumulate donations across all txs in the block first, then write once.
+        // This avoids WriteBatch visibility issues when multiple txs donate in the same block
+        // (db.get reads committed state, not in-flight batch).
+        BigInteger blockDonations = BigInteger.ZERO;
+
         for (int txIdx = 0; txIdx < txs.size(); txIdx++) {
             if (invalidIdx.contains(txIdx)) continue;
             TransactionBody tx = txs.get(txIdx);
@@ -56,8 +70,17 @@ public class GovernanceBlockProcessor {
             // 2. Process votes + track DRep interactions (single pass)
             processVotesAndTrackInteractions(tx, currentEpoch, batch, deltaOps);
 
-            // 3. Process donations
-            processDonation(tx, currentEpoch, batch, deltaOps);
+            // 3. Accumulate donations
+            BigInteger donation = tx.getDonation();
+            if (donation != null && donation.signum() > 0) {
+                blockDonations = blockDonations.add(donation);
+            }
+        }
+
+        // Write accumulated donations once per block
+        if (blockDonations.signum() > 0) {
+            governanceStore.accumulateDonation(currentEpoch, blockDonations, batch, deltaOps);
+            log.debug("Accumulated block donations {} in epoch {}", blockDonations, currentEpoch);
         }
     }
 
@@ -99,9 +122,12 @@ public class GovernanceBlockProcessor {
             GovActionId id = new GovActionId(tx.getTxHash(), idx);
             governanceStore.storeProposal(id, record, batch, deltaOps);
 
-            log.debug("Stored proposal {}/{}:{} type={} expiresAfter={}",
+            // Store permanent proposal submission metadata (for v9 DRep bonus calculation)
+            governanceStore.storeProposalSubmission(slot, currentEpoch, govActionLifetime, batch, deltaOps);
+
+            log.info("GOV_PROPOSAL: stored {}/{} type={} epoch={} expiresAfter={}",
                     tx.getTxHash().substring(0, 8), idx, action.getType(),
-                    record.expiresAfterEpoch());
+                    currentEpoch, record.expiresAfterEpoch());
         }
     }
 
@@ -167,17 +193,6 @@ public class GovernanceBlockProcessor {
         }
     }
 
-    // ===== Donation Processing =====
-
-    private void processDonation(TransactionBody tx, int currentEpoch,
-                                 WriteBatch batch, List<DeltaOp> deltaOps) throws RocksDBException {
-        BigInteger donation = tx.getDonation();
-        if (donation != null && donation.signum() > 0) {
-            governanceStore.accumulateDonation(currentEpoch, donation, batch, deltaOps);
-            log.debug("Accumulated donation {} in epoch {}", donation, currentEpoch);
-        }
-    }
-
     // ===== DRep Certificate Processing (called from DefaultAccountStateStore.processCertificate()) =====
 
     /**
@@ -215,7 +230,7 @@ public class GovernanceBlockProcessor {
                 anchorHash,
                 currentEpoch,
                 null, // lastInteractionEpoch — none yet
-                currentEpoch + drepActivity, // initial expiry estimate (updated at epoch boundary)
+                currentEpoch + drepActivity, // initial expiry (updated at epoch boundary by DRepExpiryCalculator)
                 true,
                 slot,
                 protocolVersion,
@@ -287,6 +302,9 @@ public class GovernanceBlockProcessor {
 
     /**
      * Process committee hot key authorization — create/update CommitteeMemberRecord.
+     * Per Haskell spec, hot key authorizations are stored independently of committee
+     * membership. A credential may authorize a hot key before being added to the committee.
+     * We always store the hot key so it's available when the member is later enrolled.
      */
     public void processCommitteeHotKeyAuth(AuthCommitteeHotCert cert,
                                            WriteBatch batch, List<DeltaOp> deltaOps) throws RocksDBException {
@@ -300,10 +318,12 @@ public class GovernanceBlockProcessor {
             CommitteeMemberRecord updated = existing.get().withHotKey(hotCt, hotHash);
             governanceStore.storeCommitteeMember(coldCt, coldHash, updated, batch, deltaOps);
         } else {
-            // Member not yet in governance store — not a known committee member.
-            // Don't create placeholder records; the member will be recognized after
-            // Conway genesis bootstrap or UpdateCommittee enactment creates their record.
-            log.debug("Committee hot key auth for unknown member {}:{} — skipping (not yet bootstrapped)",
+            // Member not yet in committee — store placeholder with hot key so it's available
+            // when UpdateCommittee enactment later adds this member.
+            // expiryEpoch=0 ensures this placeholder is never counted as active.
+            CommitteeMemberRecord placeholder = new CommitteeMemberRecord(hotCt, hotHash, 0, false);
+            governanceStore.storeCommitteeMember(coldCt, coldHash, placeholder, batch, deltaOps);
+            log.debug("Committee hot key auth stored for future member {}:{}",
                     coldCt, coldHash.substring(0, Math.min(8, coldHash.length())));
         }
     }

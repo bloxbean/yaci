@@ -27,11 +27,18 @@
 #       protocol-magic: 1
 
 # Storage
-# yaci:
-#   node:
-#     storage:
-#       path: ./chainstate
-#       rocksdb: true
+ yaci:
+   node:
+     remote:
+       host: localhost
+       port: 32000
+       protocol-magic: 1
+     storage:
+       path: ./chainstate
+       rocksdb: true
+     snapshot-export:
+       enabled: false
+       dir: data
 
 # Server
 # yaci:
@@ -78,6 +85,12 @@
 #     block-producer:
 #       script-evaluator: scalus   # scalus or aiken
 
+# Epoch Snapshot Export
+# ---------------------
+# Export epoch boundary data (stake delegations, DRep distribution, AdaPot, proposal status)
+# to Parquet files for offline debugging and DBSync cross-verification.
+# Requires the epoch-export module on the classpath.
+#
 # Bootstrap State Mode
 # ---------------------
 # Enable bootstrap to skip full chain sync and start from a specific block.

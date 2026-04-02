@@ -118,6 +118,10 @@ public class YaciNodeProducer {
     boolean epochParamsTrackingEnabled;
     @ConfigProperty(name = "yaci.node.governance.enabled", defaultValue = "false")
     boolean governanceEnabled;
+    @ConfigProperty(name = "yaci.node.snapshot-export.enabled", defaultValue = "false")
+    boolean snapshotExportEnabled;
+    @ConfigProperty(name = "yaci.node.snapshot-export.dir", defaultValue = "data")
+    String snapshotExportDir;
 
     // Block body pruning config
     @ConfigProperty(name = "yaci.node.chain.block-body-prune-depth", defaultValue = "0")
@@ -350,6 +354,8 @@ public class YaciNodeProducer {
         globals.put("yaci.node.rewards.enabled", rewardsEnabled);
         globals.put("yaci.node.epoch-params.tracking-enabled", epochParamsTrackingEnabled);
         globals.put("yaci.node.governance.enabled", governanceEnabled);
+        globals.put("yaci.node.snapshot-export.enabled", snapshotExportEnabled);
+        globals.put("yaci.node.snapshot-export.dir", snapshotExportDir);
 
         // Block pruning
         globals.put("yaci.node.chain.block-body-prune-depth", blockBodyPruneDepth);

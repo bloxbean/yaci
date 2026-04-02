@@ -13,6 +13,8 @@ import org.rocksdb.RocksDBException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Set;
+
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.*;
@@ -34,6 +36,118 @@ public class RatificationEngine {
                               VoteTallyCalculator tallyCalculator) {
         this.governanceStore = governanceStore;
         this.tallyCalculator = tallyCalculator;
+    }
+
+    // ===== Stateless Evaluation (testable, no store dependency) =====
+
+    /**
+     * Evaluate a single proposal using pre-computed tallies. Fully stateless — no DB access.
+     * <p>
+     * This is the core ratification logic matching the Cardano Conway spec (Amaru reference):
+     * <ol>
+     *   <li>Lifecycle check (expired / too fresh)</li>
+     *   <li>Previous action chain validation</li>
+     *   <li>Per-body threshold checks (committee → DRep → SPO) based on action type</li>
+     * </ol>
+     *
+     * @param input             Pre-computed evaluation input (tallies + thresholds)
+     * @param currentEpoch      Current epoch at boundary
+     * @param isBootstrapPhase  Protocol v9 bootstrap (DRep thresholds = 0)
+     * @param lastEnactedActions Last enacted action per type (for prev-action chain)
+     * @param committeeState    "NORMAL" or "NO_CONFIDENCE"
+     * @param committeeMinSize  Minimum active committee members required
+     * @param committeeMaxTermLength Max committee member term
+     * @param delayed           Whether a delaying action was already ratified this epoch
+     * @return Ratification status
+     */
+    public static RatificationResult.Status evaluateStateless(
+            ProposalEvaluationInput input,
+            int currentEpoch,
+            boolean isBootstrapPhase,
+            Map<GovActionType, GovActionId> lastEnactedActions,
+            String committeeState,
+            int committeeMinSize,
+            int committeeMaxTermLength,
+            boolean delayed) {
+
+        GovActionRecord proposal = input.proposal();
+        GovActionType type = proposal.actionType();
+
+        // 1. Lifecycle check
+        boolean isExpired = (currentEpoch - proposal.expiresAfterEpoch()) > 1;
+        boolean isLastChance = (currentEpoch - proposal.expiresAfterEpoch()) == 1;
+        if (isExpired) return Status.EXPIRED;
+        if (type == GovActionType.INFO_ACTION) return isLastChance ? Status.EXPIRED : Status.ACTIVE;
+        if (delayed) return isLastChance ? Status.EXPIRED : Status.ACTIVE;
+
+        // 2. Previous action chain
+        if (!prevActionValid(proposal, lastEnactedActions)) {
+            return isLastChance ? Status.EXPIRED : Status.ACTIVE;
+        }
+
+        // 3. Per-body checks based on action type
+        boolean accepted = switch (type) {
+            case HARD_FORK_INITIATION_ACTION -> {
+                if (!committeeCheck(input, committeeState, isBootstrapPhase, committeeMinSize)) yield false;
+                if (!isBootstrapPhase && !drepCheck(input)) yield false;
+                if (!spoCheck(input)) yield false;
+                yield true;
+            }
+            case PARAMETER_CHANGE_ACTION -> {
+                if (!committeeCheck(input, committeeState, isBootstrapPhase, committeeMinSize)) yield false;
+                if (!isBootstrapPhase && !drepCheck(input)) yield false;
+                // SPO only if threshold > 0 (security params)
+                if (input.spoThreshold().compareTo(BigDecimal.ZERO) > 0 && !spoCheck(input)) yield false;
+                yield true;
+            }
+            case TREASURY_WITHDRAWALS_ACTION -> {
+                if (!committeeCheck(input, committeeState, isBootstrapPhase, committeeMinSize)) yield false;
+                if (!isBootstrapPhase && !drepCheck(input)) yield false;
+                // Treasury balance check
+                // TODO: sum all TW proposals' withdrawals vs treasury
+                yield true;
+            }
+            case NO_CONFIDENCE -> {
+                // Committee does NOT vote on its own dissolution
+                if (!isBootstrapPhase && !drepCheck(input)) yield false;
+                if (!spoCheck(input)) yield false;
+                yield true;
+            }
+            case UPDATE_COMMITTEE -> {
+                // Committee does NOT vote on its own update
+                if (!isBootstrapPhase && !drepCheck(input)) yield false;
+                if (!spoCheck(input)) yield false;
+                yield true;
+            }
+            case NEW_CONSTITUTION -> {
+                if (!committeeCheck(input, committeeState, isBootstrapPhase, committeeMinSize)) yield false;
+                if (!isBootstrapPhase && !drepCheck(input)) yield false;
+                yield true;
+            }
+            case INFO_ACTION -> false; // Already handled above
+        };
+
+        if (accepted) return Status.RATIFIED;
+        return isLastChance ? Status.EXPIRED : Status.ACTIVE;
+    }
+
+    private static boolean committeeCheck(ProposalEvaluationInput input, String committeeState,
+                                           boolean isBootstrapPhase, int committeeMinSize) {
+        if ("NO_CONFIDENCE".equals(committeeState)) return false;
+        var tally = input.committeeTally();
+        if (!isBootstrapPhase) {
+            int eligible = tally.yesCount() + tally.noCount() + tally.abstainCount();
+            if (eligible < committeeMinSize) return false;
+        }
+        return VoteTallyCalculator.committeeThresholdMet(tally, input.committeeThreshold());
+    }
+
+    private static boolean drepCheck(ProposalEvaluationInput input) {
+        return VoteTallyCalculator.drepThresholdMet(input.drepTally(), input.drepThreshold());
+    }
+
+    private static boolean spoCheck(ProposalEvaluationInput input) {
+        return VoteTallyCalculator.spoThresholdMet(input.spoTally(), input.spoThreshold());
     }
 
     /**
@@ -58,6 +172,7 @@ public class RatificationEngine {
     public List<RatificationResult> evaluateAll(
             Map<GovActionId, GovActionRecord> activeProposals,
             Map<DRepDistKey, BigInteger> drepDist,
+            Set<DRepDistKey> activeDRepKeys,
             Map<String, BigInteger> poolStakeDist,
             Map<String, Integer> poolDRepDelegation,
             Map<CredentialKey, CommitteeMemberRecord> committeeMembers,
@@ -85,11 +200,17 @@ public class RatificationEngine {
             GovActionId id = entry.getKey();
             GovActionRecord proposal = entry.getValue();
 
-            Status status = evaluateProposal(id, proposal, drepDist, poolStakeDist, poolDRepDelegation,
+            Status status = evaluateProposal(id, proposal, drepDist, activeDRepKeys,
+                    poolStakeDist, poolDRepDelegation,
                     committeeMembers, committeeThreshold, lastEnactedActions, currentEpoch,
                     isBootstrapPhase, committeeMinSize, committeeMaxTermLength,
                     committeeState, treasury, drepThresholds, spoThresholds, delayed);
 
+            if (currentEpoch == 232) {
+                log.info("EVAL@232: {}/{} type={} status={} delayed={}",
+                        id.getTransactionId().substring(0, 8), id.getGov_action_index(),
+                        proposal.actionType(), status, delayed);
+            }
             results.add(new RatificationResult(id, proposal, status));
 
             // Delaying actions prevent subsequent ratifications
@@ -112,6 +233,7 @@ public class RatificationEngine {
     private Status evaluateProposal(
             GovActionId id, GovActionRecord proposal,
             Map<DRepDistKey, BigInteger> drepDist,
+            Set<DRepDistKey> activeDRepKeys,
             Map<String, BigInteger> poolStakeDist,
             Map<String, Integer> poolDRepDelegation,
             Map<CredentialKey, CommitteeMemberRecord> committeeMembers,
@@ -148,6 +270,13 @@ public class RatificationEngine {
 
         // Prev action check (for chained action types)
         if (!prevActionValid(proposal, lastEnactedActions)) {
+            if (id.getTransactionId().startsWith("49578eba")) {
+                GovActionType pt = (type == GovActionType.NO_CONFIDENCE || type == GovActionType.UPDATE_COMMITTEE)
+                        ? GovActionType.UPDATE_COMMITTEE : type;
+                log.info("TRACE-82: prevAction INVALID at epoch {} — lastEnacted[{}]={}, proposal prev={}/{}",
+                        currentEpoch, pt, lastEnactedActions.get(pt),
+                        proposal.prevActionTxHash(), proposal.prevActionIndex());
+            }
             return isLastChance ? Status.EXPIRED : Status.ACTIVE;
         }
 
@@ -158,40 +287,44 @@ public class RatificationEngine {
         // Evaluate per action type
         boolean accepted = switch (type) {
             case HARD_FORK_INITIATION_ACTION -> evaluateHardFork(
-                    votes, drepDist, poolStakeDist, poolDRepDelegation,
+                    votes, drepDist, activeDRepKeys, poolStakeDist, poolDRepDelegation,
                     committeeMembers, committeeThreshold, committeeState,
                     currentEpoch, isBootstrapPhase, committeeMinSize,
                     drepThresholds, spoThresholds);
 
             case PARAMETER_CHANGE_ACTION -> evaluateParameterChange(
-                    votes, drepDist, poolStakeDist, poolDRepDelegation,
+                    votes, drepDist, activeDRepKeys, poolStakeDist, poolDRepDelegation,
                     committeeMembers, committeeThreshold, committeeState,
                     currentEpoch, isBootstrapPhase, committeeMinSize,
-                    drepThresholds, spoThresholds);
+                    drepThresholds, spoThresholds, proposal);
 
             case TREASURY_WITHDRAWALS_ACTION -> evaluateTreasuryWithdrawal(
-                    votes, drepDist, committeeMembers, committeeThreshold,
+                    votes, drepDist, activeDRepKeys, committeeMembers, committeeThreshold,
                     committeeState, currentEpoch, isBootstrapPhase,
                     committeeMinSize, treasury, proposal, drepThresholds);
 
             case NO_CONFIDENCE -> evaluateNoConfidence(
-                    votes, drepDist, poolStakeDist, poolDRepDelegation,
+                    votes, drepDist, activeDRepKeys, poolStakeDist, poolDRepDelegation,
                     currentEpoch, isBootstrapPhase, drepThresholds, spoThresholds);
 
             case UPDATE_COMMITTEE -> evaluateUpdateCommittee(
-                    votes, drepDist, poolStakeDist, poolDRepDelegation,
+                    votes, drepDist, activeDRepKeys, poolStakeDist, poolDRepDelegation,
                     currentEpoch, isBootstrapPhase, committeeState,
                     committeeMaxTermLength, proposal,
                     drepThresholds, spoThresholds);
 
             case NEW_CONSTITUTION -> evaluateNewConstitution(
-                    votes, drepDist, committeeMembers, committeeThreshold,
+                    votes, drepDist, activeDRepKeys, committeeMembers, committeeThreshold,
                     committeeState, currentEpoch, isBootstrapPhase,
                     committeeMinSize, drepThresholds);
 
             case INFO_ACTION -> false; // Already handled above
         };
 
+        if (currentEpoch == 232 && id.getTransactionId().startsWith("49578eba")) {
+            log.info("TRACE-82-FINAL: accepted={} type={} isLastChance={} votes={}",
+                    accepted, type, isLastChance, votes.size());
+        }
         if (accepted) return Status.RATIFIED;
         return isLastChance ? Status.EXPIRED : Status.ACTIVE;
     }
@@ -201,6 +334,7 @@ public class RatificationEngine {
     private boolean evaluateHardFork(
             Map<GovernanceStateStore.VoterKey, Integer> votes,
             Map<DRepDistKey, BigInteger> drepDist,
+            Set<DRepDistKey> activeDRepKeys,
             Map<String, BigInteger> poolStakeDist,
             Map<String, Integer> poolDRepDelegation,
             Map<CredentialKey, CommitteeMemberRecord> committeeMembers,
@@ -213,7 +347,7 @@ public class RatificationEngine {
                 currentEpoch, isBootstrapPhase, committeeMinSize)) return false;
         if (!checkSPO(votes, poolStakeDist, poolDRepDelegation,
                 GovActionType.HARD_FORK_INITIATION_ACTION, isBootstrapPhase, spoThresholds)) return false;
-        if (!isBootstrapPhase && !checkDRep(votes, drepDist,
+        if (!isBootstrapPhase && !checkDRep(votes, drepDist, activeDRepKeys,
                 GovActionType.HARD_FORK_INITIATION_ACTION, drepThresholds)) return false;
         return true;
     }
@@ -221,37 +355,56 @@ public class RatificationEngine {
     private boolean evaluateParameterChange(
             Map<GovernanceStateStore.VoterKey, Integer> votes,
             Map<DRepDistKey, BigInteger> drepDist,
+            Set<DRepDistKey> activeDRepKeys,
             Map<String, BigInteger> poolStakeDist,
             Map<String, Integer> poolDRepDelegation,
             Map<CredentialKey, CommitteeMemberRecord> committeeMembers,
             BigDecimal committeeThreshold, String committeeState,
             int currentEpoch, boolean isBootstrapPhase, int committeeMinSize,
             Map<GovActionType, BigDecimal> drepThresholds,
-            Map<GovActionType, BigDecimal> spoThresholds) {
+            Map<GovActionType, BigDecimal> spoThresholds,
+            GovActionRecord proposal) {
 
-        // Committee always required
-        if (!checkCommittee(votes, committeeMembers, committeeThreshold, committeeState,
-                currentEpoch, isBootstrapPhase, committeeMinSize)) return false;
+        boolean is82 = proposal.proposalSlot() == 97796216L;
 
-        if (isBootstrapPhase) return true; // Bootstrap: committee only
+        boolean ccPass = checkCommittee(votes, committeeMembers, committeeThreshold, committeeState,
+                currentEpoch, isBootstrapPhase, committeeMinSize);
+        if (is82) log.info("P82: cc={} members={} threshold={} state={} minSize={}",
+                ccPass, committeeMembers.size(), committeeThreshold, committeeState, committeeMinSize);
+        if (!ccPass) return false;
 
-        // Post-bootstrap: DRep always required
-        if (!checkDRep(votes, drepDist, GovActionType.PARAMETER_CHANGE_ACTION, drepThresholds)) return false;
+        if (isBootstrapPhase) return true;
 
-        // SPO required if security params involved
-        // For simplicity, check SPO with security threshold if available
-        BigDecimal spoThreshold = spoThresholds.get(GovActionType.PARAMETER_CHANGE_ACTION);
-        if (spoThreshold != null && spoThreshold.compareTo(BigDecimal.ZERO) > 0) {
-            if (!checkSPO(votes, poolStakeDist, poolDRepDelegation,
-                    GovActionType.PARAMETER_CHANGE_ACTION, isBootstrapPhase, spoThresholds)) return false;
+        boolean drepPass = checkDRep(votes, drepDist, activeDRepKeys, GovActionType.PARAMETER_CHANGE_ACTION, drepThresholds);
+        if (is82) log.info("P82: drep={} threshold={} active={}",
+                drepPass, drepThresholds.get(GovActionType.PARAMETER_CHANGE_ACTION),
+                activeDRepKeys != null ? activeDRepKeys.size() : "null");
+        if (!drepPass) return false;
+
+        boolean spoRequired = false;
+        if (proposal.govAction() instanceof com.bloxbean.cardano.yaci.core.model.governance.actions.ParameterChangeAction pca
+                && pca.getProtocolParamUpdate() != null) {
+            var groups = ProtocolParamGroupClassifier.getAffectedGroups(pca.getProtocolParamUpdate());
+            spoRequired = ProtocolParamGroupClassifier.isSpoVotingRequired(groups);
+            if (is82) log.info("P82: groups={} spoRequired={}", groups, spoRequired);
+        } else if (is82) {
+            log.info("P82: govAction={} — no ProtocolParamUpdate!", proposal.govAction());
+        }
+        if (spoRequired) {
+            boolean spoPass = checkSPO(votes, poolStakeDist, poolDRepDelegation,
+                    GovActionType.PARAMETER_CHANGE_ACTION, isBootstrapPhase, spoThresholds);
+            if (is82) log.info("P82: spo={}", spoPass);
+            if (!spoPass) return false;
         }
 
+        if (is82) log.info("P82: ALL PASSED → true");
         return true;
     }
 
     private boolean evaluateTreasuryWithdrawal(
             Map<GovernanceStateStore.VoterKey, Integer> votes,
             Map<DRepDistKey, BigInteger> drepDist,
+            Set<DRepDistKey> activeDRepKeys,
             Map<CredentialKey, CommitteeMemberRecord> committeeMembers,
             BigDecimal committeeThreshold, String committeeState,
             int currentEpoch, boolean isBootstrapPhase, int committeeMinSize,
@@ -260,7 +413,7 @@ public class RatificationEngine {
 
         if (!checkCommittee(votes, committeeMembers, committeeThreshold, committeeState,
                 currentEpoch, isBootstrapPhase, committeeMinSize)) return false;
-        if (!isBootstrapPhase && !checkDRep(votes, drepDist,
+        if (!isBootstrapPhase && !checkDRep(votes, drepDist, activeDRepKeys,
                 GovActionType.TREASURY_WITHDRAWALS_ACTION, drepThresholds)) return false;
 
         // Treasury balance check: totalWithdrawal <= treasury
@@ -281,6 +434,7 @@ public class RatificationEngine {
     private boolean evaluateNoConfidence(
             Map<GovernanceStateStore.VoterKey, Integer> votes,
             Map<DRepDistKey, BigInteger> drepDist,
+            Set<DRepDistKey> activeDRepKeys,
             Map<String, BigInteger> poolStakeDist,
             Map<String, Integer> poolDRepDelegation,
             int currentEpoch, boolean isBootstrapPhase,
@@ -288,7 +442,7 @@ public class RatificationEngine {
             Map<GovActionType, BigDecimal> spoThresholds) {
 
         // No committee vote for NoConfidence
-        if (!isBootstrapPhase && !checkDRep(votes, drepDist,
+        if (!isBootstrapPhase && !checkDRep(votes, drepDist, activeDRepKeys,
                 GovActionType.NO_CONFIDENCE, drepThresholds)) return false;
         if (!checkSPO(votes, poolStakeDist, poolDRepDelegation,
                 GovActionType.NO_CONFIDENCE, isBootstrapPhase, spoThresholds)) return false;
@@ -298,6 +452,7 @@ public class RatificationEngine {
     private boolean evaluateUpdateCommittee(
             Map<GovernanceStateStore.VoterKey, Integer> votes,
             Map<DRepDistKey, BigInteger> drepDist,
+            Set<DRepDistKey> activeDRepKeys,
             Map<String, BigInteger> poolStakeDist,
             Map<String, Integer> poolDRepDelegation,
             int currentEpoch, boolean isBootstrapPhase, String committeeState,
@@ -306,7 +461,7 @@ public class RatificationEngine {
             Map<GovActionType, BigDecimal> spoThresholds) {
 
         // No committee vote for UpdateCommittee
-        if (!isBootstrapPhase && !checkDRep(votes, drepDist,
+        if (!isBootstrapPhase && !checkDRep(votes, drepDist, activeDRepKeys,
                 GovActionType.UPDATE_COMMITTEE, drepThresholds)) return false;
         if (!checkSPO(votes, poolStakeDist, poolDRepDelegation,
                 GovActionType.UPDATE_COMMITTEE, isBootstrapPhase, spoThresholds)) return false;
@@ -328,6 +483,7 @@ public class RatificationEngine {
     private boolean evaluateNewConstitution(
             Map<GovernanceStateStore.VoterKey, Integer> votes,
             Map<DRepDistKey, BigInteger> drepDist,
+            Set<DRepDistKey> activeDRepKeys,
             Map<CredentialKey, CommitteeMemberRecord> committeeMembers,
             BigDecimal committeeThreshold, String committeeState,
             int currentEpoch, boolean isBootstrapPhase, int committeeMinSize,
@@ -335,7 +491,7 @@ public class RatificationEngine {
 
         if (!checkCommittee(votes, committeeMembers, committeeThreshold, committeeState,
                 currentEpoch, isBootstrapPhase, committeeMinSize)) return false;
-        if (!isBootstrapPhase && !checkDRep(votes, drepDist,
+        if (!isBootstrapPhase && !checkDRep(votes, drepDist, activeDRepKeys,
                 GovActionType.NEW_CONSTITUTION, drepThresholds)) return false;
         return true;
     }
@@ -365,11 +521,12 @@ public class RatificationEngine {
     private boolean checkDRep(
             Map<GovernanceStateStore.VoterKey, Integer> votes,
             Map<DRepDistKey, BigInteger> drepDist,
+            Set<DRepDistKey> activeDRepKeys,
             GovActionType actionType,
             Map<GovActionType, BigDecimal> thresholds) {
 
         BigDecimal threshold = thresholds.getOrDefault(actionType, BigDecimal.ONE);
-        var tally = tallyCalculator.computeDRepTally(votes, drepDist, actionType);
+        var tally = tallyCalculator.computeDRepTally(votes, drepDist, actionType, activeDRepKeys);
         return VoteTallyCalculator.drepThresholdMet(tally, threshold);
     }
 
@@ -388,7 +545,7 @@ public class RatificationEngine {
 
     // ===== Prev Action Validation =====
 
-    private boolean prevActionValid(GovActionRecord proposal,
+    static boolean prevActionValid(GovActionRecord proposal,
                                     Map<GovActionType, GovActionId> lastEnactedActions) {
         GovActionType type = proposal.actionType();
 

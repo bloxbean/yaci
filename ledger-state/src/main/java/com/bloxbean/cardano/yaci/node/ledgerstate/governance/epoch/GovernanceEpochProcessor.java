@@ -6,10 +6,13 @@ import com.bloxbean.cardano.yaci.node.api.EpochParamProvider;
 import com.bloxbean.cardano.yaci.node.ledgerstate.AccountStateCborCodec;
 import com.bloxbean.cardano.yaci.node.ledgerstate.AdaPotTracker;
 import com.bloxbean.cardano.yaci.node.ledgerstate.DefaultAccountStateStore.DeltaOp;
+import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.node.ledgerstate.EpochParamTracker;
+import com.bloxbean.cardano.yaci.node.ledgerstate.governance.ratification.ProtocolParamGroupClassifier;
 import com.bloxbean.cardano.yaci.node.ledgerstate.governance.GovernanceStateStore;
 import com.bloxbean.cardano.yaci.node.ledgerstate.governance.GovernanceStateStore.CredentialKey;
 import com.bloxbean.cardano.yaci.node.ledgerstate.governance.epoch.DRepDistributionCalculator.DRepDistKey;
+import java.util.Set;
 import com.bloxbean.cardano.yaci.node.ledgerstate.governance.model.CommitteeMemberRecord;
 import com.bloxbean.cardano.yaci.node.ledgerstate.governance.model.DRepStateRecord;
 import com.bloxbean.cardano.yaci.node.ledgerstate.governance.model.GovActionRecord;
@@ -62,6 +65,10 @@ public class GovernanceEpochProcessor {
     private final AdaPotTracker adaPotTracker;
     private final PoolStakeResolver poolStakeResolver;
     private final RewardRestStore rewardRestStore;
+
+    // Optional epoch snapshot exporter for debugging (NOOP when disabled)
+    private com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter snapshotExporter =
+            com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.NOOP;
 
     // Conway era first epoch (network-specific, set during bootstrap)
     private int conwayFirstEpoch = -1;
@@ -142,46 +149,54 @@ public class GovernanceEpochProcessor {
         this.conwayFirstEpoch = epoch;
     }
 
+    public void setSnapshotExporter(com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter exporter) {
+        this.snapshotExporter = exporter != null ? exporter
+                : com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.NOOP;
+    }
+
     /**
-     * Process governance epoch boundary and commit all writes atomically.
-     * Called from EpochBoundaryProcessor which doesn't manage a WriteBatch.
+     * Process governance epoch boundary in two phases with a commit between.
+     * Phase 1 (Enact): applies previously ratified proposals → commits so committee/params
+     *                   changes are visible to subsequent reads.
+     * Phase 2 (Ratify + rest): evaluates current proposals, stores new pending, updates DReps.
+     * Called from EpochBoundaryProcessor.
      */
-    public GovernanceEpochResult processEpochBoundaryAndCommit(int previousEpoch, int newEpoch)
-            throws RocksDBException {
+    public GovernanceEpochResult processEpochBoundaryAndCommit(int previousEpoch, int newEpoch,
+            Map<com.bloxbean.cardano.yaci.node.ledgerstate.UtxoBalanceAggregator.CredentialKey,
+                    BigInteger> utxoBalances,
+            Map<String, BigInteger> spendableRewardRest) throws RocksDBException {
+
+        int protocolVersion = resolveProtocolMajor(newEpoch);
+        if (protocolVersion < 9) return GovernanceEpochResult.EMPTY;
+
+        // Phase 1: Bootstrap + Enact pending proposals (writes committee, params, lastEnacted)
+        BigInteger enactmentTreasuryDelta;
         try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
             List<DeltaOp> deltaOps = new ArrayList<>();
-            GovernanceEpochResult result = processEpochBoundary(previousEpoch, newEpoch, batch, deltaOps);
+            enactmentTreasuryDelta = processEnactmentPhase(previousEpoch, newEpoch, batch, deltaOps);
+            db.write(wo, batch); // Commit so ratification can see enactment changes
+        }
 
-            // Write delta log for rollback support (keyed by a governance-specific marker)
-            // Governance epoch deltas use a special key to distinguish from block-level deltas
-            // For now, governance epoch changes are committed without delta logging
-            // since epoch boundary processing is idempotent (re-run produces same result).
-            // TODO: Add delta logging for full rollback support of epoch governance state
-
+        // Phase 2: Ratification + deposit refunds + dormant + expiry + donations
+        try (WriteBatch batch = new WriteBatch(); WriteOptions wo = new WriteOptions()) {
+            List<DeltaOp> deltaOps = new ArrayList<>();
+            GovernanceEpochResult result = processRatificationPhase(previousEpoch, newEpoch,
+                    enactmentTreasuryDelta, batch, deltaOps, utxoBalances, spendableRewardRest);
             db.write(wo, batch);
             return result;
         }
     }
 
     /**
-     * Process governance state at epoch boundary.
+     * Phase 1: Bootstrap Conway genesis + enact previously ratified proposals.
+     * Writes committee members, protocol params, and lastEnactedActions to RocksDB.
+     * Must be committed before Phase 2 so ratification reads current state.
      *
-     * @param previousEpoch The epoch that just ended
-     * @param newEpoch      The epoch starting
-     * @param batch         WriteBatch for atomic writes
-     * @param deltaOps      Delta ops for rollback
-     * @return Result containing treasury/deposit deltas for AdaPot
+     * @return treasury delta from enactment (e.g., negative for treasury withdrawals)
      */
-    public GovernanceEpochResult processEpochBoundary(int previousEpoch, int newEpoch,
-                                                      WriteBatch batch, List<DeltaOp> deltaOps)
+    private BigInteger processEnactmentPhase(int previousEpoch, int newEpoch,
+                                              WriteBatch batch, List<DeltaOp> deltaOps)
             throws RocksDBException {
-        long start = System.currentTimeMillis();
-        int protocolVersion = resolveProtocolMajor(newEpoch);
-
-        // Skip if not in Conway era
-        if (protocolVersion < 9) {
-            return GovernanceEpochResult.EMPTY;
-        }
 
         // Bootstrap Conway genesis on first Conway epoch (committee, constitution, params)
         if (!genesisBootstrapped) {
@@ -192,15 +207,52 @@ public class GovernanceEpochProcessor {
             genesisBootstrapped = true;
         }
 
+        // Enact pending proposals (ratified at previous epoch boundary)
+        BigInteger treasuryDelta = BigInteger.ZERO;
+        List<GovActionId> pendingEnactmentIds = governanceStore.getPendingEnactments();
+        Map<GovActionId, GovActionRecord> allProposals = governanceStore.getAllActiveProposals();
+
+        if (!pendingEnactmentIds.isEmpty()) {
+            log.info("Phase 1 enact: {} pending enactments at {} → {}",
+                    pendingEnactmentIds.size(), previousEpoch, newEpoch);
+        }
+
+        for (GovActionId id : pendingEnactmentIds) {
+            GovActionRecord proposal = allProposals.get(id);
+            if (proposal != null) {
+                BigInteger delta = enactmentProcessor.enact(id, proposal, newEpoch, batch, deltaOps);
+                treasuryDelta = treasuryDelta.add(delta);
+                log.info("Phase 1 enacted: {}/{} type={}", id.getTransactionId().substring(0, 8),
+                        id.getGov_action_index(), proposal.actionType());
+            }
+        }
+
+        return treasuryDelta;
+    }
+
+    /**
+     * Phase 2: Ratification + deposit refunds + dormant tracking + DRep expiry + donations.
+     * Reads committed state (including Phase 1 enactment writes) for committee/params/lastEnacted.
+     */
+    private GovernanceEpochResult processRatificationPhase(int previousEpoch, int newEpoch,
+                                                            BigInteger enactmentTreasuryDelta,
+                                                            WriteBatch batch, List<DeltaOp> deltaOps,
+                                                            Map<com.bloxbean.cardano.yaci.node.ledgerstate.UtxoBalanceAggregator.CredentialKey,
+                                                                    BigInteger> utxoBalances,
+                                                            Map<String, BigInteger> spendableRewardRest)
+            throws RocksDBException {
+        long start = System.currentTimeMillis();
+        int protocolVersion = resolveProtocolMajor(newEpoch);
         boolean isBootstrapPhase = protocolVersion < 10;
 
         log.info("Governance epoch boundary {} → {} (protocolVersion={}, bootstrap={})",
                 previousEpoch, newEpoch, protocolVersion, isBootstrapPhase);
 
-        // 1. Calculate DRep distribution (using snapshot from previousEpoch)
-        int maxBootstrapEpoch = isBootstrapPhase ? -1 : findMaxBootstrapEpoch();
+        BigInteger treasuryDelta = enactmentTreasuryDelta;
+
+        // 1. Calculate DRep distribution (using UTXO balances + reward_rest from snapshot step)
         Map<DRepDistKey, BigInteger> drepDist =
-                drepDistCalculator.calculate(previousEpoch, protocolVersion, maxBootstrapEpoch);
+                drepDistCalculator.calculate(previousEpoch, utxoBalances, spendableRewardRest);
 
         // Store DRep distribution snapshot (skip virtual DReps — they have synthetic non-hex hashes)
         for (var entry : drepDist.entrySet()) {
@@ -211,20 +263,42 @@ public class GovernanceEpochProcessor {
             }
         }
 
-        // 2. RATIFY: evaluate all active proposals
-        Map<GovActionId, GovActionRecord> activeProposals = governanceStore.getAllActiveProposals();
-        Map<CredentialKey, CommitteeMemberRecord> committeeMembers = governanceStore.getAllCommitteeMembers();
+        // Export DRep distribution snapshot for debugging
+        if (snapshotExporter != com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.NOOP) {
+            var exportEntries = drepDist.entrySet().stream()
+                    .filter(e -> e.getKey().drepType() <= 1) // skip virtual DReps
+                    .map(e -> new com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.DRepDistEntry(
+                            e.getKey().drepType(), e.getKey().drepHash(), e.getValue()))
+                    .toList();
+            snapshotExporter.exportDRepDistribution(newEpoch, exportEntries);
+        }
 
-        // Resolve thresholds and committee state
+        // Build set of ACTIVE (non-expired) DRep keys for ratification tally.
+        // Only include DReps that are IN the distribution (have delegated stake).
+        Set<DRepDistKey> activeDRepKeys = buildActiveDRepKeys(drepDist, newEpoch);
+
+        // 2. Get active proposals, excluding those pending enactment/drop (already ratified/expired)
+        Map<GovActionId, GovActionRecord> activeProposals = governanceStore.getAllActiveProposals();
+        List<GovActionId> pendingEnactmentIds = governanceStore.getPendingEnactments();
+        List<GovActionId> pendingDropIds = governanceStore.getPendingDrops();
+        for (GovActionId id : pendingEnactmentIds) activeProposals.remove(id);
+        for (GovActionId id : pendingDropIds) activeProposals.remove(id);
+
+        if (!pendingEnactmentIds.isEmpty() || !pendingDropIds.isEmpty()) {
+            log.info("Phase 2: {} pending enactments, {} pending drops at {} → {}",
+                    pendingEnactmentIds.size(), pendingDropIds.size(), previousEpoch, newEpoch);
+        }
+
+        // 3. Ratify — reads committed state (committee/params/lastEnacted updated by Phase 1).
+        Map<CredentialKey, CommitteeMemberRecord> committeeMembers = governanceStore.getAllCommitteeMembers();
         BigDecimal committeeThreshold = resolveCommitteeThreshold();
         String committeeState = resolveCommitteeState(committeeMembers, newEpoch);
         Map<GovActionType, GovActionId> lastEnactedActions = resolveLastEnactedActions();
-        Map<GovActionType, BigDecimal> drepThresholds = resolveDRepThresholds(isBootstrapPhase);
-        Map<GovActionType, BigDecimal> spoThresholds = resolveSPOThresholds();
+        Map<GovActionType, BigDecimal> drepThresholds = resolveDRepThresholds(isBootstrapPhase, newEpoch);
+        Map<GovActionType, BigDecimal> spoThresholds = resolveSPOThresholds(newEpoch);
         int committeeMinSize = paramProvider.getCommitteeMinSize(newEpoch);
         int committeeMaxTermLength = paramProvider.getCommitteeMaxTermLength(newEpoch);
 
-        // Resolve pool stake distribution and pool DRep delegations for SPO voting
         PoolStakeData poolData = PoolStakeData.EMPTY;
         if (poolStakeResolver != null) {
             poolData = poolStakeResolver.resolvePoolStake(previousEpoch);
@@ -233,7 +307,6 @@ public class GovernanceEpochProcessor {
         Map<String, BigInteger> poolStakeDist = poolData.poolStakes();
         Map<String, Integer> poolDRepDelegation = poolData.poolDRepDelegations();
 
-        // Resolve treasury from AdaPot
         BigInteger treasury = BigInteger.ZERO;
         if (adaPotTracker != null && adaPotTracker.isEnabled()) {
             var prevPot = adaPotTracker.getAdaPot(previousEpoch);
@@ -243,126 +316,164 @@ public class GovernanceEpochProcessor {
         }
 
         List<RatificationResult> results = ratificationEngine.evaluateAll(
-                activeProposals, drepDist, poolStakeDist, poolDRepDelegation,
+                activeProposals, drepDist, activeDRepKeys, poolStakeDist, poolDRepDelegation,
                 committeeMembers, committeeThreshold, lastEnactedActions,
                 newEpoch, isBootstrapPhase, committeeMinSize, committeeMaxTermLength,
                 committeeState, treasury, drepThresholds, spoThresholds);
 
-        // 3. ENACT ratified actions
-        BigInteger treasuryDelta = BigInteger.ZERO;
+        // Store NEW ratified proposals as pending for next boundary
         for (RatificationResult result : results) {
             if (result.isRatified()) {
-                BigInteger delta = enactmentProcessor.enact(result.govActionId(), result.proposal(),
-                        newEpoch, batch, deltaOps);
-                treasuryDelta = treasuryDelta.add(delta);
+                governanceStore.storePendingEnactment(result.govActionId(), batch, deltaOps);
+                log.info("Phase 2: ratified → pending enactment {}/{} at {} → {}",
+                        result.govActionId().getTransactionId().substring(0, 8),
+                        result.govActionId().getGov_action_index(), previousEpoch, newEpoch);
             }
         }
 
-        // 3.5 Store treasury withdrawal amounts as reward_rest (spendable at newEpoch + 1)
+        // Export proposal status for debugging
+        if (snapshotExporter != com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.NOOP) {
+            var statusEntries = results.stream()
+                    .map(r -> new com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.ProposalStatusEntry(
+                            r.govActionId().getTransactionId(), r.govActionId().getGov_action_index(),
+                            r.proposal().actionType().name(), r.status().name(),
+                            r.proposal().deposit(), r.proposal().returnAddress(),
+                            r.proposal().proposedInEpoch(), r.proposal().expiresAfterEpoch()))
+                    .toList();
+            snapshotExporter.exportProposalStatus(newEpoch, statusEntries);
+        }
+
+        // 3.5 Store treasury withdrawal amounts as reward_rest.
+        //     Only for PREVIOUSLY ratified proposals that are now being enacted.
+        Map<GovActionId, GovActionRecord> allProposals = governanceStore.getAllActiveProposals();
         if (rewardRestStore != null) {
-            for (RatificationResult result : results) {
-                if (result.isRatified() && result.proposal().govAction()
+            Map<String, BigInteger> aggregatedWithdrawals = new java.util.HashMap<>();
+            for (GovActionId id : pendingEnactmentIds) {
+                GovActionRecord enactedProposal = allProposals.get(id);
+                if (enactedProposal != null && enactedProposal.govAction()
                         instanceof com.bloxbean.cardano.yaci.core.model.governance.actions.TreasuryWithdrawalsAction twa) {
                     if (twa.getWithdrawals() != null) {
                         for (var entry : twa.getWithdrawals().entrySet()) {
-                            boolean stored = rewardRestStore.storeRewardRest(
-                                    newEpoch + 1,
-                                    com.bloxbean.cardano.yaci.node.ledgerstate.DefaultAccountStateStore.REWARD_REST_TREASURY_WITHDRAWAL,
-                                    entry.getKey(), entry.getValue(), newEpoch, 0,
-                                    batch, deltaOps);
-                            if (!stored) {
-                                treasuryDelta = treasuryDelta.add(entry.getValue());
-                                log.info("Treasury withdrawal to {} unclaimed, returned to treasury",
-                                        entry.getKey().substring(0, Math.min(16, entry.getKey().length())));
-                            }
+                            aggregatedWithdrawals.merge(entry.getKey(), entry.getValue(), BigInteger::add);
                         }
                     }
                 }
             }
-        }
-
-        // 4. Remove expired + conflicting proposals, compute deposit refunds
-        Set<GovActionId> proposalsToDrop = proposalDropService.computeProposalsToDrop(results, activeProposals);
-        BigInteger depositRefunds = BigInteger.ZERO;
-        BigInteger unclaimedRefunds = BigInteger.ZERO;
-
-        // Remove ratified and expired proposals — store deposit refunds as reward_rest
-        for (RatificationResult result : results) {
-            if (result.isRatified() || result.isExpired()) {
-                BigInteger deposit = result.proposal().deposit();
-                depositRefunds = depositRefunds.add(deposit);
-
-                // Store deposit refund as reward_rest (spendable at newEpoch + 1)
-                if (rewardRestStore != null && deposit.signum() > 0) {
-                    boolean stored = rewardRestStore.storeRewardRest(
-                            newEpoch + 1,
-                            com.bloxbean.cardano.yaci.node.ledgerstate.DefaultAccountStateStore.REWARD_REST_PROPOSAL_REFUND,
-                            result.proposal().returnAddress(), deposit, newEpoch, 0,
-                            batch, deltaOps);
-                    if (!stored) {
-                        unclaimedRefunds = unclaimedRefunds.add(deposit);
-                    }
+            for (var entry : aggregatedWithdrawals.entrySet()) {
+                boolean stored = rewardRestStore.storeRewardRest(
+                        newEpoch,
+                        com.bloxbean.cardano.yaci.node.ledgerstate.DefaultAccountStateStore.REWARD_REST_TREASURY_WITHDRAWAL,
+                        entry.getKey(), entry.getValue(), previousEpoch, 0,
+                        batch, deltaOps);
+                if (!stored) {
+                    treasuryDelta = treasuryDelta.add(entry.getValue());
+                    log.info("Treasury withdrawal to {} unclaimed, returned to treasury",
+                            entry.getKey().substring(0, Math.min(16, entry.getKey().length())));
                 }
-
-                governanceStore.removeProposal(result.govActionId(), batch, deltaOps);
-                governanceStore.removeVotesForProposal(result.govActionId().getTransactionId(),
-                        result.govActionId().getGov_action_index(), batch, deltaOps);
             }
         }
 
-        // Remove dropped proposals (siblings/descendants) — store deposit refunds as reward_rest
+        // 4. Two-phase deposit refunds and proposal removal.
+        Set<GovActionId> proposalsToDrop = proposalDropService.computeProposalsToDrop(results, activeProposals);
+        BigInteger depositRefunds = BigInteger.ZERO;
+        Map<String, BigInteger> aggregatedRefunds = new java.util.HashMap<>();
+
+        // 4a. Process ENACTED proposals (previously ratified → now enact): refund + remove
+        for (GovActionId id : pendingEnactmentIds) {
+            GovActionRecord proposal = allProposals.get(id);
+            if (proposal != null) {
+                BigInteger deposit = proposal.deposit();
+                depositRefunds = depositRefunds.add(deposit);
+                if (deposit.signum() > 0) {
+                    aggregatedRefunds.merge(proposal.returnAddress(), deposit, BigInteger::add);
+                }
+                governanceStore.removeProposal(id, batch, deltaOps);
+                governanceStore.removeVotesForProposal(id.getTransactionId(),
+                        id.getGov_action_index(), batch, deltaOps);
+            }
+        }
+
+        // 4b. Process DROPPED proposals (previously expired → now drop): refund + remove
+        for (GovActionId id : pendingDropIds) {
+            GovActionRecord proposal = allProposals.get(id);
+            if (proposal != null) {
+                BigInteger deposit = proposal.deposit();
+                depositRefunds = depositRefunds.add(deposit);
+                if (deposit.signum() > 0) {
+                    aggregatedRefunds.merge(proposal.returnAddress(), deposit, BigInteger::add);
+                }
+                governanceStore.removeProposal(id, batch, deltaOps);
+                governanceStore.removeVotesForProposal(id.getTransactionId(),
+                        id.getGov_action_index(), batch, deltaOps);
+            }
+        }
+
+        // Clear processed pending enactments/drops BEFORE storing new ones
+        governanceStore.clearPending(batch, deltaOps);
+
+        // 4c. Drop siblings/descendants of enacted proposals
         for (GovActionId dropId : proposalsToDrop) {
             GovActionRecord dropped = activeProposals.get(dropId);
             if (dropped != null) {
                 BigInteger deposit = dropped.deposit();
                 depositRefunds = depositRefunds.add(deposit);
-
-                // Store deposit refund as reward_rest (spendable at newEpoch + 1)
-                if (rewardRestStore != null && deposit.signum() > 0) {
-                    boolean stored = rewardRestStore.storeRewardRest(
-                            newEpoch + 1,
-                            com.bloxbean.cardano.yaci.node.ledgerstate.DefaultAccountStateStore.REWARD_REST_PROPOSAL_REFUND,
-                            dropped.returnAddress(), deposit, newEpoch, 0,
-                            batch, deltaOps);
-                    if (!stored) {
-                        unclaimedRefunds = unclaimedRefunds.add(deposit);
-                    }
+                if (deposit.signum() > 0) {
+                    aggregatedRefunds.merge(dropped.returnAddress(), deposit, BigInteger::add);
                 }
-
                 governanceStore.removeProposal(dropId, batch, deltaOps);
                 governanceStore.removeVotesForProposal(dropId.getTransactionId(),
                         dropId.getGov_action_index(), batch, deltaOps);
             }
         }
 
-        // Unclaimed refunds go to treasury
+        // 4d. Store NEWLY expired proposals as pending drops for next boundary
+        for (RatificationResult result : results) {
+            if (result.isExpired()) {
+                governanceStore.storePendingDrop(result.govActionId(), batch, deltaOps);
+            }
+        }
+
+        // Store aggregated refunds as reward_rest
+        BigInteger unclaimedRefunds = BigInteger.ZERO;
+        if (rewardRestStore != null) {
+            for (var entry : aggregatedRefunds.entrySet()) {
+                boolean stored = rewardRestStore.storeRewardRest(
+                        newEpoch,
+                        com.bloxbean.cardano.yaci.node.ledgerstate.DefaultAccountStateStore.REWARD_REST_PROPOSAL_REFUND,
+                        entry.getKey(), entry.getValue(), previousEpoch, 0,
+                        batch, deltaOps);
+                if (!stored) {
+                    unclaimedRefunds = unclaimedRefunds.add(entry.getValue());
+                }
+            }
+        }
+
         if (unclaimedRefunds.signum() > 0) {
             treasuryDelta = treasuryDelta.add(unclaimedRefunds);
             log.info("Unclaimed proposal deposit refunds going to treasury: {}", unclaimedRefunds);
         }
 
-        // Note: DRep deposit refunds are handled immediately on UnregDrepCert processing
-        // in DefaultAccountStateStore.processCertificate(), not at epoch boundary.
-        // Only PROPOSAL deposits are refunded at epoch boundary (when proposals expire/enacted/dropped).
-
-        // 5. Update DRep expiry
-        updateDRepExpiry(newEpoch, batch, deltaOps);
-
-        // 6. Update dormant epoch tracking
-        // After removing expired/ratified/dropped proposals, check if any remain active
-        Map<GovActionId, GovActionRecord> remainingProposals = governanceStore.getAllActiveProposals();
-        boolean epochHadActiveProposals = !remainingProposals.isEmpty();
+        // 5. Dormant epoch tracking (needed before DRep expiry calculation)
+        int remainingCount = activeProposals.size();
+        for (RatificationResult result : results) {
+            if (result.isRatified() || result.isExpired()) {
+                if (activeProposals.containsKey(result.govActionId())) remainingCount--;
+            }
+        }
+        boolean epochHadActiveProposals = remainingCount > 0;
         governanceStore.storeEpochHadActiveProposals(newEpoch, epochHadActiveProposals, batch, deltaOps);
 
         Set<Integer> dormantEpochs = governanceStore.getDormantEpochs();
         if (!epochHadActiveProposals) {
             dormantEpochs.add(newEpoch);
         }
-        // First Conway epoch is always dormant
         if (conwayFirstEpoch >= 0 && newEpoch == conwayFirstEpoch && !dormantEpochs.contains(newEpoch)) {
             dormantEpochs.add(newEpoch);
         }
         governanceStore.storeDormantEpochs(dormantEpochs, batch, deltaOps);
+
+        // 6. Update DRep expiry (after dormant tracking so dormant set is current)
+        updateDRepExpiry(newEpoch, dormantEpochs, batch, deltaOps);
 
         // 7. Process epoch donations
         BigInteger donations = governanceStore.getEpochDonations(previousEpoch);
@@ -378,29 +489,80 @@ public class GovernanceEpochProcessor {
         return new GovernanceEpochResult(treasuryDelta, depositRefunds, donations);
     }
 
+    // ===== Active DRep Keys =====
+
+    /**
+     * Build set of ACTIVE (non-expired) DRep keys from the distribution.
+     * Only DReps in the distribution with delegated stake are included.
+     */
+    private Set<DRepDistKey> buildActiveDRepKeys(Map<DRepDistKey, BigInteger> drepDist, int newEpoch) {
+        Set<DRepDistKey> activeDRepKeys = new java.util.HashSet<>();
+        try {
+            Set<Integer> currentDormantEpochs = governanceStore.getDormantEpochs();
+            int drepActivityParam = paramProvider.getDRepActivity(newEpoch);
+            int eraFirst = conwayFirstEpoch >= 0 ? conwayFirstEpoch : newEpoch;
+            int govLifetime = paramProvider.getGovActionLifetime(newEpoch);
+
+            var allDRepStates = governanceStore.getAllDRepStates();
+            for (var distKey : drepDist.keySet()) {
+                if (distKey.drepType() > 1) continue; // Skip virtual DReps (abstain, no_confidence)
+                CredentialKey ck = new CredentialKey(distKey.drepType(), distKey.drepHash());
+                DRepStateRecord rec = allDRepStates.get(ck);
+                if (rec == null) continue;
+                DRepExpiryCalculator.ProposalSubmissionInfo proposalForDRep =
+                        findLatestProposalUpToSlot(rec.registeredAtSlot());
+                int expiry = drepExpiryCalculator.calculateExpiry(rec, currentDormantEpochs,
+                        drepActivityParam, eraFirst, newEpoch, proposalForDRep, govLifetime);
+                if (expiry >= newEpoch) {
+                    activeDRepKeys.add(distKey);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to build active DRep set: {}", e.getMessage());
+        }
+        return activeDRepKeys;
+    }
+
     // ===== DRep Expiry Update =====
 
-    private void updateDRepExpiry(int newEpoch, WriteBatch batch, List<DeltaOp> deltaOps)
+    private void updateDRepExpiry(int newEpoch, Set<Integer> dormantEpochs,
+                                   WriteBatch batch, List<DeltaOp> deltaOps)
             throws RocksDBException {
-        Set<Integer> dormantEpochs = governanceStore.getDormantEpochs();
+        // Per yaci-store DRepExpiryUtil (matches DBSync exactly):
+        // expiry = lastActivityEpoch + drepActivity + dormantCount [+ v9Bonus]
         int drepActivity = paramProvider.getDRepActivity(newEpoch);
         int eraFirstEpoch = conwayFirstEpoch >= 0 ? conwayFirstEpoch : newEpoch;
+        int govActionLifetime = paramProvider.getGovActionLifetime(newEpoch);
 
         Map<CredentialKey, DRepStateRecord> allDReps = governanceStore.getActiveDRepStates();
         for (var entry : allDReps.entrySet()) {
             CredentialKey ck = entry.getKey();
             DRepStateRecord state = entry.getValue();
 
-            // TODO: For full v9 bonus accuracy, need to look up latestProposalUpToRegistration
-            // from the proposal history. For now, pass null (no v9 bonus).
+            // Find the latest proposal submitted at or before this DRep's registration slot
+            DRepExpiryCalculator.ProposalSubmissionInfo proposalForDRep =
+                    findLatestProposalUpToSlot(state.registeredAtSlot());
+
             int expiry = drepExpiryCalculator.calculateExpiry(state, dormantEpochs, drepActivity,
-                    eraFirstEpoch, newEpoch, null, paramProvider.getGovActionLifetime(newEpoch));
+                    eraFirstEpoch, newEpoch, proposalForDRep, govActionLifetime);
             boolean active = expiry >= newEpoch;
 
             if (expiry != state.expiryEpoch() || active != state.active()) {
                 DRepStateRecord updated = state.withExpiry(expiry, active);
                 governanceStore.storeDRepState(ck.credType(), ck.hash(), updated, batch, deltaOps);
             }
+        }
+    }
+
+    /**
+     * Find the latest governance proposal submitted at or before the given slot.
+     * Uses permanent PREFIX_PROPOSAL_SUBMISSION store (survives proposal removal).
+     */
+    private DRepExpiryCalculator.ProposalSubmissionInfo findLatestProposalUpToSlot(long maxSlot) {
+        try {
+            return governanceStore.findLatestProposalUpToSlot(maxSlot);
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -446,16 +608,36 @@ public class GovernanceEpochProcessor {
         return result;
     }
 
-    private Map<GovActionType, BigDecimal> resolveDRepThresholds(boolean isBootstrapPhase) {
+    private Map<GovActionType, BigDecimal> resolveDRepThresholds(boolean isBootstrapPhase, int epoch) {
         Map<GovActionType, BigDecimal> thresholds = new HashMap<>();
         if (isBootstrapPhase) {
-            // Bootstrap: all DRep thresholds = 0 (auto-approve)
             for (GovActionType type : GovActionType.values()) {
                 thresholds.put(type, BigDecimal.ZERO);
             }
+            return thresholds;
+        }
+
+        // Read from protocol params (paramTracker or genesis defaults)
+        ProtocolParamUpdate params = (paramTracker instanceof EpochParamTracker ept)
+                ? ept.getResolvedParams(epoch) : null;
+        if (params != null && params.getDrepVotingThresholds() != null) {
+            var dt = params.getDrepVotingThresholds();
+            thresholds.put(GovActionType.NO_CONFIDENCE,
+                    ProtocolParamGroupClassifier.ratioToBigDecimal(dt.getDvtMotionNoConfidence()));
+            thresholds.put(GovActionType.UPDATE_COMMITTEE,
+                    ProtocolParamGroupClassifier.ratioToBigDecimal(dt.getDvtCommitteeNormal()));
+            thresholds.put(GovActionType.NEW_CONSTITUTION,
+                    ProtocolParamGroupClassifier.ratioToBigDecimal(dt.getDvtUpdateToConstitution()));
+            thresholds.put(GovActionType.HARD_FORK_INITIATION_ACTION,
+                    ProtocolParamGroupClassifier.ratioToBigDecimal(dt.getDvtHardForkInitiation()));
+            thresholds.put(GovActionType.TREASURY_WITHDRAWALS_ACTION,
+                    ProtocolParamGroupClassifier.ratioToBigDecimal(dt.getDvtTreasuryWithdrawal()));
+            // ParameterChange: per-proposal threshold computed in RatificationEngine
+            // Use max possible (governance group = 0.75) as default; actual is computed per proposal
+            thresholds.put(GovActionType.PARAMETER_CHANGE_ACTION,
+                    ProtocolParamGroupClassifier.ratioToBigDecimal(dt.getDvtPPGovGroup()));
         } else {
-            // TODO: Read actual DRep voting thresholds from protocol params
-            // For now, use reasonable defaults
+            // Fallback defaults
             thresholds.put(GovActionType.NO_CONFIDENCE, new BigDecimal("0.67"));
             thresholds.put(GovActionType.UPDATE_COMMITTEE, new BigDecimal("0.67"));
             thresholds.put(GovActionType.NEW_CONSTITUTION, new BigDecimal("0.75"));
@@ -466,19 +648,27 @@ public class GovernanceEpochProcessor {
         return thresholds;
     }
 
-    private Map<GovActionType, BigDecimal> resolveSPOThresholds() {
-        // TODO: Read actual SPO voting thresholds from protocol params
+    private Map<GovActionType, BigDecimal> resolveSPOThresholds(int epoch) {
         Map<GovActionType, BigDecimal> thresholds = new HashMap<>();
-        thresholds.put(GovActionType.NO_CONFIDENCE, new BigDecimal("0.60"));
-        thresholds.put(GovActionType.UPDATE_COMMITTEE, new BigDecimal("0.51"));
-        thresholds.put(GovActionType.HARD_FORK_INITIATION_ACTION, new BigDecimal("0.51"));
-        thresholds.put(GovActionType.PARAMETER_CHANGE_ACTION, new BigDecimal("0.51")); // security group
+        ProtocolParamUpdate params = (paramTracker instanceof EpochParamTracker ept)
+                ? ept.getResolvedParams(epoch) : null;
+        if (params != null && params.getPoolVotingThresholds() != null) {
+            var pt = params.getPoolVotingThresholds();
+            thresholds.put(GovActionType.NO_CONFIDENCE,
+                    ProtocolParamGroupClassifier.ratioToBigDecimal(pt.getPvtMotionNoConfidence()));
+            thresholds.put(GovActionType.UPDATE_COMMITTEE,
+                    ProtocolParamGroupClassifier.ratioToBigDecimal(pt.getPvtCommitteeNormal()));
+            thresholds.put(GovActionType.HARD_FORK_INITIATION_ACTION,
+                    ProtocolParamGroupClassifier.ratioToBigDecimal(pt.getPvtHardForkInitiation()));
+            thresholds.put(GovActionType.PARAMETER_CHANGE_ACTION,
+                    ProtocolParamGroupClassifier.ratioToBigDecimal(pt.getPvtPPSecurityGroup()));
+        } else {
+            thresholds.put(GovActionType.NO_CONFIDENCE, new BigDecimal("0.60"));
+            thresholds.put(GovActionType.UPDATE_COMMITTEE, new BigDecimal("0.51"));
+            thresholds.put(GovActionType.HARD_FORK_INITIATION_ACTION, new BigDecimal("0.51"));
+            thresholds.put(GovActionType.PARAMETER_CHANGE_ACTION, new BigDecimal("0.51"));
+        }
         return thresholds;
-    }
-
-    private int findMaxBootstrapEpoch() {
-        // TODO: Find the epoch of the last ratified HardForkInitiation that transitioned to v10
-        return -1;
     }
 
     // ===== Result =====

@@ -107,7 +107,7 @@ if (project.version.endsWith("-SNAPSHOT")) {
     version = "${project.version}".replace("-SNAPSHOT", "-${commit_id}-SNAPSHOT")
 }
 
-def nonLibraryModules = ['node-app', 'scalus-bridge'] as Set
+def nonLibraryModules = ['node-app', 'scalus-bridge', 'epoch-export'] as Set
 
 subprojects {
     // Skip most configuration for application modules (Quarkus/Scala handle their own builds)

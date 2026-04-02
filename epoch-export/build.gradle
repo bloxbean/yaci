@@ -1,0 +1,16 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    implementation project(':ledger-state')
+    implementation libs.duckdb.jdbc
+    implementation libs.cardano.client.core  // For AddressProvider, GovId, Bech32
+
+    implementation libs.slf4j.api
+}
+
+java {
+    sourceCompatibility = 25
+    targetCompatibility = 25
+}

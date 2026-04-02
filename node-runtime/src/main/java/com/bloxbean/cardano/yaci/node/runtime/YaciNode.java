@@ -392,6 +392,7 @@ public class YaciNode implements NodeAPI {
                                 epochParamProvider,
                                 magic);
                         defaultStore.setEpochBoundaryProcessor(boundaryProcessor);
+                        boundaryProcessor.setSnapshotCreator(defaultStore);
                         log.info("Epoch boundary processor wired (adapot={}, rewards={}, params={})",
                                 adaPotEnabled, rewardsEnabled, epochParamsEnabled);
                     }
@@ -439,6 +440,32 @@ public class YaciNode implements NodeAPI {
                                 boundaryProcessor.setGovernanceEpochProcessor(govEpochProcessor);
                             }
                             log.info("Governance subsystem enabled (block processor + epoch processor)");
+                        }
+                    }
+
+                    // One-time migration: populate PREFIX_ACCT_REG_SLOT from existing stake events.
+                    // Enables stale delegation detection in snapshots for pre-existing data.
+                    defaultStore.migrateAcctRegSlots();
+
+                    // Wire epoch snapshot exporter if enabled (ServiceLoader discovery)
+                    boolean exportEnabled = Boolean.parseBoolean(
+                            String.valueOf(runtimeOptions.globals().getOrDefault("yaci.node.snapshot-export.enabled", "false")));
+                    if (exportEnabled) {
+                        String exportDir = String.valueOf(runtimeOptions.globals().getOrDefault(
+                                "yaci.node.snapshot-export.dir", "data"));
+                        var loader = java.util.ServiceLoader.load(
+                                com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter.class);
+                        var impl = loader.findFirst();
+                        if (impl.isPresent()) {
+                            var exporter = impl.get();
+                            exporter.setOutputDir(exportDir);
+                            exporter.setNetworkMagic(this.config.getProtocolMagic());
+                            defaultStore.setSnapshotExporter(exporter);
+                            if (boundaryProcessor != null) boundaryProcessor.setSnapshotExporter(exporter);
+                            log.info("Epoch snapshot export enabled: {} → {}", exporter.getClass().getSimpleName(), exportDir);
+                        } else {
+                            log.warn("Snapshot export enabled but no EpochSnapshotExporter implementation found on classpath. "
+                                    + "Add the epoch-export module to enable parquet export.");
                         }
                     }
                 }
