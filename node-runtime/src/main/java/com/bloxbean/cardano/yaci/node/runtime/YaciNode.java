@@ -177,6 +177,7 @@ public class YaciNode implements NodeAPI {
     private UtxoEventHandlerAsync utxoEventHandlerAsync;
     private ScheduledFuture<?> utxoLagTask;
     private AccountStateStore accountStateStore;
+    private com.bloxbean.cardano.yaci.node.ledgerstate.EpochBoundaryProcessor epochBoundaryProcessor;
     private AccountStateEventHandler accountStateEventHandler;
     private com.bloxbean.cardano.yaci.node.api.EpochParamProvider epochParamProvider;
 
@@ -391,10 +392,14 @@ public class YaciNode implements NodeAPI {
                                 paramTrackerInstance,
                                 epochParamProvider,
                                 magic);
+                        this.epochBoundaryProcessor = boundaryProcessor;
                         defaultStore.setEpochBoundaryProcessor(boundaryProcessor);
                         boundaryProcessor.setSnapshotCreator(defaultStore);
-                        log.info("Epoch boundary processor wired (adapot={}, rewards={}, params={})",
-                                adaPotEnabled, rewardsEnabled, epochParamsEnabled);
+                        boolean exitOnCalcError = Boolean.parseBoolean(
+                                String.valueOf(runtimeOptions.globals().getOrDefault("yaci.node.exit-on-epoch-calc-error", "false")));
+                        boundaryProcessor.setExitOnEpochCalcError(exitOnCalcError);
+                        log.info("Epoch boundary processor wired (adapot={}, rewards={}, params={}, exitOnCalcError={})",
+                                adaPotEnabled, rewardsEnabled, epochParamsEnabled, exitOnCalcError);
                     }
 
                     // Wire governance subsystem if rewards/adapot are enabled
@@ -1521,6 +1526,22 @@ public class YaciNode implements NodeAPI {
                 d.maxKESEvolutions(),
                 d.securityParam()
         );
+    }
+
+    @Override
+    public java.util.Map<String, Object> getEpochCalcStatus() {
+        if (epochBoundaryProcessor == null) return null;
+        var err = epochBoundaryProcessor.getLastVerificationError();
+        if (err == null) return null;
+        return java.util.Map.of(
+                "status", "ERROR",
+                "epoch", err.epoch(),
+                "expectedTreasury", err.expectedTreasury().toString(),
+                "actualTreasury", err.actualTreasury().toString(),
+                "treasuryDiff", err.treasuryDiff().toString(),
+                "expectedReserves", err.expectedReserves().toString(),
+                "actualReserves", err.actualReserves().toString(),
+                "reservesDiff", err.reservesDiff().toString());
     }
 
     @Override

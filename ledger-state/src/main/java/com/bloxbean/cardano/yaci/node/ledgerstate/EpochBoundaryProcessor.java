@@ -52,6 +52,18 @@ public class EpochBoundaryProcessor {
     // Optional epoch snapshot exporter for debugging (NOOP when disabled)
     private EpochSnapshotExporter snapshotExporter = EpochSnapshotExporter.NOOP;
 
+    // If true, System.exit(1) on AdaPot verification failure (development mode).
+    // If false, log error and record for REST query (production mode).
+    private boolean exitOnEpochCalcError = false;
+
+    // Last verification error (null = OK). Queryable via REST endpoint.
+    private volatile VerificationError lastVerificationError;
+
+    public record VerificationError(int epoch, java.math.BigInteger expectedTreasury,
+                                     java.math.BigInteger actualTreasury, java.math.BigInteger treasuryDiff,
+                                     java.math.BigInteger expectedReserves, java.math.BigInteger actualReserves,
+                                     java.math.BigInteger reservesDiff) {}
+
     public EpochBoundaryProcessor(AdaPotTracker adaPotTracker,
                                   EpochRewardCalculator rewardCalculator,
                                   EpochParamTracker paramTracker,
@@ -76,6 +88,21 @@ public class EpochBoundaryProcessor {
      */
     public void setSnapshotCreator(DefaultAccountStateStore store) {
         this.snapshotCreator = store;
+    }
+
+    /**
+     * If true, System.exit(1) on AdaPot verification failure (useful during development).
+     * If false (default), log the error and continue syncing.
+     */
+    public void setExitOnEpochCalcError(boolean flag) {
+        this.exitOnEpochCalcError = flag;
+    }
+
+    /**
+     * Returns the last AdaPot verification error, or null if all verifications passed.
+     */
+    public VerificationError getLastVerificationError() {
+        return lastVerificationError;
     }
 
     /**
@@ -196,9 +223,6 @@ public class EpochBoundaryProcessor {
      */
     public void processPostEpochBoundary(int newEpoch) {
         // POOLREAP moved to processEpochBoundary step 4b
-        if (false && rewardCalculator != null && rewardCalculator.isEnabled()) {
-            rewardCalculator.processPoolDepositRefunds(newEpoch);
-        }
     }
 
     /**
@@ -258,46 +282,43 @@ public class EpochBoundaryProcessor {
     }
 
     /**
-     * Verify calculated AdaPot against expected values from DBSync ground truth.
-     * Small diffs (< 100K lovelace) are logged as warnings (floating-point precision).
-     * Large diffs exit to prevent compounding errors.
+     * Verify calculated AdaPot against expected values from classpath JSON.
+     * Only runs when: (1) expected JSON file exists for this network, AND (2) epoch has an entry.
+     * Any mismatch (even 1 lovelace) is an error.
      */
     private void verifyAdaPot(int epoch, BigInteger treasury, BigInteger reserves) {
         var expected = getExpectedAdaPots();
-        if (expected == null || expected.isEmpty()) return;
+        if (expected == null || expected.isEmpty()) return; // no expected file for this network
 
         var exp = expected.get(epoch);
-        if (exp == null) return;
+        if (exp == null) return; // no expected data for this epoch — skip silently
 
         BigInteger treasuryDiff = treasury.subtract(exp.treasury);
         BigInteger reservesDiff = reserves.subtract(exp.reserves);
-        boolean treasuryMatch = treasuryDiff.signum() == 0;
-        boolean reservesMatch = reservesDiff.signum() == 0;
 
-        if (treasuryMatch && reservesMatch) {
+        if (treasuryDiff.signum() == 0 && reservesDiff.signum() == 0) {
             log.info("AdaPot verification PASSED for epoch {}", epoch);
-        } else {
-            long absTreasuryDiff = treasuryDiff.abs().longValueExact();
-            long absReservesDiff = reservesDiff.abs().longValueExact();
-            long maxDiff = Math.max(absTreasuryDiff, absReservesDiff);
+            return;
+        }
 
-            if (maxDiff <= 100_000) {
-                // Small diff — likely floating-point precision in cf-rewards library
-                log.warn("AdaPot verification WARN for epoch {} (small diff, likely precision): " +
-                         "treasury_diff={}, reserves_diff={}", epoch, treasuryDiff, reservesDiff);
-            } else {
-                log.error("AdaPot verification FAILED for epoch {}!", epoch);
-                if (!treasuryMatch) {
-                    log.error("  Treasury: expected={}, actual={}, diff={}",
-                            exp.treasury, treasury, treasuryDiff);
-                }
-                if (!reservesMatch) {
-                    log.error("  Reserves: expected={}, actual={}, diff={}",
-                            exp.reserves, reserves, reservesDiff);
-                }
-                log.error("Exiting to prevent compounding errors. Debug epoch {} before continuing.", epoch);
-                System.exit(1);
-            }
+        // Mismatch detected
+        log.error("AdaPot verification FAILED for epoch {}!", epoch);
+        if (treasuryDiff.signum() != 0) {
+            log.error("  Treasury: expected={}, actual={}, diff={}", exp.treasury, treasury, treasuryDiff);
+        }
+        if (reservesDiff.signum() != 0) {
+            log.error("  Reserves: expected={}, actual={}, diff={}", exp.reserves, reserves, reservesDiff);
+        }
+
+        lastVerificationError = new VerificationError(epoch,
+                exp.treasury, treasury, treasuryDiff, exp.reserves, reserves, reservesDiff);
+
+        if (exitOnEpochCalcError) {
+            log.error("Exiting (exit-on-epoch-calc-error=true). Debug epoch {} before continuing.", epoch);
+            System.exit(1);
+        } else {
+            log.error("Continuing despite mismatch (exit-on-epoch-calc-error=false). " +
+                    "Check /api/v1/node/epoch-calc-status for details.");
         }
     }
 

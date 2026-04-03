@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.node.api.EpochParamProvider;
+import com.bloxbean.cardano.yaci.node.api.model.CredentialKey;
 import com.bloxbean.cardano.yaci.node.api.account.AccountStateStore;
 import com.bloxbean.cardano.yaci.node.api.account.LedgerStateProvider;
 import com.bloxbean.cardano.yaci.node.api.events.BlockAppliedEvent;
@@ -1029,14 +1030,13 @@ public class DefaultAccountStateStore implements AccountStateStore {
                 if (key.length < 7 || key[0] != PREFIX_REWARD_REST) break;
 
                 int spendableEpoch = ByteBuffer.wrap(key, 1, 4).order(ByteOrder.BIG_ENDIAN).getInt();
-                if (spendableEpoch > epoch) break; // Keys sorted by epoch, no more spendable entries
+                if (spendableEpoch > epoch) break;
 
                 int credType = key[6] & 0xFF;
                 String credHash = HexUtil.encodeHexString(Arrays.copyOfRange(key, 7, key.length));
-                String credKey = credType + ":" + credHash;
 
                 var rest = AccountStateCborCodec.decodeRewardRest(it.value());
-                result.merge(credKey, rest.amount(), BigInteger::add);
+                result.merge(credType + ":" + credHash, rest.amount(), BigInteger::add);
 
                 it.next();
             }
@@ -1052,8 +1052,13 @@ public class DefaultAccountStateStore implements AccountStateStore {
      * Entries with spendable_epoch ≤ epoch are credited to the account's reward balance.
      */
     private void creditAndRemoveSpendableRewardRest(int epoch, org.rocksdb.WriteBatch batch) {
-        int credited = 0;
-        BigInteger totalCredited = BigInteger.ZERO;
+        // Phase 1: Iterate reward_rest entries, accumulate per-credential totals.
+        // Pre-aggregation avoids WriteBatch visibility bug: if same credential has
+        // multiple reward_rest entries (e.g., proposal refund + treasury withdrawal),
+        // the second db.get() would read committed state and miss the first batch.put.
+        java.util.Map<CredentialKey, BigInteger> perCredentialTotal = new java.util.LinkedHashMap<>();
+        java.util.List<byte[]> keysToDelete = new java.util.ArrayList<>();
+
         try (RocksIterator it = db.newIterator(cfState)) {
             it.seek(new byte[]{PREFIX_REWARD_REST});
             while (it.isValid()) {
@@ -1067,28 +1072,44 @@ public class DefaultAccountStateStore implements AccountStateStore {
                 String credHash = HexUtil.encodeHexString(Arrays.copyOfRange(key, 7, key.length));
 
                 var rest = AccountStateCborCodec.decodeRewardRest(it.value());
-                BigInteger amount = rest.amount();
-
-                // Credit to PREFIX_ACCT.reward
-                byte[] acctKey = accountKey(credType, credHash);
-                byte[] acctVal = db.get(cfState, acctKey);
-                if (acctVal != null && amount.signum() > 0) {
-                    var acct = AccountStateCborCodec.decodeStakeAccount(acctVal);
-                    BigInteger newReward = acct.reward().add(amount);
-                    byte[] newVal = AccountStateCborCodec.encodeStakeAccount(newReward, acct.deposit());
-                    batch.put(cfState, acctKey, newVal);
-                    credited++;
-                    totalCredited = totalCredited.add(amount);
+                if (rest.amount().signum() > 0) {
+                    perCredentialTotal.merge(CredentialKey.of(credType, credHash), rest.amount(), BigInteger::add);
                 }
-
-                // Remove the reward_rest entry
-                batch.delete(cfState, key);
-
+                keysToDelete.add(Arrays.copyOf(key, key.length));
                 it.next();
             }
         } catch (Exception e) {
-            log.error("creditAndRemoveSpendableRewardRest failed: {}", e.toString());
+            log.error("creditAndRemoveSpendableRewardRest failed during iteration: {}", e.toString());
+            return;
         }
+
+        // Phase 2: Credit each credential once (single db.get + batch.put per credential)
+        int credited = 0;
+        BigInteger totalCredited = BigInteger.ZERO;
+        try {
+            for (var entry : perCredentialTotal.entrySet()) {
+                CredentialKey ck = entry.getKey();
+                BigInteger amount = entry.getValue();
+
+                byte[] acctKey = accountKey(ck.typeInt(), ck.hash());
+                byte[] acctVal = db.get(cfState, acctKey);
+                if (acctVal != null) {
+                    var acct = AccountStateCborCodec.decodeStakeAccount(acctVal);
+                    BigInteger newReward = acct.reward().add(amount);
+                    batch.put(cfState, acctKey, AccountStateCborCodec.encodeStakeAccount(newReward, acct.deposit()));
+                    credited++;
+                    totalCredited = totalCredited.add(amount);
+                }
+            }
+
+            // Phase 3: Delete all processed reward_rest entries
+            for (byte[] key : keysToDelete) {
+                batch.delete(cfState, key);
+            }
+        } catch (Exception e) {
+            log.error("creditAndRemoveSpendableRewardRest failed during crediting: {}", e.toString());
+        }
+
         if (credited > 0) {
             log.info("Credited {} spendable reward_rest entries for epoch {}: total={}",
                     credited, epoch, totalCredited);
@@ -2007,7 +2028,7 @@ public class DefaultAccountStateStore implements AccountStateStore {
 
         // Pre-build map: credential → latest deregistration position (slot, txIdx, certIdx)
         // Used to detect delegations invalidated by a subsequent deregistration.
-        java.util.Map<String, long[]> latestDeregistrations = new java.util.HashMap<>();
+        java.util.Map<CredentialKey, long[]> latestDeregistrations = new java.util.HashMap<>();
         try (RocksIterator deregIt = db.newIterator(cfState)) {
             deregIt.seek(new byte[]{PREFIX_STAKE_EVENT});
             while (deregIt.isValid()) {
@@ -2020,7 +2041,7 @@ public class DefaultAccountStateStore implements AccountStateStore {
                     int evCertIdx = ByteBuffer.wrap(dk, 11, 2).order(ByteOrder.BIG_ENDIAN).getShort() & 0xFFFF;
                     int evCredType = dk[13] & 0xFF;
                     String evCredHash = HexUtil.encodeHexString(Arrays.copyOfRange(dk, 14, dk.length));
-                    String credKey = evCredType + ":" + evCredHash;
+                    var credKey = CredentialKey.of(evCredType, evCredHash);
 
                     long[] existing = latestDeregistrations.get(credKey);
                     if (existing == null
@@ -2117,7 +2138,7 @@ public class DefaultAccountStateStore implements AccountStateStore {
                 // If a credential was deregistered AFTER the delegation was made (comparing
                 // slot, then txIndex, then certIndex), the delegation is stale even if the
                 // credential was re-registered later — a new delegation would be needed.
-                String deregKey = credType + ":" + credHash;
+                var deregKey = CredentialKey.of(credType, credHash);
                 long[] latestDereg = latestDeregistrations.get(deregKey);
                 if (latestDereg != null) {
                     long dSlot = latestDereg[0];

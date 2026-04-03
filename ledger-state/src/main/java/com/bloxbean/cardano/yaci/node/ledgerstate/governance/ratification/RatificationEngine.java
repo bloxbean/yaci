@@ -206,11 +206,6 @@ public class RatificationEngine {
                     isBootstrapPhase, committeeMinSize, committeeMaxTermLength,
                     committeeState, treasury, drepThresholds, spoThresholds, delayed);
 
-            if (currentEpoch == 232) {
-                log.info("EVAL@232: {}/{} type={} status={} delayed={}",
-                        id.getTransactionId().substring(0, 8), id.getGov_action_index(),
-                        proposal.actionType(), status, delayed);
-            }
             results.add(new RatificationResult(id, proposal, status));
 
             // Delaying actions prevent subsequent ratifications
@@ -270,13 +265,6 @@ public class RatificationEngine {
 
         // Prev action check (for chained action types)
         if (!prevActionValid(proposal, lastEnactedActions)) {
-            if (id.getTransactionId().startsWith("49578eba")) {
-                GovActionType pt = (type == GovActionType.NO_CONFIDENCE || type == GovActionType.UPDATE_COMMITTEE)
-                        ? GovActionType.UPDATE_COMMITTEE : type;
-                log.info("TRACE-82: prevAction INVALID at epoch {} — lastEnacted[{}]={}, proposal prev={}/{}",
-                        currentEpoch, pt, lastEnactedActions.get(pt),
-                        proposal.prevActionTxHash(), proposal.prevActionIndex());
-            }
             return isLastChance ? Status.EXPIRED : Status.ACTIVE;
         }
 
@@ -321,10 +309,6 @@ public class RatificationEngine {
             case INFO_ACTION -> false; // Already handled above
         };
 
-        if (currentEpoch == 232 && id.getTransactionId().startsWith("49578eba")) {
-            log.info("TRACE-82-FINAL: accepted={} type={} isLastChance={} votes={}",
-                    accepted, type, isLastChance, votes.size());
-        }
         if (accepted) return Status.RATIFIED;
         return isLastChance ? Status.EXPIRED : Status.ACTIVE;
     }
@@ -365,39 +349,20 @@ public class RatificationEngine {
             Map<GovActionType, BigDecimal> spoThresholds,
             GovActionRecord proposal) {
 
-        boolean is82 = proposal.proposalSlot() == 97796216L;
-
-        boolean ccPass = checkCommittee(votes, committeeMembers, committeeThreshold, committeeState,
-                currentEpoch, isBootstrapPhase, committeeMinSize);
-        if (is82) log.info("P82: cc={} members={} threshold={} state={} minSize={}",
-                ccPass, committeeMembers.size(), committeeThreshold, committeeState, committeeMinSize);
-        if (!ccPass) return false;
-
+        if (!checkCommittee(votes, committeeMembers, committeeThreshold, committeeState,
+                currentEpoch, isBootstrapPhase, committeeMinSize)) return false;
         if (isBootstrapPhase) return true;
+        if (!checkDRep(votes, drepDist, activeDRepKeys, GovActionType.PARAMETER_CHANGE_ACTION, drepThresholds)) return false;
 
-        boolean drepPass = checkDRep(votes, drepDist, activeDRepKeys, GovActionType.PARAMETER_CHANGE_ACTION, drepThresholds);
-        if (is82) log.info("P82: drep={} threshold={} active={}",
-                drepPass, drepThresholds.get(GovActionType.PARAMETER_CHANGE_ACTION),
-                activeDRepKeys != null ? activeDRepKeys.size() : "null");
-        if (!drepPass) return false;
-
-        boolean spoRequired = false;
+        // SPO vote required only for security-group parameter changes
         if (proposal.govAction() instanceof com.bloxbean.cardano.yaci.core.model.governance.actions.ParameterChangeAction pca
                 && pca.getProtocolParamUpdate() != null) {
             var groups = ProtocolParamGroupClassifier.getAffectedGroups(pca.getProtocolParamUpdate());
-            spoRequired = ProtocolParamGroupClassifier.isSpoVotingRequired(groups);
-            if (is82) log.info("P82: groups={} spoRequired={}", groups, spoRequired);
-        } else if (is82) {
-            log.info("P82: govAction={} — no ProtocolParamUpdate!", proposal.govAction());
+            if (ProtocolParamGroupClassifier.isSpoVotingRequired(groups)) {
+                if (!checkSPO(votes, poolStakeDist, poolDRepDelegation,
+                        GovActionType.PARAMETER_CHANGE_ACTION, isBootstrapPhase, spoThresholds)) return false;
+            }
         }
-        if (spoRequired) {
-            boolean spoPass = checkSPO(votes, poolStakeDist, poolDRepDelegation,
-                    GovActionType.PARAMETER_CHANGE_ACTION, isBootstrapPhase, spoThresholds);
-            if (is82) log.info("P82: spo={}", spoPass);
-            if (!spoPass) return false;
-        }
-
-        if (is82) log.info("P82: ALL PASSED → true");
         return true;
     }
 

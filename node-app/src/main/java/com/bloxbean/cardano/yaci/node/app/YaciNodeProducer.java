@@ -120,6 +120,8 @@ public class YaciNodeProducer {
     boolean governanceEnabled;
     @ConfigProperty(name = "yaci.node.snapshot-export.enabled", defaultValue = "false")
     boolean snapshotExportEnabled;
+    @ConfigProperty(name = "yaci.node.exit-on-epoch-calc-error", defaultValue = "false")
+    boolean exitOnEpochCalcError;
     @ConfigProperty(name = "yaci.node.snapshot-export.dir", defaultValue = "data")
     String snapshotExportDir;
 
@@ -356,6 +358,7 @@ public class YaciNodeProducer {
         globals.put("yaci.node.governance.enabled", governanceEnabled);
         globals.put("yaci.node.snapshot-export.enabled", snapshotExportEnabled);
         globals.put("yaci.node.snapshot-export.dir", snapshotExportDir);
+        globals.put("yaci.node.exit-on-epoch-calc-error", exitOnEpochCalcError);
 
         // Block pruning
         globals.put("yaci.node.chain.block-body-prune-depth", blockBodyPruneDepth);

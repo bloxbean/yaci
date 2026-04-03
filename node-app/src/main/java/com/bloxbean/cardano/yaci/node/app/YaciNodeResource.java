@@ -113,6 +113,16 @@ public class YaciNodeResource {
         return Response.ok(params).build();
     }
 
+    @GET
+    @Path("/epoch-calc-status")
+    public Response getEpochCalcStatus() {
+        var status = nodeAPI.getEpochCalcStatus();
+        if (status == null) {
+            return Response.ok(Map.of("status", "OK")).build();
+        }
+        return Response.ok(status).build();
+    }
+
     @POST
     @Path("/recover")
     public Response recoverChainState() {

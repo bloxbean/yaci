@@ -185,6 +185,14 @@ public interface NodeAPI {
     }
 
     /**
+     * Get epoch calculation verification status. Returns null if all verifications passed,
+     * or a map with error details (epoch, diffs) if a mismatch was detected.
+     */
+    default java.util.Map<String, Object> getEpochCalcStatus() {
+        return null;
+    }
+
+    /**
      * Trigger a controlled rollback. Requires dev mode.
      * Rolls back chain state to the given slot, publishes RollbackEvent,
      * and notifies connected clients via n2n protocol.
