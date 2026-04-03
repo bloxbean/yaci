@@ -3,7 +3,7 @@
 # Properties here override the defaults bundled in the jar.
 # Quarkus automatically loads this file from the config/ directory.
 
-# HTTP port (default: 8080)
+# HTTP port (default: 7070)
  quarkus:
    http:
      port: 7070
@@ -29,10 +29,10 @@
 # Storage
  yaci:
    node:
-     remote:
-       host: localhost
-       port: 32000
-       protocol-magic: 1
+#     remote:
+#       host: localhost
+#       port: 32000
+#       protocol-magic: 1
      storage:
        path: ./chainstate
        rocksdb: true
