@@ -15,6 +15,7 @@ import com.bloxbean.cardano.yaci.core.model.serializers.UpdateSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.WithdrawalsSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.types.UnitInterval;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
 import java.math.BigDecimal;
@@ -48,6 +49,117 @@ import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
 //TODO -- Test this class
 public enum GovActionSerializer implements Serializer<GovAction> {
     INSTANCE;
+
+    @Override
+    public DataItem serializeDI(GovAction action) {
+        Array array = new Array();
+        switch (action) {
+            case ParameterChangeAction pca -> {
+                array.add(new co.nstant.in.cbor.model.UnsignedInteger(0));
+                array.add(serializeGovActionId(pca.getGovActionId()));
+                array.add(UpdateSerializer.serializePPUpdate(pca.getProtocolParamUpdate()));
+                if (pca.getPolicyHash() != null) {
+                    array.add(new co.nstant.in.cbor.model.ByteString(HexUtil.decodeHexString(pca.getPolicyHash())));
+                } else {
+                    array.add(SimpleValue.NULL);
+                }
+            }
+            case HardForkInitiationAction hf -> {
+                array.add(new co.nstant.in.cbor.model.UnsignedInteger(1));
+                array.add(serializeGovActionId(hf.getGovActionId()));
+                Array pvArr = new Array();
+                pvArr.add(new co.nstant.in.cbor.model.UnsignedInteger(hf.getProtocolVersion().get_1()));
+                pvArr.add(new co.nstant.in.cbor.model.UnsignedInteger(hf.getProtocolVersion().get_2()));
+                array.add(pvArr);
+            }
+            case TreasuryWithdrawalsAction twa -> {
+                array.add(new co.nstant.in.cbor.model.UnsignedInteger(2));
+                Map wMap = new Map();
+                if (twa.getWithdrawals() != null) {
+                    for (var entry : twa.getWithdrawals().entrySet()) {
+                        wMap.put(new co.nstant.in.cbor.model.ByteString(HexUtil.decodeHexString(entry.getKey())),
+                                new co.nstant.in.cbor.model.UnsignedInteger(entry.getValue()));
+                    }
+                }
+                array.add(wMap);
+                if (twa.getPolicyHash() != null) {
+                    array.add(new co.nstant.in.cbor.model.ByteString(HexUtil.decodeHexString(twa.getPolicyHash())));
+                } else {
+                    array.add(SimpleValue.NULL);
+                }
+            }
+            case NoConfidence nc -> {
+                array.add(new co.nstant.in.cbor.model.UnsignedInteger(3));
+                array.add(serializeGovActionId(nc.getGovActionId()));
+            }
+            case UpdateCommittee uc -> {
+                array.add(new co.nstant.in.cbor.model.UnsignedInteger(4));
+                array.add(serializeGovActionId(uc.getGovActionId()));
+                // set<committee_cold_credential>
+                Array removals = new Array();
+                if (uc.getMembersForRemoval() != null) {
+                    for (Credential cred : uc.getMembersForRemoval()) {
+                        removals.add(cred.serialize());
+                    }
+                }
+                array.add(removals);
+                // { committee_cold_credential => epoch }
+                Map newMembers = new Map();
+                if (uc.getNewMembersAndTerms() != null) {
+                    for (var entry : uc.getNewMembersAndTerms().entrySet()) {
+                        newMembers.put(entry.getKey().serialize(),
+                                new co.nstant.in.cbor.model.UnsignedInteger(entry.getValue()));
+                    }
+                }
+                array.add(newMembers);
+                // unit_interval (required per CDDL, serialize NULL if absent)
+                if (uc.getThreshold() != null) {
+                    array.add(serializeUnitInterval(uc.getThreshold()));
+                } else {
+                    array.add(SimpleValue.NULL);
+                }
+            }
+            case NewConstitution nc -> {
+                array.add(new co.nstant.in.cbor.model.UnsignedInteger(5));
+                array.add(serializeGovActionId(nc.getGovActionId()));
+                // constitution = [anchor, scripthash / null]
+                Array constArr = new Array();
+                if (nc.getConstitution() != null && nc.getConstitution().getAnchor() != null) {
+                    constArr.add(serializeAnchor(nc.getConstitution().getAnchor()));
+                } else {
+                    constArr.add(SimpleValue.NULL);
+                }
+                if (nc.getConstitution() != null && nc.getConstitution().getScripthash() != null) {
+                    constArr.add(new co.nstant.in.cbor.model.ByteString(
+                            HexUtil.decodeHexString(nc.getConstitution().getScripthash())));
+                } else {
+                    constArr.add(SimpleValue.NULL);
+                }
+                array.add(constArr);
+            }
+            case InfoAction ia -> {
+                array.add(new co.nstant.in.cbor.model.UnsignedInteger(6));
+            }
+            default -> throw new IllegalArgumentException("Unknown GovAction type: " + action.getClass());
+        }
+        return array;
+    }
+
+    private static DataItem serializeGovActionId(com.bloxbean.cardano.yaci.core.model.governance.GovActionId id) {
+        if (id == null) return SimpleValue.NULL;
+        return GovActionIdSerializer.INSTANCE.serializeDI(id);
+    }
+
+    private static DataItem serializeAnchor(com.bloxbean.cardano.yaci.core.model.governance.Anchor anchor) {
+        Array arr = new Array();
+        arr.add(new co.nstant.in.cbor.model.UnicodeString(anchor.getAnchor_url()));
+        arr.add(new co.nstant.in.cbor.model.ByteString(HexUtil.decodeHexString(anchor.getAnchor_data_hash())));
+        return arr;
+    }
+
+    private static DataItem serializeUnitInterval(UnitInterval ui) {
+        return CborSerializationUtil.serializeRational(ui);
+    }
 
     @Override
     public GovAction deserializeDI(DataItem di) {

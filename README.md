@@ -18,7 +18,7 @@ previous blocks, query information from a local node, monitor the local mempool,
 
 ## Prerequisites
 
-- Java 21 or later
+- Java 25 or later
 
 ## Dependencies
 

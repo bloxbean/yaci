@@ -24,8 +24,9 @@ compileJava {
 
 
 dependencies {
-    api project(':node-api')
-    api project(':node-runtime')
+    api project(':core')
+    api project(':helper')
+    api project(':events-core')
 }
 
 test {
@@ -107,16 +108,11 @@ if (project.version.endsWith("-SNAPSHOT")) {
     version = "${project.version}".replace("-SNAPSHOT", "-${commit_id}-SNAPSHOT")
 }
 
-def nonLibraryModules = ['node-app', 'scalus-bridge'] as Set
-
 subprojects {
-    // Skip most configuration for application modules (Quarkus/Scala handle their own builds)
-    if (!(project.name in nonLibraryModules)) {
-        apply plugin: 'java-library'
-        apply plugin: 'maven-publish'
-        apply plugin: 'signing'
-        apply plugin: 'org.unbroken-dome.test-sets'
-    }
+    apply plugin: 'java-library'
+    apply plugin: 'maven-publish'
+    apply plugin: 'signing'
+    apply plugin: 'org.unbroken-dome.test-sets'
 
     repositories {
         mavenLocal()
@@ -131,102 +127,100 @@ subprojects {
         version = "${project.version}".replace("-SNAPSHOT", "-${commit_id}-SNAPSHOT")
     }
 
-    // Only configure library-specific settings for non-application modules
-    if (!(project.name in nonLibraryModules)) {
-        //Jars are with yaci prefix
-        tasks.named('jar') {
-            archiveBaseName = 'yaci-' + project.name
-        }
-        dependencies {
-            api libs.slf4j.api
+    //Jars are with yaci prefix
+    tasks.named('jar') {
+        archiveBaseName = 'yaci-' + project.name
+    }
 
-            compileOnly libs.lombok
-            annotationProcessor libs.lombok
+    dependencies {
+        api libs.slf4j.api
 
-            testImplementation libs.junit.jupiter.api
-            testRuntimeOnly libs.junit.jupiter.engine
-            testRuntimeOnly libs.junit.platform.launcher
-            testImplementation libs.harmcrest.library
-            testImplementation libs.mockito.inline
-            testImplementation libs.mockito.junit.jupiter
-            testImplementation libs.assertj.core
-            testRuntimeOnly libs.slf4j.reload4j
+        compileOnly libs.lombok
+        annotationProcessor libs.lombok
 
-            testCompileOnly libs.lombok
-            testAnnotationProcessor libs.lombok
-        }
+        testImplementation libs.junit.jupiter.api
+        testRuntimeOnly libs.junit.jupiter.engine
+        testRuntimeOnly libs.junit.platform.launcher
+        testImplementation libs.harmcrest.library
+        testImplementation libs.mockito.inline
+        testImplementation libs.mockito.junit.jupiter
+        testImplementation libs.assertj.core
+        testRuntimeOnly libs.slf4j.reload4j
 
-        compileJava {
-            sourceCompatibility = '25'
-            targetCompatibility = '25'
+        testCompileOnly libs.lombok
+        testAnnotationProcessor libs.lombok
+    }
 
-            options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
-        }
+    compileJava {
+        sourceCompatibility = '25'
+        targetCompatibility = '25'
 
-        tasks.withType(Javadoc) {
-            options.encoding = 'UTF-8'
-        }
+        options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
+    }
 
-        task sourceJar(type: Jar) {
-            archiveClassifier = "sources"
-            from sourceSets.main.allJava
-        }
+    tasks.withType(Javadoc) {
+        options.encoding = 'UTF-8'
+    }
 
-        task javadocJar(type: Jar, dependsOn: javadoc) {
-            archiveClassifier = "javadoc"
-            from javadoc.destinationDir
-        }
+    task sourceJar(type: Jar) {
+        archiveClassifier = "sources"
+        from sourceSets.main.allJava
+    }
 
-        testSets {
-            integrationTest
-        }
+    task javadocJar(type: Jar, dependsOn: javadoc) {
+        archiveClassifier = "javadoc"
+        from javadoc.destinationDir
+    }
 
-        publishing {
-            publications {
-                mavenJava(MavenPublication) {
-                    from components.java
-                    artifact(sourceJar) {
-                        classifier = 'sources'
+    testSets {
+        integrationTest
+    }
+
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+                artifact(sourceJar) {
+                    classifier = 'sources'
+                }
+                artifact(javadocJar) {
+                    classifier = 'javadoc'
+                }
+
+                artifactId 'yaci-' + project.name
+                pom {
+                    url = 'https://github.com/bloxbean/yaci'
+                    licenses {
+                        license {
+                            name = 'The MIT License'
+                            url = 'https://opensource.org/licenses/mit-license.php'
+                        }
                     }
-                    artifact(javadocJar) {
-                        classifier = 'javadoc'
+                    developers {
+                        developer {
+                            id = 'satran004'
+                            name = 'Satya'
+                        }
                     }
-
-                    artifactId 'yaci-' + project.name
-                    pom {
+                    scm {
+                        connection = 'scm:git:git://github.com/bloxbean/yaci.git'
+                        developerConnection = 'scm:git:ssh://git@github.com/bloxbean/yaci.git'
                         url = 'https://github.com/bloxbean/yaci'
-                        licenses {
-                            license {
-                                name = 'The MIT License'
-                                url = 'https://opensource.org/licenses/mit-license.php'
-                            }
-                        }
-                        developers {
-                            developer {
-                                id = 'satran004'
-                                name = 'Satya'
-                            }
-                        }
-                        scm {
-                            connection = 'scm:git:git://github.com/bloxbean/yaci.git'
-                            developerConnection = 'scm:git:ssh://git@github.com/bloxbean/yaci.git'
-                            url = 'https://github.com/bloxbean/yaci'
-                        }
                     }
                 }
             }
         }
+    }
 
-        ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
+    ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
 
-        if (isReleaseVersion && !project.hasProperty("skipSigning")) {
-            signing {
-                sign publishing.publications
-            }
+    if (isReleaseVersion && !project.hasProperty("skipSigning")) {
+        signing {
+            sign publishing.publications
         }
     }
 
-    // Make all tests use JUnit 5 (for all modules including application)
+    // Make all tests use JUnit 5
     tasks.withType(Test) {
         useJUnitPlatform()
         testLogging {

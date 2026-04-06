@@ -1,17 +1,8 @@
 [versions]
-cardano-client-lib = "0.8.0-preview2-vrf-SNAPSHOT"
-julc="0.1.0-pre7"
+cardano-client-lib = "0.8.0-pre3"
 
 [libraries]
 cardano-client-core = { module = "com.bloxbean.cardano:cardano-client-core", version.ref = "cardano-client-lib" }
-cardano-client-lib = { module = "com.bloxbean.cardano:cardano-client-lib", version.ref = "cardano-client-lib" }
-cardano-client-crypto-ext = { module = "com.bloxbean.cardano:cardano-client-crypto-ext", version.ref = "cardano-client-lib" }
-cardano-client-backend-blockfrost = { module = "com.bloxbean.cardano:cardano-client-backend-blockfrost", version.ref = "cardano-client-lib" }
-cardano-client-quicktx = { module = "com.bloxbean.cardano:cardano-client-quicktx", version.ref = "cardano-client-lib" }
-cardano-client-cip20 = { module = "com.bloxbean.cardano:cardano-client-cip20", version.ref = "cardano-client-lib" }
-
-julc-vm-java={ module = "com.bloxbean.cardano:julc-vm-java", version.ref = "julc" }
-julc-cardano-client-lib={ module = "com.bloxbean.cardano:julc-cardano-client-lib", version.ref = "julc" }
 
 cbor = "co.nstant.in:cbor:0.9"
 netty = "io.netty:netty-all:4.1.131.Final"
@@ -33,13 +24,3 @@ mockito-junit-jupiter="org.mockito:mockito-junit-jupiter:3.7.7"
 assertj-core="org.assertj:assertj-core:3.21.0"
 
 reload4j="ch.qos.reload4j:reload4j:1.2.22"
-
-jackson-databind = "com.fasterxml.jackson.core:jackson-databind:2.17.0"
-
-rocksdb="org.rocksdb:rocksdbjni:9.11.2"
-
-scala3-library = "org.scala-lang:scala3-library_3:3.3.4"
-scalus-cardano-ledger = "org.scalus:scalus-cardano-ledger_3:0.16.0"
-scalus-bloxbean-ccl = "org.scalus:scalus-bloxbean-cardano-client-lib_3:0.16.0"
-
-aiken-java-binding = "com.bloxbean.cardano:aiken-java-binding:0.1.0"

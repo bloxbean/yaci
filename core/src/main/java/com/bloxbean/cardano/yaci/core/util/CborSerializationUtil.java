@@ -173,5 +173,41 @@ public class CborSerializationUtil {
             throw new CborRuntimeException("Cbor de-serialization error", e);
         }
     }
+
+    // =====================================================================
+    // CBOR Serialization Helpers (inverse of toInt/toLong/toUnitInterval etc.)
+    // =====================================================================
+
+    /**
+     * Serialize a UnitInterval (or NonNegativeInterval) as CBOR tag 30 rational [numerator, denominator].
+     * Inverse of {@link #toUnitInterval(DataItem)}.
+     */
+    public static DataItem serializeRational(UnitInterval ui) {
+        Array arr = new Array();
+        arr.add(new UnsignedInteger(ui.getNumerator()));
+        arr.add(new UnsignedInteger(ui.getDenominator()));
+        arr.setTag(30);
+        return arr;
+    }
+
+    /** Create a CBOR UnsignedInteger from a long value. */
+    public static UnsignedInteger cborUInt(long val) {
+        return new UnsignedInteger(val);
+    }
+
+    /** Create a CBOR UnsignedInteger from a BigInteger value. */
+    public static UnsignedInteger cborUInt(BigInteger val) {
+        return new UnsignedInteger(val);
+    }
+
+    /** Put an int value into a CBOR Map with an int key. */
+    public static void cborMapPutUInt(Map map, int key, int val) {
+        map.put(cborUInt(key), cborUInt(val));
+    }
+
+    /** Put a BigInteger value into a CBOR Map with an int key. */
+    public static void cborMapPutBigUInt(Map map, int key, BigInteger val) {
+        map.put(cborUInt(key), new UnsignedInteger(val));
+    }
 }
 
