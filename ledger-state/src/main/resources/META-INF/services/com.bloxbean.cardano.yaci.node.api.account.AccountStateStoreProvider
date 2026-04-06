@@ -1,2 +1,0 @@
-com.bloxbean.cardano.yaci.node.ledgerstate.DefaultAccountStateStoreProvider
-com.bloxbean.cardano.yaci.node.ledgerstate.InMemoryAccountStateStoreProvider

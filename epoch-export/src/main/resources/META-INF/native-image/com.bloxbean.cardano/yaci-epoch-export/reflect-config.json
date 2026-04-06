@@ -1,9 +1,0 @@
-[
-  {
-    "name": "com.bloxbean.cardano.yaci.node.export.ParquetEpochSnapshotExporter",
-    "methods": [
-      { "name": "<init>", "parameterTypes": [] },
-      { "name": "<init>", "parameterTypes": ["java.lang.String"] }
-    ]
-  }
-]

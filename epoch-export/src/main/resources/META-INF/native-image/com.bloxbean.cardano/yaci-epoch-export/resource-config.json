@@ -1,9 +1,0 @@
-{
-  "resources": {
-    "includes": [
-      {
-        "pattern": "\\QMETA-INF/services/com.bloxbean.cardano.yaci.node.ledgerstate.export.EpochSnapshotExporter\\E"
-      }
-    ]
-  }
-}
