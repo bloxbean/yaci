@@ -1,5 +1,5 @@
 [versions]
-cardano-client-lib = "0.8.0-pre2-vrf-SNAPSHOT"
+cardano-client-lib = "0.8.0-pre3"
 
 [libraries]
 cardano-client-core = { module = "com.bloxbean.cardano:cardano-client-core", version.ref = "cardano-client-lib" }
