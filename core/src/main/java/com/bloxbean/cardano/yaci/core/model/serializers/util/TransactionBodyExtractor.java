@@ -40,6 +40,13 @@ public class TransactionBodyExtractor {
         int arrTxBodySize = bais.read();
 
         long length = getLength(arrTxBodySize,getSymbolBytes(blockBody.length - bais.available(),blockBody));
+
+        // Skip extra length bytes for definite-length arrays (>23 elements)
+        int extraBytes = WitnessUtil.skipBytes(arrTxBodySize);
+        if (extraBytes > 0) {
+            bais.skip(extraBytes);
+        }
+
         int start = blockBody.length - bais.available();
         for(int i = 0 ; i < length; i++){
             int previous = bais.available();
