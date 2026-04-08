@@ -319,7 +319,7 @@ public class BlockSyncIT extends BaseTest {
 
 
     @Test
-    void syncFromPoint_continueOnParseError_() throws InterruptedException {
+    void syncFromPoint_continueOnParseError_definteSizeArrayInTxArray() throws InterruptedException {
         BlockSync blockSync = new BlockSync(Constants.PREVIEW_PUBLIC_RELAY_ADDR, Constants.PREPROD_PUBLIC_RELAY_PORT,
                 Constants.PREVIEW_PROTOCOL_MAGIC, Constants.WELL_KNOWN_PREVIEW_POINT);
 
