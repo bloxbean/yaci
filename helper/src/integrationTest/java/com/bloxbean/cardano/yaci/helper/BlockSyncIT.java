@@ -14,6 +14,9 @@ import com.bloxbean.cardano.yaci.helper.util.TcpProxyManager;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.OpenOption;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -313,5 +316,37 @@ public class BlockSyncIT extends BaseTest {
         tcpProxyManager.stopAll();
         blockSync.stop();
     }
+
+
+    @Test
+    void syncFromPoint_continueOnParseError_() throws InterruptedException {
+        BlockSync blockSync = new BlockSync(Constants.PREVIEW_PUBLIC_RELAY_ADDR, Constants.PREPROD_PUBLIC_RELAY_PORT,
+                Constants.PREVIEW_PROTOCOL_MAGIC, Constants.WELL_KNOWN_PREVIEW_POINT);
+
+        AtomicLong blockNo = new AtomicLong(0);
+        CountDownLatch countDownLatch = new CountDownLatch(3);
+        blockSync.startSync(new Point(107725013, "5ba1fdf48f4014fc9d581f5994f13543fe09b58e54af94b642b90f7a81b63622"),
+                new BlockChainDataListener() {
+                    @Override
+                    public void onBlock(Era era, Block block, List<Transaction> transactions) {
+                        System.out.println(block.getHeader().getHeaderBody().getBlockNumber());
+
+                        if (blockNo.get() == 0 && block.getHeader().getHeaderBody().getBlockNumber() == 4134992)
+                            blockNo.set(block.getHeader().getHeaderBody().getBlockNumber());
+
+                        countDownLatch.countDown();
+                    }
+
+                    @Override
+                    public void onParsingError(BlockParseRuntimeException e) {
+                        System.out.println("ERROR BLock: " + e.getBlockNumber());
+                        System.out.println("CBOR: " + HexUtil.encodeHexString(e.getBlockCbor()));
+                    }
+                });
+
+        countDownLatch.await(60, TimeUnit.SECONDS);
+        assertThat(blockNo.get()).isEqualTo(4134992);
+    }
+
 
 }
