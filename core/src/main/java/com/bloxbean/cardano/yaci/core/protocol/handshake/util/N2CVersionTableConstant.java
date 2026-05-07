@@ -29,6 +29,9 @@ public class N2CVersionTableConstant {
     public final static long PROTOCOL_V18 = 32786;
     public final static long PROTOCOL_V19 = 32787;
     public final static long PROTOCOL_V20 = 32788;
+    public final static long PROTOCOL_V21 = 32789;
+    public final static long PROTOCOL_V22 = 32790;
+    public final static long PROTOCOL_V23 = 32791;
 
     public static VersionTable v1AndAbove(long networkMagic) {
         OldN2CVersionData oldVersionData = new OldN2CVersionData(networkMagic);
@@ -55,6 +58,9 @@ public class N2CVersionTableConstant {
         versionTableMap.put(PROTOCOL_V18, versionData);
         versionTableMap.put(PROTOCOL_V19, versionData);
         versionTableMap.put(PROTOCOL_V20, versionData);
+        versionTableMap.put(PROTOCOL_V21, versionData);
+        versionTableMap.put(PROTOCOL_V22, versionData);
+        versionTableMap.put(PROTOCOL_V23, versionData);
 
         return new VersionTable(versionTableMap);
     }
@@ -72,6 +78,9 @@ public class N2CVersionTableConstant {
         versionTableMap.put(PROTOCOL_V18, versionData);
         versionTableMap.put(PROTOCOL_V19, versionData);
         versionTableMap.put(PROTOCOL_V20, versionData);
+        versionTableMap.put(PROTOCOL_V21, versionData);
+        versionTableMap.put(PROTOCOL_V22, versionData);
+        versionTableMap.put(PROTOCOL_V23, versionData);
 
         return new VersionTable(versionTableMap);
     }

@@ -77,11 +77,35 @@ public class GovStateQuery implements EraQuery<GovStateQueryResult> {
 
         govStateQueryResult.setCurrentPParams(currentProtocolParam);
 
+        // futurePParams is a tagged sum (FuturePParams):
+        //   [0]            -> NoPParamsUpdate
+        //   [1, pp]        -> DefinitePParamsUpdate pp                  ; pp is the PParams array
+        //   [2, maybe_pp]  -> PotentialPParamsUpdate (Maybe pp)         ; maybe_pp is [] (Nothing) or [pp] (Just)
+        // Source: cardano-ledger libs/cardano-ledger-core/src/Cardano/Ledger/State/Governance.hs
+        //   data FuturePParams era = NoPParamsUpdate
+        //                          | DefinitePParamsUpdate (PParams era)
+        //                          | PotentialPParamsUpdate (Maybe (PParams era))
+        //   instance EncCBOR (FuturePParams era):
+        //     NoPParamsUpdate           -> Sum NoPParamsUpdate 0
+        //     DefinitePParamsUpdate pp  -> Sum DefinitePParamsUpdate 1 !> To pp
+        //     PotentialPParamsUpdate pp -> Sum PotentialPParamsUpdate 2 !> To pp
         Array futurePParams = (Array) resultArray.getDataItems().get(5);
-        if (!futurePParams.getDataItems().isEmpty() && futurePParams.getDataItems().size() > 1) {
-            List<DataItem> futureParamsDIList = ((Array)futurePParams.getDataItems().get(1)).getDataItems();
-            ProtocolParamUpdate futureProtocolParam = deserializePPResult(futureParamsDIList);
-            govStateQueryResult.setFuturePParams(futureProtocolParam);
+        List<DataItem> fpItems = futurePParams.getDataItems();
+        if (!fpItems.isEmpty()) {
+            int variantTag = toInt(fpItems.get(0));
+            List<DataItem> futureParamsDIList = null;
+            if (variantTag == 1 && fpItems.size() > 1) {
+                futureParamsDIList = ((Array) fpItems.get(1)).getDataItems();
+            } else if (variantTag == 2 && fpItems.size() > 1) {
+                Array maybeWrapper = (Array) fpItems.get(1);
+                if (!maybeWrapper.getDataItems().isEmpty()) {
+                    futureParamsDIList = ((Array) maybeWrapper.getDataItems().get(0)).getDataItems();
+                }
+            }
+            if (futureParamsDIList != null && !futureParamsDIList.isEmpty()) {
+                ProtocolParamUpdate futureProtocolParam = deserializePPResult(futureParamsDIList);
+                govStateQueryResult.setFuturePParams(futureProtocolParam);
+            }
         }
 
         // next ratify state

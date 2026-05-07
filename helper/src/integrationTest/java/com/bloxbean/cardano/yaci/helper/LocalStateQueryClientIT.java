@@ -118,7 +118,7 @@ class LocalStateQueryClientIT extends BaseTest {
                 .create(mono)
                 .expectNextMatches(protoParams -> protoParams.getProtocolParams().getCollateralPercent() == 150
                         && protoParams.getProtocolParams().getMaxCollateralInputs().equals(3)
-                        && protoParams.getProtocolParams().getMaxTxExMem().equals(BigInteger.valueOf(14000000))
+                        && protoParams.getProtocolParams().getMaxTxExMem().equals(BigInteger.valueOf(16500000))
                 )
                 .expectComplete()
                 .verify();
