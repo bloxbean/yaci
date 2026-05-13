@@ -24,6 +24,10 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     private final ConcurrentLinkedQueue<String> requestedTxIds;
 
     public TxSubmissionAgent() {
+        this(true);
+    }
+    public TxSubmissionAgent(boolean isClient) {
+        super(isClient);
         this.currenState = TxSubmissionState.Init;
         this.txs = new ConcurrentLinkedQueue<>();
         this.pendingTxIds = new ConcurrentLinkedQueue<>();
@@ -36,7 +40,7 @@ public class TxSubmissionAgent extends Agent<TxSubmissionListener> {
     }
 
     @Override
-    public Message buildNextMessage() {
+public Message buildNextMessage() {
         switch ((TxSubmissionState) currenState) {
             case Init:
                 return new Init();

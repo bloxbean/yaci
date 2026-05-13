@@ -19,4 +19,12 @@ public enum TipSerializer implements Serializer<Tip> {
 
         return new Tip(tipPoint, block);
     }
+
+    @Override
+    public DataItem serializeDI(Tip tip) {
+        Array array = new Array();
+        array.add(PointSerializer.INSTANCE.serializeDI(tip.getPoint()));
+        array.add(new UnsignedInteger(tip.getBlock()));
+        return array;
+    }
 }

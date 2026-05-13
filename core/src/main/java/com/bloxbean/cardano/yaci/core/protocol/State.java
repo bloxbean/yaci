@@ -6,7 +6,7 @@ import java.util.List;
 public interface State {
     State nextState(Message message);
 
-    boolean hasAgency();
+    boolean hasAgency(boolean isClient);
 
     default Message handleInbound(byte[] bytes) {
         return null;
