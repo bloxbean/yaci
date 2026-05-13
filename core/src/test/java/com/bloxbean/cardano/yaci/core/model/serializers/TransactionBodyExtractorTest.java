@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
+import com.bloxbean.cardano.yaci.core.util.CborLoader;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
 import com.bloxbean.cardano.yaci.core.util.TxUtil;
@@ -23,5 +24,15 @@ class TransactionBodyExtractorTest {
 
         assertThat(tuples.size()).isEqualTo(65);
         assertThat(txHashes.contains("19d5925fe8021913db3a5b7d91c323fb02ba5db666907d7461c3f8889e431aa0")).isTrue();
+    }
+
+    @Test
+    void getTxBodiesFromBlockWithDefiniteSizeTxArray() {
+        byte[] blockBody = CborLoader.getHexBytes("block/preview_definite_length_4134992.txt");
+        List<Tuple<DataItem, byte[]>> tuples = TransactionBodyExtractor.getTxBodiesFromBlock(blockBody);
+        List<String> txHashes = tuples.stream().map(t -> TxUtil.calculateTxHash(t._2)).collect(Collectors.toList());
+
+        assertThat(tuples.size()).isEqualTo(95);
+        assertThat(txHashes.contains("b27abbb02eb1ed90ddcb5ef4c39d80f05022817213cf7051fa97a1fcd2644240")).isTrue();
     }
 }

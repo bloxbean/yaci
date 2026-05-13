@@ -43,6 +43,12 @@ public final class WitnessUtil {
         long witnessElementCount = getLength(witnessLengthByte,
                 getSymbolBytes(blockBytes.length - stream.available(), blockBytes));
 
+        // Skip extra length bytes for definite-length arrays (>23 elements)
+        int extraBytes = skipBytes(witnessLengthByte);
+        if (extraBytes > 0) {
+            stream.skip(extraBytes);
+        }
+
         List<byte[]> witnessList = new ArrayList<>();
 
         for (int i = 0; i < witnessElementCount; i++) {
@@ -194,7 +200,7 @@ public final class WitnessUtil {
         return (code & 0b111_00000) == 0b110_00000;
     }
 
-    private static int skipBytes(int initialByte) throws CborException {
+    static int skipBytes(int initialByte) throws CborException {
          switch (AdditionalInformation.ofByte(initialByte)) {
              case DIRECT:
                 return 0;
