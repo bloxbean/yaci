@@ -31,6 +31,8 @@ public class PeerClient {
 
     private int txMaxQueueSize;
 
+    private final AppProtocolManager appProtocolManager = new AppProtocolManager();
+
     private N2NPeerFetcher n2NPeerFetcher;
 
     /**
@@ -62,7 +64,7 @@ public class PeerClient {
         if (n2NPeerFetcher != null && n2NPeerFetcher.isRunning())
             throw new IllegalStateException("Already connected. Please call shutdown() before connecting again.");
 
-        n2NPeerFetcher = new N2NPeerFetcher(host, port, wellKnownPoint, versionTable);
+        n2NPeerFetcher = new N2NPeerFetcher(host, port, wellKnownPoint, versionTable, appProtocolManager);
         if (txMaxQueueSize > 0)
             n2NPeerFetcher.setTxMaxQueueSize(txMaxQueueSize);
 
@@ -179,6 +181,14 @@ public class PeerClient {
 
     public void enableTxSubmission() {
         n2NPeerFetcher.enableTxSubmission();
+    }
+
+    /**
+     * Get the app protocol manager for this peer connection.
+     * Available before and after connect().
+     */
+    public AppProtocolManager getAppProtocolManager() {
+        return appProtocolManager;
     }
 
     // ========================================
