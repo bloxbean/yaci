@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Server-side agent for Protocol 100 (App Message Submission).
  * Pulls messages from connected clients using a blocking request pattern.
- * Maintains FIFO queue, dedup set, and ack/req window tracking.
+ * Maintains FIFO queue, bounded processed-id cache, and ack/req window tracking.
  */
 @Slf4j
 public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener> {
@@ -27,8 +27,9 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
     private static final int DEFAULT_BATCH_SIZE = 10;
 
     private final Queue<AppMessageId> outstandingMessageIds = new ConcurrentLinkedQueue<>();
+    private final Set<String> outstandingMessageIdSet = new HashSet<>();
     private final AtomicInteger pendingAcknowledgments = new AtomicInteger(0);
-    private final Set<String> seenMessageIds = new HashSet<>();
+    private final Set<String> processedMessageIds;
     private volatile Message pendingRequest;
     private final AppMsgSubmissionConfig config;
 
@@ -39,6 +40,7 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
     public AppMsgSubmissionServerAgent(AppMsgSubmissionConfig config) {
         super(false); // Server agent
         this.config = config;
+        this.processedMessageIds = createBoundedMessageIdCache(config.getProcessedMessageIdCacheSize());
         this.currentState = AppMsgSubmissionState.Init;
     }
 
@@ -113,10 +115,13 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
 
         for (AppMessageId mid : reply.getMessageIds()) {
             String idStr = HexUtil.encodeHexString(mid.getMessageId());
-            if (!seenMessageIds.contains(idStr)) {
+            if (!processedMessageIds.contains(idStr) && !outstandingMessageIdSet.contains(idStr)) {
                 outstandingMessageIds.offer(mid);
-                seenMessageIds.add(idStr);
+                outstandingMessageIdSet.add(idStr);
                 log.debug("Added message ID to queue: {} (size: {} bytes)", idStr, mid.getSize());
+            } else {
+                pendingAcknowledgments.incrementAndGet();
+                log.debug("Skipping already processed or in-flight message ID: {}", idStr);
             }
         }
 
@@ -125,9 +130,8 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
         if (!outstandingMessageIds.isEmpty()) {
             requestMessageBodies();
         } else {
-            // All IDs were already seen (deduped) — ack and continue polling
-            log.debug("All {} message IDs already seen, sending next blocking request", reply.getMessageIds().size());
-            pendingAcknowledgments.addAndGet(reply.getMessageIds().size());
+            log.debug("All {} message IDs were already processed or in-flight; sending next blocking request",
+                    reply.getMessageIds().size());
             sendNextBlockingRequest();
         }
     }
@@ -136,19 +140,27 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
         log.info("Received ReplyMessages with {} messages", reply.getMessages().size());
 
         for (AppMessage msg : reply.getMessages()) {
-            AppMessageId processedId = outstandingMessageIds.poll();
-            if (processedId != null) {
+            String messageId = HexUtil.encodeHexString(msg.getMessageId());
+            if (removeOutstandingMessageId(messageId)) {
+                processedMessageIds.add(messageId);
                 pendingAcknowledgments.incrementAndGet();
-                log.debug("Processed message, pending acks: {}", pendingAcknowledgments.get());
+                log.debug("Processed message {}, pending acks: {}", messageId, pendingAcknowledgments.get());
+            } else {
+                log.debug("Ignoring unsolicited or duplicate message body: {}", messageId);
             }
+        }
+
+        if (!outstandingMessageIds.isEmpty()) {
+            log.warn("Peer replied with fewer app messages than requested; dropping {} unresolved message ID(s)",
+                    outstandingMessageIds.size());
+            outstandingMessageIds.clear();
+            outstandingMessageIdSet.clear();
         }
 
         getAgentListeners().forEach(l -> l.handleReplyMessages(reply));
 
-        if (outstandingMessageIds.isEmpty()) {
-            log.info("All messages processed, sending next blocking request");
-            sendNextBlockingRequest();
-        }
+        log.info("Message reply processed, sending next blocking request");
+        sendNextBlockingRequest();
     }
 
     private void sendInitialBlockingRequest() {
@@ -208,7 +220,8 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
     @Override
     public void reset() {
         outstandingMessageIds.clear();
-        seenMessageIds.clear();
+        outstandingMessageIdSet.clear();
+        processedMessageIds.clear();
         pendingAcknowledgments.set(0);
         pendingRequest = null;
         this.currentState = AppMsgSubmissionState.Init;
@@ -221,11 +234,11 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
     }
 
     public int getReceivedMessageIdCount() {
-        return seenMessageIds.size();
+        return processedMessageIds.size();
     }
 
     public boolean hasReceivedMessageId(String hexId) {
-        return seenMessageIds.contains(hexId);
+        return processedMessageIds.contains(hexId);
     }
 
     public int getOutstandingMessageCount() {
@@ -238,5 +251,25 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
 
     public AppMsgSubmissionConfig getConfig() {
         return config;
+    }
+
+    private Set<String> createBoundedMessageIdCache(int maxSize) {
+        final int boundedMaxSize = Math.max(1, maxSize);
+        return Collections.synchronizedSet(Collections.newSetFromMap(
+                new LinkedHashMap<String, Boolean>(boundedMaxSize, 0.75f, false) {
+                    @Override
+                    protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+                        return size() > boundedMaxSize;
+                    }
+                }));
+    }
+
+    private boolean removeOutstandingMessageId(String messageId) {
+        if (!outstandingMessageIdSet.remove(messageId))
+            return false;
+
+        outstandingMessageIds.removeIf(mid ->
+                messageId.equals(HexUtil.encodeHexString(mid.getMessageId())));
+        return true;
     }
 }

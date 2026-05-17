@@ -18,6 +18,9 @@ public class AppMsgSubmissionConfig {
     @Builder.Default
     private final int maxMessageSize = 65536; // 64KB max per message
 
+    @Builder.Default
+    private final int processedMessageIdCacheSize = 10000;
+
     public static AppMsgSubmissionConfig createDefault() {
         return AppMsgSubmissionConfig.builder().build();
     }
@@ -35,11 +38,15 @@ public class AppMsgSubmissionConfig {
             log.warn("AppMsgSubmissionConfig: batchSize must be positive, got: {}", batchSize);
         if (batchSize > 10)
             log.warn("AppMsgSubmissionConfig: batchSize ({}) exceeds recommended limit of 10", batchSize);
+        if (processedMessageIdCacheSize <= 0)
+            log.warn("AppMsgSubmissionConfig: processedMessageIdCacheSize must be positive, got: {}",
+                    processedMessageIdCacheSize);
     }
 
     @Override
     public String toString() {
-        return String.format("AppMsgSubmissionConfig{batchSize=%d, blockingMode=%s, maxMessageSize=%d}",
-                batchSize, useBlockingMode, maxMessageSize);
+        return String.format("AppMsgSubmissionConfig{batchSize=%d, blockingMode=%s, maxMessageSize=%d, "
+                        + "processedMessageIdCacheSize=%d}",
+                batchSize, useBlockingMode, maxMessageSize, processedMessageIdCacheSize);
     }
 }

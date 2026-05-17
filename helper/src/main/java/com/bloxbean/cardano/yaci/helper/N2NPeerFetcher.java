@@ -135,7 +135,6 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
         blockFetchAgent.resetPoints(wellKnownPoint, wellKnownPoint);
         setupAgentListeners();
-        appProtocolManager.setupListeners();
 
         List<Agent<?>> allAgents = new ArrayList<>(List.of(
                 keepAliveAgent, chainSyncAgent, blockFetchAgent, txSubmissionAgent));

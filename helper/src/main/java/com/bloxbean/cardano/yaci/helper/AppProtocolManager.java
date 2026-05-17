@@ -7,19 +7,19 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Manages app-layer protocols (Protocol 100+) for a peer connection.
- * The AppMsgSubmissionAgent is always created internally. Callers signal intent
- * via {@link #enableAppMsg()}; actual activation only happens if the peer also
- * negotiates V100 during handshake (two-level check).
+ * Callers signal intent via {@link #enableAppMsg()}; the agent is added to a
+ * connection only when enabled and activated only when the peer negotiates V100.
  */
 @Slf4j
 public class AppProtocolManager {
     private final AppMsgSubmissionAgent appMsgAgent = new AppMsgSubmissionAgent();
     private boolean appMsgEnabled = false;
+    private boolean listenersSetup = false;
 
     /**
      * Signal intent to use the AppMsgSubmission protocol.
@@ -33,14 +33,17 @@ public class AppProtocolManager {
         return appMsgEnabled;
     }
 
-    public Optional<AppMsgSubmissionAgent> getAppMsgSubmissionAgent() {
-        return Optional.of(appMsgAgent);
+    public AppMsgSubmissionAgent getAppMsgSubmissionAgent() {
+        return appMsgAgent;
     }
 
     /**
-     * Get all app agents to include in the connection agent list.
+     * Get app agents to include in the connection agent list.
+     * Returns an empty list unless app messaging is explicitly enabled.
      */
     public List<Agent<?>> getAgents() {
+        if (!appMsgEnabled)
+            return Collections.emptyList();
         return List.of(appMsgAgent);
     }
 
@@ -50,6 +53,9 @@ public class AppProtocolManager {
      * so the listener must trigger replies after each server request.
      */
     public void setupListeners() {
+        if (listenersSetup)
+            return;
+
         appMsgAgent.addListener(new AppMsgSubmissionListener() {
             @Override
             public void handleRequestMessageIds(
@@ -63,6 +69,7 @@ public class AppProtocolManager {
                 appMsgAgent.sendNextMessage();
             }
         });
+        listenersSetup = true;
         log.info("AppMsgSubmission listener wired for internal app agent");
     }
 
@@ -84,6 +91,7 @@ public class AppProtocolManager {
     }
 
     private void activateAppMsgSubmission() {
+        setupListeners();
         appMsgAgent.sendNextMessage();  // sends MsgInit
         log.info("AppMsgSubmission protocol activated (MsgInit sent)");
     }
