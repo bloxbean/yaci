@@ -39,6 +39,8 @@ public class NodeClientConfig {
 
     /**
      * Maximum number of retry attempts before giving up.
+     * This is used only when autoReconnect is enabled. If autoReconnect is false,
+     * startup fails after the first failed connection attempt.
      * Default: Integer.MAX_VALUE (unlimited retries for backward compatibility)
      */
     @Builder.Default
@@ -61,6 +63,14 @@ public class NodeClientConfig {
      */
     @Builder.Default
     private final int connectionTimeoutMs = 30000;
+
+    /**
+     * Whether startup failures should be propagated to the caller.
+     * Default: false to preserve historical behavior where start() logs startup errors.
+     * Set to true for supervised applications that need to fail over to another peer.
+     */
+    @Builder.Default
+    private final boolean propagateStartupFailure = false;
 
     /**
      * Creates a default configuration with backward-compatible settings.

@@ -9,13 +9,14 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.SocketAddress;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /**
  * This class tries to open the network connection. The session gets destroyed during disconnection event.
  */
 @Slf4j
 class Session implements Disposable {
-    private final SocketAddress socketAddress;
+    private final Supplier<SocketAddress> socketAddressSupplier;
     private final Bootstrap clientBootstrap;
     private Channel activeChannel;
     private final AtomicBoolean shouldReconnect;
@@ -28,6 +29,26 @@ class Session implements Disposable {
     /**
      * Constructor with NodeClientConfig for configurable connection behavior.
      *
+     * @param socketAddressSupplier the socket address supplier to use for each connection attempt
+     * @param clientBootstrap the Netty bootstrap
+     * @param config the connection configuration
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public Session(Supplier<SocketAddress> socketAddressSupplier, Bootstrap clientBootstrap, NodeClientConfig config,
+                   HandshakeAgent handshakeAgent, Agent[] agents) {
+        this.socketAddressSupplier = socketAddressSupplier;
+        this.clientBootstrap = clientBootstrap;
+        this.config = config != null ? config : NodeClientConfig.defaultConfig();
+        this.shouldReconnect = new AtomicBoolean(this.config.isAutoReconnect());
+
+        this.handshakeAgent = handshakeAgent;
+        this.agents = agents;
+    }
+
+    /**
+     * Constructor with NodeClientConfig for configurable connection behavior.
+     *
      * @param socketAddress the socket address to connect to
      * @param clientBootstrap the Netty bootstrap
      * @param config the connection configuration
@@ -36,13 +57,7 @@ class Session implements Disposable {
      */
     public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, NodeClientConfig config,
                    HandshakeAgent handshakeAgent, Agent[] agents) {
-        this.socketAddress = socketAddress;
-        this.clientBootstrap = clientBootstrap;
-        this.config = config != null ? config : NodeClientConfig.defaultConfig();
-        this.shouldReconnect = new AtomicBoolean(this.config.isAutoReconnect());
-
-        this.handshakeAgent = handshakeAgent;
-        this.agents = agents;
+        this(() -> socketAddress, clientBootstrap, config, handshakeAgent, agents);
     }
 
     /**
@@ -55,7 +70,8 @@ class Session implements Disposable {
      * @deprecated Use {@link #Session(SocketAddress, Bootstrap, NodeClientConfig, HandshakeAgent, Agent[])} instead
      */
     @Deprecated
-    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, HandshakeAgent handshakeAgent, Agent[] agents) {
+    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, HandshakeAgent handshakeAgent,
+                   Agent[] agents) {
         this(socketAddress, clientBootstrap, NodeClientConfig.defaultConfig(), handshakeAgent, agents);
     }
 
@@ -69,21 +85,25 @@ class Session implements Disposable {
     public Disposable start() throws InterruptedException {
         //Create a new connectFuture
         ChannelFuture connectFuture = null;
+        long retriesUsed = 0;
         // Always try to connect at least once, then retry only if shouldReconnect is true
-        do {
+        while (connectFuture == null) {
             try {
+                SocketAddress socketAddress = socketAddressSupplier.get();
+                if (showConnectionLog())
+                    log.info("Connecting to {} (attempt {}, max retries: {})",
+                            socketAddress, retriesUsed + 1, config.getMaxRetryAttempts());
                 connectFuture = clientBootstrap.connect(socketAddress).sync();
             } catch (Exception e) {
                 log.error("Connection failed", e);
-                if (shouldReconnect.get()) {
-                    Thread.sleep(config.getInitialRetryDelayMs());
-                    log.debug("Trying to reconnect !!!");
-                } else {
-                    // If auto-reconnect is disabled, fail fast
+                if (!shouldRetry(retriesUsed)) {
                     throw e;
                 }
+                retriesUsed++;
+                Thread.sleep(config.getInitialRetryDelayMs());
+                log.debug("Trying to reconnect !!!");
             }
-        } while (connectFuture == null && shouldReconnect.get());
+        }
 
         handshakeAgent.reset();
         for (Agent agent: agents) {
@@ -157,6 +177,14 @@ class Session implements Disposable {
 
     public boolean shouldReconnect() {
         return shouldReconnect.get();
+    }
+
+    private boolean shouldRetry(long retriesUsed) {
+        if (!shouldReconnect.get())
+            return false;
+
+        int maxRetryAttempts = config.getMaxRetryAttempts();
+        return maxRetryAttempts == Integer.MAX_VALUE || retriesUsed < maxRetryAttempts;
     }
 
     public void handshake() {

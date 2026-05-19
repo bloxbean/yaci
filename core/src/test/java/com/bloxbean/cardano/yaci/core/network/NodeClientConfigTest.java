@@ -17,6 +17,7 @@ class NodeClientConfigTest {
         assertEquals(Integer.MAX_VALUE, config.getMaxRetryAttempts(), "Default max retry attempts should be unlimited");
         assertTrue(config.isEnableConnectionLogging(), "Connection logging should be enabled by default");
         assertEquals(30000, config.getConnectionTimeoutMs(), "Default connection timeout should be 30000ms");
+        assertFalse(config.isPropagateStartupFailure(), "Startup failure propagation should be disabled by default");
     }
 
     @Test
@@ -28,6 +29,7 @@ class NodeClientConfigTest {
         assertEquals(8000, config.getInitialRetryDelayMs());
         assertEquals(Integer.MAX_VALUE, config.getMaxRetryAttempts());
         assertTrue(config.isEnableConnectionLogging());
+        assertFalse(config.isPropagateStartupFailure());
     }
 
     @Test

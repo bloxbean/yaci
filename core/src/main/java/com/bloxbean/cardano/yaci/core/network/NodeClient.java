@@ -14,6 +14,7 @@ import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.SocketAddress;
+import java.util.function.Supplier;
 
 @Slf4j
 public abstract class NodeClient {
@@ -79,6 +80,11 @@ public abstract class NodeClient {
             throw new RuntimeException("Session already available. Only one session is allowed per N2NClient. To start again, please call shutdown() first.");
 
         try {
+            if (workerGroup == null || workerGroup.isShuttingDown() || workerGroup.isShutdown()
+                    || workerGroup.isTerminated()) {
+                workerGroup = configureEventLoopGroup();
+            }
+
             Bootstrap b = new Bootstrap();
             b.group(workerGroup);
             b.channel(getChannelClass());
@@ -96,12 +102,28 @@ public abstract class NodeClient {
                 }
             });
 
-            SocketAddress socketAddress = createSocketAddress();
-
-            session = new Session(socketAddress, b, config, handshakeAgent, agents);
+            session = new Session(createSocketAddressSupplier(), b, config, handshakeAgent, agents);
             session.setSessionListener(sessionListener);
             session.start();
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+
+            if (session != null) {
+                session.disableReconnection();
+                session.dispose();
+                session = null;
+            }
+
+            if (config.isPropagateStartupFailure()) {
+                if (workerGroup != null) {
+                    workerGroup.shutdownGracefully();
+                    workerGroup = null;
+                }
+                throw new NodeClientException("Failed to start node client", e);
+            }
+
             log.error("Error", e);
         }
     }
@@ -163,6 +185,15 @@ public abstract class NodeClient {
      * @return
      */
     protected abstract SocketAddress createSocketAddress();
+
+    /**
+     * Create a socket address supplier. The supplier is invoked for every connection attempt.
+     *
+     * @return socket address supplier
+     */
+    protected Supplier<SocketAddress> createSocketAddressSupplier() {
+        return this::createSocketAddress;
+    }
 
     /**
      * Create and configure an EventLoopGroup. This method is invoked from {@link #start()}

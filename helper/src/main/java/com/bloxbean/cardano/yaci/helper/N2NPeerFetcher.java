@@ -11,6 +11,7 @@ import com.bloxbean.cardano.yaci.core.model.byron.ByronBlockHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
+import com.bloxbean.cardano.yaci.core.network.NodeClientConfig;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
@@ -53,6 +54,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     private final int port;
     private final VersionTable versionTable;
     private final Point wellKnownPoint;
+    private final NodeClientConfig nodeClientConfig;
 
     // Agents
     private HandshakeAgent handshakeAgent;
@@ -99,14 +101,32 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     /**
+     * Construct {@link N2NPeerFetcher} to sync the blockchain.
+     */
+    public N2NPeerFetcher(String host, int port, Point wellKnownPoint, long protocolMagic,
+                          NodeClientConfig nodeClientConfig) {
+        this(host, port, wellKnownPoint, N2NVersionTableConstant.v11AndAbove(protocolMagic), nodeClientConfig);
+    }
+
+    /**
      * Main constructor - fetcher syncs from the given wellKnownPoint
      * Application controls sync strategy by choosing the starting point
      */
     public N2NPeerFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable) {
+        this(host, port, wellKnownPoint, versionTable, NodeClientConfig.defaultConfig());
+    }
+
+    /**
+     * Main constructor - fetcher syncs from the given wellKnownPoint.
+     * Application controls sync strategy and connection policy.
+     */
+    public N2NPeerFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable,
+                          NodeClientConfig nodeClientConfig) {
         this.host = host;
         this.port = port;
         this.versionTable = versionTable;
         this.wellKnownPoint = wellKnownPoint;
+        this.nodeClientConfig = nodeClientConfig != null ? nodeClientConfig : NodeClientConfig.defaultConfig();
 
         init();
     }
@@ -121,7 +141,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         blockFetchAgent.resetPoints(wellKnownPoint, wellKnownPoint);
         setupAgentListeners();
 
-        n2nClient = new TCPNodeClient(host, port, handshakeAgent, keepAliveAgent,
+        n2nClient = new TCPNodeClient(host, port, nodeClientConfig, handshakeAgent, keepAliveAgent,
                 chainSyncAgent, blockFetchAgent, txSubmissionAgent);
     }
 
