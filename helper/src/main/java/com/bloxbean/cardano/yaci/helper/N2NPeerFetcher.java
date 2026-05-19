@@ -54,7 +54,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     // Core connection fields
     private final String host;
     private final int port;
-    private final VersionTable versionTable;
+    private VersionTable versionTable;
     private final Point wellKnownPoint;
 
     // Agents
@@ -136,10 +136,27 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         blockFetchAgent.resetPoints(wellKnownPoint, wellKnownPoint);
         setupAgentListeners();
 
+        validateAppProtocolConfiguration();
+    }
+
+    private void ensureClientInitialized() {
+        if (n2nClient != null)
+            return;
+
+        validateAppProtocolConfiguration();
+
         List<Agent<?>> allAgents = new ArrayList<>(List.of(
                 keepAliveAgent, chainSyncAgent, blockFetchAgent, txSubmissionAgent));
         allAgents.addAll(appProtocolManager.getAgents());
         n2nClient = new TCPNodeClient(host, port, handshakeAgent, allAgents.toArray(new Agent<?>[0]));
+    }
+
+    private void validateAppProtocolConfiguration() {
+        if (appProtocolManager.isAppMsgEnabled()
+                && !N2NVersionTableConstant.hasAppLayerVersion(versionTable)) {
+            throw new IllegalStateException(
+                    "App message protocol requires a version table with app-layer V100 support");
+        }
     }
 
     private void setupAgentListeners() {
@@ -399,6 +416,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
             }
         });
 
+        ensureClientInitialized();
         n2nClient.start();
     }
 
@@ -407,7 +425,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
      * Useful for header-only synchronization or when you want to control body fetching manually
      */
     public void startChainSyncOnly(Point from, boolean isPipelined) {
-        if (!n2nClient.isRunning()) {
+        if (!isRunning()) {
             throw new IllegalStateException("Connection not established. Call connect() first.");
         }
 
@@ -424,7 +442,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
      * Must be called after connection is established
      */
     public void startBlockFetchOnly(Point from, Point to) {
-        if (!n2nClient.isRunning()) {
+        if (!isRunning()) {
             throw new IllegalStateException("Connection not established. Call connect() first.");
         }
 
@@ -459,7 +477,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     public void sendKeepAliveMessage(int cookie) {
-        if (n2nClient.isRunning())
+        if (isRunning())
             keepAliveAgent.sendKeepAlive(cookie);
     }
 
@@ -482,16 +500,17 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
     @Override
     public boolean isRunning() {
-        return n2nClient.isRunning();
+        return n2nClient != null && n2nClient.isRunning();
     }
 
     @Override
     public void shutdown() {
-        n2nClient.shutdown();
+        if (n2nClient != null)
+            n2nClient.shutdown();
     }
 
     public void fetch(Point from, Point to) {
-        if (!n2nClient.isRunning())
+        if (!isRunning())
             throw new IllegalStateException("fetch() should be called after start()");
 
         blockFetchAgent.resetPoints(from, to);
@@ -502,7 +521,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     public void startSync(Point from, boolean isPipelined) {
-        if (!n2nClient.isRunning())
+        if (!isRunning())
             throw new IllegalStateException("startSync() should be called after start()");
 
         chainSyncAgent.enablePipelining(isPipelined);
@@ -514,7 +533,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     public Optional<Tip> getLatestTip() {
-        if (!n2nClient.isRunning())
+        if (!isRunning())
             throw new IllegalStateException("getTip() should be called after start()");
 
         // Return the latest known tip if available
@@ -536,6 +555,14 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
     public void enableTxSubmission() {
         txSubmissionAgent.sendNextMessage();
+    }
+
+    public void enableAppMsg() {
+        if (n2nClient != null)
+            throw new IllegalStateException("App message protocol must be enabled before start()");
+
+        this.versionTable = N2NVersionTableConstant.withAppLayer(versionTable);
+        appProtocolManager.enableAppMsg();
     }
 
     /**

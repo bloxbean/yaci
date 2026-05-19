@@ -32,6 +32,33 @@ public class N2NVersionTableConstant {
         return versionNumber >= PROTOCOL_V100;
     }
 
+    public static boolean hasAppLayerVersion(VersionTable versionTable) {
+        return versionTable != null && versionTable.getVersionDataMap().keySet().stream()
+                .anyMatch(N2NVersionTableConstant::isAppLayerVersion);
+    }
+
+    public static VersionTable withAppLayer(VersionTable versionTable) {
+        if (versionTable == null)
+            throw new IllegalArgumentException("Version table is required");
+
+        Map<Long, VersionData> versionTableMap = new HashMap<>(versionTable.getVersionDataMap());
+        if (versionTableMap.keySet().stream().anyMatch(N2NVersionTableConstant::isAppLayerVersion))
+            return new VersionTable(versionTableMap);
+
+        VersionData appVersionData = versionTableMap.get(PROTOCOL_V15);
+        if (appVersionData == null) {
+            appVersionData = versionTableMap.entrySet().stream()
+                    .filter(entry -> entry.getKey() < PROTOCOL_V100)
+                    .max(Map.Entry.comparingByKey())
+                    .map(Map.Entry::getValue)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "No node-to-node version data available for app-layer V100"));
+        }
+
+        versionTableMap.put(PROTOCOL_V100, appVersionData);
+        return new VersionTable(versionTableMap);
+    }
+
     public static VersionTable v4AndAbove(long networkMagic) {
         N2NVersionData versionData = new N2NVersionData(networkMagic, true);
 

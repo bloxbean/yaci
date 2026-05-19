@@ -94,6 +94,35 @@ class AppMsgSubmissionAgentTest {
     }
 
     @Test
+    void testRequestMessageIdsRespectsRequestWindow() {
+        agent.enqueueMessage(createTestMessage(new byte[]{1}, "t"));
+        agent.enqueueMessage(createTestMessage(new byte[]{2}, "t"));
+        agent.enqueueMessage(createTestMessage(new byte[]{3}, "t"));
+        agent.sendRequest(new MsgInit());
+
+        agent.receiveResponse(new MsgRequestMessageIds(true, (short) 0, (short) 2));
+
+        var reply = agent.buildNextMessage();
+
+        assertThat(reply).isInstanceOf(MsgReplyMessageIds.class);
+        assertThat(((MsgReplyMessageIds) reply).getMessageIds()).hasSize(2);
+    }
+
+    @Test
+    void testBlockingEnqueueDoesNotExceedRequestWindow() {
+        agent.sendRequest(new MsgInit());
+        agent.receiveResponse(new MsgRequestMessageIds(true, (short) 0, (short) 1));
+
+        assertThat(agent.enqueueMessage(createTestMessage(new byte[]{1}, "t"))).isTrue();
+        assertThat(agent.enqueueMessage(createTestMessage(new byte[]{2}, "t"))).isTrue();
+
+        var reply = agent.buildNextMessage();
+
+        assertThat(reply).isInstanceOf(MsgReplyMessageIds.class);
+        assertThat(((MsgReplyMessageIds) reply).getMessageIds()).hasSize(1);
+    }
+
+    @Test
     void testRequestMessagesFlow() {
         agent.enqueueMessage(createTestMessage(new byte[]{1}, "t"));
         agent.sendRequest(new MsgInit());

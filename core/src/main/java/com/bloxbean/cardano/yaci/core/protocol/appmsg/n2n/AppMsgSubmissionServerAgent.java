@@ -32,6 +32,7 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
     private final Set<String> processedMessageIds;
     private volatile Message pendingRequest;
     private final AppMsgSubmissionConfig config;
+    private volatile int requestedMessageIdCount;
 
     public AppMsgSubmissionServerAgent() {
         this(AppMsgSubmissionConfig.createDefault());
@@ -47,6 +48,14 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
     @Override
     public int getProtocolId() {
         return 100;
+    }
+
+    @Override
+    public void sendRequest(Message message) {
+        if (message instanceof MsgRequestMessageIds) {
+            requestedMessageIdCount = Math.max(0, ((MsgRequestMessageIds) message).getReqCount());
+        }
+        super.sendRequest(message);
     }
 
     @Override
@@ -113,7 +122,13 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
             return;
         }
 
+        int processedReplyIds = 0;
         for (AppMessageId mid : reply.getMessageIds()) {
+            if (processedReplyIds >= requestedMessageIdCount) {
+                log.warn("Peer replied with more app message IDs than requested; ignoring extra ID(s)");
+                break;
+            }
+
             String idStr = HexUtil.encodeHexString(mid.getMessageId());
             if (!processedMessageIds.contains(idStr) && !outstandingMessageIdSet.contains(idStr)) {
                 outstandingMessageIds.offer(mid);
@@ -123,6 +138,7 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
                 pendingAcknowledgments.incrementAndGet();
                 log.debug("Skipping already processed or in-flight message ID: {}", idStr);
             }
+            processedReplyIds++;
         }
 
         getAgentListeners().forEach(l -> l.handleReplyMessageIds(reply));
@@ -139,25 +155,41 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
     private void handleReplyMessages(MsgReplyMessages reply) {
         log.info("Received ReplyMessages with {} messages", reply.getMessages().size());
 
+        Map<String, AppMessage> replyByMessageId = new HashMap<>();
         for (AppMessage msg : reply.getMessages()) {
             String messageId = HexUtil.encodeHexString(msg.getMessageId());
-            if (removeOutstandingMessageId(messageId)) {
-                processedMessageIds.add(messageId);
-                pendingAcknowledgments.incrementAndGet();
-                log.debug("Processed message {}, pending acks: {}", messageId, pendingAcknowledgments.get());
+            if (outstandingMessageIdSet.contains(messageId)) {
+                replyByMessageId.put(messageId, msg);
             } else {
                 log.debug("Ignoring unsolicited or duplicate message body: {}", messageId);
             }
         }
 
+        List<AppMessage> acceptedMessages = new ArrayList<>();
+        while (!outstandingMessageIds.isEmpty()) {
+            AppMessageId outstandingId = outstandingMessageIds.peek();
+            String messageId = HexUtil.encodeHexString(outstandingId.getMessageId());
+            AppMessage msg = replyByMessageId.get(messageId);
+            if (msg == null)
+                break;
+
+            if (removeOutstandingMessageId(messageId)) {
+                processedMessageIds.add(messageId);
+                pendingAcknowledgments.incrementAndGet();
+                acceptedMessages.add(msg);
+                log.debug("Processed message {}, pending acks: {}", messageId, pendingAcknowledgments.get());
+            }
+        }
+
         if (!outstandingMessageIds.isEmpty()) {
-            log.warn("Peer replied with fewer app messages than requested; dropping {} unresolved message ID(s)",
+            log.warn("Peer replied with missing or out-of-order app messages; dropping {} unresolved message ID(s)",
                     outstandingMessageIds.size());
             outstandingMessageIds.clear();
             outstandingMessageIdSet.clear();
         }
 
-        getAgentListeners().forEach(l -> l.handleReplyMessages(reply));
+        MsgReplyMessages acceptedReply = new MsgReplyMessages(acceptedMessages);
+        getAgentListeners().forEach(l -> l.handleReplyMessages(acceptedReply));
 
         log.info("Message reply processed, sending next blocking request");
         sendNextBlockingRequest();
@@ -184,6 +216,7 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
         }
 
         MsgRequestMessageIds request = new MsgRequestMessageIds(blocking, ack, req);
+        requestedMessageIdCount = Math.max(0, req);
         this.pendingRequest = request;
 
         if (hasAgency()) {
@@ -222,6 +255,7 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
         outstandingMessageIds.clear();
         outstandingMessageIdSet.clear();
         processedMessageIds.clear();
+        requestedMessageIdCount = 0;
         pendingAcknowledgments.set(0);
         pendingRequest = null;
         this.currentState = AppMsgSubmissionState.Init;

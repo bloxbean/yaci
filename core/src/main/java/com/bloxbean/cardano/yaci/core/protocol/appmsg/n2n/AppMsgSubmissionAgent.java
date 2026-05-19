@@ -26,6 +26,7 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
     private final ConcurrentLinkedQueue<byte[]> pendingIds;
     private final ConcurrentLinkedQueue<byte[]> requestedIds;
     private final int maxQueueSize;
+    private volatile int requestedMessageIdWindow;
 
     public AppMsgSubmissionAgent() {
         this(DEFAULT_MAX_QUEUE_SIZE);
@@ -73,6 +74,7 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
         MsgReplyMessageIds reply = new MsgReplyMessageIds();
         if (!pendingIds.isEmpty()) {
             pendingIds.stream()
+                    .limit(requestedMessageIdWindow)
                     .flatMap(id -> findMessage(id).stream())
                     .forEach(msg -> reply.addMessageId(
                             new AppMessageId(msg.getMessageId(), msg.getSize())));
@@ -115,15 +117,10 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
         // Process acknowledgments
         removeAcknowledged(request.getAckCount());
 
+        requestedMessageIdWindow = Math.max(0, request.getReqCount());
+
         // Fill pending IDs up to requested count
-        int toAdd = request.getReqCount() - pendingIds.size();
-        if (toAdd > 0) {
-            pendingMessages.stream()
-                    .map(AppMessage::getMessageId)
-                    .filter(id -> !containsId(pendingIds, id))
-                    .limit(toAdd)
-                    .forEach(pendingIds::add);
-        }
+        fillPendingIdsUpToWindow();
 
         getAgentListeners().forEach(l -> l.handleRequestMessageIds(request));
     }
@@ -164,8 +161,10 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
             }
             pendingMessages.add(message);
             shouldWake = AppMsgSubmissionState.MessageIdsBlocking.equals(currentState);
-            if (shouldWake) {
+            if (shouldWake && hasPendingIdCapacity()) {
                 pendingIds.add(message.getMessageId());
+            } else {
+                shouldWake = false;
             }
         }
         log.info("Message enqueued: {}, total in queue: {}", message.getMessageIdHex(), pendingMessages.size());
@@ -192,6 +191,7 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
         pendingMessages.clear();
         pendingIds.clear();
         requestedIds.clear();
+        requestedMessageIdWindow = 0;
         this.currentState = AppMsgSubmissionState.Init;
     }
 
@@ -207,5 +207,21 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
 
     private boolean containsId(ConcurrentLinkedQueue<byte[]> queue, byte[] id) {
         return queue.stream().anyMatch(existing -> Arrays.equals(existing, id));
+    }
+
+    private void fillPendingIdsUpToWindow() {
+        int toAdd = requestedMessageIdWindow - pendingIds.size();
+        if (toAdd <= 0)
+            return;
+
+        pendingMessages.stream()
+                .map(AppMessage::getMessageId)
+                .filter(id -> !containsId(pendingIds, id))
+                .limit(toAdd)
+                .forEach(pendingIds::add);
+    }
+
+    private boolean hasPendingIdCapacity() {
+        return pendingIds.size() < requestedMessageIdWindow;
     }
 }

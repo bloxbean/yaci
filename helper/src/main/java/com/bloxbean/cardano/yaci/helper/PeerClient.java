@@ -183,6 +183,14 @@ public class PeerClient {
         n2NPeerFetcher.enableTxSubmission();
     }
 
+    public void enableAppMsg() {
+        if (n2NPeerFetcher != null)
+            throw new IllegalStateException("App message protocol must be enabled before connect()");
+
+        this.versionTable = N2NVersionTableConstant.withAppLayer(versionTable);
+        appProtocolManager.enableAppMsg();
+    }
+
     /**
      * Get the app protocol manager for this peer connection.
      * Available before and after connect().

@@ -103,6 +103,26 @@ class AppMsgSubmissionServerAgentTest {
     }
 
     @Test
+    void testReplyMessageIdsDoesNotExceedRequestWindow() {
+        agent.receiveResponse(new MsgInit());
+
+        agent.sendRequest(new MsgRequestMessageIds(true, (short) 0, (short) 1));
+
+        MsgReplyMessageIds reply = new MsgReplyMessageIds();
+        reply.addMessageId(new byte[]{1}, 10);
+        reply.addMessageId(new byte[]{2}, 10);
+        agent.receiveResponse(reply);
+
+        assertThat(agent.getOutstandingMessageCount()).isEqualTo(1);
+
+        Message nextMsg = agent.buildNextMessage();
+        assertThat(nextMsg).isInstanceOf(MsgRequestMessages.class);
+        List<byte[]> requestedIds = ((MsgRequestMessages) nextMsg).getMessageIds();
+        assertThat(requestedIds).hasSize(1);
+        assertThat(requestedIds.get(0)).containsExactly((byte) 1);
+    }
+
+    @Test
     void testDeduplicationAfterMessageBodyReceived() {
         agent.receiveResponse(new MsgInit());
 
@@ -221,7 +241,7 @@ class AppMsgSubmissionServerAgentTest {
     }
 
     @Test
-    void testPartialReplyMessagesDoesNotBlockNextBatch() {
+    void testOutOfOrderReplyMessagesAreNotAcknowledged() {
         agent.receiveResponse(new MsgInit());
         sendPendingMessageIdRequest();
 
@@ -241,7 +261,32 @@ class AppMsgSubmissionServerAgentTest {
         assertThat(agent.getCurrentState()).isEqualTo(AppMsgSubmissionState.Idle);
         assertThat(agent.getOutstandingMessageCount()).isEqualTo(0);
         assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{1}))).isFalse();
-        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{2}))).isTrue();
+        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{2}))).isFalse();
+
+        Message nextMsg = agent.buildNextMessage();
+        assertThat(nextMsg).isInstanceOf(MsgRequestMessageIds.class);
+        assertThat(((MsgRequestMessageIds) nextMsg).getAckCount()).isEqualTo((short) 0);
+    }
+
+    @Test
+    void testPrefixPartialReplyMessagesAckOnlyAcceptedPrefix() {
+        agent.receiveResponse(new MsgInit());
+        sendPendingMessageIdRequest();
+
+        MsgReplyMessageIds replyIds = new MsgReplyMessageIds();
+        replyIds.addMessageId(new byte[]{1}, 10);
+        replyIds.addMessageId(new byte[]{2}, 10);
+        agent.receiveResponse(replyIds);
+
+        sendPendingMessageBodyRequest();
+
+        MsgReplyMessages partialReply = new MsgReplyMessages();
+        partialReply.addMessage(createTestMessage(new byte[]{1}));
+        agent.receiveResponse(partialReply);
+
+        assertThat(agent.getOutstandingMessageCount()).isEqualTo(0);
+        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{1}))).isTrue();
+        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{2}))).isFalse();
 
         Message nextMsg = agent.buildNextMessage();
         assertThat(nextMsg).isInstanceOf(MsgRequestMessageIds.class);
