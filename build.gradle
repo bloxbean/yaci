@@ -142,7 +142,7 @@ subprojects {
         testRuntimeOnly libs.junit.jupiter.engine
         testRuntimeOnly libs.junit.platform.launcher
         testImplementation libs.harmcrest.library
-        testImplementation libs.mockito.inline
+        testImplementation libs.mockito.core
         testImplementation libs.mockito.junit.jupiter
         testImplementation libs.assertj.core
         testRuntimeOnly libs.slf4j.reload4j
