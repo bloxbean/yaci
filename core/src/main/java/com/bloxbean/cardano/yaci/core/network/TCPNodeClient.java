@@ -10,11 +10,16 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetAddress;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.UnknownHostException;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * This is the main class to initialize single or multiple agents for Node-to-node mini-protocol and setup channel handlers to send / process
@@ -24,7 +29,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public class TCPNodeClient extends NodeClient {
     private String host;
     private int port;
-    private DnsRotatingSocketAddressSupplier socketAddressSupplier;
+    private DnsRotatingSocketAddressProvider socketAddressProvider;
 
     /**
      * Constructor with NodeClientConfig for configurable connection behavior.
@@ -40,7 +45,8 @@ public class TCPNodeClient extends NodeClient {
         super(config, handshakeAgent, agents);
         this.host = host;
         this.port = port;
-        this.socketAddressSupplier = new DnsRotatingSocketAddressSupplier(host, port);
+        this.socketAddressProvider = new DnsRotatingSocketAddressProvider(host, port,
+                getConfig().getSocketAddressFamily());
     }
 
     /**
@@ -57,7 +63,15 @@ public class TCPNodeClient extends NodeClient {
 
     @Override
     protected SocketAddress createSocketAddress() {
-        return socketAddressSupplier.get();
+        return new InetSocketAddress(host, port);
+    }
+
+    @Override
+    protected List<SocketAddress> createSocketAddressCandidates() {
+        if (getConfig().getSocketAddressResolutionMode() == SocketAddressResolutionMode.DNS_ROTATING)
+            return socketAddressProvider.get();
+
+        return super.createSocketAddressCandidates();
     }
 
     @Override
@@ -77,24 +91,88 @@ public class TCPNodeClient extends NodeClient {
         bootstrap.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, getConfig().getConnectionTimeoutMs());
     }
 
-    private static class DnsRotatingSocketAddressSupplier {
+    static class DnsRotatingSocketAddressProvider {
         private final String host;
         private final int port;
+        private final SocketAddressFamily socketAddressFamily;
+        private final InetAddressResolver addressResolver;
         private final AtomicInteger cursor = new AtomicInteger(ThreadLocalRandom.current().nextInt());
 
-        private DnsRotatingSocketAddressSupplier(String host, int port) {
-            this.host = host;
-            this.port = port;
+        DnsRotatingSocketAddressProvider(String host, int port, SocketAddressFamily socketAddressFamily) {
+            this(host, port, socketAddressFamily, InetAddress::getAllByName);
         }
 
-        public SocketAddress get() {
+        DnsRotatingSocketAddressProvider(String host, int port, SocketAddressFamily socketAddressFamily,
+                                         InetAddressResolver addressResolver) {
+            this.host = host;
+            this.port = port;
+            this.socketAddressFamily = socketAddressFamily != null ? socketAddressFamily : SocketAddressFamily.ANY;
+            this.addressResolver = addressResolver;
+        }
+
+        public List<SocketAddress> get() {
             try {
-                InetAddress[] addresses = InetAddress.getAllByName(host);
-                int index = Math.floorMod(cursor.getAndIncrement(), addresses.length);
-                return new InetSocketAddress(addresses[index], port);
+                List<InetAddress> addresses = selectAddresses(Arrays.asList(addressResolver.resolve(host)));
+                if (addresses.isEmpty()) {
+                    throw new IllegalStateException("Unable to resolve " + host + ":" + port
+                            + " with address family " + socketAddressFamily);
+                }
+
+                List<SocketAddress> socketAddresses = new ArrayList<>(addresses.size());
+                for (InetAddress address : addresses) {
+                    socketAddresses.add(new InetSocketAddress(address, port));
+                }
+                return socketAddresses;
             } catch (UnknownHostException e) {
                 throw new IllegalStateException("Unable to resolve " + host + ":" + port, e);
             }
         }
+
+        private List<InetAddress> selectAddresses(List<InetAddress> addresses) {
+            List<InetAddress> ipv4 = filterByFamily(addresses, Inet4Address.class);
+            List<InetAddress> ipv6 = filterByFamily(addresses, Inet6Address.class);
+            int start = cursor.getAndIncrement();
+
+            return switch (socketAddressFamily) {
+                case ANY -> rotate(addresses, start);
+                case IPV4_ONLY -> rotate(ipv4, start);
+                case IPV6_ONLY -> rotate(ipv6, start);
+                case IPV4_PREFERRED -> concatenate(rotate(ipv4, start), rotate(ipv6, start));
+                case IPV6_PREFERRED -> concatenate(rotate(ipv6, start), rotate(ipv4, start));
+            };
+        }
+
+        private <T extends InetAddress> List<InetAddress> filterByFamily(List<InetAddress> addresses,
+                                                                         Class<T> addressFamilyClass) {
+            List<InetAddress> filteredAddresses = new ArrayList<>();
+            for (InetAddress address : addresses) {
+                if (addressFamilyClass.isInstance(address)) {
+                    filteredAddresses.add(address);
+                }
+            }
+            return filteredAddresses;
+        }
+
+        private List<InetAddress> rotate(List<InetAddress> addresses, int start) {
+            if (addresses.size() <= 1)
+                return new ArrayList<>(addresses);
+
+            int index = Math.floorMod(start, addresses.size());
+            List<InetAddress> rotatedAddresses = new ArrayList<>(addresses.size());
+            rotatedAddresses.addAll(addresses.subList(index, addresses.size()));
+            rotatedAddresses.addAll(addresses.subList(0, index));
+            return rotatedAddresses;
+        }
+
+        private List<InetAddress> concatenate(List<InetAddress> first, List<InetAddress> second) {
+            List<InetAddress> addresses = new ArrayList<>(first.size() + second.size());
+            addresses.addAll(first);
+            addresses.addAll(second);
+            return addresses;
+        }
+    }
+
+    interface InetAddressResolver {
+        InetAddress[] resolve(String host) throws UnknownHostException;
     }
 }

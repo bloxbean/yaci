@@ -18,6 +18,10 @@ class NodeClientConfigTest {
         assertTrue(config.isEnableConnectionLogging(), "Connection logging should be enabled by default");
         assertEquals(30000, config.getConnectionTimeoutMs(), "Default connection timeout should be 30000ms");
         assertFalse(config.isPropagateStartupFailure(), "Startup failure propagation should be disabled by default");
+        assertEquals(SocketAddressResolutionMode.STANDARD, config.getSocketAddressResolutionMode(),
+                "Default socket address resolution mode should be STANDARD");
+        assertEquals(SocketAddressFamily.ANY, config.getSocketAddressFamily(),
+                "Default socket address family should be ANY");
     }
 
     @Test
@@ -30,6 +34,8 @@ class NodeClientConfigTest {
         assertEquals(Integer.MAX_VALUE, config.getMaxRetryAttempts());
         assertTrue(config.isEnableConnectionLogging());
         assertFalse(config.isPropagateStartupFailure());
+        assertEquals(SocketAddressResolutionMode.STANDARD, config.getSocketAddressResolutionMode());
+        assertEquals(SocketAddressFamily.ANY, config.getSocketAddressFamily());
     }
 
     @Test
@@ -52,12 +58,16 @@ class NodeClientConfigTest {
                 .initialRetryDelayMs(5000)
                 .maxRetryAttempts(3)
                 .enableConnectionLogging(false)
+                .socketAddressResolutionMode(SocketAddressResolutionMode.DNS_ROTATING)
+                .socketAddressFamily(SocketAddressFamily.IPV4_ONLY)
                 .build();
 
         assertFalse(config.isAutoReconnect());
         assertEquals(5000, config.getInitialRetryDelayMs());
         assertEquals(3, config.getMaxRetryAttempts());
         assertFalse(config.isEnableConnectionLogging());
+        assertEquals(SocketAddressResolutionMode.DNS_ROTATING, config.getSocketAddressResolutionMode());
+        assertEquals(SocketAddressFamily.IPV4_ONLY, config.getSocketAddressFamily());
     }
 
     @Test

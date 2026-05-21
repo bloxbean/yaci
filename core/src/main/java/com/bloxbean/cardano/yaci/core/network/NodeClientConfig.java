@@ -38,9 +38,11 @@ public class NodeClientConfig {
     private final int initialRetryDelayMs = 8000;
 
     /**
-     * Maximum number of retry attempts before giving up.
+     * Maximum number of retry cycles before giving up.
+     * In DNS_ROTATING mode, one cycle tries every resolved socket address candidate once.
+     * In STANDARD mode, one cycle has a single JVM-selected socket address candidate.
      * This is used only when autoReconnect is enabled. If autoReconnect is false,
-     * startup fails after the first failed connection attempt.
+     * startup fails after the first failed cycle.
      * Default: Integer.MAX_VALUE (unlimited retries for backward compatibility)
      */
     @Builder.Default
@@ -73,7 +75,25 @@ public class NodeClientConfig {
     private final boolean propagateStartupFailure = false;
 
     /**
-     * Creates a default configuration with backward-compatible settings.
+     * Controls how TCP socket addresses are resolved for connection attempts.
+     * Default: STANDARD, which creates a fresh InetSocketAddress for each attempt
+     * and lets the JVM choose the address.
+     *
+     * DNS_ROTATING uses the JVM InetAddress resolver and is subject to the JVM DNS cache TTL.
+     * Operators that need faster DNS refresh should set networkaddress.cache.ttl or sun.net.inetaddr.ttl.
+     */
+    @Builder.Default
+    private final SocketAddressResolutionMode socketAddressResolutionMode = SocketAddressResolutionMode.STANDARD;
+
+    /**
+     * Controls address-family filtering and preference for DNS_ROTATING mode.
+     * Default: ANY, which keeps all resolved addresses.
+     */
+    @Builder.Default
+    private final SocketAddressFamily socketAddressFamily = SocketAddressFamily.ANY;
+
+    /**
+     * Creates a default configuration.
      * This is equivalent to calling {@code NodeClientConfig.builder().build()}
      *
      * @return a new NodeClientConfig with default values

@@ -14,6 +14,7 @@ import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.SocketAddress;
+import java.util.List;
 import java.util.function.Supplier;
 
 @Slf4j
@@ -85,7 +86,7 @@ public abstract class NodeClient {
                 workerGroup = configureEventLoopGroup();
             }
 
-            Bootstrap b = new Bootstrap();
+            Bootstrap b = createBootstrap();
             b.group(workerGroup);
             b.channel(getChannelClass());
 
@@ -102,7 +103,7 @@ public abstract class NodeClient {
                 }
             });
 
-            session = new Session(createSocketAddressSupplier(), b, config, handshakeAgent, agents);
+            session = new Session(this::createSocketAddressCandidates, b, config, handshakeAgent, agents);
             session.setSessionListener(sessionListener);
             session.start();
         } catch (Exception e) {
@@ -193,6 +194,25 @@ public abstract class NodeClient {
      */
     protected Supplier<SocketAddress> createSocketAddressSupplier() {
         return this::createSocketAddress;
+    }
+
+    /**
+     * Create socket address candidates for a connection attempt cycle. Session will try all candidates
+     * before applying the retry policy.
+     *
+     * @return socket address candidates
+     */
+    protected List<SocketAddress> createSocketAddressCandidates() {
+        return List.of(createSocketAddressSupplier().get());
+    }
+
+    /**
+     * Create the Netty bootstrap used by this client.
+     *
+     * @return bootstrap
+     */
+    protected Bootstrap createBootstrap() {
+        return new Bootstrap();
     }
 
     /**
