@@ -13,6 +13,7 @@ import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.network.NodeClientConfig;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
+import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -31,6 +32,8 @@ import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxs;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -52,7 +55,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     // Core connection fields
     private final String host;
     private final int port;
-    private final VersionTable versionTable;
+    private VersionTable versionTable;
     private final Point wellKnownPoint;
     private final NodeClientConfig nodeClientConfig;
 
@@ -66,6 +69,9 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
     // Tx submission queue size (0 = use agent default)
     private int txMaxQueueSize;
+
+    // App protocol manager (handles Protocol 100+ agents)
+    private AppProtocolManager appProtocolManager;
 
     // Keep alive tracking
     private int lastKeepAliveResponseCookie = 0;
@@ -105,7 +111,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
      */
     public N2NPeerFetcher(String host, int port, Point wellKnownPoint, long protocolMagic,
                           NodeClientConfig nodeClientConfig) {
-        this(host, port, wellKnownPoint, N2NVersionTableConstant.v11AndAbove(protocolMagic), nodeClientConfig);
+        this(host, port, wellKnownPoint, N2NVersionTableConstant.v11AndAbove(protocolMagic), nodeClientConfig, new AppProtocolManager());
     }
 
     /**
@@ -113,7 +119,15 @@ public class N2NPeerFetcher implements Fetcher<Block> {
      * Application controls sync strategy by choosing the starting point
      */
     public N2NPeerFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable) {
-        this(host, port, wellKnownPoint, versionTable, NodeClientConfig.defaultConfig());
+        this(host, port, wellKnownPoint, versionTable, new AppProtocolManager());
+    }
+
+    /**
+     * Constructor with an externally-provided AppProtocolManager.
+     */
+    public N2NPeerFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable,
+                          AppProtocolManager appProtocolManager) {
+        this(host, port, wellKnownPoint, versionTable, NodeClientConfig.defaultConfig(), appProtocolManager);
     }
 
     /**
@@ -122,10 +136,21 @@ public class N2NPeerFetcher implements Fetcher<Block> {
      */
     public N2NPeerFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable,
                           NodeClientConfig nodeClientConfig) {
+        this(host, port, wellKnownPoint, versionTable, nodeClientConfig, new AppProtocolManager());
+    }
+
+    /**
+     * Main constructor - fetcher syncs from the given wellKnownPoint.
+     * Application controls sync strategy, connection policy, and app protocols.
+     */
+    public N2NPeerFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable,
+                          NodeClientConfig nodeClientConfig,
+                          AppProtocolManager appProtocolManager) {
         this.host = host;
         this.port = port;
         this.versionTable = versionTable;
         this.wellKnownPoint = wellKnownPoint;
+        this.appProtocolManager = appProtocolManager != null ? appProtocolManager : new AppProtocolManager();
         this.nodeClientConfig = nodeClientConfig != null ? nodeClientConfig : NodeClientConfig.defaultConfig();
 
         init();
@@ -141,8 +166,29 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         blockFetchAgent.resetPoints(wellKnownPoint, wellKnownPoint);
         setupAgentListeners();
 
-        n2nClient = new TCPNodeClient(host, port, nodeClientConfig, handshakeAgent, keepAliveAgent,
-                chainSyncAgent, blockFetchAgent, txSubmissionAgent);
+        validateAppProtocolConfiguration();
+    }
+
+    private void ensureClientInitialized() {
+        if (n2nClient != null)
+            return;
+
+        validateAppProtocolConfiguration();
+
+        List<Agent<?>> allAgents = new ArrayList<>(List.of(
+                keepAliveAgent, chainSyncAgent, blockFetchAgent, txSubmissionAgent));
+        allAgents.addAll(appProtocolManager.getAgents());
+        n2nClient = new TCPNodeClient(host, port, nodeClientConfig, handshakeAgent, allAgents.toArray(new Agent<?>[0]));
+    }
+
+    private void validateAppProtocolConfiguration() {
+        if (appProtocolManager.isAppMsgEnabled()
+                && !N2NVersionTableConstant.hasAppLayerVersion(versionTable)) {
+            throw new IllegalStateException(
+                    "App message protocol requires a version table with app-layer V100 support");
+        }
+//        n2nClient = new TCPNodeClient(host, port, nodeClientConfig, handshakeAgent, keepAliveAgent,
+//                chainSyncAgent, blockFetchAgent, txSubmissionAgent);
     }
 
     private void setupAgentListeners() {
@@ -156,6 +202,8 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
                 //We don't need to start chain sync here, as it will be started by the application
                 //by invoking startXXX() methods.
+                appProtocolManager.onHandshakeComplete(handshakeAgent.getProtocolVersion());
+
                 if (firstTimeHandshake) {
                     firstTimeHandshake = false;
                     log.info("First time handshake completed. Waiting for explicit sync start.");
@@ -400,6 +448,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
             }
         });
 
+        ensureClientInitialized();
         n2nClient.start();
     }
 
@@ -408,7 +457,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
      * Useful for header-only synchronization or when you want to control body fetching manually
      */
     public void startChainSyncOnly(Point from, boolean isPipelined) {
-        if (!n2nClient.isRunning()) {
+        if (!isRunning()) {
             throw new IllegalStateException("Connection not established. Call connect() first.");
         }
 
@@ -425,7 +474,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
      * Must be called after connection is established
      */
     public void startBlockFetchOnly(Point from, Point to) {
-        if (!n2nClient.isRunning()) {
+        if (!isRunning()) {
             throw new IllegalStateException("Connection not established. Call connect() first.");
         }
 
@@ -460,7 +509,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     public void sendKeepAliveMessage(int cookie) {
-        if (n2nClient.isRunning())
+        if (isRunning())
             keepAliveAgent.sendKeepAlive(cookie);
     }
 
@@ -483,16 +532,17 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
     @Override
     public boolean isRunning() {
-        return n2nClient.isRunning();
+        return n2nClient != null && n2nClient.isRunning();
     }
 
     @Override
     public void shutdown() {
-        n2nClient.shutdown();
+        if (n2nClient != null)
+            n2nClient.shutdown();
     }
 
     public void fetch(Point from, Point to) {
-        if (!n2nClient.isRunning())
+        if (!isRunning())
             throw new IllegalStateException("fetch() should be called after start()");
 
         blockFetchAgent.resetPoints(from, to);
@@ -503,7 +553,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     public void startSync(Point from, boolean isPipelined) {
-        if (!n2nClient.isRunning())
+        if (!isRunning())
             throw new IllegalStateException("startSync() should be called after start()");
 
         chainSyncAgent.enablePipelining(isPipelined);
@@ -515,7 +565,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     public Optional<Tip> getLatestTip() {
-        if (!n2nClient.isRunning())
+        if (!isRunning())
             throw new IllegalStateException("getTip() should be called after start()");
 
         // Return the latest known tip if available
@@ -537,6 +587,21 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
     public void enableTxSubmission() {
         txSubmissionAgent.sendNextMessage();
+    }
+
+    public void enableAppMsg() {
+        if (n2nClient != null)
+            throw new IllegalStateException("App message protocol must be enabled before start()");
+
+        this.versionTable = N2NVersionTableConstant.withAppLayer(versionTable);
+        appProtocolManager.enableAppMsg();
+    }
+
+    /**
+     * Get the app protocol manager for external access.
+     */
+    public AppProtocolManager getAppProtocolManager() {
+        return appProtocolManager;
     }
 
     // ========================================
