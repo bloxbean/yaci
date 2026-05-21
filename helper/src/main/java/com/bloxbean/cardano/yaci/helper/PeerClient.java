@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
+import com.bloxbean.cardano.yaci.core.network.NodeClientConfig;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
@@ -28,6 +29,7 @@ public class PeerClient {
     private int port;
     private Point wellKnownPoint;
     private VersionTable versionTable;
+    private NodeClientConfig nodeClientConfig;
 
     private int txMaxQueueSize;
 
@@ -36,35 +38,62 @@ public class PeerClient {
     private N2NPeerFetcher n2NPeerFetcher;
 
     /**
-     * Construct a BlockSync instance
+     * Construct a PeerClient instance
      * @param host Cardano node host
      * @param port Cardano node port
      * @param protocolMagic Protocol magic
      * @param wellKnownPoint A wellknown point
      */
     public PeerClient(String host, int port, long protocolMagic, Point wellKnownPoint) {
-        this(host, port, wellKnownPoint, N2NVersionTableConstant.v4AndAbove(protocolMagic));
+        this(host, port, wellKnownPoint, N2NVersionTableConstant.v11AndAbove(protocolMagic));
     }
 
     /**
-     * Construct a BlockSync instance
+     * Construct a PeerClient instance
+     * @param host Cardano node host
+     * @param port Cardano node port
+     * @param protocolMagic Protocol magic
+     * @param wellKnownPoint A wellknown point
+     * @param nodeClientConfig connection configuration
+     */
+    public PeerClient(String host, int port, long protocolMagic, Point wellKnownPoint,
+                      NodeClientConfig nodeClientConfig) {
+        this(host, port, wellKnownPoint, N2NVersionTableConstant.v11AndAbove(protocolMagic), nodeClientConfig);
+    }
+
+    /**
+     * Construct a PeerClient instance
      * @param host Cardano node host
      * @param port Cardano node port
      * @param wellKnownPoint A wellknown point
      * @param versionTable {@link VersionTable} instance
      */
     public PeerClient(String host, int port, Point wellKnownPoint, VersionTable versionTable) {
+        this(host, port, wellKnownPoint, versionTable, NodeClientConfig.defaultConfig());
+    }
+
+    /**
+     * Construct a PeerClient instance
+     * @param host Cardano node host
+     * @param port Cardano node port
+     * @param wellKnownPoint A wellknown point
+     * @param versionTable {@link VersionTable} instance
+     * @param nodeClientConfig connection configuration
+     */
+    public PeerClient(String host, int port, Point wellKnownPoint, VersionTable versionTable,
+                      NodeClientConfig nodeClientConfig) {
         this.host = host;
         this.port = port;
         this.wellKnownPoint = wellKnownPoint;
         this.versionTable = versionTable;
+        this.nodeClientConfig = nodeClientConfig != null ? nodeClientConfig : NodeClientConfig.defaultConfig();
     }
 
     public void connect(BlockChainDataListener blockChainDataListener, TxSubmissionListener txSubmissionListener) {
         if (n2NPeerFetcher != null && n2NPeerFetcher.isRunning())
-            throw new IllegalStateException("Already connected. Please call shutdown() before connecting again.");
+            throw new IllegalStateException("Already connected. Please call stop() before connecting again.");
 
-        n2NPeerFetcher = new N2NPeerFetcher(host, port, wellKnownPoint, versionTable, appProtocolManager);
+        n2NPeerFetcher = new N2NPeerFetcher(host, port, wellKnownPoint, versionTable, nodeClientConfig, appProtocolManager);
         if (txMaxQueueSize > 0)
             n2NPeerFetcher.setTxMaxQueueSize(txMaxQueueSize);
 

@@ -11,6 +11,7 @@ import com.bloxbean.cardano.yaci.core.model.byron.ByronBlockHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
+import com.bloxbean.cardano.yaci.core.network.NodeClientConfig;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
@@ -56,6 +57,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     private final int port;
     private VersionTable versionTable;
     private final Point wellKnownPoint;
+    private final NodeClientConfig nodeClientConfig;
 
     // Agents
     private HandshakeAgent handshakeAgent;
@@ -105,6 +107,14 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     /**
+     * Construct {@link N2NPeerFetcher} to sync the blockchain.
+     */
+    public N2NPeerFetcher(String host, int port, Point wellKnownPoint, long protocolMagic,
+                          NodeClientConfig nodeClientConfig) {
+        this(host, port, wellKnownPoint, N2NVersionTableConstant.v11AndAbove(protocolMagic), nodeClientConfig, new AppProtocolManager());
+    }
+
+    /**
      * Main constructor - fetcher syncs from the given wellKnownPoint
      * Application controls sync strategy by choosing the starting point
      */
@@ -117,11 +127,31 @@ public class N2NPeerFetcher implements Fetcher<Block> {
      */
     public N2NPeerFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable,
                           AppProtocolManager appProtocolManager) {
+        this(host, port, wellKnownPoint, versionTable, NodeClientConfig.defaultConfig(), appProtocolManager);
+    }
+
+    /**
+     * Main constructor - fetcher syncs from the given wellKnownPoint.
+     * Application controls sync strategy and connection policy.
+     */
+    public N2NPeerFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable,
+                          NodeClientConfig nodeClientConfig) {
+        this(host, port, wellKnownPoint, versionTable, nodeClientConfig, new AppProtocolManager());
+    }
+
+    /**
+     * Main constructor - fetcher syncs from the given wellKnownPoint.
+     * Application controls sync strategy, connection policy, and app protocols.
+     */
+    public N2NPeerFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable,
+                          NodeClientConfig nodeClientConfig,
+                          AppProtocolManager appProtocolManager) {
         this.host = host;
         this.port = port;
         this.versionTable = versionTable;
         this.wellKnownPoint = wellKnownPoint;
-        this.appProtocolManager = appProtocolManager;
+        this.appProtocolManager = appProtocolManager != null ? appProtocolManager : new AppProtocolManager();
+        this.nodeClientConfig = nodeClientConfig != null ? nodeClientConfig : NodeClientConfig.defaultConfig();
 
         init();
     }
@@ -148,7 +178,7 @@ public class N2NPeerFetcher implements Fetcher<Block> {
         List<Agent<?>> allAgents = new ArrayList<>(List.of(
                 keepAliveAgent, chainSyncAgent, blockFetchAgent, txSubmissionAgent));
         allAgents.addAll(appProtocolManager.getAgents());
-        n2nClient = new TCPNodeClient(host, port, handshakeAgent, allAgents.toArray(new Agent<?>[0]));
+        n2nClient = new TCPNodeClient(host, port, nodeClientConfig, handshakeAgent, allAgents.toArray(new Agent<?>[0]));
     }
 
     private void validateAppProtocolConfiguration() {
@@ -157,6 +187,8 @@ public class N2NPeerFetcher implements Fetcher<Block> {
             throw new IllegalStateException(
                     "App message protocol requires a version table with app-layer V100 support");
         }
+//        n2nClient = new TCPNodeClient(host, port, nodeClientConfig, handshakeAgent, keepAliveAgent,
+//                chainSyncAgent, blockFetchAgent, txSubmissionAgent);
     }
 
     private void setupAgentListeners() {

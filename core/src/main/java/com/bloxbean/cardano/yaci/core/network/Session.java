@@ -8,14 +8,16 @@ import io.netty.channel.ChannelFuture;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.SocketAddress;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /**
  * This class tries to open the network connection. The session gets destroyed during disconnection event.
  */
 @Slf4j
 class Session implements Disposable {
-    private final SocketAddress socketAddress;
+    private final SocketAddressProvider socketAddressProvider;
     private final Bootstrap clientBootstrap;
     private Channel activeChannel;
     private final AtomicBoolean shouldReconnect;
@@ -28,6 +30,40 @@ class Session implements Disposable {
     /**
      * Constructor with NodeClientConfig for configurable connection behavior.
      *
+     * @param socketAddressProvider the socket address provider to use for each connection attempt cycle
+     * @param clientBootstrap the Netty bootstrap
+     * @param config the connection configuration
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public Session(SocketAddressProvider socketAddressProvider, Bootstrap clientBootstrap, NodeClientConfig config,
+                   HandshakeAgent handshakeAgent, Agent[] agents) {
+        this.socketAddressProvider = socketAddressProvider;
+        this.clientBootstrap = clientBootstrap;
+        this.config = config != null ? config : NodeClientConfig.defaultConfig();
+        this.shouldReconnect = new AtomicBoolean(this.config.isAutoReconnect());
+
+        this.handshakeAgent = handshakeAgent;
+        this.agents = agents;
+    }
+
+    /**
+     * Constructor with NodeClientConfig for configurable connection behavior.
+     *
+     * @param socketAddressSupplier the socket address supplier to use for each connection attempt cycle
+     * @param clientBootstrap the Netty bootstrap
+     * @param config the connection configuration
+     * @param handshakeAgent the handshake agent
+     * @param agents the protocol agents
+     */
+    public Session(Supplier<SocketAddress> socketAddressSupplier, Bootstrap clientBootstrap, NodeClientConfig config,
+                   HandshakeAgent handshakeAgent, Agent[] agents) {
+        this(() -> List.of(socketAddressSupplier.get()), clientBootstrap, config, handshakeAgent, agents);
+    }
+
+    /**
+     * Constructor with NodeClientConfig for configurable connection behavior.
+     *
      * @param socketAddress the socket address to connect to
      * @param clientBootstrap the Netty bootstrap
      * @param config the connection configuration
@@ -36,13 +72,7 @@ class Session implements Disposable {
      */
     public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, NodeClientConfig config,
                    HandshakeAgent handshakeAgent, Agent[] agents) {
-        this.socketAddress = socketAddress;
-        this.clientBootstrap = clientBootstrap;
-        this.config = config != null ? config : NodeClientConfig.defaultConfig();
-        this.shouldReconnect = new AtomicBoolean(this.config.isAutoReconnect());
-
-        this.handshakeAgent = handshakeAgent;
-        this.agents = agents;
+        this(() -> socketAddress, clientBootstrap, config, handshakeAgent, agents);
     }
 
     /**
@@ -55,7 +85,8 @@ class Session implements Disposable {
      * @deprecated Use {@link #Session(SocketAddress, Bootstrap, NodeClientConfig, HandshakeAgent, Agent[])} instead
      */
     @Deprecated
-    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, HandshakeAgent handshakeAgent, Agent[] agents) {
+    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, HandshakeAgent handshakeAgent,
+                   Agent[] agents) {
         this(socketAddress, clientBootstrap, NodeClientConfig.defaultConfig(), handshakeAgent, agents);
     }
 
@@ -69,21 +100,58 @@ class Session implements Disposable {
     public Disposable start() throws InterruptedException {
         //Create a new connectFuture
         ChannelFuture connectFuture = null;
-        // Always try to connect at least once, then retry only if shouldReconnect is true
-        do {
+        long retryCyclesUsed = 0;
+        long attempts = 0;
+
+        while (connectFuture == null) {
+            Exception lastFailure = null;
+            List<SocketAddress> socketAddresses = null;
+
             try {
-                connectFuture = clientBootstrap.connect(socketAddress).sync();
+                socketAddresses = socketAddressProvider.get();
+                if (socketAddresses == null || socketAddresses.isEmpty()) {
+                    throw new IllegalStateException("No socket addresses available for connection");
+                }
             } catch (Exception e) {
-                log.error("Connection failed", e);
-                if (shouldReconnect.get()) {
-                    Thread.sleep(config.getInitialRetryDelayMs());
-                    log.debug("Trying to reconnect !!!");
-                } else {
-                    // If auto-reconnect is disabled, fail fast
-                    throw e;
+                lastFailure = e;
+                logAddressResolutionFailure(e);
+            }
+
+            if (socketAddresses != null) {
+                for (int i = 0; i < socketAddresses.size() && connectFuture == null; i++) {
+                    SocketAddress socketAddress = socketAddresses.get(i);
+                    try {
+                        attempts++;
+                        if (showConnectionLog())
+                            log.info("Connecting to {} (attempt {}, candidate {}/{}, max retries: {})",
+                                    socketAddress, attempts, i + 1, socketAddresses.size(),
+                                    config.getMaxRetryAttempts());
+                        connectFuture = clientBootstrap.connect(socketAddress).sync();
+                    } catch (InterruptedException e) {
+                        throw e;
+                    } catch (Exception e) {
+                        lastFailure = e;
+                        logConnectionFailure(socketAddress, e);
+                    }
                 }
             }
-        } while (connectFuture == null && shouldReconnect.get());
+
+            if (connectFuture == null) {
+                if (!shouldRetry(retryCyclesUsed)) {
+                    logConnectionCycleFailure("Connection failed after exhausting socket address candidates",
+                            lastFailure);
+                    throwConnectionFailure(lastFailure);
+                }
+
+                retryCyclesUsed++;
+                Thread.sleep(config.getInitialRetryDelayMs());
+                if (lastFailure != null)
+                    log.warn("Connection cycle failed. Retrying after {} ms: {}", config.getInitialRetryDelayMs(),
+                            lastFailure.toString());
+                else
+                    log.debug("Trying to reconnect !!!");
+            }
+        }
 
         handshakeAgent.reset();
         for (Agent agent: agents) {
@@ -157,6 +225,51 @@ class Session implements Disposable {
 
     public boolean shouldReconnect() {
         return shouldReconnect.get();
+    }
+
+    private boolean shouldRetry(long retriesUsed) {
+        if (!shouldReconnect.get())
+            return false;
+
+        int maxRetryAttempts = config.getMaxRetryAttempts();
+        return maxRetryAttempts == Integer.MAX_VALUE || retriesUsed < maxRetryAttempts;
+    }
+
+    private void throwConnectionFailure(Exception failure) throws InterruptedException {
+        if (failure == null)
+            throw new IllegalStateException("Connection failed");
+
+        if (failure instanceof InterruptedException)
+            throw (InterruptedException) failure;
+
+        if (failure instanceof RuntimeException)
+            throw (RuntimeException) failure;
+
+        throw new RuntimeException(failure);
+    }
+
+    private void logConnectionFailure(SocketAddress socketAddress, Exception failure) {
+        if (log.isDebugEnabled()) {
+            log.warn("Connection failed for {}", socketAddress, failure);
+        } else {
+            log.warn("Connection failed for {}: {}", socketAddress, failure.toString());
+        }
+    }
+
+    private void logAddressResolutionFailure(Exception failure) {
+        if (log.isDebugEnabled()) {
+            log.warn("Address resolution failed", failure);
+        } else {
+            log.warn("Address resolution failed: {}", failure.toString());
+        }
+    }
+
+    private void logConnectionCycleFailure(String message, Exception failure) {
+        if (failure == null) {
+            log.error(message);
+        } else {
+            log.error(message, failure);
+        }
     }
 
     public void handshake() {

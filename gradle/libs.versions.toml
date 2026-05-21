@@ -1,5 +1,5 @@
 [versions]
-cardano-client-lib = "0.8.0-pre3"
+cardano-client-lib = "0.8.0-pre4"
 
 [libraries]
 cardano-client-core = { module = "com.bloxbean.cardano:cardano-client-core", version.ref = "cardano-client-lib" }
@@ -14,13 +14,13 @@ slf4j-reload4j="org.slf4j:slf4j-reload4j:2.0.11"
 
 lombok="org.projectlombok:lombok:1.18.44"
 
-junit-jupiter-api="org.junit.jupiter:junit-jupiter-api:5.8.1"
-junit-jupiter-engine="org.junit.jupiter:junit-jupiter-engine:5.8.1"
-junit-platform-launcher="org.junit.platform:junit-platform-launcher:1.8.1"
+junit-jupiter-api="org.junit.jupiter:junit-jupiter-api:5.13.4"
+junit-jupiter-engine="org.junit.jupiter:junit-jupiter-engine:5.13.4"
+junit-platform-launcher="org.junit.platform:junit-platform-launcher:1.13.4"
 harmcrest-library="org.hamcrest:hamcrest-library:2.2"
 
-mockito-inline="org.mockito:mockito-inline:3.7.7"
-mockito-junit-jupiter="org.mockito:mockito-junit-jupiter:3.7.7"
+mockito-core="org.mockito:mockito-core:5.23.0"
+mockito-junit-jupiter="org.mockito:mockito-junit-jupiter:5.23.0"
 assertj-core="org.assertj:assertj-core:3.21.0"
 
 reload4j="ch.qos.reload4j:reload4j:1.2.22"
