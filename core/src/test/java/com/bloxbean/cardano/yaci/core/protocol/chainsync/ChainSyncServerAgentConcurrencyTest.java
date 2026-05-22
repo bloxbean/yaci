@@ -1,5 +1,7 @@
 package com.bloxbean.cardano.yaci.core.protocol.chainsync;
 
+import com.bloxbean.cardano.yaci.core.protocol.Agent;
+import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.*;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncServerAgent;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncState;
@@ -14,6 +16,7 @@ import io.netty.util.concurrent.GenericFutureListener;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Modifier;
 import java.net.SocketAddress;
 import java.util.*;
 import java.util.concurrent.*;
@@ -305,6 +308,15 @@ class ChainSyncServerAgentConcurrencyTest {
         assertThat(exceptionCount.get()).isZero();
         assertThat(agent.getLastSentPoint()).isNotNull();
         assertThat(agent.getLastSentPoint().getSlot()).isGreaterThan(100L);
+    }
+
+    @Test
+    void agentStateUpdatesAreVisibleAcrossNettyAndProducerThreads() throws Exception {
+        var currentState = Agent.class.getDeclaredField("currentState");
+        assertThat(Modifier.isVolatile(currentState.getModifiers())).isTrue();
+
+        var sendRequest = Agent.class.getDeclaredMethod("sendRequest", Message.class);
+        assertThat(Modifier.isSynchronized(sendRequest.getModifiers())).isTrue();
     }
 
     // ---- Helper methods ----
