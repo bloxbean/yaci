@@ -11,7 +11,7 @@ import java.util.List;
 
 @Slf4j
 public abstract class Agent<T extends AgentListener> {
-    protected State currentState;
+    protected volatile State currentState;
     private Instant instant;
     private volatile Channel channel;
     private final List<T> agentListeners = new ArrayList<>();
@@ -30,7 +30,7 @@ public abstract class Agent<T extends AgentListener> {
         this.channel = channel;
     }
 
-    public void sendRequest(Message message) {
+    public synchronized void sendRequest(Message message) {
         if (currentState.hasAgency(isClient)) {
             if (log.isDebugEnabled())
                 log.debug("Agency = true----------- Move to next state: agent for protocol id : " + this.getProtocolId());
