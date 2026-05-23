@@ -9,13 +9,14 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.SocketAddress;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /**
  * This class tries to open the network connection. The session gets destroyed during disconnection event.
  */
 @Slf4j
 class Session implements Disposable {
-    private final SocketAddress socketAddress;
+    private final Supplier<SocketAddress> socketAddressSupplier;
     private final Bootstrap clientBootstrap;
     private Channel activeChannel;
     private final AtomicBoolean shouldReconnect;
@@ -25,38 +26,15 @@ class Session implements Disposable {
 
     private SessionListener sessionListener;
 
-    /**
-     * Constructor with NodeClientConfig for configurable connection behavior.
-     *
-     * @param socketAddress the socket address to connect to
-     * @param clientBootstrap the Netty bootstrap
-     * @param config the connection configuration
-     * @param handshakeAgent the handshake agent
-     * @param agents the protocol agents
-     */
-    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, NodeClientConfig config,
+    public Session(Supplier<SocketAddress> socketAddressSupplier, Bootstrap clientBootstrap, NodeClientConfig config,
                    HandshakeAgent handshakeAgent, Agent[] agents) {
-        this.socketAddress = socketAddress;
+        this.socketAddressSupplier = socketAddressSupplier;
         this.clientBootstrap = clientBootstrap;
         this.config = config != null ? config : NodeClientConfig.defaultConfig();
         this.shouldReconnect = new AtomicBoolean(this.config.isAutoReconnect());
 
         this.handshakeAgent = handshakeAgent;
         this.agents = agents;
-    }
-
-    /**
-     * Constructor with default configuration (for backward compatibility).
-     *
-     * @param socketAddress the socket address to connect to
-     * @param clientBootstrap the Netty bootstrap
-     * @param handshakeAgent the handshake agent
-     * @param agents the protocol agents
-     * @deprecated Use {@link #Session(SocketAddress, Bootstrap, NodeClientConfig, HandshakeAgent, Agent[])} instead
-     */
-    @Deprecated
-    public Session(SocketAddress socketAddress, Bootstrap clientBootstrap, HandshakeAgent handshakeAgent, Agent[] agents) {
-        this(socketAddress, clientBootstrap, NodeClientConfig.defaultConfig(), handshakeAgent, agents);
     }
 
     public void setSessionListener(SessionListener sessionListener) {
@@ -71,10 +49,11 @@ class Session implements Disposable {
         ChannelFuture connectFuture = null;
         // Always try to connect at least once, then retry only if shouldReconnect is true
         do {
+            SocketAddress socketAddress = socketAddressSupplier.get();
             try {
                 connectFuture = clientBootstrap.connect(socketAddress).sync();
             } catch (Exception e) {
-                log.error("Connection failed", e);
+                log.error("Connection failed to {}", socketAddress, e);
                 if (shouldReconnect.get()) {
                     Thread.sleep(config.getInitialRetryDelayMs());
                     log.debug("Trying to reconnect !!!");

@@ -97,9 +97,7 @@ public abstract class NodeClient {
                 }
             });
 
-            SocketAddress socketAddress = createSocketAddress();
-
-            session = new Session(socketAddress, b, config, handshakeAgent, agents);
+            session = new Session(this::createSocketAddress, b, config, handshakeAgent, agents);
             session.setSessionListener(sessionListener);
             session.start();
         } catch (Exception e) {
