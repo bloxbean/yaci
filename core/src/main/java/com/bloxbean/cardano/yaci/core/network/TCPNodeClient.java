@@ -50,7 +50,13 @@ public class TCPNodeClient extends NodeClient {
 
     @Override
     protected SocketAddress createSocketAddress() {
-        return new InetSocketAddress(host, port);
+        InetSocketAddress addr = new InetSocketAddress(host, port);
+        if (addr.isUnresolved()) {
+            log.warn("Could not resolve host {}", host);
+        } else {
+            log.info("Resolved {} to {}:{}", host, addr.getAddress().getHostAddress(), port);
+        }
+        return addr;
     }
 
     @Override
