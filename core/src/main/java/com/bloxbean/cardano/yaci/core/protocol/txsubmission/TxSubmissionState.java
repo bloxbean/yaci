@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.core.protocol.txsubmission;
 
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.State;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.MsgDone;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.ReplyTxIds;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.ReplyTxs;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxIds;
@@ -42,8 +43,15 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
     TxIdsBlocking {
         @Override
         public State nextState(Message message) {
+            // Per the node-to-node tx-submission mini-protocol, the client may terminate the
+            // protocol with MsgDone instead of ReplyTxIds while the server is blocking-waiting.
+            // Transition to Done so the agent can be torn down and re-created on reconnect;
+            // without this the server agent stays wedged here forever (client holds agency, so
+            // it can never send another RequestTxIds) and stops ingesting mempool txs.
             if (message instanceof ReplyTxIds)
                 return Idle;
+            else if (message instanceof MsgDone)
+                return Done;
             else
                 return this;
         }
@@ -58,6 +66,8 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
         public State nextState(Message message) {
             if (message instanceof ReplyTxIds)
                 return Idle;
+            else if (message instanceof MsgDone) // defensive: honour client termination
+                return Done;
             else
                 return this;
         }
@@ -72,6 +82,8 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
         public State nextState(Message message) {
             if (message instanceof ReplyTxs)
                 return Idle;
+            else if (message instanceof MsgDone) // defensive: honour client termination
+                return Done;
             else
                 return this;
         }

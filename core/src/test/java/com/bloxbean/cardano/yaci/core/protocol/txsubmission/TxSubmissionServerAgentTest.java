@@ -333,6 +333,33 @@ class TxSubmissionServerAgentTest {
     }
 
     @Test
+    void testMsgDoneFromTxIdsBlockingTransitionsToDone() {
+        // Move to Idle, then have the server send a blocking RequestTxIds so we land in TxIdsBlocking
+        agent.receiveResponse(new Init());
+        assertEquals(TxSubmissionState.Idle, agent.getCurrentState());
+
+        agent.sendRequest(new RequestTxIds(true, (short) 0, (short) 10));
+        assertEquals(TxSubmissionState.TxIdsBlocking, agent.getCurrentState());
+        assertFalse(agent.isDone());
+
+        // Client terminates the protocol with MsgDone while we are blocking-waiting.
+        // Before the fix the agent stayed wedged in TxIdsBlocking forever; now it must reach Done.
+        agent.receiveResponse(new MsgDone());
+
+        assertEquals(TxSubmissionState.Done, agent.getCurrentState());
+        assertTrue(agent.isDone());
+        assertEquals(0, agent.getOutstandingTxCount());
+    }
+
+    @Test
+    void testMsgDoneStateTransitionsForAllClientAgencyStates() {
+        // The terminal MsgDone transition must hold for every state where the client has agency.
+        assertEquals(TxSubmissionState.Done, TxSubmissionState.TxIdsBlocking.nextState(new MsgDone()));
+        assertEquals(TxSubmissionState.Done, TxSubmissionState.TxIdsNonBlocking.nextState(new MsgDone()));
+        assertEquals(TxSubmissionState.Done, TxSubmissionState.Txs.nextState(new MsgDone()));
+    }
+
+    @Test
     void testConfigurationValidation() {
         // Valid config should not log warnings
         TxSubmissionConfig validConfig = TxSubmissionConfig.createDefault();
