@@ -43,11 +43,6 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
     TxIdsBlocking {
         @Override
         public State nextState(Message message) {
-            // Per the node-to-node tx-submission mini-protocol, the client may terminate the
-            // protocol with MsgDone instead of ReplyTxIds while the server is blocking-waiting.
-            // Transition to Done so the agent can be torn down and re-created on reconnect;
-            // without this the server agent stays wedged here forever (client holds agency, so
-            // it can never send another RequestTxIds) and stops ingesting mempool txs.
             if (message instanceof ReplyTxIds)
                 return Idle;
             else if (message instanceof MsgDone)
