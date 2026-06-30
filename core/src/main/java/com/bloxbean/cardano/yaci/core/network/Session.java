@@ -7,6 +7,8 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.BindException;
+import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -123,10 +125,10 @@ class Session implements Disposable {
                     try {
                         attempts++;
                         if (showConnectionLog())
-                            log.info("Connecting to {} (attempt {}, candidate {}/{}, max retries: {})",
-                                    socketAddress, attempts, i + 1, socketAddresses.size(),
-                                    config.getMaxRetryAttempts());
-                        connectFuture = clientBootstrap.connect(socketAddress).sync();
+                            log.info("Connecting to {}{} (attempt {}, candidate {}/{}, max retries: {})",
+                                    socketAddress, localBindLogSuffix(), attempts, i + 1,
+                                    socketAddresses.size(), config.getMaxRetryAttempts());
+                        connectFuture = connectAndSync(socketAddress);
                     } catch (InterruptedException e) {
                         throw e;
                     } catch (Exception e) {
@@ -254,6 +256,52 @@ class Session implements Disposable {
         } else {
             log.warn("Connection failed for {}: {}", socketAddress, failure.toString());
         }
+    }
+
+    private ChannelFuture connectAndSync(SocketAddress remoteAddress) throws InterruptedException {
+        SocketAddress localAddress = localBindAddress();
+        if (localAddress != null) {
+            try {
+                return clientBootstrap.connect(remoteAddress, localAddress).sync();
+            } catch (InterruptedException e) {
+                throw e;
+            } catch (Exception e) {
+                if (!config.isLocalBindFallbackToEphemeral() || !hasCause(e, BindException.class)) {
+                    throw e;
+                }
+                log.warn("Local bind {} failed for {}; retrying with OS-assigned source port: {}",
+                        localAddress, remoteAddress, e.toString());
+                return clientBootstrap.connect(remoteAddress).sync();
+            }
+        }
+        return clientBootstrap.connect(remoteAddress).sync();
+    }
+
+    private SocketAddress localBindAddress() {
+        if (!config.hasLocalBindAddress()) {
+            return null;
+        }
+        String host = config.getLocalBindHost();
+        if (host == null || host.isBlank()) {
+            return new InetSocketAddress(config.getLocalBindPort());
+        }
+        return new InetSocketAddress(host, config.getLocalBindPort());
+    }
+
+    private String localBindLogSuffix() {
+        SocketAddress localAddress = localBindAddress();
+        return localAddress != null ? " from " + localAddress : "";
+    }
+
+    private static boolean hasCause(Throwable error, Class<? extends Throwable> type) {
+        Throwable current = error;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private void logAddressResolutionFailure(Exception failure) {

@@ -5,7 +5,9 @@ import com.bloxbean.cardano.yaci.core.network.handlers.MiniProtoStreamingByteToM
 import com.bloxbean.cardano.yaci.core.network.server.handlers.MiniProtoServerInboundHandler;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncServerAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockFetchServerAgent;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionServerAgent;
@@ -31,6 +33,7 @@ public class NodeServerSession {
     private final TxSubmissionListener txSubmissionListener;
     private final TxSubmissionConfig txSubmissionConfig;
     private final List<AgentFactory> agentFactories;
+    private final ServerConnectionListener connectionListener;
 
     public NodeServerSession(Channel clientChannel, VersionTable versionTable, ChainState chainState,
                            TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig) {
@@ -41,15 +44,41 @@ public class NodeServerSession {
     public NodeServerSession(Channel clientChannel, VersionTable versionTable, ChainState chainState,
                            TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig,
                            List<AgentFactory> agentFactories) {
+        this(clientChannel, versionTable, chainState, txSubmissionListener, txSubmissionConfig,
+                agentFactories, null);
+    }
+
+    public NodeServerSession(Channel clientChannel, VersionTable versionTable, ChainState chainState,
+                           TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig,
+                           List<AgentFactory> agentFactories, ServerConnectionListener connectionListener) {
         this.clientChannel = clientChannel;
         this.handshakeAgent = new HandshakeAgent(versionTable, false);
         this.chainState = chainState;
         this.txSubmissionListener = txSubmissionListener;
         this.txSubmissionConfig = txSubmissionConfig != null ? txSubmissionConfig : TxSubmissionConfig.createDefault();
         this.agentFactories = agentFactories != null ? agentFactories : Collections.emptyList();
+        this.connectionListener = connectionListener;
+        attachConnectionListener();
         this.agents = createAgents();
 
         setupPipeline();
+    }
+
+    private void attachConnectionListener() {
+        if (connectionListener == null) {
+            return;
+        }
+        handshakeAgent.addListener(new HandshakeAgentListener() {
+            @Override
+            public void handshakeOk() {
+                connectionListener.onHandshakeComplete(clientChannel, handshakeAgent.getProtocolVersion());
+            }
+
+            @Override
+            public void handshakeError(Reason reason) {
+                connectionListener.onHandshakeFailed(clientChannel, new IllegalStateException(String.valueOf(reason)));
+            }
+        });
     }
 
     private void setupPipeline() {

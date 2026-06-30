@@ -63,8 +63,14 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
             long highestVersion = supportedProtocolVersions.get(supportedProtocolVersions.size() - 1);
 
             N2NVersionData requestedVersionData = (N2NVersionData) versionDataMap.get(highestVersion);
+            N2NVersionData supportedVersionData = (N2NVersionData) versionTable.getVersionDataMap().get(highestVersion);
 
-            var acceptedVersionData = new N2NVersionData(requestedVersionData.getNetworkMagic(), requestedVersionData.getInitiatorOnlyDiffusionMode(), 0, requestedVersionData.getQuery());
+            var acceptedVersionData = new N2NVersionData(
+                    requestedVersionData.getNetworkMagic(),
+                    requestedVersionData.getInitiatorOnlyDiffusionMode(),
+                    negotiatedPeerSharing(requestedVersionData, supportedVersionData),
+                    Boolean.TRUE.equals(requestedVersionData.getQuery())
+                            && Boolean.TRUE.equals(supportedVersionData.getQuery()));
 
             // Accept the highest version
             var acceptVersion = new AcceptVersion(highestVersion, acceptedVersionData);
@@ -80,6 +86,24 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
             return refuse;
         }
 
+    }
+
+    private int negotiatedPeerSharing(N2NVersionData requestedVersionData, N2NVersionData supportedVersionData) {
+        int requested = requestedVersionData.getPeerSharing() != null ? requestedVersionData.getPeerSharing() : 0;
+        int supported = supportedVersionData.getPeerSharing() != null ? supportedVersionData.getPeerSharing() : 0;
+        return Math.min(requested, supported);
+    }
+
+    @Override
+    public synchronized void sendRequest(Message message) {
+        super.sendRequest(message);
+        if (message instanceof AcceptVersion acceptVersion) {
+            setProtocolVersion(acceptVersion);
+            handshakeOk();
+        } else if (message instanceof Refuse refuse) {
+            setProtocolVersion(null);
+            handshakeError(refuse.getReason());
+        }
     }
 
     @Override
@@ -108,7 +132,15 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     }
 
     private void handshakeError(Message message) {
-        getAgentListeners().forEach(handshakeAgentListener -> handshakeAgentListener.handshakeError((Reason)message));
+        if (message instanceof Refuse refuse) {
+            handshakeError(refuse.getReason());
+        } else {
+            handshakeError((Reason) message);
+        }
+    }
+
+    private void handshakeError(Reason reason) {
+        getAgentListeners().forEach(handshakeAgentListener -> handshakeAgentListener.handshakeError(reason));
     }
 
     @Override

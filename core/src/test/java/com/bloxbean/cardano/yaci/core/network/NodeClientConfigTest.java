@@ -22,6 +22,11 @@ class NodeClientConfigTest {
                 "Default socket address resolution mode should be STANDARD");
         assertEquals(SocketAddressFamily.ANY, config.getSocketAddressFamily(),
                 "Default socket address family should be ANY");
+        assertNull(config.getLocalBindHost(), "Default local bind host should be null");
+        assertEquals(0, config.getLocalBindPort(), "Default local bind port should be 0");
+        assertFalse(config.hasLocalBindAddress(), "Default config should not bind outbound source ports");
+        assertFalse(config.isLocalBindFallbackToEphemeral(),
+                "Default config should not fall back from local bind to ephemeral source ports");
     }
 
     @Test
@@ -60,6 +65,9 @@ class NodeClientConfigTest {
                 .enableConnectionLogging(false)
                 .socketAddressResolutionMode(SocketAddressResolutionMode.DNS_ROTATING)
                 .socketAddressFamily(SocketAddressFamily.IPV4_ONLY)
+                .localBindHost("127.0.0.1")
+                .localBindPort(13338)
+                .localBindFallbackToEphemeral(true)
                 .build();
 
         assertFalse(config.isAutoReconnect());
@@ -68,6 +76,10 @@ class NodeClientConfigTest {
         assertFalse(config.isEnableConnectionLogging());
         assertEquals(SocketAddressResolutionMode.DNS_ROTATING, config.getSocketAddressResolutionMode());
         assertEquals(SocketAddressFamily.IPV4_ONLY, config.getSocketAddressFamily());
+        assertEquals("127.0.0.1", config.getLocalBindHost());
+        assertEquals(13338, config.getLocalBindPort());
+        assertTrue(config.hasLocalBindAddress());
+        assertTrue(config.isLocalBindFallbackToEphemeral());
     }
 
     @Test

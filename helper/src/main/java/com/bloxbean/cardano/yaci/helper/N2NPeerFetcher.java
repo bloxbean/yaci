@@ -22,6 +22,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListe
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainsyncAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
@@ -519,6 +520,10 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
     public long getLastKeepAliveResponseTime() {
         return lastKeepAliveResponseTime;
+    }
+
+    public Optional<AcceptVersion> getProtocolVersion() {
+        return Optional.ofNullable(handshakeAgent.getProtocolVersion());
     }
 
     public void submitTxBytes(byte[] txBytes) {

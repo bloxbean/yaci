@@ -89,6 +89,9 @@ public class TCPNodeClient extends NodeClient {
         bootstrap.option(ChannelOption.SO_KEEPALIVE, true);
         bootstrap.option(ChannelOption.TCP_NODELAY, true);
         bootstrap.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, getConfig().getConnectionTimeoutMs());
+        if (getConfig().hasLocalBindAddress()) {
+            bootstrap.option(ChannelOption.SO_REUSEADDR, true);
+        }
     }
 
     static class DnsRotatingSocketAddressProvider {

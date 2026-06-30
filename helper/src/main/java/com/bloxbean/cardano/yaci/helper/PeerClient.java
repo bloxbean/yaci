@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.network.NodeClientConfig;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener;
@@ -170,6 +171,12 @@ public class PeerClient {
      */
     public long getLastKeepAliveResponseTime() {
         return n2NPeerFetcher.getLastKeepAliveResponseTime();
+    }
+
+    public Optional<AcceptVersion> getProtocolVersion() {
+        return n2NPeerFetcher != null
+                ? n2NPeerFetcher.getProtocolVersion()
+                : Optional.empty();
     }
 
     /**

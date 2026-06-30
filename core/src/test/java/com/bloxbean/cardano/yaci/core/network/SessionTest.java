@@ -11,6 +11,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import org.junit.jupiter.api.Test;
 
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.List;
@@ -102,6 +103,86 @@ class SessionTest {
         assertSame(session, session.start());
         verify(bootstrap, times(1)).connect(first);
         verify(bootstrap, times(1)).connect(second);
+    }
+
+    @Test
+    void startUsesConfiguredLocalBindAddressWhenPresent() throws InterruptedException {
+        Bootstrap bootstrap = mock(Bootstrap.class);
+        ChannelFuture channelFuture = mockSuccessfulChannelFuture();
+        HandshakeAgent handshakeAgent = mock(HandshakeAgent.class);
+        when(handshakeAgent.isDone()).thenReturn(true);
+
+        SocketAddress remote = new InetSocketAddress("127.0.0.1", 3001);
+        SocketAddress local = new InetSocketAddress("127.0.0.1", 13338);
+        when(bootstrap.connect(remote, local)).thenReturn(channelFuture);
+
+        NodeClientConfig config = NodeClientConfig.builder()
+                .autoReconnect(false)
+                .enableConnectionLogging(false)
+                .localBindHost("127.0.0.1")
+                .localBindPort(13338)
+                .build();
+
+        Session session = new Session(remote, bootstrap, config, handshakeAgent, new Agent[0]);
+
+        assertSame(session, session.start());
+        verify(bootstrap, times(1)).connect(remote, local);
+        verify(bootstrap, times(0)).connect(remote);
+    }
+
+    @Test
+    void startFallsBackToEphemeralSourcePortWhenLocalBindFailsAndFallbackIsEnabled() throws Exception {
+        Bootstrap bootstrap = mock(Bootstrap.class);
+        ChannelFuture bindFailure = mock(ChannelFuture.class);
+        ChannelFuture channelFuture = mockSuccessfulChannelFuture();
+        HandshakeAgent handshakeAgent = mock(HandshakeAgent.class);
+        when(handshakeAgent.isDone()).thenReturn(true);
+
+        SocketAddress remote = new InetSocketAddress("127.0.0.1", 3001);
+        SocketAddress local = new InetSocketAddress("127.0.0.1", 13338);
+        when(bindFailure.sync()).thenThrow(new RuntimeException(new BindException("Address already in use")));
+        when(bootstrap.connect(remote, local)).thenReturn(bindFailure);
+        when(bootstrap.connect(remote)).thenReturn(channelFuture);
+
+        NodeClientConfig config = NodeClientConfig.builder()
+                .autoReconnect(false)
+                .enableConnectionLogging(false)
+                .localBindHost("127.0.0.1")
+                .localBindPort(13338)
+                .localBindFallbackToEphemeral(true)
+                .build();
+
+        Session session = new Session(remote, bootstrap, config, handshakeAgent, new Agent[0]);
+
+        assertSame(session, session.start());
+        verify(bootstrap, times(1)).connect(remote, local);
+        verify(bootstrap, times(1)).connect(remote);
+    }
+
+    @Test
+    void startDoesNotFallBackToEphemeralSourcePortByDefault() throws Exception {
+        Bootstrap bootstrap = mock(Bootstrap.class);
+        ChannelFuture bindFailure = mock(ChannelFuture.class);
+        HandshakeAgent handshakeAgent = mock(HandshakeAgent.class);
+        when(handshakeAgent.isDone()).thenReturn(true);
+
+        SocketAddress remote = new InetSocketAddress("127.0.0.1", 3001);
+        SocketAddress local = new InetSocketAddress("127.0.0.1", 13338);
+        when(bindFailure.sync()).thenThrow(new RuntimeException(new BindException("Address already in use")));
+        when(bootstrap.connect(remote, local)).thenReturn(bindFailure);
+
+        NodeClientConfig config = NodeClientConfig.builder()
+                .autoReconnect(false)
+                .enableConnectionLogging(false)
+                .localBindHost("127.0.0.1")
+                .localBindPort(13338)
+                .build();
+
+        Session session = new Session(remote, bootstrap, config, handshakeAgent, new Agent[0]);
+
+        assertThrows(RuntimeException.class, session::start);
+        verify(bootstrap, times(1)).connect(remote, local);
+        verify(bootstrap, times(0)).connect(remote);
     }
 
     @Test

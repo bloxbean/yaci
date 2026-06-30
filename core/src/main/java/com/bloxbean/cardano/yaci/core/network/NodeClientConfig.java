@@ -93,6 +93,34 @@ public class NodeClientConfig {
     private final SocketAddressFamily socketAddressFamily = SocketAddressFamily.ANY;
 
     /**
+     * Optional local host/interface used when binding outbound TCP connections before connect().
+     * Blank or null means wildcard address. This is ignored when localBindPort is not positive.
+     */
+    private final String localBindHost;
+
+    /**
+     * Optional local source port used when binding outbound TCP connections before connect().
+     * Default: 0, which lets the operating system choose an ephemeral source port.
+     */
+    @Builder.Default
+    private final int localBindPort = 0;
+
+    /**
+     * When true, a local-bind failure falls back to a normal connect using an
+     * OS-assigned source port. This is useful for relay source-port reuse,
+     * where TIME_WAIT or platform socket rules must not prevent availability.
+     */
+    @Builder.Default
+    private final boolean localBindFallbackToEphemeral = false;
+
+    /**
+     * @return true when outbound connects should bind to a local source port.
+     */
+    public boolean hasLocalBindAddress() {
+        return localBindPort > 0;
+    }
+
+    /**
      * Creates a default configuration.
      * This is equivalent to calling {@code NodeClientConfig.builder().build()}
      *
