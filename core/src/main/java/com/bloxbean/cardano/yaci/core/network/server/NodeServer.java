@@ -28,6 +28,7 @@ public class NodeServer {
     private TxSubmissionListener txSubmissionListener;
     private TxSubmissionConfig txSubmissionConfig;
     private List<AgentFactory> agentFactories;
+    private ServerConnectionListener connectionListener;
     private final static Map<Channel, NodeServerSession> sessions = new ConcurrentHashMap<>();
 
     public NodeServer(int port, VersionTable versionTable, ChainState chainState) {
@@ -57,6 +58,10 @@ public class NodeServer {
         this.agentFactories = agentFactories != null ? agentFactories : Collections.emptyList();
     }
 
+    public void setConnectionListener(ServerConnectionListener connectionListener) {
+        this.connectionListener = connectionListener;
+    }
+
     public void start() {
         try {
             log.info("Initializing NodeServer on port {}", port);
@@ -72,10 +77,30 @@ public class NodeServer {
                             log.info("New connection from: {}", ch.remoteAddress());
                             log.info("Local address: {}", ch.localAddress());
 
+                            ServerConnectionListener listener = connectionListener;
+                            if (listener != null) {
+                                ServerConnectionDecision decision;
+                                try {
+                                    decision = listener.onAccept(ch);
+                                } catch (Exception e) {
+                                    log.warn("Inbound connection listener rejected {} after error: {}",
+                                            ch.remoteAddress(), e.toString());
+                                    ch.close();
+                                    return;
+                                }
+                                if (decision != null && !decision.accepted()) {
+                                    log.info("Rejected inbound connection from {}: {}",
+                                            ch.remoteAddress(), decision.reason());
+                                    ch.close();
+                                    return;
+                                }
+                                ch.closeFuture().addListener(closeFuture -> listener.onClosed(ch));
+                            }
+
                             try {
                                 NodeServerSession session = new NodeServerSession(
                                         ch, versionTable, chainState, txSubmissionListener,
-                                        txSubmissionConfig, agentFactories);
+                                        txSubmissionConfig, agentFactories, listener);
                                 sessions.put(ch, session);
                                 log.info("Created session for client: {}", ch.remoteAddress());
                             } catch (Exception e) {
