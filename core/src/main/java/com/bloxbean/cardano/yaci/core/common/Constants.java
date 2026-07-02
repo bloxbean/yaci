@@ -12,6 +12,7 @@ public class Constants {
     public static final long PREPROD_PROTOCOL_MAGIC = NetworkType.PREPROD.getProtocolMagic();
     public static final long PREVIEW_PROTOCOL_MAGIC = NetworkType.PREVIEW.getProtocolMagic();
     public static final long SANCHONET_PROTOCOL_MAGIC = NetworkType.SANCHONET.getProtocolMagic();
+    public static final long MUSASHI_PROTOCOL_MAGIC = 164L;
 
     /**
      * @deprecated Use MAINNET_PUBLIC_RELAY_ADDR
