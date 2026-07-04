@@ -4,6 +4,8 @@ dependencies {
     api libs.slf4j.api
 
     implementation libs.cardano.client.core
+
+    testImplementation libs.jqwik
 }
 
 publishing {

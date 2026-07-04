@@ -146,6 +146,10 @@ gradle-app.setting
 # Cache of project
 .gradletasknamecache
 
+# jqwik property-test generated examples/failure database
+**/.jqwik-database
+**/.jqwik-database/
+
 # # Work around https://youtrack.jetbrains.com/issue/IDEA-116898
 # gradle/wrapper/gradle-wrapper.properties
 
