@@ -36,7 +36,7 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         String txHash = TxUtil.calculateTxHash(txBytes);
         transactionBodyBuilder.txHash(txHash);
 
-        if (YaciConfig.INSTANCE.isReturnTxBodyCbor()) {
+        if (YaciConfig.INSTANCE.isReturnTxBodyCbor() || YaciConfig.INSTANCE.isReturnFullTxCbor()) {
             transactionBodyBuilder.cbor(HexUtil.encodeHexString(txBytes));
         }
 

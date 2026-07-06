@@ -18,6 +18,7 @@ public class Transaction {
     private long blockNumber;
     private long slot;
     private String txHash;
+    private String txCbor;
     private TransactionBody body;
     private List<Utxo> utxos;
     private Utxo collateralReturnUtxo;

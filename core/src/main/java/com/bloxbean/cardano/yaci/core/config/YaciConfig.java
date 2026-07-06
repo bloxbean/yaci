@@ -8,10 +8,12 @@ public enum YaciConfig {
 
     private boolean returnBlockCbor;
     private boolean returnTxBodyCbor;
+    private boolean returnFullTxCbor;
 
     YaciConfig() {
         returnBlockCbor = false;
         returnTxBodyCbor = false;
+        returnFullTxCbor = false;
     }
 
     /**
@@ -44,5 +46,21 @@ public enum YaciConfig {
      */
     public void setReturnTxBodyCbor(boolean returnTxBodyCbor) {
         this.returnTxBodyCbor = returnTxBodyCbor;
+    }
+
+    /**
+     * Returns true if full transaction cbor is returned.
+     * @return
+     */
+    public boolean isReturnFullTxCbor() {
+        return returnFullTxCbor;
+    }
+
+    /**
+     * Set to true to return full transaction cbor.
+     * @param returnFullTxCbor
+     */
+    public void setReturnFullTxCbor(boolean returnFullTxCbor) {
+        this.returnFullTxCbor = returnFullTxCbor;
     }
 }
