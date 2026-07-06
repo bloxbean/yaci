@@ -8,12 +8,14 @@ public enum YaciConfig {
 
     private boolean returnBlockCbor;
     private boolean returnTxBodyCbor;
+    private boolean returnFullTxCbor;
 
     private boolean blockFetchCheckRangeExists = false;
 
     YaciConfig() {
         returnBlockCbor = false;
         returnTxBodyCbor = false;
+        returnFullTxCbor = false;
     }
 
     /**
@@ -54,5 +56,21 @@ public enum YaciConfig {
 
     public boolean isBlockFetchCheckRangeExists() {
         return blockFetchCheckRangeExists;
+    }
+
+    /**
+     * Returns true if full transaction cbor is returned.
+     * @return
+     */
+    public boolean isReturnFullTxCbor() {
+        return returnFullTxCbor;
+    }
+
+    /**
+     * Set to true to return full transaction cbor.
+     * @param returnFullTxCbor
+     */
+    public void setReturnFullTxCbor(boolean returnFullTxCbor) {
+        this.returnFullTxCbor = returnFullTxCbor;
     }
 }
