@@ -2,7 +2,6 @@ package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.listener.BlockFetchAgentListenerAdapter;
 import com.bloxbean.cardano.yaci.helper.listener.ChainSyncListenerAdapter;
@@ -14,8 +13,10 @@ import com.bloxbean.cardano.yaci.helper.listener.ChainSyncListenerAdapter;
 public class BlockSync {
     private String host;
     private int port;
+    private Long protocolMagic;
     private Point wellKnownPoint;
     private VersionTable versionTable;
+    private LeiosConfig leiosConfig = LeiosConfig.defaultConfig();
 
     private N2NChainSyncFetcher n2NChainSyncFetcher;
 
@@ -27,7 +28,19 @@ public class BlockSync {
      * @param wellKnownPoint A wellknown point
      */
     public BlockSync(String host, int port, long protocolMagic, Point wellKnownPoint) {
-        this(host, port, wellKnownPoint, N2NVersionTableConstant.v4AndAbove(protocolMagic));
+        this(host, port, protocolMagic, wellKnownPoint, LeiosConfig.defaultConfig());
+    }
+
+    /**
+     * Construct a tip-following block sync with optional Leios integration.
+     * In {@link LeiosConfig.Mode#AUTO}, Leios agents attach only for the Musashi network magic.
+     */
+    public BlockSync(String host, int port, long protocolMagic, Point wellKnownPoint, LeiosConfig leiosConfig) {
+        this.host = host;
+        this.port = port;
+        this.protocolMagic = protocolMagic;
+        this.wellKnownPoint = wellKnownPoint;
+        this.leiosConfig = leiosConfig != null ? leiosConfig : LeiosConfig.defaultConfig();
     }
 
     /**
@@ -38,10 +51,20 @@ public class BlockSync {
      * @param versionTable {@link VersionTable} instance
      */
     public BlockSync(String host, int port, Point wellKnownPoint, VersionTable versionTable) {
+        this(host, port, wellKnownPoint, versionTable, LeiosConfig.defaultConfig());
+    }
+
+    /**
+     * Construct a tip-following block sync with a caller-provided version table and Leios policy.
+     */
+    public BlockSync(String host, int port, Point wellKnownPoint, VersionTable versionTable,
+                     LeiosConfig leiosConfig) {
         this.host = host;
         this.port = port;
         this.wellKnownPoint = wellKnownPoint;
         this.versionTable = versionTable;
+        this.protocolMagic = LeiosConfig.protocolMagic(versionTable);
+        this.leiosConfig = leiosConfig != null ? leiosConfig : LeiosConfig.defaultConfig();
     }
 
     /**
@@ -57,12 +80,17 @@ public class BlockSync {
     }
 
     private void initializeAgentAndStart(Point point, BlockChainDataListener blockChainDataListener, boolean syncFromTip) {
-        n2NChainSyncFetcher = new N2NChainSyncFetcher(host, port, point, versionTable, syncFromTip);
+        if (versionTable != null) {
+            n2NChainSyncFetcher = new N2NChainSyncFetcher(host, port, point, versionTable, syncFromTip, leiosConfig);
+        } else {
+            n2NChainSyncFetcher = new N2NChainSyncFetcher(host, port, point, protocolMagic, syncFromTip, leiosConfig);
+        }
 
         BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(blockChainDataListener);
         ChainSyncListenerAdapter chainSyncAgentListener = new ChainSyncListenerAdapter(blockChainDataListener);
         n2NChainSyncFetcher.addChainSyncListener(chainSyncAgentListener);
         n2NChainSyncFetcher.addBlockFetchListener(blockfetchAgentListener);
+        n2NChainSyncFetcher.addLeiosDataListener(blockChainDataListener);
 
         n2NChainSyncFetcher.start();
     }

@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
+import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
@@ -18,13 +19,17 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainsyncAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
+import com.bloxbean.cardano.yaci.core.protocol.leiosfetch.LeiosFetchAgent;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.LeiosNotifyAgent;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import com.bloxbean.cardano.yaci.core.common.GenesisConfig;
 import com.bloxbean.cardano.yaci.core.model.Era;
+import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
@@ -39,14 +44,19 @@ import java.util.function.Consumer;
 public class N2NChainSyncFetcher implements Fetcher<Block> {
     private String host;
     private int port;
+    private long protocolMagic;
     private VersionTable versionTable;
     private Point wellKnownPoint;
     private boolean syncFromLatest;
+    private LeiosConfig leiosConfig;
     private boolean tipFound = false;
     private HandshakeAgent handshakeAgent;
     private KeepAliveAgent keepAliveAgent;
     private ChainsyncAgent chainSyncAgent;
     private BlockfetchAgent blockFetchAgent;
+    private LeiosNotifyAgent leiosNotifyAgent;
+    private LeiosFetchAgent leiosFetchAgent;
+    private final List<LeiosSyncCoordinator> leiosSyncCoordinators = new ArrayList<>();
     private TCPNodeClient n2nClient;
 
     private int lastKeepAliveResponseCookie = 0;
@@ -61,7 +71,12 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
      * @param protocolMagic  protocol magic
      */
     public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, long protocolMagic) {
-        this(host, port, wellKnownPoint, N2NVersionTableConstant.v4AndAbove(protocolMagic), true);
+        this(host, port, wellKnownPoint, protocolMagic, true, LeiosConfig.defaultConfig());
+    }
+
+    public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, long protocolMagic,
+                               LeiosConfig leiosConfig) {
+        this(host, port, wellKnownPoint, protocolMagic, true, leiosConfig);
     }
 
     /**
@@ -73,7 +88,14 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
      * @param syncFromLatest true if sync from latest block, false if sync from the well known point
      */
     public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, long protocolMagic, boolean syncFromLatest) {
-        this(host, port, wellKnownPoint, N2NVersionTableConstant.v4AndAbove(protocolMagic), syncFromLatest);
+        this(host, port, wellKnownPoint, protocolMagic, syncFromLatest, LeiosConfig.defaultConfig());
+    }
+
+    public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, long protocolMagic,
+                               boolean syncFromLatest,
+                               LeiosConfig leiosConfig) {
+        this(host, port, wellKnownPoint, LeiosConfig.versionTableFor(protocolMagic, leiosConfig), syncFromLatest,
+                protocolMagic, leiosConfig);
     }
 
     /**
@@ -88,6 +110,11 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
         this(host, port, wellKnownPoint, versionTable, true);
     }
 
+    public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable,
+                               LeiosConfig leiosConfig) {
+        this(host, port, wellKnownPoint, versionTable, true, LeiosConfig.protocolMagic(versionTable), leiosConfig);
+    }
+
     /**
      * Construct {@link N2NChainSyncFetcher} to sync the blockchain
      *
@@ -98,11 +125,25 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
      * @param syncFromLatest true if sync from latest block, false if sync from the well known point
      */
     public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable, boolean syncFromLatest) {
+        this(host, port, wellKnownPoint, versionTable, syncFromLatest, LeiosConfig.protocolMagic(versionTable),
+                LeiosConfig.defaultConfig());
+    }
+
+    public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable,
+                               boolean syncFromLatest, LeiosConfig leiosConfig) {
+        this(host, port, wellKnownPoint, versionTable, syncFromLatest, LeiosConfig.protocolMagic(versionTable),
+                leiosConfig);
+    }
+
+    private N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable,
+                                boolean syncFromLatest, long protocolMagic, LeiosConfig leiosConfig) {
         this.host = host;
         this.port = port;
         this.versionTable = versionTable;
+        this.protocolMagic = protocolMagic;
         this.wellKnownPoint = wellKnownPoint;
         this.syncFromLatest = syncFromLatest;
+        this.leiosConfig = leiosConfig != null ? leiosConfig : LeiosConfig.defaultConfig();
 
         init();
     }
@@ -113,6 +154,10 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
         chainSyncAgent = new ChainsyncAgent(new Point[]{wellKnownPoint});
         blockFetchAgent = new BlockfetchAgent();
         blockFetchAgent.resetPoints(wellKnownPoint, wellKnownPoint);
+        if (leiosConfig.shouldAttach(protocolMagic)) {
+            leiosNotifyAgent = new LeiosNotifyAgent();
+            leiosFetchAgent = new LeiosFetchAgent();
+        }
 
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
@@ -120,6 +165,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
                 keepAliveAgent.sendKeepAlive(1234);
                 //start
                 chainSyncAgent.sendNextMessage();
+                startLeiosIfCompatible();
             }
         });
 
@@ -238,8 +284,43 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
             lastKeepAliveResponseTime = System.currentTimeMillis();
         });
 
-        n2nClient = new TCPNodeClient(host, port, handshakeAgent, keepAliveAgent,
-                chainSyncAgent, blockFetchAgent);
+        List<Agent> agents = new ArrayList<>();
+        agents.add(keepAliveAgent);
+        agents.add(chainSyncAgent);
+        agents.add(blockFetchAgent);
+        if (leiosNotifyAgent != null && leiosFetchAgent != null) {
+            agents.add(leiosNotifyAgent);
+            agents.add(leiosFetchAgent);
+        }
+        n2nClient = new TCPNodeClient(host, port, handshakeAgent, agents.toArray(new Agent[0]));
+    }
+
+    /**
+     * Registers the same listener for helper-level Leios callbacks when this connection attaches Leios agents.
+     */
+    public void addLeiosDataListener(BlockChainDataListener listener) {
+        if (this.isRunning())
+            throw new IllegalStateException("Listener can be added only before start() call");
+
+        if (listener == null || leiosNotifyAgent == null || leiosFetchAgent == null)
+            return;
+
+        LeiosSyncCoordinator coordinator = new LeiosSyncCoordinator(listener, leiosFetchAgent, leiosConfig);
+        leiosSyncCoordinators.add(coordinator);
+        leiosNotifyAgent.addListener(coordinator);
+        leiosFetchAgent.addListener(coordinator);
+    }
+
+    private void startLeiosIfCompatible() {
+        if (leiosNotifyAgent == null || leiosFetchAgent == null) {
+            return;
+        }
+
+        if (leiosConfig.isCompatible(handshakeAgent.getProtocolVersion(), protocolMagic)) {
+            leiosNotifyAgent.start();
+        } else {
+            leiosNotifyAgent.stopAutoRequestNext();
+        }
     }
 
     private void resetBlockFetchAgentAndFetchBlock(long slot, String hash) {
@@ -338,6 +419,15 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
      */
     @Override
     public void shutdown() {
+        for (LeiosSyncCoordinator coordinator : leiosSyncCoordinators) {
+            coordinator.close();
+        }
+        if (leiosNotifyAgent != null) {
+            leiosNotifyAgent.shutdown();
+        }
+        if (leiosFetchAgent != null) {
+            leiosFetchAgent.done();
+        }
         n2nClient.shutdown();
     }
 
