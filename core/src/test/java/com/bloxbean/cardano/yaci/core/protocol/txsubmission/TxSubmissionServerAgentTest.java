@@ -201,6 +201,50 @@ class TxSubmissionServerAgentTest {
     }
 
     @Test
+    void testListenerCanFilterRequestedTxBodies() {
+        agent.receiveResponse(new Init());
+        agent.buildNextMessage();
+
+        ReplyTxIds replyTxIds = new ReplyTxIds();
+        TxId txId1 = new TxId(com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era.Conway, "tx1".getBytes());
+        TxId txId2 = new TxId(com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era.Conway, "tx2".getBytes());
+        TxId txId3 = new TxId(com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era.Conway, "tx3".getBytes());
+        replyTxIds.addTxId(txId1, 100);
+        replyTxIds.addTxId(txId2, 200);
+        replyTxIds.addTxId(txId3, 300);
+
+        agent.addListener(new TxSubmissionListener() {
+            @Override
+            public void handleRequestTxs(RequestTxs requestTxs) {}
+
+            @Override
+            public void handleRequestTxIdsNonBlocking(RequestTxIds requestTxIds) {}
+
+            @Override
+            public void handleRequestTxIdsBlocking(RequestTxIds requestTxIds) {}
+
+            @Override
+            public boolean shouldRequestTx(TxId txId, int size) {
+                return !txId.equals(txId2);
+            }
+        });
+
+        agent.receiveResponse(replyTxIds);
+
+        var message = agent.buildNextMessage();
+        assertNotNull(message);
+        assertInstanceOf(RequestTxs.class, message);
+
+        RequestTxs requestTxs = (RequestTxs) message;
+        assertEquals(2, requestTxs.getTxIds().size());
+        assertTrue(requestTxs.getTxIds().contains(txId1));
+        assertFalse(requestTxs.getTxIds().contains(txId2));
+        assertTrue(requestTxs.getTxIds().contains(txId3));
+        assertEquals(3, agent.getReceivedTxIdCount());
+        assertEquals(2, agent.getOutstandingTxCount());
+    }
+
+    @Test
     void testCannotRequestInWrongState() {
         // In Init state, server doesn't have agency
         assertFalse(agent.hasAgency());
