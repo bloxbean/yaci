@@ -116,6 +116,10 @@ public enum BlockSerializer implements Serializer<Block> {
         Array headerArr = (Array) blockArray.getDataItems().get(0);
         BlockHeader blockHeader = BlockHeaderSerializer.INSTANCE.getBlockHeaderFromHeaderArray(headerArr);
         blockBuilder.header(blockHeader);
+        //Dijkstra (Leios) blocks are [header, block_body]; every earlier era keeps the path below unchanged
+        if (DijkstraBlockBodySerializer.isDijkstraBlock(era, blockArray)) {
+            return DijkstraBlockBodySerializer.INSTANCE.deserialize(blockBuilder, blockBody, blockHeader);
+        }
 
         //transaction bodies 1
         /**
@@ -233,7 +237,7 @@ public enum BlockSerializer implements Serializer<Block> {
     }
 
     /** Correct optional datum/redeemer bytes per witness; extraction failures never reject the parsed block. */
-    private void handleWitnessDatumRedeemer(long block, List<Witnesses> witnesses, List<byte[]> transactionWitness) {
+    void handleWitnessDatumRedeemer(long block, List<Witnesses> witnesses, List<byte[]> transactionWitness) {
         if (witnesses == null || witnesses.isEmpty()) return;
         if (transactionWitness == null || transactionWitness.size() != witnesses.size()) {
             log.error("block: {} witness set count mismatch. parsed: {}, raw: {}",
