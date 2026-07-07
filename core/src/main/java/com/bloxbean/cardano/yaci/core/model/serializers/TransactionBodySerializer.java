@@ -174,8 +174,13 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
                 if (requiredSigDI == Special.BREAK)
                     continue;
 
-                ByteString requiredSigBS = (ByteString) requiredSigDI;
-                requiredSigners.add(HexUtil.encodeHexString(requiredSigBS.getBytes()));
+                if (requiredSigDI instanceof ByteString requiredSigBS) {
+                    requiredSigners.add(HexUtil.encodeHexString(requiredSigBS.getBytes()));
+                } else {
+                    //Fail loud: silently hex-encoding the CBOR framing would ship a bogus signer downstream
+                    throw new IllegalStateException("required_signers element is not a byte string. Major type: "
+                            + requiredSigDI.getMajorType());
+                }
             }
             transactionBodyBuilder.requiredSigners(requiredSigners);
         }

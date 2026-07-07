@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model;
 
+import com.bloxbean.cardano.yaci.core.model.leios.LeiosAnnouncement;
 import lombok.*;
 
 @Getter
@@ -21,7 +22,12 @@ public class HeaderBody {
     private String blockBodyHash;
     private OperationalCert operationalCert;
     private ProtocolVersion protocolVersion;
+    private LeiosAnnouncement leiosAnnouncement;
+    /**
+     * Dijkstra/Leios header flag indicating that this RB certifies the previous EB announcement.
+     * Null for non-Dijkstra headers and older Musashi fixtures that do not carry the fixed slot.
+     */
+    private Boolean leiosCertified;
     //Derived value
     private String blockHash;
 }
-

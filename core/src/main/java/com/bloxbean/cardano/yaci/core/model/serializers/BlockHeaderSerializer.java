@@ -3,12 +3,16 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.yaci.core.model.*;
+import com.bloxbean.cardano.yaci.core.model.leios.LeiosAnnouncement;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import lombok.extern.slf4j.Slf4j;
 
+import java.math.BigInteger;
 import java.util.List;
 
+@Slf4j
 public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
     INSTANCE;
 
@@ -27,14 +31,12 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
     }
 
     public BlockHeader getBlockHeaderFromHeaderArray(Array headerArray) {
-        //Assumption: Last two header parameters are for protocol version
         List<DataItem> headerBodyArr = ((Array) headerArray.getDataItems().get(0)).getDataItems();
-        DataItem protoVersionDI = headerBodyArr.get(headerBodyArr.size() - 1);
 
-        if (protoVersionDI.getMajorType() == MajorType.UNSIGNED_INTEGER) { //pre Babbage
-            return preBabbageHeader(headerArray);
-        } else {
+        if (isPostBabbageHeader(headerBodyArr)) {
             return postBabbageHeader(headerArray);
+        } else {
+            return preBabbageHeader(headerArray);
         }
     }
 
@@ -70,6 +72,8 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
         ProtocolVersion protocolVersion = new ProtocolVersion(CborSerializationUtil.toBigInteger(protocolVersionArr.get(0)).longValue(),
                 CborSerializationUtil.toBigInteger(protocolVersionArr.get(1)).longValue());
         headerBodyBuilder.protocolVersion(protocolVersion);
+        readLeiosCertified(headerBodyArr).ifPresent(headerBodyBuilder::leiosCertified);
+        readLeiosAnnouncement(headerBodyArr).ifPresent(headerBodyBuilder::leiosAnnouncement);
 
         //Derive blockHash
         String blockHash = HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(CborSerializationUtil.serialize(headerArray)));
@@ -116,5 +120,85 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
         headerBodyBuilder.blockHash(blockHash);
 
         return new BlockHeader(headerBodyBuilder.build(), bodySignature);
+    }
+
+    private boolean isPostBabbageHeader(List<DataItem> headerBodyArr) {
+        return headerBodyArr.size() > 8 && headerBodyArr.get(8) instanceof Array;
+    }
+
+    private java.util.Optional<LeiosAnnouncement> readLeiosAnnouncement(List<DataItem> headerBodyArr) {
+        if (headerBodyArr.size() <= 10) {
+            return java.util.Optional.empty();
+        }
+
+        DataItem item;
+        if (isCborBoolean(headerBodyArr.get(10))) {
+            if (headerBodyArr.size() <= 11) {
+                return java.util.Optional.empty();
+            }
+            item = headerBodyArr.get(11);
+        } else {
+            item = headerBodyArr.get(10);
+        }
+        if (item == SimpleValue.NULL) {
+            return java.util.Optional.empty();
+        }
+        if (!(item instanceof Array announcementArr)) {
+            if (log.isDebugEnabled()) {
+                log.debug("Ignoring unsupported Leios announcement header extension shape: {}",
+                        item != null ? item.getMajorType() : null);
+            }
+            return java.util.Optional.empty();
+        }
+
+        List<DataItem> items = announcementArr.getDataItems().stream()
+                .filter(dataItem -> dataItem != SimpleValue.BREAK)
+                .toList();
+        if (items.size() != 2 || !(items.get(0) instanceof ByteString ebHash)
+                || !(items.get(1) instanceof UnsignedInteger ebSize)) {
+            if (log.isDebugEnabled()) {
+                log.debug("Ignoring unsupported Leios announcement header extension shape");
+            }
+            return java.util.Optional.empty();
+        }
+
+        if (ebHash.getBytes().length != 32) {
+            if (log.isDebugEnabled()) {
+                log.debug("Ignoring Leios announcement with EB hash length {}", ebHash.getBytes().length);
+            }
+            return java.util.Optional.empty();
+        }
+
+        BigInteger size = ebSize.getValue();
+        if (size.signum() < 0 || size.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) > 0) {
+            if (log.isDebugEnabled()) {
+                log.debug("Ignoring Leios announcement with EB size outside signed long range");
+            }
+            return java.util.Optional.empty();
+        }
+
+        return java.util.Optional.of(LeiosAnnouncement.builder()
+                .ebHash(HexUtil.encodeHexString(ebHash.getBytes()))
+                .ebSize(size.longValue())
+                .build());
+    }
+
+    private java.util.Optional<Boolean> readLeiosCertified(List<DataItem> headerBodyArr) {
+        if (headerBodyArr.size() <= 10) {
+            return java.util.Optional.empty();
+        }
+
+        DataItem item = headerBodyArr.get(10);
+        if (item == SimpleValue.TRUE) {
+            return java.util.Optional.of(Boolean.TRUE);
+        }
+        if (item == SimpleValue.FALSE) {
+            return java.util.Optional.of(Boolean.FALSE);
+        }
+        return java.util.Optional.empty();
+    }
+
+    private boolean isCborBoolean(DataItem dataItem) {
+        return dataItem == SimpleValue.TRUE || dataItem == SimpleValue.FALSE;
     }
 }
