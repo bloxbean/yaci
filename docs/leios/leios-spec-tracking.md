@@ -1,17 +1,28 @@
 # Linear Leios Spec Tracking
 
-Last verified: 2026-07-02
+Last verified: 2026-07-07
+
+> How to track upstream sources, release cadence, and the re-pin procedure:
+> see `docs/leios/leios-musashi-source-tracking-guide.md`.
+
+## Pin matrix
+
+| Scope | Pinned to | Status |
+| :--- | :--- | :--- |
+| Mini-protocols 18/19 + serialization/listener layer (ADR 0007/0010) | blueprint `leios-prototype` @ `188183b3` (2026-06-29); node releases w25/w26 | implemented |
+| Block restructure re-pin (ADR 0011) | blueprint `leios-prototype` @ `93276ab` sync, head `cb1de23` (2026-07-06); node release **`prototype-2026w27`** | implemented |
 
 Yaci's experimental Linear Leios support currently implements the Musashi network mini-protocol wire format from
-the cardano-blueprint `leios-prototype` branch at commit `188183b37081fa012fa890236edb7771f96ae92f`.
+the cardano-blueprint `leios-prototype` branch at commit `188183b37081fa012fa890236edb7771f96ae92f`, plus the
+Dijkstra ranking-block restructure from the `prototype-2026w27` re-pin (`93276ab` ledger CDDL sync).
 
 The implemented scope is limited to node-to-node mini-protocol framing for:
 
 - `leios-notify` on mux protocol id `18`
 - `leios-fetch` on mux protocol id `19`
 
-Endorser block, vote, and transaction-list bodies are kept as opaque CBOR payloads. Block-level
-serialization/deserialization is intentionally outside this implementation.
+Endorser block, vote, and transaction-list bodies are decoded best-effort while keeping raw CBOR. Dijkstra
+ranking blocks are parsed through the w27 nested block-body layout.
 
 The source CDDL files for the current implementation are:
 

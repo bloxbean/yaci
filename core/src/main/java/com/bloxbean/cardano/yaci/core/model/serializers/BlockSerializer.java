@@ -4,6 +4,8 @@ import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
+import com.bloxbean.cardano.yaci.core.model.serializers.leios.LeiosCborReader;
+import com.bloxbean.cardano.yaci.core.model.serializers.leios.LeiosCertificateSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
@@ -45,6 +47,9 @@ public enum BlockSerializer implements Serializer<Block> {
         Array headerArr = (Array) blockArray.getDataItems().get(0);
         BlockHeader blockHeader = BlockHeaderSerializer.INSTANCE.getBlockHeaderFromHeaderArray(headerArr);
         blockBuilder.header(blockHeader);
+        if (isDijkstraRestructuredBlock(era, blockArray)) {
+            return DijkstraBlockBodySerializer.INSTANCE.deserialize(blockBuilder, blockBody, blockHeader);
+        }
 
         //transaction bodies 1
         /**
@@ -117,6 +122,13 @@ public enum BlockSerializer implements Serializer<Block> {
             blockBuilder.invalidTransactions(invalidTransactions);
         }
 
+        //Legacy (pre-w27) Dijkstra segmented body: trailing leios_cert/peras_cert at positions 5/6.
+        //Dijkstra-gated so no other era's parsing can grow these fields; raw bytes are sliced from
+        //the block bytes, never re-encoded from the DataItem tree.
+        if (era == Era.Dijkstra) {
+            populateLegacyDijkstraCertificates(blockBuilder, blockArray, blockBody);
+        }
+
         if (YaciConfig.INSTANCE.isReturnBlockCbor()) {
             blockBuilder.cbor(HexUtil.encodeHexString(blockBody));
         }
@@ -124,12 +136,70 @@ public enum BlockSerializer implements Serializer<Block> {
         return blockBuilder.build();
     }
 
+    private boolean isPresentCborItem(DataItem dataItem) {
+        return dataItem != null && dataItem != SimpleValue.NULL && dataItem != SimpleValue.BREAK;
+    }
+
+    private void populateLegacyDijkstraCertificates(Block.BlockBuilder blockBuilder, Array blockArray, byte[] blockBody) {
+        List<DataItem> items = blockArray.getDataItems();
+        int itemCount = items.size();
+        if (itemCount > 0 && items.get(itemCount - 1) == SimpleValue.BREAK) {
+            itemCount--;
+        }
+        if (itemCount <= 5) {
+            return;
+        }
+        boolean hasLeiosCert = isPresentCborItem(items.get(5));
+        boolean hasPerasCert = itemCount > 6 && isPresentCborItem(items.get(6));
+        if (!hasLeiosCert && !hasPerasCert) {
+            return;
+        }
+
+        //Walk the raw block bytes to slice the certificate items byte-exactly
+        LeiosCborReader reader = new LeiosCborReader(blockBody);
+        reader.readLength(LeiosCborReader.MAJOR_TYPE_ARRAY); //outer [era, block]
+        reader.readDataItem(); //era tag
+        reader.readLength(LeiosCborReader.MAJOR_TYPE_ARRAY); //inner block array
+        for (int i = 0; i < 5; i++) { //header + 4 segments
+            reader.readDataItem();
+        }
+        byte[] leiosCertBytes = reader.readDataItem().rawBytes();
+        if (hasLeiosCert) {
+            blockBuilder.leiosCertificate(LeiosCertificateSerializer.INSTANCE.deserialize(leiosCertBytes));
+        }
+        if (hasPerasCert) {
+            blockBuilder.perasCertCbor(HexUtil.encodeHexString(reader.readDataItem().rawBytes()));
+        }
+    }
+
+    private boolean isDijkstraRestructuredBlock(Era era, Array blockArray) {
+        if (era != Era.Dijkstra) {
+            return false;
+        }
+        List<DataItem> items = blockArray.getDataItems();
+        int itemCount = items.size();
+        if (itemCount > 0 && items.get(itemCount - 1) == SimpleValue.BREAK) {
+            itemCount--; //indefinite-length arrays carry a trailing BREAK in getDataItems()
+        }
+        return itemCount == 2 && items.get(1) instanceof Array;
+    }
+
     @SneakyThrows
     private void handleWitnessDatumRedeemer(long block, List<Witnesses> witnesses, byte[] rawBlockBytes) {
-        if (witnesses != null && !witnesses.isEmpty()) {
-            final List<byte[]> transactionWitness = WitnessUtil.getWitnessRawData(rawBlockBytes);
+        final List<byte[]> transactionWitness = WitnessUtil.getWitnessRawData(rawBlockBytes);
+        fixWitnessDatumRedeemer(block, witnesses, transactionWitness);
+    }
 
-            for (int witnessIndex = 0; witnessIndex < transactionWitness.size(); witnessIndex++) {
+    @SneakyThrows
+    static void fixWitnessDatumRedeemer(long block, List<Witnesses> witnesses, List<byte[]> transactionWitness) {
+        if (witnesses != null && !witnesses.isEmpty()) {
+            if (transactionWitness.size() != witnesses.size()) {
+                log.error("block: {} witness raw byte count {} does not match parsed witness count {}",
+                        block, transactionWitness.size(), witnesses.size());
+            }
+
+            int witnessCount = Math.min(transactionWitness.size(), witnesses.size());
+            for (int witnessIndex = 0; witnessIndex < witnessCount; witnessIndex++) {
 
                 final var witnessFields = WitnessUtil.getWitnessFields(
                         transactionWitness.get(witnessIndex));
@@ -137,31 +207,38 @@ public enum BlockSerializer implements Serializer<Block> {
 
                 if (witness.getDatums() != null && !witness.getDatums().isEmpty()) {
 
-                    var datumBytes = getArrayBytes(witnessFields.get(BigInteger.valueOf(4L)));
-                    final List<Datum> datums = witness.getDatums();
-
-                    if (datumBytes.size() != datums.size()) {
-                        log.error("block: {} datum does not have the same size", block);
+                    byte[] datumFieldBytes = witnessFields.get(BigInteger.valueOf(4L));
+                    if (datumFieldBytes == null) {
+                        //Do NOT skip the rest of this witness: the redeemer fix-up below must still run
+                        log.error("block: {} witness {} has parsed datums but no raw datum field",
+                                block, witnessIndex);
                     } else {
-                        if (datums != null && !datums.isEmpty()) {
-                            for (int datumIndex = 0; datumIndex < datums.size(); datumIndex++) {
+                        var datumBytes = getArrayBytes(datumFieldBytes);
+                        final List<Datum> datums = witness.getDatums();
 
-                                final Datum datum = datums.get(datumIndex);
-                                final byte[] rawCbor = datumBytes.get(datumIndex);
+                        if (datumBytes.size() != datums.size()) {
+                            log.error("block: {} datum does not have the same size", block);
+                        } else {
+                            if (datums != null && !datums.isEmpty()) {
+                                for (int datumIndex = 0; datumIndex < datums.size(); datumIndex++) {
 
-                                final var cbor = HexUtil.encodeHexString(rawCbor);
-                                final var hash = Datum.cborToHash(rawCbor);
+                                    final Datum datum = datums.get(datumIndex);
+                                    final byte[] rawCbor = datumBytes.get(datumIndex);
 
-                                if (!datum.getHash().equals(hash)) {
-                                    log.debug("Datum Hash Mismatch : {} - {} - {}", block, datum.getHash(), hash);
+                                    final var cbor = HexUtil.encodeHexString(rawCbor);
+                                    final var hash = Datum.cborToHash(rawCbor);
+
+                                    if (!datum.getHash().equals(hash)) {
+                                        log.debug("Datum Hash Mismatch : {} - {} - {}", block, datum.getHash(), hash);
+                                    }
+
+                                    var updatedDatum = datum.toBuilder()
+                                            .cbor(cbor)
+                                            .hash(hash)
+                                            .build();
+
+                                    datums.set(datumIndex, updatedDatum);
                                 }
-
-                                var updatedDatum = datum.toBuilder()
-                                        .cbor(cbor)
-                                        .hash(hash)
-                                        .build();
-
-                                datums.set(datumIndex, updatedDatum);
                             }
                         }
                     }
@@ -176,6 +253,11 @@ public enum BlockSerializer implements Serializer<Block> {
                 if (redeemers != null && !redeemers.isEmpty()) {
 
                     var redeemersBytes = witnessFields.get(BigInteger.valueOf(5L));
+                    if (redeemersBytes == null) {
+                        log.error("block: {} witness {} has parsed redeemers but no raw redeemer field",
+                                block, witnessIndex);
+                        continue;
+                    }
 
                     //Isolate the first 3 bits of the byte, which represent the "major type" in CBOR's encoding structure. (0xe0 = 11100000)
                     var majorType = MajorType.ofByte(redeemersBytes[0] & 0xe0);

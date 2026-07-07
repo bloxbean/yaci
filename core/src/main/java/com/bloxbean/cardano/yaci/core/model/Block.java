@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model;
 
+import com.bloxbean.cardano.yaci.core.model.leios.LeiosCertificate;
 import lombok.*;
 
 import java.util.*;
@@ -21,5 +22,7 @@ public class Block {
     private Map<Integer, AuxData> auxiliaryDataMap = new LinkedHashMap();
     private List<Integer> invalidTransactions = new ArrayList<>();
 
+    private LeiosCertificate leiosCertificate;
+    private String perasCertCbor;
     private String cbor;
 }

@@ -10,7 +10,10 @@ import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
+import com.bloxbean.cardano.yaci.helper.LeiosConfig;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
+import com.bloxbean.cardano.yaci.helper.model.leios.EndorserBlockEvent;
+import com.bloxbean.cardano.yaci.helper.model.leios.LeiosVotesEvent;
 
 import java.util.List;
 
@@ -19,6 +22,19 @@ public interface BlockChainDataListener {
     default void onByronEbBlock(ByronEbBlock byronEbBlock) {}
 
     default void onBlock(Era era, Block block, List<Transaction> transactions) {}
+
+    /**
+     * Called for Leios Endorser Blocks observed through helper-level Leios integration. This stream is
+     * observational and has no ordering guarantee relative to the announcing ranking block; the normal
+     * {@link #onBlock(Era, Block, List)} stream remains ledger-authoritative.
+     */
+    default void onEndorserBlock(EndorserBlockEvent event) {}
+
+    /**
+     * Called for Leios vote notifications when vote delivery is enabled through {@link LeiosConfig}.
+     */
+    default void onLeiosVotes(LeiosVotesEvent event) {}
+
     default void onRollback(Point point) {}
 
     /**
