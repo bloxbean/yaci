@@ -17,3 +17,11 @@ publishing {
         }
     }
 }
+
+// Manual fixture-capture tool for Musashi re-pins (docs/leios/leios-musashi-source-tracking-guide.md step 4):
+// ./gradlew :helper:captureW27Fixtures  — connects to the public relay and dumps raw hex fixtures
+tasks.register('captureW27Fixtures', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.bloxbean.cardano.yaci.helper.MusashiW27FixtureCapture'
+    args = ["${rootProject.projectDir}/core/src/test/resources/leios/w27", '150']
+}

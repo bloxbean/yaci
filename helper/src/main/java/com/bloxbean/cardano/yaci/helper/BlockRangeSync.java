@@ -12,6 +12,7 @@ public class BlockRangeSync {
     private String host;
     private int port;
     private long protocolMagic;
+    private LeiosConfig leiosConfig;
 
     private BlockFetcher blockFetcher;
 
@@ -22,9 +23,19 @@ public class BlockRangeSync {
      * @param protocolMagic protocol magic
      */
     public BlockRangeSync(String host, int port, long protocolMagic) {
+        this(host, port, protocolMagic, LeiosConfig.defaultConfig());
+    }
+
+    /**
+     * Construct a range sync with optional Leios policy.
+     * In {@link LeiosConfig.Mode#AUTO}, Leios agents stay detached because notify/fetch events are near-tip and
+     * not scoped to the requested range. Use {@link LeiosConfig.Mode#ENABLED} to opt in explicitly.
+     */
+    public BlockRangeSync(String host, int port, long protocolMagic, LeiosConfig leiosConfig) {
         this.host = host;
         this.port = port;
         this.protocolMagic = protocolMagic;
+        this.leiosConfig = leiosConfig != null ? leiosConfig : LeiosConfig.defaultConfig();
     }
 
     /**
@@ -32,10 +43,11 @@ public class BlockRangeSync {
      * @param blockChainDataListener
      */
     public void start(BlockChainDataListener blockChainDataListener) {
-        blockFetcher = new BlockFetcher(host, port, protocolMagic);
+        blockFetcher = new BlockFetcher(host, port, protocolMagic, leiosConfig);
 
         BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(blockChainDataListener);
         blockFetcher.addBlockFetchListener(blockfetchAgentListener);
+        blockFetcher.addLeiosDataListener(blockChainDataListener);
         blockFetcher.start();
     }
 

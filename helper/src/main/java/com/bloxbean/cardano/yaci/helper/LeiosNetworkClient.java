@@ -6,7 +6,6 @@ import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.N2NVersionData;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionData;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
@@ -22,9 +21,7 @@ import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.LeiosNotifyAgentListe
 import com.bloxbean.cardano.yaci.helper.listener.LeiosDataListener;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -303,14 +300,7 @@ public class LeiosNetworkClient implements AutoCloseable {
     }
 
     private static VersionTable leiosVersionTable(long networkMagic) {
-        N2NVersionData versionData = new N2NVersionData(networkMagic, true, 0, false);
-        Map<Long, VersionData> versionTableMap = new HashMap<>();
-        versionTableMap.put(N2NVersionTableConstant.PROTOCOL_V11, versionData);
-        versionTableMap.put(N2NVersionTableConstant.PROTOCOL_V12, versionData);
-        versionTableMap.put(N2NVersionTableConstant.PROTOCOL_V13, versionData);
-        versionTableMap.put(N2NVersionTableConstant.PROTOCOL_V14, versionData);
-        versionTableMap.put(N2NVersionTableConstant.PROTOCOL_V15, versionData);
-        return new VersionTable(versionTableMap);
+        return N2NVersionTableConstant.v11AndAbove(networkMagic);
     }
 
     private boolean isLeiosCompatible(AcceptVersion acceptVersion) {
