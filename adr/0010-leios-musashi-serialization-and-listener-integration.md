@@ -49,8 +49,8 @@ Musashi prototype speaks today and pins where every format is expected to move.
   `LeiosDemoTypes.hs` et al.) — the node Musashi actually runs
   (`cardano-node 11.0.1.164`, weekly `input-output-hk/ouroboros-leios`
   prototype releases).
-- **Yaci**: ADR 0007/0008/0009, `docs/linear-leios-support-plan.md`,
-  `docs/leios-spec-tracking.md`, and the current branch code.
+- **Yaci**: ADR 0007/0008/0009, `docs/leios/linear-leios-support-plan.md`,
+  `docs/leios/leios-spec-tracking.md`, and the current branch code.
 
 ### What the live Musashi wire actually is (facts this design builds on)
 
@@ -347,7 +347,7 @@ reusable inside `LeiosNetworkClient` later — not required now.
   `Dijkstra` constant (compile-time visible, not a behavior change).
 - Leios data: opt-in by overriding `onEndorserBlock` / `onLeiosVotes` —
   feeding the `stores:leios` module sketched in
-  `docs/linear-leios-support-plan.md` (tables `leios_endorser_block`,
+  `docs/leios/linear-leios-support-plan.md` (tables `leios_endorser_block`,
   `leios_eb_tx`, …) whenever that work starts. Nothing in this ADR blocks or
   presupposes it.
 
@@ -424,7 +424,7 @@ on it.
 
 | Risk | Mitigation |
 | :--- | :--- |
-| Live wire ≠ pinned CDDL (vote already drifted at head; testnet redeploys weekly) | Fixture capture precedes code; shape-tolerant decoders degrade to raw + `UNKNOWN`, never throw into protocol loops; profile pins recorded here and in `docs/leios-spec-tracking.md` |
+| Live wire ≠ pinned CDDL (vote already drifted at head; testnet redeploys weekly) | Fixture capture precedes code; shape-tolerant decoders degrade to raw + `UNKNOWN`, never throw into protocol loops; profile pins recorded here and in `docs/leios/leios-spec-tracking.md` |
 | Dijkstra body restructure ships mid-stream (blueprint head already has it) | Layer-1 parser is position-guarded; restructure detection is a planned dispatch branch, and `onParsingError` + raw CBOR keep the failure diagnosable |
 | Header shape guard misfires on a future non-Leios header change | guard requires exactly `[bstr(32), uint]` at index 10; anything else is ignored, never fatal |
 | A1 mux re-encode makes `LeiosRawCbor` non-byte-exact | hash checks advisory until A1; tag-24 tx bytes are immune (definite bstr); fixtures use raw file bytes |
