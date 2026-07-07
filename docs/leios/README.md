@@ -9,7 +9,8 @@ edited as the prototype evolves — point-in-time design decisions live in
 
 | Document | What it is | When to read it |
 | :--- | :--- | :--- |
-| [leios-musashi-source-tracking-guide.md](leios-musashi-source-tracking-guide.md) | **Start here.** How the wire formats are defined upstream, the weekly release cadence, which repos to watch, and the step-by-step re-pin procedure when the network changes | You're maintaining Leios support, or a `prototype-2026wXX` release just dropped |
+| [leios-usage-guide.md](leios-usage-guide.md) | **Start here as an app developer.** Usage patterns with code: follow Musashi with zero code change, observe Endorser Blocks/votes, index both transaction lanes, range-fetch limits, raw protocol access, `LeiosConfig` reference | You're building an application or indexer on Yaci's Leios support |
+| [leios-musashi-source-tracking-guide.md](leios-musashi-source-tracking-guide.md) | **Start here as a maintainer.** How the wire formats are defined upstream, the weekly release cadence, which repos to watch, and the step-by-step re-pin procedure when the network changes | You're maintaining Leios support, or a `prototype-2026wXX` release just dropped |
 | [leios-spec-tracking.md](leios-spec-tracking.md) | The **pin matrix** — exactly which upstream commits/releases the current Yaci implementation targets, and its status | You need to know what Yaci implements *right now* |
 | [linear-leios-support-plan.md](linear-leios-support-plan.md) | The long-term plan for Yaci and Yaci Store: prototype compatibility through full CIP-0164 support, phases, risks, store schema sketches | You're planning the next phase of Leios work |
 
