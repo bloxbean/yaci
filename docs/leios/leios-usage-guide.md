@@ -220,6 +220,34 @@ rangeSync.fetch(fromPoint, toPoint);   // Dijkstra blocks parse fine
   tip-follower (Pattern 2/3). If your indexer was down, the missed EB bodies
   cannot currently be backfilled from the network.
 
+### Planned: batch EB resolution for initial sync (placeholder API)
+
+For bulk pipelines that process blocks in batches (yaci-store's parallel
+initial sync being the reference case), the intended mechanism is **one bulk
+EB-closure fetch per block batch**, made at batch-assembly time before
+parallel processing. The API for this already exists as a **placeholder**:
+
+```java
+LeiosEndorserBlockFetcher fetcher = LeiosEndorserBlockFetcher.unsupported();
+Map<String, EndorserBlockClosure> closures = fetcher.fetchClosures(points);
+// throws UnsupportedOperationException today — see below
+```
+
+Contract (stable, code against it now): input = points of **certified** EBs;
+returns a map keyed by EB hash (hex); an **absent key means unresolved** —
+strict pipelines fail the batch, observational pipelines record the gap.
+
+**Why it's unimplemented (TODO):** resolving arbitrary historical EBs needs
+CIP-0164's `MsgLeiosMultiBlockRequest` (bulk "EBs + all referenced
+transactions", designed for catch-up). The Musashi prototype has only
+offer-gated single-point requests, its batch/range messages are commented
+out of the pinned CDDL, and the protocol has **no error/not-found response**
+— requesting an unoffered EB risks a stalled agent or connection reset. The
+placeholder deliberately throws instead of silently returning empty results,
+so a pipeline wired for strict completeness fails loudly rather than
+committing batches with missing transactions. Implementation lands when a
+target network ships the multi/range fetch messages — see ADR 0012.
+
 ---
 
 ## Pattern 5 — Raw protocol access (`LeiosNetworkClient`)
@@ -271,6 +299,9 @@ feature flags of your own.
   `onLeiosVotes` are observational until the merged ledger-effective view
   lands.
 - EB data is near-tip only; no historical EB backfill (prototype limitation).
+  `LeiosEndorserBlockFetcher` (batch closure resolution for initial sync) is
+  a placeholder that throws `UnsupportedOperationException` until the final
+  protocol's multi/range fetch exists.
 - Dijkstra transaction bodies: key 14 is `guards` — keyhash-variant guards
   surface under `TransactionBody.requiredSigners`; credential-variant guards
   fail loudly via `onParsingError`. `sub_transactions` (key 23) and keys
