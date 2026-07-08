@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.AppMsgSubmissionAgent;
+import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.AppMsgSubmissionConfig;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.AppMsgSubmissionListener;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
@@ -17,9 +18,23 @@ import java.util.List;
  */
 @Slf4j
 public class AppProtocolManager {
-    private final AppMsgSubmissionAgent appMsgAgent = new AppMsgSubmissionAgent();
+    private final AppMsgSubmissionConfig appMsgConfig;
+    private final AppMsgSubmissionAgent appMsgAgent;
     private boolean appMsgEnabled = false;
     private boolean listenersSetup = false;
+
+    public AppProtocolManager() {
+        this(AppMsgSubmissionConfig.createDefault());
+    }
+
+    /**
+     * @param appMsgConfig transport config (chain-ids, size/TTL limits) shared by
+     *                     the client agent on this connection
+     */
+    public AppProtocolManager(AppMsgSubmissionConfig appMsgConfig) {
+        this.appMsgConfig = appMsgConfig != null ? appMsgConfig : AppMsgSubmissionConfig.createDefault();
+        this.appMsgAgent = new AppMsgSubmissionAgent(this.appMsgConfig);
+    }
 
     /**
      * Signal intent to use the AppMsgSubmission protocol.
@@ -35,6 +50,10 @@ public class AppProtocolManager {
 
     public AppMsgSubmissionAgent getAppMsgSubmissionAgent() {
         return appMsgAgent;
+    }
+
+    public AppMsgSubmissionConfig getAppMsgConfig() {
+        return appMsgConfig;
     }
 
     /**
@@ -92,7 +111,8 @@ public class AppProtocolManager {
 
     private void activateAppMsgSubmission() {
         setupListeners();
-        appMsgAgent.sendNextMessage();  // sends MsgInit
-        log.info("AppMsgSubmission protocol activated (MsgInit sent)");
+        appMsgAgent.sendNextMessage();  // sends MsgInit with our chain-ids
+        log.info("AppMsgSubmission protocol activated (MsgInit sent, chains: {})",
+                appMsgConfig.getChainIds());
     }
 }

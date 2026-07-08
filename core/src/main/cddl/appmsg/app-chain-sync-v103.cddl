@@ -1,0 +1,37 @@
+; =============================================================================
+; Yano App-Chain: App Chain Sync mini-protocol (protocol id 103)
+; =============================================================================
+; Catch-up transfer of finalized app blocks — a deliberately simple BlockFetch
+; analog. A joining or lagging member requests height ranges, verifies each
+; block locally (prev-hash chain, finality certificate against the membership
+; registry, re-applied state root) and commits, then switches to live gossip
+; (protocol 100). Runs on the same connection, negotiated by the same V100
+; handshake capability.
+;
+; State machine:
+;   States:  StIdle | StBusy | StDone
+;   Agency:  client: StIdle      server: StBusy      nobody: StDone
+;
+;   Transitions:
+;     StIdle -- msg-request-range --> StBusy
+;     StBusy -- msg-blocks         --> StIdle
+;     StBusy -- msg-no-blocks      --> StIdle
+;     StIdle -- msg-done           --> StDone
+;
+; The server MAY truncate the requested range (bounded reply batches); the
+; reply always carries the server's current tip height so the client can
+; keep requesting until it catches up.
+; =============================================================================
+
+app-chain-sync-message
+    = msg-request-range
+    / msg-blocks
+    / msg-no-blocks
+    / msg-done
+
+msg-request-range = [0, chain-id : tstr, from-height : uint, to-height : uint]  ; client
+msg-blocks        = [1, [ *block-cbor ], tip-height : uint]                      ; server
+msg-no-blocks     = [2, tip-height : uint]                                       ; server
+msg-done          = [3]                                                          ; client
+
+block-cbor = bstr    ; cbor(app-block) — see yano core-api cddl/appchain/app-block.cddl

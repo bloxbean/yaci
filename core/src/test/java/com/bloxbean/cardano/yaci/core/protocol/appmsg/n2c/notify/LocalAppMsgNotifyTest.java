@@ -40,7 +40,7 @@ class LocalAppMsgNotifyTest {
                 LocalAppMsgNotifySerializers.MsgReplyMessagesNonBlockingSerializer.INSTANCE.deserialize(bytes);
         assertThat(deserialized.getMessages()).hasSize(1);
         assertThat(deserialized.isHasMore()).isTrue();
-        assertThat(deserialized.getMessages().get(0).getTopicId()).isEqualTo("notify-topic");
+        assertThat(deserialized.getMessages().get(0).getTopic()).isEqualTo("notify-topic");
     }
 
     @Test
@@ -125,13 +125,7 @@ class LocalAppMsgNotifyTest {
     }
 
     private AppMessage testMessage() {
-        return AppMessage.builder()
-                .messageId(new byte[]{7, 8, 9})
-                .messageBody(new byte[]{10})
-                .authMethod(0)
-                .authProof(new byte[0])
-                .topicId("notify-topic")
-                .expiresAt(0)
-                .build();
+        return com.bloxbean.cardano.yaci.core.protocol.appmsg.AppMsgTestFixtures
+                .message("test-chain", "notify-topic", 1, new byte[]{10});
     }
 }

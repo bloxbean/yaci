@@ -1,0 +1,56 @@
+; =============================================================================
+; Yano App-Chain: Application Message Envelope (v2)
+; =============================================================================
+; The wire envelope carried by the App Message Submission mini-protocol
+; (protocol 100) and the local (n2c) app message protocols (101/102).
+;
+; Design rules:
+;  * `body` is an OPAQUE application payload. The transport, diffusion and
+;    sequencing layers never parse it. Applications define their own inner
+;    schema (CBOR, JSON, protobuf, raw bytes — anything).
+;  * `message-id` is content-derived:
+;        message-id = blake2b-256( cbor(signed-body) )
+;    Receivers MUST recompute it from the received fields and reject the
+;    message on mismatch.
+;  * `auth-proof` authenticates the signed body. Scheme 0 (ed25519) is a
+;    signature by `sender` over cbor(signed-body). Verification and
+;    membership authorization are performed by the embedding node.
+;  * `expires-at` (unix seconds) bounds the message's life in diffusion
+;    buffers. Nodes MUST drop expired messages and MUST reject messages
+;    whose expiry exceeds the per-chain max TTL.
+;  * `sender-seq` is a per-sender monotonically increasing sequence number
+;    used for gap detection and replay rejection. It does NOT define global
+;    order — the app-chain sequencer does.
+; =============================================================================
+
+app-message = [
+    version     : uint,             ; envelope version, currently 2
+    message-id  : bstr .size 32,    ; blake2b-256(cbor(signed-body))
+    chain-id    : tstr,             ; app-chain identity (group-scoped namespace)
+    topic       : tstr,             ; sub-stream within the chain; "" = default
+                                    ; prefix "~" reserved for system topics
+    sender      : bstr,             ; member identity (Ed25519 public key), 32 bytes
+                                    ; for scheme 0
+    sender-seq  : uint,             ; per-sender sequence number
+    expires-at  : uint,             ; unix seconds; 0 = no expiry (discouraged)
+    body        : bstr,             ; OPAQUE application payload
+    auth        : auth-proof
+]
+
+; The byte string that is hashed (message-id) and signed (auth-proof):
+signed-body = [
+    chain-id    : tstr,
+    topic       : tstr,
+    sender      : bstr,
+    sender-seq  : uint,
+    expires-at  : uint,
+    body        : bstr
+]
+
+auth-proof = [
+    scheme : uint,                  ; 0 = ed25519, 1 = spo-kes (reserved)
+    proof  : bstr
+]
+; scheme 0: proof = Ed25519 signature by `sender` over cbor(signed-body)
+; scheme 1: proof = cbor([kes-signature, operational-certificate,
+;                         cold-verification-key])  (CIP-137 compatible; reserved)

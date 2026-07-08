@@ -6,6 +6,7 @@ import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.messages.*;
 public interface AppMsgSubmissionListener extends AgentListener {
 
     // Client-side methods (handling requests from server)
+    default void handleInitAck(MsgInitAck ack) {}
     default void handleRequestMessageIds(MsgRequestMessageIds request) {}
     default void handleRequestMessages(MsgRequestMessages request) {}
 

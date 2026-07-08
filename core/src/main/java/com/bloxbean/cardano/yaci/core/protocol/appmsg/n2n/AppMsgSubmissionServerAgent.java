@@ -14,11 +14,17 @@ import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Server-side agent for Protocol 100 (App Message Submission).
  * Pulls messages from connected clients using a blocking request pattern.
  * Maintains FIFO queue, bounded processed-id cache, and ack/req window tracking.
+ * <p>
+ * Enforces on every inbound message body: content-derived message-id recompute,
+ * max body size, TTL bounds, chain membership (negotiated via MsgInit/MsgInitAck)
+ * and the pluggable {@link AppMsgValidator} (auth/membership/admission). Rejected
+ * messages are still acknowledged (the window advances) but never reach listeners.
  */
 @Slf4j
 public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener> {
@@ -30,9 +36,12 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
     private final Set<String> outstandingMessageIdSet = new HashSet<>();
     private final AtomicInteger pendingAcknowledgments = new AtomicInteger(0);
     private final Set<String> processedMessageIds;
+    private final AtomicLong rejectedMessageCount = new AtomicLong(0);
     private volatile Message pendingRequest;
     private final AppMsgSubmissionConfig config;
     private volatile int requestedMessageIdCount;
+    /** Chains announced by the connected client in MsgInit. */
+    private volatile Set<String> clientChainIds = Set.of();
 
     public AppMsgSubmissionServerAgent() {
         this(AppMsgSubmissionConfig.createDefault());
@@ -56,6 +65,10 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
             requestedMessageIdCount = Math.max(0, ((MsgRequestMessageIds) message).getReqCount());
         }
         super.sendRequest(message);
+        if (message instanceof MsgInitAck) {
+            // InitAck delivered, state is now Idle — kick off the pull loop
+            sendInitialBlockingRequest();
+        }
     }
 
     @Override
@@ -63,6 +76,10 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
         log.debug("buildNextMessage() - state: {}, hasAgency: {}, pendingRequest: {}",
                 currentState, hasAgency(),
                 pendingRequest != null ? pendingRequest.getClass().getSimpleName() : "null");
+
+        if (currentState == AppMsgSubmissionState.InitAck) {
+            return new MsgInitAck(new ArrayList<>(config.getChainIds()));
+        }
 
         if (currentState == AppMsgSubmissionState.Idle && pendingRequest != null) {
             if (getChannel() == null) {
@@ -90,7 +107,7 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
         log.debug("Processing: {} in state: {}", message.getClass().getSimpleName(), currentState);
 
         if (message instanceof MsgInit) {
-            handleInit();
+            handleInit((MsgInit) message);
         } else if (message instanceof MsgReplyMessageIds) {
             handleReplyMessageIds((MsgReplyMessageIds) message);
         } else if (message instanceof MsgReplyMessages) {
@@ -100,9 +117,16 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
         }
     }
 
-    private void handleInit() {
-        log.info("Received MsgInit from client");
-        sendInitialBlockingRequest();
+    private void handleInit(MsgInit init) {
+        this.clientChainIds = Set.copyOf(init.getChainIds());
+        Set<String> shared = new HashSet<>(config.getChainIds());
+        shared.retainAll(clientChainIds);
+        log.info("Received MsgInit from client (chains: {}, shared: {})", clientChainIds, shared);
+        if (shared.isEmpty() && !config.getChainIds().isEmpty()) {
+            log.warn("No shared app chains with client — session will carry no messages");
+        }
+        // Send MsgInitAck; the pull loop starts from sendRequest() once it is delivered
+        sendNextMessage();
     }
 
     private void handleReplyMessageIds(MsgReplyMessageIds reply) {
@@ -176,8 +200,14 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
             if (removeOutstandingMessageId(messageId)) {
                 processedMessageIds.add(messageId);
                 pendingAcknowledgments.incrementAndGet();
-                acceptedMessages.add(msg);
-                log.debug("Processed message {}, pending acks: {}", messageId, pendingAcknowledgments.get());
+                String rejection = checkMessage(msg);
+                if (rejection == null) {
+                    acceptedMessages.add(msg);
+                    log.debug("Processed message {}, pending acks: {}", messageId, pendingAcknowledgments.get());
+                } else {
+                    rejectedMessageCount.incrementAndGet();
+                    log.warn("Rejected inbound app message {}: {}", messageId, rejection);
+                }
             }
         }
 
@@ -193,6 +223,34 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
 
         log.info("Message reply processed, sending next blocking request");
         sendNextBlockingRequest();
+    }
+
+    /**
+     * Structural + pluggable validation of one inbound message.
+     * @return null if accepted, otherwise the rejection reason
+     */
+    private String checkMessage(AppMessage msg) {
+        if (msg.getVersion() != AppMessage.ENVELOPE_VERSION)
+            return "unsupported envelope version: " + msg.getVersion();
+        if (!msg.hasValidMessageId())
+            return "message-id mismatch (content-derived id verification failed)";
+        if (msg.getSize() > config.getMaxMessageSize())
+            return "body exceeds max size (" + msg.getSize() + " > " + config.getMaxMessageSize() + ")";
+
+        long now = System.currentTimeMillis() / 1000;
+        if (msg.isExpired(now))
+            return "expired (expiresAt=" + msg.getExpiresAt() + ")";
+        if (config.getMaxTtlSeconds() > 0 && msg.getExpiresAt() > now + config.getMaxTtlSeconds())
+            return "expiresAt too far in the future (max TTL " + config.getMaxTtlSeconds() + "s)";
+
+        if (!config.getChainIds().isEmpty() && !config.getChainIds().contains(msg.getChainId()))
+            return "chain not served: " + msg.getChainId();
+
+        AppMsgValidator.Result result = config.getValidator().validate(msg);
+        if (!result.isAccepted())
+            return result.getReason() != null ? result.getReason() : "rejected by validator";
+
+        return null;
     }
 
     private void sendInitialBlockingRequest() {
@@ -258,6 +316,8 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
         requestedMessageIdCount = 0;
         pendingAcknowledgments.set(0);
         pendingRequest = null;
+        rejectedMessageCount.set(0);
+        clientChainIds = Set.of();
         this.currentState = AppMsgSubmissionState.Init;
     }
 
@@ -281,6 +341,14 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
 
     public int getPendingAcknowledgments() {
         return pendingAcknowledgments.get();
+    }
+
+    public long getRejectedMessageCount() {
+        return rejectedMessageCount.get();
+    }
+
+    public Set<String> getClientChainIds() {
+        return clientChainIds;
     }
 
     public AppMsgSubmissionConfig getConfig() {
