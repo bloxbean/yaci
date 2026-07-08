@@ -168,4 +168,16 @@ public class WitnessUtilTest {
 
         assertThat(redeemers).hasSize(30);
     }
+
+    @Test
+    @SneakyThrows
+    public void getWitnessRawData_indefiniteWitnessArray() {
+        byte[] blockBytes = HexUtil.decodeHexString("82058580809fa0a10180ffa080");
+
+        var witnesses = WitnessUtil.getWitnessRawData(blockBytes);
+
+        assertThat(witnesses).hasSize(2);
+        assertThat(HexUtil.encodeHexString(witnesses.get(0))).isEqualTo("a0");
+        assertThat(HexUtil.encodeHexString(witnesses.get(1))).isEqualTo("a10180");
+    }
 }
