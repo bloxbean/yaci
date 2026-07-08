@@ -34,7 +34,7 @@ public class PeerClient {
 
     private int txMaxQueueSize;
 
-    private final AppProtocolManager appProtocolManager = new AppProtocolManager();
+    private AppProtocolManager appProtocolManager = new AppProtocolManager();
 
     private N2NPeerFetcher n2NPeerFetcher;
 
@@ -223,6 +223,19 @@ public class PeerClient {
         if (n2NPeerFetcher != null)
             throw new IllegalStateException("App message protocol must be enabled before connect()");
 
+        this.versionTable = N2NVersionTableConstant.withAppLayer(versionTable);
+        appProtocolManager.enableAppMsg();
+    }
+
+    /**
+     * Enable the app message protocol with a specific transport config
+     * (chain-ids, size/TTL limits). Must be called before connect().
+     */
+    public void enableAppMsg(com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.AppMsgSubmissionConfig appMsgConfig) {
+        if (n2NPeerFetcher != null)
+            throw new IllegalStateException("App message protocol must be enabled before connect()");
+
+        this.appProtocolManager = new AppProtocolManager(appMsgConfig);
         this.versionTable = N2NVersionTableConstant.withAppLayer(versionTable);
         appProtocolManager.enableAppMsg();
     }

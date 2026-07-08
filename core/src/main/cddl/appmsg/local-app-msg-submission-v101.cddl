@@ -1,0 +1,36 @@
+; =============================================================================
+; Yano App-Chain: Local App Message Submission mini-protocol (protocol id 101)
+; =============================================================================
+; Node-to-client request/response for a local application to submit an app
+; message to its node for diffusion — the app-chain analogue of Cardano's
+; local-tx-submission. Mirrors CIP-137's Local Message Submission protocol.
+;
+; State machine:
+;   States:  StIdle | StBusy | StDone
+;   Agency:  client: StIdle       server: StBusy       nobody: StDone
+;
+;   Transitions:
+;     StIdle -- msg-submit-message --> StBusy
+;     StBusy -- msg-accept-message --> StIdle
+;     StBusy -- msg-reject-message --> StIdle
+;     StIdle -- msg-done           --> StDone
+; =============================================================================
+
+local-app-msg-submission-message
+    = msg-submit-message
+    / msg-accept-message
+    / msg-reject-message
+    / msg-done
+
+msg-submit-message = [0, app-message]        ; client -> node
+msg-accept-message = [1]                      ; node -> client
+msg-reject-message = [2, reject-reason, reject-detail]  ; node -> client
+msg-done           = [3]                      ; client -> node
+
+reject-reason = 0   ; INVALID          (structural/auth/admission failure)
+              / 1   ; ALREADY_RECEIVED (duplicate message-id)
+              / 2   ; EXPIRED
+              / 3   ; OTHER
+reject-detail = tstr
+
+; app-message: see app-message-envelope.cddl

@@ -1,0 +1,85 @@
+; =============================================================================
+; Yano App-Chain: App Message Submission mini-protocol (protocol id 100)
+; =============================================================================
+; Pull-based message diffusion between app-chain nodes, derived from Cardano
+; CIP-137 (Decentralised Message Queue) and structurally identical to the
+; Cardano tx-submission mini-protocol: the inbound side (server) drives the
+; flow by requesting message ids and then message bodies, with ack/req
+; windowing for flow control.
+;
+; Runs multiplexed on the same node-to-node connection as the Cardano L1
+; mini-protocols (chain-sync 2, block-fetch 3, tx-submission 4, keep-alive 8,
+; peer-sharing 10). Capability is negotiated in the standard N2N handshake by
+; advertising synthetic version 100 in the version table — a peer that does
+; not know version 100 (e.g. a Haskell cardano-node) simply negotiates a
+; lower version and this protocol stays inactive.
+;
+; State machine:
+;
+;   States:  StInit | StInitAck | StIdle | StMessageIdsBlocking
+;          | StMessageIdsNonBlocking | StMessages | StDone
+;
+;   Agency:  client (outbound side):  StInit, StMessageIdsBlocking,
+;                                     StMessageIdsNonBlocking, StMessages
+;            server (inbound side):   StInitAck, StIdle
+;            nobody:                   StDone
+;
+;   Transitions:
+;     StInit                  -- msg-init                    --> StInitAck
+;     StInitAck               -- msg-init-ack                --> StIdle
+;     StIdle                  -- msg-request-message-ids(b=true)  --> StMessageIdsBlocking
+;     StIdle                  -- msg-request-message-ids(b=false) --> StMessageIdsNonBlocking
+;     StIdle                  -- msg-request-messages         --> StMessages
+;     StIdle                  -- msg-done                     --> StDone
+;     StMessageIdsBlocking    -- msg-reply-message-ids        --> StIdle
+;     StMessageIdsNonBlocking -- msg-reply-message-ids        --> StIdle
+;     StMessages              -- msg-reply-messages           --> StIdle
+;
+; Chain-scoped negotiation:
+;   msg-init carries the client's chain-ids; msg-init-ack carries the
+;   server's. Both sides restrict the session to the intersection: the
+;   client MUST NOT offer messages for unshared chains, the server MUST
+;   reject them.
+;
+; Flow-control invariants (as in CIP-137 / tx-submission):
+;   * `ack` acknowledges previously announced ids (removed from the
+;     outbound FIFO); `req` requests up to that many new ids.
+;   * A blocking request is only legal when the unacknowledged buffer is
+;     empty. Requesting 0 ids is illegal.
+;   * Requesting a message id that was never announced is a protocol
+;     violation.
+;   * The outbound side MAY omit messages that became invalid (e.g.
+;     expired) between announcement and fetch.
+; =============================================================================
+
+app-msg-submission-message
+    = msg-init
+    / msg-request-message-ids
+    / msg-reply-message-ids
+    / msg-request-messages
+    / msg-reply-messages
+    / msg-done
+    / msg-init-ack
+
+msg-init                = [0, chain-id-list]        ; client -> server
+msg-request-message-ids = [1, is-blocking
+                            , ack-count : word16
+                            , req-count : word16]    ; server -> client
+msg-reply-message-ids   = [2, [ *message-id-and-size ]]  ; client -> server
+msg-request-messages    = [3, [ *message-id ]]      ; server -> client
+msg-reply-messages      = [4, [ *app-message ]]     ; client -> server
+msg-done                = [5]                        ; client -> server
+msg-init-ack            = [6, chain-id-list]        ; server -> client
+
+chain-id-list        = [ *tstr ]
+is-blocking          = false / true
+word16               = uint .size 2
+message-id           = bstr .size 32
+message-size-bytes   = uint
+message-id-and-size  = [ message-id, message-size-bytes ]
+
+; app-message: see app-message-envelope.cddl
+
+; NOTE: the inner arrays of msg-init, msg-init-ack, msg-reply-message-ids,
+; msg-request-messages and msg-reply-messages are encoded as
+; indefinite-length CBOR arrays by this implementation.

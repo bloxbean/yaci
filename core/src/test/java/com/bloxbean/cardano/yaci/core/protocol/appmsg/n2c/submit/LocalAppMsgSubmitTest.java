@@ -19,8 +19,8 @@ class LocalAppMsgSubmitTest {
 
         MsgSubmitMessage deserialized =
                 LocalAppMsgSubmitSerializers.MsgSubmitMessageSerializer.INSTANCE.deserialize(bytes);
-        assertThat(deserialized.getAppMessage().getMessageId()).isEqualTo(new byte[]{1, 2, 3});
-        assertThat(deserialized.getAppMessage().getTopicId()).isEqualTo("test");
+        assertThat(deserialized.getAppMessage().getMessageId()).isEqualTo(appMsg.getMessageId());
+        assertThat(deserialized.getAppMessage().getTopic()).isEqualTo("test");
     }
 
     @Test
@@ -104,13 +104,7 @@ class LocalAppMsgSubmitTest {
     }
 
     private AppMessage testMessage() {
-        return AppMessage.builder()
-                .messageId(new byte[]{1, 2, 3})
-                .messageBody(new byte[]{10, 20})
-                .authMethod(0)
-                .authProof(new byte[0])
-                .topicId("test")
-                .expiresAt(0)
-                .build();
+        return com.bloxbean.cardano.yaci.core.protocol.appmsg.AppMsgTestFixtures
+                .message("test-chain", "test", 1, new byte[]{10, 20});
     }
 }

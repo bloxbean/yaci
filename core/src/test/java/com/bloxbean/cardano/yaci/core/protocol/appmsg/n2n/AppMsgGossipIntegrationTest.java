@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
 import com.bloxbean.cardano.yaci.core.network.server.AgentFactory;
 import com.bloxbean.cardano.yaci.core.network.server.NodeServer;
+import com.bloxbean.cardano.yaci.core.protocol.appmsg.AppMsgTestFixtures;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.model.AppMessage;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.messages.MsgRequestMessageIds;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.messages.MsgRequestMessages;
@@ -19,8 +20,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -31,24 +34,27 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Integration test: starts a real server with AppMsgSubmissionServerAgent,
  * connects a client with AppMsgSubmissionAgent carrying messages,
- * and verifies the pull-based gossip protocol transfers messages end-to-end.
+ * and verifies the pull-based gossip protocol transfers messages end-to-end,
+ * including chain-scoped negotiation (MsgInit/MsgInitAck) and enforcement.
  */
 @Slf4j
 class AppMsgGossipIntegrationTest {
 
     private static final int TEST_PORT = 23457;
     private static final long TEST_MAGIC = 42;
+    private static final String CHAIN = AppMsgTestFixtures.CHAIN;
 
     @Test
     @Timeout(30)
     void testClientToServerMessageGossip() throws Exception {
         // --- Server-side: NodeServer with app-layer agent factory ---
         List<AppMessage> serverReceivedMessages = new CopyOnWriteArrayList<>();
-        CountDownLatch messagesReceivedLatch = new CountDownLatch(2); // expect 2 messages
+        CountDownLatch messagesReceivedLatch = new CountDownLatch(2); // expect 2 valid messages
 
         AppMsgSubmissionConfig serverConfig = AppMsgSubmissionConfig.builder()
                 .batchSize(10)
                 .useBlockingMode(true)
+                .chainIds(Set.of(CHAIN))
                 .build();
 
         AgentFactory appMsgFactory = () -> {
@@ -65,8 +71,8 @@ class AppMsgGossipIntegrationTest {
                     for (AppMessage msg : reply.getMessages()) {
                         serverReceivedMessages.add(msg);
                         messagesReceivedLatch.countDown();
-                        log.info("Server received message: id={}, topic={}, body-size={}",
-                                msg.getMessageIdHex(), msg.getTopicId(), msg.getMessageBody().length);
+                        log.info("Server received message: id={}, chain={}, topic={}, body-size={}",
+                                msg.getMessageIdHex(), msg.getChainId(), msg.getTopic(), msg.getSize());
                     }
                 }
             });
@@ -86,7 +92,10 @@ class AppMsgGossipIntegrationTest {
 
         try {
             // --- Client-side: connect with AppMsgSubmissionAgent containing messages ---
-            AppMsgSubmissionAgent clientAgent = new AppMsgSubmissionAgent();
+            AppMsgSubmissionConfig clientConfig = AppMsgSubmissionConfig.builder()
+                    .chainIds(Set.of(CHAIN, "client-only-chain"))
+                    .build();
+            AppMsgSubmissionAgent clientAgent = new AppMsgSubmissionAgent(clientConfig);
 
             // Wire up the client listener to drive the protocol forward
             // (same pattern as N2NPeerFetcher does for TxSubmissionAgent)
@@ -100,31 +109,14 @@ class AppMsgGossipIntegrationTest {
                 public void handleRequestMessages(MsgRequestMessages request) {
                     clientAgent.sendNextMessage();
                 }
-
-                @Override
-                public void handleReplyMessageIds(MsgReplyMessageIds reply) {}
-
-                @Override
-                public void handleReplyMessages(MsgReplyMessages reply) {}
             });
 
-            // Enqueue messages before connecting
-            AppMessage msg1 = AppMessage.builder()
-                    .messageId(new byte[]{0x01, 0x02, 0x03, 0x04})
-                    .messageBody("Hello from client - message 1".getBytes())
-                    .authMethod(0)
-                    .authProof(new byte[0])
-                    .topicId("test-topic")
-                    .expiresAt(0)
-                    .build();
-            AppMessage msg2 = AppMessage.builder()
-                    .messageId(new byte[]{0x05, 0x06, 0x07, 0x08})
-                    .messageBody("Hello from client - message 2".getBytes())
-                    .authMethod(0)
-                    .authProof(new byte[0])
-                    .topicId("test-topic")
-                    .expiresAt(0)
-                    .build();
+            // Well-formed envelope v2 messages (content-derived ids)
+            AppMessage msg1 = AppMsgTestFixtures.message(CHAIN, "test-topic", 1,
+                    "Hello from client - message 1".getBytes(StandardCharsets.UTF_8));
+            AppMessage msg2 = AppMsgTestFixtures.message(CHAIN, "test-topic", 2,
+                    "Hello from client - message 2".getBytes(StandardCharsets.UTF_8));
+
             HandshakeAgent handshakeAgent = new HandshakeAgent(
                     N2NVersionTableConstant.v11AndAboveWithAppLayer(TEST_MAGIC, false, 0, false), true);
 
@@ -162,16 +154,21 @@ class AppMsgGossipIntegrationTest {
             // Wait for messages to be pulled by server
             boolean received = messagesReceivedLatch.await(15, TimeUnit.SECONDS);
 
+            // Chain negotiation should have resolved to the shared chain only
+            assertThat(clientAgent.getNegotiatedChainIds()).containsExactly(CHAIN);
+
             client.shutdown();
 
             // Verify
             assertThat(received).as("Server should have received 2 messages").isTrue();
             assertThat(serverReceivedMessages).hasSize(2);
-            assertThat(serverReceivedMessages.get(0).getTopicId()).isEqualTo("test-topic");
-            assertThat(new String(serverReceivedMessages.get(0).getMessageBody()))
+            assertThat(serverReceivedMessages.get(0).getChainId()).isEqualTo(CHAIN);
+            assertThat(serverReceivedMessages.get(0).getTopic()).isEqualTo("test-topic");
+            assertThat(new String(serverReceivedMessages.get(0).getBody(), StandardCharsets.UTF_8))
                     .isEqualTo("Hello from client - message 1");
-            assertThat(new String(serverReceivedMessages.get(1).getMessageBody()))
+            assertThat(new String(serverReceivedMessages.get(1).getBody(), StandardCharsets.UTF_8))
                     .isEqualTo("Hello from client - message 2");
+            assertThat(serverReceivedMessages).allMatch(AppMessage::hasValidMessageId);
 
             log.info("App message gossip integration test passed!");
 

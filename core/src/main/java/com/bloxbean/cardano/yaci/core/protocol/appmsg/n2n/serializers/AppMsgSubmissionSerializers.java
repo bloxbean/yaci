@@ -15,7 +15,7 @@ import java.util.List;
 @Slf4j
 public class AppMsgSubmissionSerializers {
 
-    // Tag 0: MsgInit
+    // Tag 0: MsgInit [0, [chainId(tstr), ...]]
     public enum MsgInitSerializer implements Serializer<MsgInit> {
         INSTANCE;
 
@@ -23,17 +23,65 @@ public class AppMsgSubmissionSerializers {
         public byte[] serialize(MsgInit object) {
             Array array = new Array();
             array.add(new UnsignedInteger(0));
+            array.add(serializeChainIds(object.getChainIds()));
             return CborSerializationUtil.serialize(array);
         }
 
         @Override
         public MsgInit deserializeDI(DataItem di) {
             Array array = (Array) di;
-            int label = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
-            if (label == 0)
-                return new MsgInit();
-            throw new CborRuntimeException("Invalid MsgInit label: " + label);
+            List<DataItem> items = array.getDataItems();
+            int label = ((UnsignedInteger) items.get(0)).getValue().intValue();
+            if (label != 0)
+                throw new CborRuntimeException("Invalid MsgInit label: " + label);
+            return new MsgInit(deserializeChainIds(items));
         }
+    }
+
+    // Tag 6: MsgInitAck [6, [chainId(tstr), ...]]
+    public enum MsgInitAckSerializer implements Serializer<MsgInitAck> {
+        INSTANCE;
+
+        @Override
+        public byte[] serialize(MsgInitAck object) {
+            Array array = new Array();
+            array.add(new UnsignedInteger(6));
+            array.add(serializeChainIds(object.getChainIds()));
+            return CborSerializationUtil.serialize(array);
+        }
+
+        @Override
+        public MsgInitAck deserializeDI(DataItem di) {
+            Array array = (Array) di;
+            List<DataItem> items = array.getDataItems();
+            int label = ((UnsignedInteger) items.get(0)).getValue().intValue();
+            if (label != 6)
+                throw new CborRuntimeException("Invalid MsgInitAck label: " + label);
+            return new MsgInitAck(deserializeChainIds(items));
+        }
+    }
+
+    private static Array serializeChainIds(List<String> chainIds) {
+        Array chains = new Array();
+        chains.setChunked(true);
+        if (chainIds != null) {
+            for (String chainId : chainIds) {
+                chains.add(new UnicodeString(chainId));
+            }
+        }
+        chains.add(SimpleValue.BREAK);
+        return chains;
+    }
+
+    private static List<String> deserializeChainIds(List<DataItem> items) {
+        List<String> chainIds = new ArrayList<>();
+        if (items.size() > 1 && items.get(1) instanceof Array) {
+            for (DataItem chainDI : ((Array) items.get(1)).getDataItems()) {
+                if (chainDI instanceof Special) break;
+                chainIds.add(((UnicodeString) chainDI).getString());
+            }
+        }
+        return chainIds;
     }
 
     // Tag 1: MsgRequestMessageIds [1, isBlocking, ack, req]
@@ -208,35 +256,53 @@ public class AppMsgSubmissionSerializers {
         }
     }
 
-    // AppMessage CBOR:
-    // [messageId(bstr), messageBody(bstr), authMethod(uint), authProof(bstr), topicId(tstr), expiresAt(uint)]
+    // AppMessage envelope v2 CBOR:
+    // [version(uint), messageId(bstr), chainId(tstr), topic(tstr), sender(bstr),
+    //  senderSeq(uint), expiresAt(uint), body(bstr), [authScheme(uint), authProof(bstr)]]
     public static Array serializeAppMessage(AppMessage msg) {
         Array arr = new Array();
+        arr.add(new UnsignedInteger(msg.getVersion()));
         arr.add(new ByteString(msg.getMessageId()));
-        arr.add(new ByteString(msg.getMessageBody()));
-        arr.add(new UnsignedInteger(msg.getAuthMethod()));
-        arr.add(new ByteString(msg.getAuthProof() != null ? msg.getAuthProof() : new byte[0]));
-        arr.add(new UnicodeString(msg.getTopicId() != null ? msg.getTopicId() : ""));
+        arr.add(new UnicodeString(msg.getChainId() != null ? msg.getChainId() : ""));
+        arr.add(new UnicodeString(msg.getTopic() != null ? msg.getTopic() : ""));
+        arr.add(new ByteString(msg.getSender() != null ? msg.getSender() : new byte[0]));
+        arr.add(new UnsignedInteger(msg.getSenderSeq()));
         arr.add(new UnsignedInteger(msg.getExpiresAt()));
+        arr.add(new ByteString(msg.getBody() != null ? msg.getBody() : new byte[0]));
+
+        Array auth = new Array();
+        auth.add(new UnsignedInteger(msg.getAuthScheme()));
+        auth.add(new ByteString(msg.getAuthProof() != null ? msg.getAuthProof() : new byte[0]));
+        arr.add(auth);
         return arr;
     }
 
     public static AppMessage deserializeAppMessage(Array arr) {
         List<DataItem> items = arr.getDataItems();
-        byte[] messageId = ((ByteString) items.get(0)).getBytes();
-        byte[] messageBody = ((ByteString) items.get(1)).getBytes();
-        int authMethod = ((UnsignedInteger) items.get(2)).getValue().intValue();
-        byte[] authProof = ((ByteString) items.get(3)).getBytes();
-        String topicId = ((UnicodeString) items.get(4)).getString();
-        long expiresAt = ((UnsignedInteger) items.get(5)).getValue().longValue();
+        int version = ((UnsignedInteger) items.get(0)).getValue().intValue();
+        byte[] messageId = ((ByteString) items.get(1)).getBytes();
+        String chainId = ((UnicodeString) items.get(2)).getString();
+        String topic = ((UnicodeString) items.get(3)).getString();
+        byte[] sender = ((ByteString) items.get(4)).getBytes();
+        long senderSeq = ((UnsignedInteger) items.get(5)).getValue().longValue();
+        long expiresAt = ((UnsignedInteger) items.get(6)).getValue().longValue();
+        byte[] body = ((ByteString) items.get(7)).getBytes();
+
+        Array auth = (Array) items.get(8);
+        int authScheme = ((UnsignedInteger) auth.getDataItems().get(0)).getValue().intValue();
+        byte[] authProof = ((ByteString) auth.getDataItems().get(1)).getBytes();
 
         return AppMessage.builder()
+                .version(version)
                 .messageId(messageId)
-                .messageBody(messageBody)
-                .authMethod(authMethod)
-                .authProof(authProof)
-                .topicId(topicId)
+                .chainId(chainId)
+                .topic(topic)
+                .sender(sender)
+                .senderSeq(senderSeq)
                 .expiresAt(expiresAt)
+                .body(body)
+                .authScheme(authScheme)
+                .authProof(authProof)
                 .build();
     }
 }

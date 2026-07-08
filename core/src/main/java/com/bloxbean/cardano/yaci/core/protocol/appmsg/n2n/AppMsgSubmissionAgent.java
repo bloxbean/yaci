@@ -5,36 +5,42 @@ import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.model.AppMessage;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.model.AppMessageId;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.messages.*;
-import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Arrays;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Client-side agent for Protocol 100 (App Message Submission).
  * Maintains a queue of pending messages and responds to server requests
- * for message IDs and bodies.
+ * for message IDs and bodies. Only messages for chains negotiated via
+ * MsgInit/MsgInitAck are offered; expired messages are dropped on offer.
  */
 @Slf4j
 public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
-    private static final int DEFAULT_MAX_QUEUE_SIZE = 1000;
 
     private final ConcurrentLinkedQueue<AppMessage> pendingMessages;
     private final ConcurrentLinkedQueue<byte[]> pendingIds;
     private final ConcurrentLinkedQueue<byte[]> requestedIds;
+    private final AppMsgSubmissionConfig config;
     private final int maxQueueSize;
     private volatile int requestedMessageIdWindow;
+    /** Chains both sides share; null until MsgInitAck received (then never null). */
+    private volatile Set<String> negotiatedChainIds;
 
     public AppMsgSubmissionAgent() {
-        this(DEFAULT_MAX_QUEUE_SIZE);
+        this(AppMsgSubmissionConfig.createDefault(), 1000);
     }
 
-    public AppMsgSubmissionAgent(int maxQueueSize) {
+    public AppMsgSubmissionAgent(AppMsgSubmissionConfig config) {
+        this(config, 1000);
+    }
+
+    public AppMsgSubmissionAgent(AppMsgSubmissionConfig config, int maxQueueSize) {
         super(true); // Client agent
         this.currentState = AppMsgSubmissionState.Init;
+        this.config = config;
         this.pendingMessages = new ConcurrentLinkedQueue<>();
         this.pendingIds = new ConcurrentLinkedQueue<>();
         this.requestedIds = new ConcurrentLinkedQueue<>();
@@ -50,18 +56,20 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
     public Message buildNextMessage() {
         switch ((AppMsgSubmissionState) currentState) {
             case Init:
-                return new MsgInit();
+                return new MsgInit(new ArrayList<>(config.getChainIds()));
             case MessageIdsBlocking:
                 // In blocking mode, hold agency until we have actual message IDs to report.
                 // Don't rely solely on pendingIds — it may have stale entries (IDs whose
                 // messages were already delivered and removed from pendingMessages).
                 // enqueueMessage() will trigger sendNextMessage() when new messages arrive.
+                sweepExpired();
                 if (pendingMessages.isEmpty()) {
                     pendingIds.clear(); // Clean up stale IDs
                     return null;
                 }
                 return buildReplyMessageIds();
             case MessageIdsNonBlocking:
+                sweepExpired();
                 return buildReplyMessageIds();
             case Messages:
                 return buildReplyMessages();
@@ -100,13 +108,29 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
     public void processResponse(Message message) {
         if (message == null) return;
 
-        if (message instanceof MsgInit) {
-            log.debug("Received MsgInit");
+        if (message instanceof MsgInitAck) {
+            handleInitAck((MsgInitAck) message);
         } else if (message instanceof MsgRequestMessageIds) {
             handleRequestMessageIds((MsgRequestMessageIds) message);
         } else if (message instanceof MsgRequestMessages) {
             handleRequestMessages((MsgRequestMessages) message);
         }
+    }
+
+    private void handleInitAck(MsgInitAck ack) {
+        Set<String> shared = new HashSet<>(config.getChainIds());
+        shared.retainAll(new HashSet<>(ack.getChainIds()));
+        this.negotiatedChainIds = Collections.unmodifiableSet(shared);
+        if (shared.isEmpty()) {
+            log.warn("No shared app chains with peer (local: {}, peer: {}) — nothing will be offered",
+                    config.getChainIds(), ack.getChainIds());
+        } else {
+            log.info("App chains negotiated with peer: {}", shared);
+        }
+        // Drop queued messages for chains the peer doesn't serve
+        pendingMessages.removeIf(m -> !shared.contains(m.getChainId()));
+        pendingIds.removeIf(id -> findMessage(id).isEmpty());
+        getAgentListeners().forEach(l -> l.handleInitAck(ack));
     }
 
     private void handleRequestMessageIds(MsgRequestMessageIds request) {
@@ -144,11 +168,33 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
     }
 
     /**
-     * Enqueue a message for submission to peers.
+     * Enqueue a message for submission to peers. Rejects duplicates, full queue,
+     * oversized bodies, expired messages, and (post-negotiation) unshared chains.
      *
-     * @return true if enqueued, false if rejected (queue full or duplicate)
+     * @return true if enqueued, false if rejected
      */
     public boolean enqueueMessage(AppMessage message) {
+        if (message.getSize() > config.getMaxMessageSize()) {
+            log.warn("Rejecting oversized message {} ({} > {} bytes)",
+                    message.getMessageIdHex(), message.getSize(), config.getMaxMessageSize());
+            return false;
+        }
+        long now = System.currentTimeMillis() / 1000;
+        if (message.isExpired(now)) {
+            log.warn("Rejecting expired message {}", message.getMessageIdHex());
+            return false;
+        }
+        Set<String> negotiated = negotiatedChainIds;
+        if (negotiated != null && !negotiated.contains(message.getChainId())) {
+            log.debug("Not enqueuing message {} — chain {} not shared with peer",
+                    message.getMessageIdHex(), message.getChainId());
+            return false;
+        }
+        if (!config.getChainIds().isEmpty() && !config.getChainIds().contains(message.getChainId())) {
+            log.warn("Rejecting message {} for unknown chain {}", message.getMessageIdHex(), message.getChainId());
+            return false;
+        }
+
         boolean shouldWake;
         synchronized (this) {
             if (pendingMessages.size() >= maxQueueSize) {
@@ -181,6 +227,11 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
         return pendingMessages.size();
     }
 
+    /** Chains shared with the peer, or null if MsgInitAck has not arrived yet. */
+    public Set<String> getNegotiatedChainIds() {
+        return negotiatedChainIds;
+    }
+
     @Override
     public boolean isDone() {
         return currentState == AppMsgSubmissionState.Done;
@@ -192,7 +243,16 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
         pendingIds.clear();
         requestedIds.clear();
         requestedMessageIdWindow = 0;
+        negotiatedChainIds = null;
         this.currentState = AppMsgSubmissionState.Init;
+    }
+
+    private void sweepExpired() {
+        long now = System.currentTimeMillis() / 1000;
+        boolean removed = pendingMessages.removeIf(m -> m.isExpired(now));
+        if (removed) {
+            pendingIds.removeIf(id -> findMessage(id).isEmpty());
+        }
     }
 
     private Optional<AppMessage> findMessage(byte[] messageId) {

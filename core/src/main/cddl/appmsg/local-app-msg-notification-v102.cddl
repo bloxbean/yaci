@@ -1,0 +1,39 @@
+; =============================================================================
+; Yano App-Chain: Local App Message Notification mini-protocol (protocol id 102)
+; =============================================================================
+; Node-to-client pull for a local application to consume app messages from
+; its node, blocking or non-blocking — the app-chain analogue of CIP-137's
+; Local Message Notification protocol.
+;
+; State machine:
+;   States:  StIdle | StBusyBlocking | StBusyNonBlocking | StDone
+;   Agency:  client: StIdle
+;            server: StBusyBlocking, StBusyNonBlocking
+;            nobody: StDone
+;
+;   Transitions:
+;     StIdle            -- msg-request-messages(b=true)   --> StBusyBlocking
+;     StIdle            -- msg-request-messages(b=false)  --> StBusyNonBlocking
+;     StBusyBlocking    -- msg-reply-messages-blocking     --> StIdle
+;     StBusyNonBlocking -- msg-reply-messages-non-blocking --> StIdle
+;     StIdle            -- msg-client-done                 --> StDone
+;
+; A blocking reply is guaranteed to carry at least one message; a
+; non-blocking reply may be empty. `has-more` signals a remaining backlog.
+; =============================================================================
+
+local-app-msg-notification-message
+    = msg-request-messages
+    / msg-reply-messages-non-blocking
+    / msg-reply-messages-blocking
+    / msg-client-done
+
+msg-request-messages            = [0, is-blocking]                ; client -> node
+msg-reply-messages-non-blocking = [1, [ *app-message ], has-more] ; node -> client
+msg-reply-messages-blocking     = [2, [ +app-message ]]           ; node -> client
+msg-client-done                 = [3]                              ; client -> node
+
+is-blocking = false / true
+has-more    = false / true
+
+; app-message: see app-message-envelope.cddl

@@ -1,8 +1,8 @@
 package com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n;
 
 import com.bloxbean.cardano.yaci.core.protocol.Message;
+import com.bloxbean.cardano.yaci.core.protocol.appmsg.AppMsgTestFixtures;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.model.AppMessage;
-import com.bloxbean.cardano.yaci.core.protocol.appmsg.model.AppMessageId;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.messages.*;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import org.junit.jupiter.api.AfterEach;
@@ -10,8 +10,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static com.bloxbean.cardano.yaci.core.protocol.appmsg.AppMsgTestFixtures.CHAIN;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AppMsgSubmissionServerAgentTest {
@@ -28,6 +30,20 @@ class AppMsgSubmissionServerAgentTest {
         if (agent != null) agent.shutdown();
     }
 
+    /**
+     * Drive the server through MsgInit → MsgInitAck so it lands in Idle with the
+     * initial blocking request pending (test mode: transitions driven manually).
+     */
+    private void initToIdle() {
+        agent.receiveResponse(new MsgInit(List.of(CHAIN)));
+        assertThat(agent.getCurrentState()).isEqualTo(AppMsgSubmissionState.InitAck);
+
+        Message ack = agent.buildNextMessage();
+        assertThat(ack).isInstanceOf(MsgInitAck.class);
+        agent.sendRequest(ack); // → Idle; triggers the initial blocking request
+        assertThat(agent.getCurrentState()).isEqualTo(AppMsgSubmissionState.Idle);
+    }
+
     @Test
     void testInitialState() {
         assertThat(agent.getCurrentState()).isEqualTo(AppMsgSubmissionState.Init);
@@ -37,24 +53,24 @@ class AppMsgSubmissionServerAgentTest {
     }
 
     @Test
-    void testServerAgencyInIdleState() {
-        // Init state - client has agency
-        assertThat(agent.hasAgency()).isFalse();
+    void testInitAckCarriesServerChains() {
+        agent = new AppMsgSubmissionServerAgent(AppMsgSubmissionConfig.builder()
+                .chainIds(Set.of(CHAIN))
+                .build());
 
-        // Process Init -> move to Idle
-        agent.receiveResponse(new MsgInit());
-        assertThat(agent.getCurrentState()).isEqualTo(AppMsgSubmissionState.Idle);
-
-        // In Idle state, server has agency
+        agent.receiveResponse(new MsgInit(List.of(CHAIN, "other")));
+        assertThat(agent.getClientChainIds()).containsExactlyInAnyOrder(CHAIN, "other");
+        assertThat(agent.getCurrentState()).isEqualTo(AppMsgSubmissionState.InitAck);
         assertThat(agent.hasAgency()).isTrue();
+
+        Message ack = agent.buildNextMessage();
+        assertThat(ack).isInstanceOf(MsgInitAck.class);
+        assertThat(((MsgInitAck) ack).getChainIds()).containsExactly(CHAIN);
     }
 
     @Test
-    void testInitTriggersBlockingRequest() {
-        agent.receiveResponse(new MsgInit());
-
-        // After init, server should have a pending blocking request
-        assertThat(agent.getCurrentState()).isEqualTo(AppMsgSubmissionState.Idle);
+    void testInitTriggersBlockingRequestAfterInitAck() {
+        initToIdle();
         assertThat(agent.hasAgency()).isTrue();
 
         // buildNextMessage should return the blocking request
@@ -69,7 +85,7 @@ class AppMsgSubmissionServerAgentTest {
 
     @Test
     void testReplyMessageIdsProcessing() {
-        agent.receiveResponse(new MsgInit());
+        initToIdle();
 
         // Simulate server sending blocking request and transitioning to MessageIdsBlocking
         MsgRequestMessageIds request = new MsgRequestMessageIds(true, (short) 0, (short) 10);
@@ -104,7 +120,7 @@ class AppMsgSubmissionServerAgentTest {
 
     @Test
     void testReplyMessageIdsDoesNotExceedRequestWindow() {
-        agent.receiveResponse(new MsgInit());
+        initToIdle();
 
         agent.sendRequest(new MsgRequestMessageIds(true, (short) 0, (short) 1));
 
@@ -124,27 +140,30 @@ class AppMsgSubmissionServerAgentTest {
 
     @Test
     void testDeduplicationAfterMessageBodyReceived() {
-        agent.receiveResponse(new MsgInit());
+        initToIdle();
+
+        AppMessage msg = AppMsgTestFixtures.message(1, "dedup-test");
 
         sendPendingMessageIdRequest();
 
         MsgReplyMessageIds reply1 = new MsgReplyMessageIds();
-        reply1.addMessageId(new byte[]{1, 2, 3}, 100);
+        reply1.addMessageId(msg.getMessageId(), msg.getSize());
         agent.receiveResponse(reply1);
 
         sendPendingMessageBodyRequest();
         MsgReplyMessages messages1 = new MsgReplyMessages();
-        messages1.addMessage(createTestMessage(new byte[]{1, 2, 3}));
+        messages1.addMessage(msg);
         agent.receiveResponse(messages1);
 
         assertThat(agent.getReceivedMessageIdCount()).isEqualTo(1);
-        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{1, 2, 3}))).isTrue();
+        assertThat(agent.hasReceivedMessageId(msg.getMessageIdHex())).isTrue();
 
         sendPendingMessageIdRequest();
 
+        AppMessage msg2 = AppMsgTestFixtures.message(2, "dedup-test-2");
         MsgReplyMessageIds reply2 = new MsgReplyMessageIds();
-        reply2.addMessageId(new byte[]{1, 2, 3}, 100);
-        reply2.addMessageId(new byte[]{7, 8, 9}, 300);
+        reply2.addMessageId(msg.getMessageId(), msg.getSize());
+        reply2.addMessageId(msg2.getMessageId(), msg2.getSize());
         agent.receiveResponse(reply2);
 
         assertThat(agent.getReceivedMessageIdCount()).isEqualTo(1);
@@ -153,18 +172,20 @@ class AppMsgSubmissionServerAgentTest {
 
     @Test
     void testReplyMessagesProcessing() {
-        agent.receiveResponse(new MsgInit());
+        initToIdle();
+
+        AppMessage msg = AppMsgTestFixtures.message(CHAIN, "test", 1, new byte[]{10, 20, 30});
 
         // Send blocking request -> get message IDs
         agent.sendRequest(new MsgRequestMessageIds(true, (short) 0, (short) 10));
 
         MsgReplyMessageIds replyIds = new MsgReplyMessageIds();
-        replyIds.addMessageId(new byte[]{1, 2}, 50);
+        replyIds.addMessageId(msg.getMessageId(), msg.getSize());
         agent.receiveResponse(replyIds);
         assertThat(agent.getOutstandingMessageCount()).isEqualTo(1);
 
         // Server requests message bodies
-        agent.sendRequest(new MsgRequestMessages(List.of(new byte[]{1, 2})));
+        agent.sendRequest(new MsgRequestMessages(List.of(msg.getMessageId())));
         assertThat(agent.getCurrentState()).isEqualTo(AppMsgSubmissionState.Messages);
 
         // Track listener
@@ -178,14 +199,7 @@ class AppMsgSubmissionServerAgentTest {
 
         // Client replies with full messages
         MsgReplyMessages replyMsgs = new MsgReplyMessages();
-        replyMsgs.addMessage(AppMessage.builder()
-                .messageId(new byte[]{1, 2})
-                .messageBody(new byte[]{10, 20, 30})
-                .authMethod(0)
-                .authProof(new byte[0])
-                .topicId("test")
-                .expiresAt(0)
-                .build());
+        replyMsgs.addMessage(msg);
         agent.receiveResponse(replyMsgs);
 
         // Verify
@@ -195,7 +209,7 @@ class AppMsgSubmissionServerAgentTest {
         assertThat(agent.getPendingAcknowledgments()).isEqualTo(0);
         assertThat(receivedMsgs.get()).isNotNull();
         assertThat(receivedMsgs.get().getMessages()).hasSize(1);
-        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{1, 2}))).isTrue();
+        assertThat(agent.hasReceivedMessageId(msg.getMessageIdHex())).isTrue();
 
         // The next blocking request should carry the ack count
         var nextMsg = agent.buildNextMessage();
@@ -204,8 +218,122 @@ class AppMsgSubmissionServerAgentTest {
     }
 
     @Test
+    void testInvalidMessageIdRejectedButAcked() {
+        initToIdle();
+
+        AppMessage valid = AppMsgTestFixtures.message(1, "valid");
+        // Tampered: claims valid's id but different body → id recompute fails
+        AppMessage forged = AppMessage.builder()
+                .messageId(valid.getMessageId())
+                .chainId(valid.getChainId())
+                .topic(valid.getTopic())
+                .sender(valid.getSender())
+                .senderSeq(valid.getSenderSeq())
+                .expiresAt(valid.getExpiresAt())
+                .body(new byte[]{99, 98, 97})
+                .authScheme(valid.getAuthScheme())
+                .authProof(valid.getAuthProof())
+                .build();
+
+        deliverMessage(forged);
+
+        assertThat(agent.getRejectedMessageCount()).isEqualTo(1);
+        // Rejected but acked: id is in processed cache, window advanced via next request
+        assertThat(agent.hasReceivedMessageId(valid.getMessageIdHex())).isTrue();
+        Message nextMsg = agent.buildNextMessage();
+        assertThat(((MsgRequestMessageIds) nextMsg).getAckCount()).isEqualTo((short) 1);
+    }
+
+    @Test
+    void testExpiredMessageRejected() {
+        initToIdle();
+
+        long past = System.currentTimeMillis() / 1000 - 10;
+        AppMessage expired = AppMsgTestFixtures.message(CHAIN, "", 1, new byte[]{1}, past);
+
+        AtomicReference<MsgReplyMessages> delivered = new AtomicReference<>();
+        agent.addListener(new AppMsgSubmissionListener() {
+            @Override
+            public void handleReplyMessages(MsgReplyMessages reply) {
+                delivered.set(reply);
+            }
+        });
+
+        deliverMessage(expired);
+
+        assertThat(agent.getRejectedMessageCount()).isEqualTo(1);
+        assertThat(delivered.get().getMessages()).isEmpty();
+    }
+
+    @Test
+    void testTtlTooFarInFutureRejected() {
+        agent = new AppMsgSubmissionServerAgent(AppMsgSubmissionConfig.builder()
+                .maxTtlSeconds(60)
+                .build());
+        initToIdle();
+
+        long tooFar = System.currentTimeMillis() / 1000 + 3600;
+        AppMessage msg = AppMsgTestFixtures.message(CHAIN, "", 1, new byte[]{1}, tooFar);
+
+        deliverMessage(msg);
+
+        assertThat(agent.getRejectedMessageCount()).isEqualTo(1);
+    }
+
+    @Test
+    void testOversizedMessageRejected() {
+        agent = new AppMsgSubmissionServerAgent(AppMsgSubmissionConfig.builder()
+                .maxMessageSize(2)
+                .build());
+        initToIdle();
+
+        AppMessage big = AppMsgTestFixtures.message(CHAIN, "", 1, new byte[]{1, 2, 3});
+
+        deliverMessage(big);
+
+        assertThat(agent.getRejectedMessageCount()).isEqualTo(1);
+    }
+
+    @Test
+    void testUnservedChainRejected() {
+        agent = new AppMsgSubmissionServerAgent(AppMsgSubmissionConfig.builder()
+                .chainIds(Set.of("served-chain"))
+                .build());
+        initToIdle();
+
+        AppMessage otherChain = AppMsgTestFixtures.message("other-chain", "", 1, new byte[]{1});
+
+        deliverMessage(otherChain);
+
+        assertThat(agent.getRejectedMessageCount()).isEqualTo(1);
+    }
+
+    @Test
+    void testCustomValidatorRejection() {
+        agent = new AppMsgSubmissionServerAgent(AppMsgSubmissionConfig.builder()
+                .validator(m -> AppMsgValidator.Result.reject("not on allow-list"))
+                .build());
+        initToIdle();
+
+        AppMessage msg = AppMsgTestFixtures.message(1, "anything");
+
+        AtomicReference<MsgReplyMessages> delivered = new AtomicReference<>();
+        agent.addListener(new AppMsgSubmissionListener() {
+            @Override
+            public void handleReplyMessages(MsgReplyMessages reply) {
+                delivered.set(reply);
+            }
+        });
+
+        deliverMessage(msg);
+
+        assertThat(agent.getRejectedMessageCount()).isEqualTo(1);
+        assertThat(delivered.get().getMessages()).isEmpty();
+    }
+
+    @Test
     void testResetClearsState() {
-        agent.receiveResponse(new MsgInit());
+        initToIdle();
 
         agent.sendRequest(new MsgRequestMessageIds(true, (short) 0, (short) 10));
         MsgReplyMessageIds reply = new MsgReplyMessageIds();
@@ -218,11 +346,12 @@ class AppMsgSubmissionServerAgentTest {
         assertThat(agent.getReceivedMessageIdCount()).isEqualTo(0);
         assertThat(agent.getOutstandingMessageCount()).isEqualTo(0);
         assertThat(agent.getPendingAcknowledgments()).isEqualTo(0);
+        assertThat(agent.getRejectedMessageCount()).isEqualTo(0);
     }
 
     @Test
     void testEmptyReplyMessageIdsSendsNextBlockingRequest() {
-        agent.receiveResponse(new MsgInit());
+        initToIdle();
 
         // Send blocking request
         agent.sendRequest(new MsgRequestMessageIds(true, (short) 0, (short) 10));
@@ -242,12 +371,15 @@ class AppMsgSubmissionServerAgentTest {
 
     @Test
     void testOutOfOrderReplyMessagesAreNotAcknowledged() {
-        agent.receiveResponse(new MsgInit());
+        initToIdle();
         sendPendingMessageIdRequest();
 
+        AppMessage msg1 = AppMsgTestFixtures.message(1, "ooo-1");
+        AppMessage msg2 = AppMsgTestFixtures.message(2, "ooo-2");
+
         MsgReplyMessageIds replyIds = new MsgReplyMessageIds();
-        replyIds.addMessageId(new byte[]{1}, 10);
-        replyIds.addMessageId(new byte[]{2}, 10);
+        replyIds.addMessageId(msg1.getMessageId(), msg1.getSize());
+        replyIds.addMessageId(msg2.getMessageId(), msg2.getSize());
         agent.receiveResponse(replyIds);
         assertThat(agent.getOutstandingMessageCount()).isEqualTo(2);
 
@@ -255,13 +387,13 @@ class AppMsgSubmissionServerAgentTest {
         assertThat(bodyRequest.getMessageIds()).hasSize(2);
 
         MsgReplyMessages partialReply = new MsgReplyMessages();
-        partialReply.addMessage(createTestMessage(new byte[]{2}));
+        partialReply.addMessage(msg2);
         agent.receiveResponse(partialReply);
 
         assertThat(agent.getCurrentState()).isEqualTo(AppMsgSubmissionState.Idle);
         assertThat(agent.getOutstandingMessageCount()).isEqualTo(0);
-        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{1}))).isFalse();
-        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{2}))).isFalse();
+        assertThat(agent.hasReceivedMessageId(msg1.getMessageIdHex())).isFalse();
+        assertThat(agent.hasReceivedMessageId(msg2.getMessageIdHex())).isFalse();
 
         Message nextMsg = agent.buildNextMessage();
         assertThat(nextMsg).isInstanceOf(MsgRequestMessageIds.class);
@@ -270,23 +402,26 @@ class AppMsgSubmissionServerAgentTest {
 
     @Test
     void testPrefixPartialReplyMessagesAckOnlyAcceptedPrefix() {
-        agent.receiveResponse(new MsgInit());
+        initToIdle();
         sendPendingMessageIdRequest();
 
+        AppMessage msg1 = AppMsgTestFixtures.message(1, "prefix-1");
+        AppMessage msg2 = AppMsgTestFixtures.message(2, "prefix-2");
+
         MsgReplyMessageIds replyIds = new MsgReplyMessageIds();
-        replyIds.addMessageId(new byte[]{1}, 10);
-        replyIds.addMessageId(new byte[]{2}, 10);
+        replyIds.addMessageId(msg1.getMessageId(), msg1.getSize());
+        replyIds.addMessageId(msg2.getMessageId(), msg2.getSize());
         agent.receiveResponse(replyIds);
 
         sendPendingMessageBodyRequest();
 
         MsgReplyMessages partialReply = new MsgReplyMessages();
-        partialReply.addMessage(createTestMessage(new byte[]{1}));
+        partialReply.addMessage(msg1);
         agent.receiveResponse(partialReply);
 
         assertThat(agent.getOutstandingMessageCount()).isEqualTo(0);
-        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{1}))).isTrue();
-        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{2}))).isFalse();
+        assertThat(agent.hasReceivedMessageId(msg1.getMessageIdHex())).isTrue();
+        assertThat(agent.hasReceivedMessageId(msg2.getMessageIdHex())).isFalse();
 
         Message nextMsg = agent.buildNextMessage();
         assertThat(nextMsg).isInstanceOf(MsgRequestMessageIds.class);
@@ -299,15 +434,33 @@ class AppMsgSubmissionServerAgentTest {
                 .processedMessageIdCacheSize(2)
                 .build());
 
-        agent.receiveResponse(new MsgInit());
-        completeMessage(new byte[]{1});
-        completeMessage(new byte[]{2});
-        completeMessage(new byte[]{3});
+        initToIdle();
+        AppMessage m1 = AppMsgTestFixtures.message(1, "bounded-1");
+        AppMessage m2 = AppMsgTestFixtures.message(2, "bounded-2");
+        AppMessage m3 = AppMsgTestFixtures.message(3, "bounded-3");
+        completeMessage(m1);
+        completeMessage(m2);
+        completeMessage(m3);
 
         assertThat(agent.getReceivedMessageIdCount()).isEqualTo(2);
-        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{1}))).isFalse();
-        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{2}))).isTrue();
-        assertThat(agent.hasReceivedMessageId(HexUtil.encodeHexString(new byte[]{3}))).isTrue();
+        assertThat(agent.hasReceivedMessageId(m1.getMessageIdHex())).isFalse();
+        assertThat(agent.hasReceivedMessageId(m2.getMessageIdHex())).isTrue();
+        assertThat(agent.hasReceivedMessageId(m3.getMessageIdHex())).isTrue();
+    }
+
+    /** Announce + fetch + deliver a single message body through the full pull cycle. */
+    private void deliverMessage(AppMessage msg) {
+        sendPendingMessageIdRequest();
+
+        MsgReplyMessageIds replyIds = new MsgReplyMessageIds();
+        replyIds.addMessageId(msg.getMessageId(), msg.getSize());
+        agent.receiveResponse(replyIds);
+
+        sendPendingMessageBodyRequest();
+
+        MsgReplyMessages replyMessages = new MsgReplyMessages();
+        replyMessages.addMessage(msg);
+        agent.receiveResponse(replyMessages);
     }
 
     private MsgRequestMessageIds sendPendingMessageIdRequest() {
@@ -324,28 +477,7 @@ class AppMsgSubmissionServerAgentTest {
         return (MsgRequestMessages) nextMsg;
     }
 
-    private void completeMessage(byte[] messageId) {
-        sendPendingMessageIdRequest();
-
-        MsgReplyMessageIds replyIds = new MsgReplyMessageIds();
-        replyIds.addMessageId(messageId, 10);
-        agent.receiveResponse(replyIds);
-
-        sendPendingMessageBodyRequest();
-
-        MsgReplyMessages replyMessages = new MsgReplyMessages();
-        replyMessages.addMessage(createTestMessage(messageId));
-        agent.receiveResponse(replyMessages);
-    }
-
-    private AppMessage createTestMessage(byte[] messageId) {
-        return AppMessage.builder()
-                .messageId(messageId)
-                .messageBody(new byte[]{10, 20, 30})
-                .authMethod(0)
-                .authProof(new byte[0])
-                .topicId("test")
-                .expiresAt(0)
-                .build();
+    private void completeMessage(AppMessage msg) {
+        deliverMessage(msg);
     }
 }

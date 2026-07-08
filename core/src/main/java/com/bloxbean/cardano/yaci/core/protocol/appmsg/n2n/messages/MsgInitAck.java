@@ -8,24 +8,25 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Sent by the client to start the protocol. Carries the chain-ids the client
- * participates in so the responder can scope the session (chain-scoped negotiation).
- * CBOR: [0, [chainId(tstr), ...]]
+ * Sent by the server in response to {@link MsgInit}, carrying the server's own
+ * chain-ids. Both sides then restrict the session to the intersection: the client
+ * only offers messages for shared chains, the server rejects anything else.
+ * CBOR: [6, [chainId(tstr), ...]]
  */
 @Getter
-public class MsgInit implements Message {
+public class MsgInitAck implements Message {
     private final List<String> chainIds;
 
-    public MsgInit() {
+    public MsgInitAck() {
         this(Collections.emptyList());
     }
 
-    public MsgInit(List<String> chainIds) {
+    public MsgInitAck(List<String> chainIds) {
         this.chainIds = chainIds != null ? List.copyOf(chainIds) : Collections.emptyList();
     }
 
     @Override
     public byte[] serialize() {
-        return AppMsgSubmissionSerializers.MsgInitSerializer.INSTANCE.serialize(this);
+        return AppMsgSubmissionSerializers.MsgInitAckSerializer.INSTANCE.serialize(this);
     }
 }

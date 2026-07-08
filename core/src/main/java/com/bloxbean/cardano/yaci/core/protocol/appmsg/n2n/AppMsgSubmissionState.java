@@ -9,13 +9,26 @@ public enum AppMsgSubmissionState implements AppMsgSubmissionStateBase {
         @Override
         public State nextState(Message message) {
             if (message instanceof MsgInit)
-                return Idle;
+                return InitAck;
             return this;
         }
 
         @Override
         public boolean hasAgency(boolean isClient) {
             return isClient;
+        }
+    },
+    InitAck {
+        @Override
+        public State nextState(Message message) {
+            if (message instanceof MsgInitAck)
+                return Idle;
+            return this;
+        }
+
+        @Override
+        public boolean hasAgency(boolean isClient) {
+            return !isClient;
         }
     },
     Idle {

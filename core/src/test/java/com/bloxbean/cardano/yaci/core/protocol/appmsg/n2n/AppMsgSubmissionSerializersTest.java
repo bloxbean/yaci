@@ -1,10 +1,13 @@
 package com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n;
 
+import com.bloxbean.cardano.yaci.core.protocol.appmsg.AppMsgTestFixtures;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.model.AppMessage;
+import com.bloxbean.cardano.yaci.core.protocol.appmsg.model.AuthScheme;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.messages.*;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.serializers.AppMsgSubmissionSerializers;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -13,11 +16,31 @@ class AppMsgSubmissionSerializersTest {
 
     @Test
     void msgInit_roundtrip() {
-        MsgInit msg = new MsgInit();
+        MsgInit msg = new MsgInit(List.of("chain-a", "chain-b"));
         byte[] bytes = msg.serialize();
 
         MsgInit deserialized = AppMsgSubmissionSerializers.MsgInitSerializer.INSTANCE.deserialize(bytes);
         assertThat(deserialized).isNotNull();
+        assertThat(deserialized.getChainIds()).containsExactly("chain-a", "chain-b");
+    }
+
+    @Test
+    void msgInit_empty_roundtrip() {
+        MsgInit msg = new MsgInit();
+        byte[] bytes = msg.serialize();
+
+        MsgInit deserialized = AppMsgSubmissionSerializers.MsgInitSerializer.INSTANCE.deserialize(bytes);
+        assertThat(deserialized.getChainIds()).isEmpty();
+    }
+
+    @Test
+    void msgInitAck_roundtrip() {
+        MsgInitAck msg = new MsgInitAck(List.of("chain-a"));
+        byte[] bytes = msg.serialize();
+
+        MsgInitAck deserialized = AppMsgSubmissionSerializers.MsgInitAckSerializer.INSTANCE.deserialize(bytes);
+        assertThat(deserialized).isNotNull();
+        assertThat(deserialized.getChainIds()).containsExactly("chain-a");
     }
 
     @Test
@@ -86,14 +109,8 @@ class AppMsgSubmissionSerializersTest {
 
     @Test
     void msgReplyMessages_roundtrip() {
-        AppMessage appMsg = AppMessage.builder()
-                .messageId(new byte[]{10, 20, 30})
-                .messageBody(new byte[]{1, 2, 3, 4, 5})
-                .authMethod(0)
-                .authProof(new byte[]{99})
-                .topicId("test-topic")
-                .expiresAt(1700000000L)
-                .build();
+        AppMessage appMsg = AppMsgTestFixtures.message("audit-chain", "orders", 7,
+                new byte[]{1, 2, 3, 4, 5}, 1900000000L);
 
         MsgReplyMessages msg = new MsgReplyMessages();
         msg.addMessage(appMsg);
@@ -104,33 +121,24 @@ class AppMsgSubmissionSerializersTest {
         assertThat(deserialized.getMessages()).hasSize(1);
 
         AppMessage result = deserialized.getMessages().get(0);
-        assertThat(result.getMessageId()).isEqualTo(new byte[]{10, 20, 30});
-        assertThat(result.getMessageBody()).isEqualTo(new byte[]{1, 2, 3, 4, 5});
-        assertThat(result.getAuthMethod()).isEqualTo(0);
-        assertThat(result.getAuthProof()).isEqualTo(new byte[]{99});
-        assertThat(result.getTopicId()).isEqualTo("test-topic");
-        assertThat(result.getExpiresAt()).isEqualTo(1700000000L);
+        assertThat(result.getVersion()).isEqualTo(AppMessage.ENVELOPE_VERSION);
+        assertThat(result.getMessageId()).isEqualTo(appMsg.getMessageId());
+        assertThat(result.getChainId()).isEqualTo("audit-chain");
+        assertThat(result.getTopic()).isEqualTo("orders");
+        assertThat(result.getSender()).isEqualTo(AppMsgTestFixtures.SENDER);
+        assertThat(result.getSenderSeq()).isEqualTo(7);
+        assertThat(result.getExpiresAt()).isEqualTo(1900000000L);
+        assertThat(result.getBody()).isEqualTo(new byte[]{1, 2, 3, 4, 5});
+        assertThat(result.getAuthScheme()).isEqualTo(AuthScheme.ED25519.getValue());
+        assertThat(result.hasValidMessageId()).isTrue();
     }
 
     @Test
     void msgReplyMessages_multipleMessages_roundtrip() {
-        AppMessage msg1 = AppMessage.builder()
-                .messageId(new byte[]{1})
-                .messageBody(new byte[]{11})
-                .authMethod(0)
-                .authProof(new byte[0])
-                .topicId("topic-a")
-                .expiresAt(0L)
-                .build();
-
-        AppMessage msg2 = AppMessage.builder()
-                .messageId(new byte[]{2})
-                .messageBody(new byte[]{22, 33})
-                .authMethod(1)
-                .authProof(new byte[]{88})
-                .topicId("topic-b")
-                .expiresAt(9999999999L)
-                .build();
+        AppMessage msg1 = AppMsgTestFixtures.message("chain-1", "topic-a", 1,
+                new byte[]{11}, 1900000000L);
+        AppMessage msg2 = AppMsgTestFixtures.message("chain-2", "topic-b", 2,
+                new byte[]{22, 33}, 1900000001L);
 
         MsgReplyMessages msg = new MsgReplyMessages(List.of(msg1, msg2));
         byte[] bytes = msg.serialize();
@@ -138,8 +146,36 @@ class AppMsgSubmissionSerializersTest {
         MsgReplyMessages deserialized =
                 AppMsgSubmissionSerializers.MsgReplyMessagesSerializer.INSTANCE.deserialize(bytes);
         assertThat(deserialized.getMessages()).hasSize(2);
-        assertThat(deserialized.getMessages().get(0).getTopicId()).isEqualTo("topic-a");
-        assertThat(deserialized.getMessages().get(1).getTopicId()).isEqualTo("topic-b");
+        assertThat(deserialized.getMessages().get(0).getTopic()).isEqualTo("topic-a");
+        assertThat(deserialized.getMessages().get(0).getChainId()).isEqualTo("chain-1");
+        assertThat(deserialized.getMessages().get(1).getTopic()).isEqualTo("topic-b");
+        assertThat(deserialized.getMessages().get(1).getChainId()).isEqualTo("chain-2");
+    }
+
+    @Test
+    void messageId_isContentDerived_andTamperEvident() {
+        AppMessage msg = AppMsgTestFixtures.message("chain-x", "t", 42,
+                "hello".getBytes(StandardCharsets.UTF_8), 1900000000L);
+        assertThat(msg.hasValidMessageId()).isTrue();
+
+        // Same content → same id (deterministic)
+        byte[] again = AppMessage.computeMessageId("chain-x", "t", AppMsgTestFixtures.SENDER,
+                42, 1900000000L, "hello".getBytes(StandardCharsets.UTF_8));
+        assertThat(again).isEqualTo(msg.getMessageId());
+
+        // Tampered body → id check fails
+        AppMessage tampered = AppMessage.builder()
+                .messageId(msg.getMessageId())
+                .chainId(msg.getChainId())
+                .topic(msg.getTopic())
+                .sender(msg.getSender())
+                .senderSeq(msg.getSenderSeq())
+                .expiresAt(msg.getExpiresAt())
+                .body("HELLO".getBytes(StandardCharsets.UTF_8))
+                .authScheme(msg.getAuthScheme())
+                .authProof(msg.getAuthProof())
+                .build();
+        assertThat(tampered.hasValidMessageId()).isFalse();
     }
 
     @Test
@@ -157,7 +193,7 @@ class AppMsgSubmissionSerializersTest {
         AppMsgSubmissionStateBase stateBase = AppMsgSubmissionState.Init;
 
         // MsgInit (tag 0)
-        byte[] initBytes = new MsgInit().serialize();
+        byte[] initBytes = new MsgInit(List.of("c1")).serialize();
         assertThat(stateBase.handleInbound(initBytes)).isInstanceOf(MsgInit.class);
 
         // MsgRequestMessageIds (tag 1)
@@ -179,5 +215,9 @@ class AppMsgSubmissionSerializersTest {
         // MsgDone (tag 5)
         byte[] doneBytes = new MsgDone().serialize();
         assertThat(stateBase.handleInbound(doneBytes)).isInstanceOf(MsgDone.class);
+
+        // MsgInitAck (tag 6)
+        byte[] initAckBytes = new MsgInitAck(List.of("c1")).serialize();
+        assertThat(stateBase.handleInbound(initAckBytes)).isInstanceOf(MsgInitAck.class);
     }
 }
