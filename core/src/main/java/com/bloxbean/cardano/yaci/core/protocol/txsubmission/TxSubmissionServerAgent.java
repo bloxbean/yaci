@@ -135,18 +135,25 @@ public class TxSubmissionServerAgent extends Agent<TxSubmissionListener> {
             return;
         }
 
-        // Add transaction IDs to FIFO queue
+        // Notify listeners first so they can plan which announced ids should be fetched.
+        getAgentListeners().forEach(listener -> listener.handleReplyTxIds(replyTxIds));
+
+        // Add transaction IDs accepted by listeners to FIFO queue.
         replyTxIds.getTxIdAndSizeMap().forEach((txId, size) -> {
             String txIdStr = txId.toString();
-            if (!seenTxIds.contains(txIdStr)) {
+            if (seenTxIds.contains(txIdStr)) {
+                return;
+            }
+            seenTxIds.add(txIdStr);
+            boolean shouldRequest = getAgentListeners().stream()
+                    .allMatch(listener -> listener.shouldRequestTx(txId, size));
+            if (shouldRequest) {
                 outstandingTxIds.offer(txId);
-                seenTxIds.add(txIdStr);
                 log.debug("Added tx ID to queue: {} (size: {} bytes)", txId, size);
+            } else {
+                log.debug("Skipped tx ID by listener policy: {} (size: {} bytes)", txId, size);
             }
         });
-
-        // Notify listeners
-        getAgentListeners().forEach(listener -> listener.handleReplyTxIds(replyTxIds));
 
         // Request the actual transaction bodies
         if (!outstandingTxIds.isEmpty()) {
