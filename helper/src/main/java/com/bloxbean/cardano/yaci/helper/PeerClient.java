@@ -235,9 +235,29 @@ public class PeerClient {
         if (n2NPeerFetcher != null)
             throw new IllegalStateException("App message protocol must be enabled before connect()");
 
+        // Replacing the manager must not silently drop an already-enabled
+        // app-chain sync protocol (call-order independence).
+        boolean appChainSyncEnabled = appProtocolManager.isAppChainSyncEnabled();
         this.appProtocolManager = new AppProtocolManager(appMsgConfig);
         this.versionTable = N2NVersionTableConstant.withAppLayer(versionTable);
         appProtocolManager.enableAppMsg();
+        if (appChainSyncEnabled)
+            appProtocolManager.enableAppChainSync();
+    }
+
+    /**
+     * Enable the app-chain sync protocol (103, finalized app-block range
+     * fetch). Must be called before connect(). The agent is request-driven:
+     * nothing is sent until {@code getAppProtocolManager()
+     * .getAppChainSyncAgent().requestRange(...)} is invoked, and callers
+     * should gate requests on the manager's {@code isAppLayerNegotiated()}.
+     */
+    public void enableAppChainSync() {
+        if (n2NPeerFetcher != null)
+            throw new IllegalStateException("App chain sync protocol must be enabled before connect()");
+
+        this.versionTable = N2NVersionTableConstant.withAppLayer(versionTable);
+        appProtocolManager.enableAppChainSync();
     }
 
     /**
