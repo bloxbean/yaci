@@ -55,15 +55,35 @@ public final class WitnessUtil {
 
         List<byte[]> witnessList = new ArrayList<>();
 
-        for (int i = 0; i < witnessElementCount; i++) {
-            final var start = blockBytes.length - stream.available(); // start cutting position
-            // find witness byte array length
-            final var previous = stream.available();
-            decoder.decodeNext();
-            final var current = stream.available();
-            final byte[] witness = new byte[previous - current];
-            System.arraycopy(blockBytes, start, witness, 0, witness.length);
-            witnessList.add(witness);
+        if (witnessElementCount != TransactionBodyExtractor.INFINITY) {
+            for (int i = 0; i < witnessElementCount; i++) {
+                final var start = blockBytes.length - stream.available(); // start cutting position
+                // find witness byte array length
+                final var previous = stream.available();
+                decoder.decodeNext();
+                final var current = stream.available();
+                final byte[] witness = new byte[previous - current];
+                System.arraycopy(blockBytes, start, witness, 0, witness.length);
+                witnessList.add(witness);
+            }
+        } else {
+            for (;;) {
+                final var start = blockBytes.length - stream.available();
+                final var previous = stream.available();
+                final var dataItem = decoder.decodeNext();
+                if (dataItem == null) {
+                    throw new CborException("Unexpected end of stream");
+                }
+
+                if (Special.BREAK.equals(dataItem)) {
+                    break;
+                }
+
+                final var current = stream.available();
+                final byte[] witness = new byte[previous - current];
+                System.arraycopy(blockBytes, start, witness, 0, witness.length);
+                witnessList.add(witness);
+            }
         }
 
         return witnessList;
