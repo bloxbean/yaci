@@ -236,13 +236,15 @@ public class PeerClient {
             throw new IllegalStateException("App message protocol must be enabled before connect()");
 
         // Replacing the manager must not silently drop an already-enabled
-        // app-chain sync protocol (call-order independence).
-        boolean appChainSyncEnabled = appProtocolManager.isAppChainSyncEnabled();
+        // app-chain sync protocol — the AGENT INSTANCE is carried over, so
+        // listeners/references obtained via getAppChainSyncAgent() before this
+        // call stay valid (true call-order independence).
+        var existingSyncAgent = appProtocolManager.isAppChainSyncEnabled()
+                ? appProtocolManager.getAppChainSyncAgent() : null;
         this.appProtocolManager = new AppProtocolManager(appMsgConfig);
         this.versionTable = N2NVersionTableConstant.withAppLayer(versionTable);
         appProtocolManager.enableAppMsg();
-        if (appChainSyncEnabled)
-            appProtocolManager.enableAppChainSync();
+        appProtocolManager.adoptAppChainSyncAgent(existingSyncAgent);
     }
 
     /**

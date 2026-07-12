@@ -255,6 +255,8 @@ public class N2NPeerFetcher implements Fetcher<Block> {
                 log.info("ChainSync agent disconnected - resetting handshake flag");
                 // Notify agent about connection loss for reconnection preparation
                 chainSyncAgent.onConnectionLost();
+                // App-layer gate closes until the next handshake renegotiates it
+                appProtocolManager.onDisconnected();
                 // Reset firstTimeHandshake to false so that on reconnection
                 // we know it's a reconnection and not the first connection
                 firstTimeHandshake = false;

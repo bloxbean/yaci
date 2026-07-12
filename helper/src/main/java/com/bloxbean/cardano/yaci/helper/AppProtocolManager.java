@@ -76,6 +76,18 @@ public class AppProtocolManager {
         this.appChainSyncEnabled = true;
     }
 
+    /**
+     * Adopt an EXISTING app-chain sync agent (listeners and all) — used when a
+     * manager is replaced (e.g. {@code PeerClient.enableAppMsg(config)}) so
+     * references and listeners registered through {@link #getAppChainSyncAgent()}
+     * before the replacement stay valid.
+     */
+    void adoptAppChainSyncAgent(AppChainSyncClientAgent agent) {
+        if (agent == null) return;
+        this.appChainSyncAgent = agent;
+        this.appChainSyncEnabled = true;
+    }
+
     public boolean isAppChainSyncEnabled() {
         return appChainSyncEnabled;
     }
@@ -141,16 +153,27 @@ public class AppProtocolManager {
     public void onHandshakeComplete(AcceptVersion acceptVersion) {
         if (acceptVersion == null) return;
         if (!appMsgEnabled && !appChainSyncEnabled) return;  // caller didn't enable anything
-        if (!N2NVersionTableConstant.isAppLayerVersion(acceptVersion.getVersionNumber())) {
+        // Assign (not just set) on EVERY handshake: a reconnection that
+        // renegotiates a non-app-layer version must clear the gate.
+        appLayerNegotiated =
+                N2NVersionTableConstant.isAppLayerVersion(acceptVersion.getVersionNumber());
+        if (!appLayerNegotiated) {
             log.info("Peer negotiated V{} — app-layer protocols not activated",
                     acceptVersion.getVersionNumber());
             return;
         }
-        appLayerNegotiated = true;
         if (appMsgEnabled)
             activateAppMsgSubmission();
         // AppChainSync (103) needs no activation: it is request-driven and
         // only sends when the caller invokes requestRange().
+    }
+
+    /**
+     * Connection dropped: the app-layer gate closes until the NEXT handshake
+     * completes with an app-layer version. Called by the connection owner.
+     */
+    public void onDisconnected() {
+        appLayerNegotiated = false;
     }
 
     private void activateAppMsgSubmission() {

@@ -138,6 +138,33 @@ class AppProtocolManagerTest {
     }
 
     @Test
+    void renegotiatingNonAppLayerVersionClearsTheGate() {
+        // Reconnection that downgrades below V100 must close the gate
+        AppProtocolManager manager = new AppProtocolManager();
+        manager.enableAppChainSync();
+
+        manager.onHandshakeComplete(acceptVersion(100));
+        assertThat(manager.isAppLayerNegotiated()).isTrue();
+
+        manager.onHandshakeComplete(acceptVersion(11));
+        assertThat(manager.isAppLayerNegotiated()).isFalse();
+    }
+
+    @Test
+    void disconnectClosesTheGateUntilNextHandshake() {
+        AppProtocolManager manager = new AppProtocolManager();
+        manager.enableAppChainSync();
+        manager.onHandshakeComplete(acceptVersion(100));
+        assertThat(manager.isAppLayerNegotiated()).isTrue();
+
+        manager.onDisconnected();
+        assertThat(manager.isAppLayerNegotiated()).isFalse();
+
+        manager.onHandshakeComplete(acceptVersion(100));
+        assertThat(manager.isAppLayerNegotiated()).isTrue();
+    }
+
+    @Test
     void enableAppMsgWithConfigPreservesEnabledAppChainSync() {
         // enableAppMsg(config) replaces the manager — an earlier
         // enableAppChainSync() must survive (call-order independence)
@@ -150,6 +177,21 @@ class AppProtocolManagerTest {
         assertThat(peerClient.getAppProtocolManager().isAppMsgEnabled()).isTrue();
         assertThat(peerClient.getAppProtocolManager().isAppChainSyncEnabled()).isTrue();
         assertThat(peerClient.getAppProtocolManager().getAgents()).hasSize(2);
+    }
+
+    @Test
+    void enableAppMsgWithConfigPreservesSyncAgentIdentity() {
+        // Listeners/references obtained BEFORE the manager replacement must
+        // stay valid — the agent INSTANCE is adopted, not recreated.
+        PeerClient peerClient = new PeerClient("localhost", 1, 42, Point.ORIGIN);
+        peerClient.enableAppChainSync();
+        var agentBefore = peerClient.getAppProtocolManager().getAppChainSyncAgent();
+
+        peerClient.enableAppMsg(
+                com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.AppMsgSubmissionConfig.createDefault());
+
+        assertThat(peerClient.getAppProtocolManager().getAppChainSyncAgent())
+                .isSameAs(agentBefore);
     }
 
     @Test
