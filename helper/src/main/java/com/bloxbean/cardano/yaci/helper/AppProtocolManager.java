@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
+import com.bloxbean.cardano.yaci.core.protocol.appchainsync.AppChainSyncClientAgent;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.AppMsgSubmissionAgent;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.AppMsgSubmissionConfig;
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n.AppMsgSubmissionListener;
@@ -8,13 +9,18 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Manages app-layer protocols (Protocol 100+) for a peer connection.
- * Callers signal intent via {@link #enableAppMsg()}; the agent is added to a
- * connection only when enabled and activated only when the peer negotiates V100.
+ * Callers signal intent via {@link #enableAppMsg()} and/or
+ * {@link #enableAppChainSync()}; an agent is added to a connection only when
+ * its protocol is enabled, and app-layer traffic flows only when the peer
+ * negotiates an app-layer handshake version (V100+). The app-chain sync
+ * client (protocol 103) is fully request-driven, so enabling it just rides
+ * the agent on the connection — callers gate their requests on
+ * {@link #isAppLayerNegotiated()}.
  */
 @Slf4j
 public class AppProtocolManager {
@@ -22,6 +28,9 @@ public class AppProtocolManager {
     private final AppMsgSubmissionAgent appMsgAgent;
     private boolean appMsgEnabled = false;
     private boolean listenersSetup = false;
+    private AppChainSyncClientAgent appChainSyncAgent;
+    private boolean appChainSyncEnabled = false;
+    private volatile boolean appLayerNegotiated = false;
 
     public AppProtocolManager() {
         this(AppMsgSubmissionConfig.createDefault());
@@ -57,13 +66,56 @@ public class AppProtocolManager {
     }
 
     /**
+     * Signal intent to use the AppChainSync protocol (103, finalized app-block
+     * range fetch). The agent rides the connection when enabled; it sends
+     * nothing until {@link AppChainSyncClientAgent#requestRange} is called.
+     */
+    public void enableAppChainSync() {
+        if (appChainSyncAgent == null)
+            appChainSyncAgent = new AppChainSyncClientAgent();
+        this.appChainSyncEnabled = true;
+    }
+
+    /**
+     * Adopt an EXISTING app-chain sync agent (listeners and all) — used when a
+     * manager is replaced (e.g. {@code PeerClient.enableAppMsg(config)}) so
+     * references and listeners registered through {@link #getAppChainSyncAgent()}
+     * before the replacement stay valid.
+     */
+    void adoptAppChainSyncAgent(AppChainSyncClientAgent agent) {
+        if (agent == null) return;
+        this.appChainSyncAgent = agent;
+        this.appChainSyncEnabled = true;
+    }
+
+    public boolean isAppChainSyncEnabled() {
+        return appChainSyncEnabled;
+    }
+
+    /** Null until {@link #enableAppChainSync()} is called. */
+    public AppChainSyncClientAgent getAppChainSyncAgent() {
+        return appChainSyncAgent;
+    }
+
+    /**
+     * True once the handshake completed with an app-layer version (V100+).
+     * Callers should gate app-chain sync requests on this.
+     */
+    public boolean isAppLayerNegotiated() {
+        return appLayerNegotiated;
+    }
+
+    /**
      * Get app agents to include in the connection agent list.
-     * Returns an empty list unless app messaging is explicitly enabled.
+     * Returns an empty list unless at least one app protocol is enabled.
      */
     public List<Agent<?>> getAgents() {
-        if (!appMsgEnabled)
-            return Collections.emptyList();
-        return List.of(appMsgAgent);
+        List<Agent<?>> agents = new ArrayList<>(2);
+        if (appMsgEnabled)
+            agents.add(appMsgAgent);
+        if (appChainSyncEnabled)
+            agents.add(appChainSyncAgent);
+        return agents;
     }
 
     /**
@@ -94,19 +146,34 @@ public class AppProtocolManager {
 
     /**
      * Enable app protocols if the negotiated version supports them AND
-     * the caller has signalled intent via {@link #enableAppMsg()}.
-     * Called after handshake completes.
+     * the caller has signalled intent via {@link #enableAppMsg()} /
+     * {@link #enableAppChainSync()}. Called after handshake completes.
      * @param acceptVersion the negotiated version from handshake
      */
     public void onHandshakeComplete(AcceptVersion acceptVersion) {
-        if (!appMsgEnabled) return;  // caller didn't enable it
         if (acceptVersion == null) return;
-        if (!N2NVersionTableConstant.isAppLayerVersion(acceptVersion.getVersionNumber())) {
+        if (!appMsgEnabled && !appChainSyncEnabled) return;  // caller didn't enable anything
+        // Assign (not just set) on EVERY handshake: a reconnection that
+        // renegotiates a non-app-layer version must clear the gate.
+        appLayerNegotiated =
+                N2NVersionTableConstant.isAppLayerVersion(acceptVersion.getVersionNumber());
+        if (!appLayerNegotiated) {
             log.info("Peer negotiated V{} — app-layer protocols not activated",
                     acceptVersion.getVersionNumber());
             return;
         }
-        activateAppMsgSubmission();
+        if (appMsgEnabled)
+            activateAppMsgSubmission();
+        // AppChainSync (103) needs no activation: it is request-driven and
+        // only sends when the caller invokes requestRange().
+    }
+
+    /**
+     * Connection dropped: the app-layer gate closes until the NEXT handshake
+     * completes with an app-layer version. Called by the connection owner.
+     */
+    public void onDisconnected() {
+        appLayerNegotiated = false;
     }
 
     private void activateAppMsgSubmission() {

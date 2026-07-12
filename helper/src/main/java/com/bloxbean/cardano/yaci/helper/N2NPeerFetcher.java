@@ -183,10 +183,10 @@ public class N2NPeerFetcher implements Fetcher<Block> {
     }
 
     private void validateAppProtocolConfiguration() {
-        if (appProtocolManager.isAppMsgEnabled()
+        if ((appProtocolManager.isAppMsgEnabled() || appProtocolManager.isAppChainSyncEnabled())
                 && !N2NVersionTableConstant.hasAppLayerVersion(versionTable)) {
             throw new IllegalStateException(
-                    "App message protocol requires a version table with app-layer V100 support");
+                    "App-layer protocols require a version table with app-layer V100 support");
         }
 //        n2nClient = new TCPNodeClient(host, port, nodeClientConfig, handshakeAgent, keepAliveAgent,
 //                chainSyncAgent, blockFetchAgent, txSubmissionAgent);
@@ -255,6 +255,8 @@ public class N2NPeerFetcher implements Fetcher<Block> {
                 log.info("ChainSync agent disconnected - resetting handshake flag");
                 // Notify agent about connection loss for reconnection preparation
                 chainSyncAgent.onConnectionLost();
+                // App-layer gate closes until the next handshake renegotiates it
+                appProtocolManager.onDisconnected();
                 // Reset firstTimeHandshake to false so that on reconnection
                 // we know it's a reconnection and not the first connection
                 firstTimeHandshake = false;
@@ -600,6 +602,15 @@ public class N2NPeerFetcher implements Fetcher<Block> {
 
         this.versionTable = N2NVersionTableConstant.withAppLayer(versionTable);
         appProtocolManager.enableAppMsg();
+    }
+
+    /** Enable the app-chain sync protocol (103). Must be called before start(). */
+    public void enableAppChainSync() {
+        if (n2nClient != null)
+            throw new IllegalStateException("App chain sync protocol must be enabled before start()");
+
+        this.versionTable = N2NVersionTableConstant.withAppLayer(versionTable);
+        appProtocolManager.enableAppChainSync();
     }
 
     /**
