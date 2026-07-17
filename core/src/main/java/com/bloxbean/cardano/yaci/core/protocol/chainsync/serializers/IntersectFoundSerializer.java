@@ -26,4 +26,13 @@ public enum IntersectFoundSerializer implements Serializer<IntersectFound> {
 
         return intersectFound;
     }
+
+    @Override
+    public DataItem serializeDI(IntersectFound inFnd) {
+        Array array = new Array();
+        array.add(new UnsignedInteger(5));
+        array.add(PointSerializer.INSTANCE.serializeDI(inFnd.getPoint()));
+        array.add(TipSerializer.INSTANCE.serializeDI(inFnd.getTip()));
+        return array;
+    }
 }
