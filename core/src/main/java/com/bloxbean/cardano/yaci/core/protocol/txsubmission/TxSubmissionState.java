@@ -61,8 +61,6 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
         public State nextState(Message message) {
             if (message instanceof ReplyTxIds)
                 return Idle;
-            else if (message instanceof MsgDone) // defensive: honour client termination
-                return Done;
             else
                 return this;
         }
@@ -77,8 +75,6 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
         public State nextState(Message message) {
             if (message instanceof ReplyTxs)
                 return Idle;
-            else if (message instanceof MsgDone) // defensive: honour client termination
-                return Done;
             else
                 return this;
         }

@@ -352,11 +352,13 @@ class TxSubmissionServerAgentTest {
     }
 
     @Test
-    void testMsgDoneStateTransitionsForAllClientAgencyStates() {
-        // The terminal MsgDone transition must hold for every state where the client has agency.
+    void testMsgDoneStateTransition() {
+        // Per the node-to-node tx-submission spec, MsgDone is only legal (and only handled)
+        // in TxIdsBlocking. The other client-agency states are not part of the spec for MsgDone,
+        // so they must ignore it and stay put rather than transition to Done.
         assertEquals(TxSubmissionState.Done, TxSubmissionState.TxIdsBlocking.nextState(new MsgDone()));
-        assertEquals(TxSubmissionState.Done, TxSubmissionState.TxIdsNonBlocking.nextState(new MsgDone()));
-        assertEquals(TxSubmissionState.Done, TxSubmissionState.Txs.nextState(new MsgDone()));
+        assertEquals(TxSubmissionState.TxIdsNonBlocking, TxSubmissionState.TxIdsNonBlocking.nextState(new MsgDone()));
+        assertEquals(TxSubmissionState.Txs, TxSubmissionState.Txs.nextState(new MsgDone()));
     }
 
     @Test
