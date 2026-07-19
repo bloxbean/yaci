@@ -5,7 +5,8 @@ import com.bloxbean.cardano.yaci.node.api.model.MemPoolTransaction;
 import java.util.Set;
 
 public interface MemPool {
-    // Add a transaction to the mempool and return the created mempool transaction
+    // Add a transaction to the mempool and return the created mempool transaction,
+    // or null if the transaction is already present (duplicate delivery)
     MemPoolTransaction addTransaction(byte[] txBytes);
 
     // Get the next transaction to process (FIFO)

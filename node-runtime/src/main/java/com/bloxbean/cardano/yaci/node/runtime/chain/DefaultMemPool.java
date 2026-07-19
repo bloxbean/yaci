@@ -19,9 +19,11 @@ public class DefaultMemPool implements MemPool {
     @Override
     public synchronized MemPoolTransaction addTransaction(byte[] txBytes) {
         var txHash = TransactionUtil.getTxHash(txBytes);
-        // Deduplicate: skip if already present
+        // Deduplicate: return null if already present so callers can tell a new entry
+        // from a duplicate delivery (e.g. the same tx arriving via multiple N2N sessions)
+        // and only publish MemPoolTransactionReceivedEvent for new entries
         if (txIndex.containsKey(txHash)) {
-            return txIndex.get(txHash);
+            return null;
         }
         long txSeqId = cursor.incrementAndGet();
         var memPoolTransaction = new MemPoolTransaction(txSeqId, HexUtil.decodeHexString(txHash), txBytes, TxBodyType.CONWAY);

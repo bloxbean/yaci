@@ -118,9 +118,16 @@ public class YaciTxSubmissionHandler implements TxSubmissionListener, TxSubmissi
                     continue;
                 }
 
-                // Add to mempool and publish event
+                // Add to mempool and publish event; null means the tx was already in the
+                // mempool (same tx delivered by another session) - don't publish again
                 MemPoolTransaction mpt = memPool.addTransaction(tx.getTx());
-                if (eventBus != null && mpt != null) {
+                if (mpt == null) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("Transaction {} already in mempool (duplicate delivery), skipping event", txHash);
+                    }
+                    continue;
+                }
+                if (eventBus != null) {
                     eventBus.publish(new MemPoolTransactionReceivedEvent(mpt),
                             EventMetadata.builder().origin("txsubmission").build(),
                             PublishOptions.builder().build());
