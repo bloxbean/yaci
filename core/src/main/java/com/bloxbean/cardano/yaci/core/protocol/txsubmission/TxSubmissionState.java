@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.core.protocol.txsubmission;
 
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.State;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.MsgDone;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.ReplyTxIds;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.ReplyTxs;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxIds;
@@ -44,6 +45,8 @@ public enum TxSubmissionState implements TxSubmissionStateBase {
         public State nextState(Message message) {
             if (message instanceof ReplyTxIds)
                 return Idle;
+            else if (message instanceof MsgDone)
+                return Done;
             else
                 return this;
         }
