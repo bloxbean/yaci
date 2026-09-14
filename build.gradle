@@ -4,7 +4,9 @@ plugins {
     id 'signing'
     id 'org.unbroken-dome.test-sets' version("4.1.0")
     id 'org.ajoberstar.grgit' version '5.2.0'
-    id 'io.github.gradle-nexus.publish-plugin' version '2.0.0'
+    // The root publishes yaci, so it applies nmcp as well as the aggregation plugin.
+    id 'com.gradleup.nmcp' version '1.6.2'
+    id 'com.gradleup.nmcp.aggregation' version '1.6.2'
 }
 
 repositories {
@@ -38,6 +40,13 @@ tasks.withType(Test) {
     useJUnitPlatform()
 }
 
+// The root has no sources, but the Central Portal requires sources and javadoc jars for every
+// jar-packaged publication, so the root publishes empty ones alongside its dependency jar.
+java {
+    withSourcesJar()
+    withJavadocJar()
+}
+
 ext.ossrhUsername = System.getenv('MAVEN_USERNAME')
 ext.ossrhPassword = System.getenv('MAVEN_PASSWORD')
 
@@ -69,38 +78,46 @@ publishing {
             }
         }
     }
-
-    repositories {
-        maven {
-            def releasesRepoUrl = "https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/"
-            def snapshotsRepoUrl = "https://central.sonatype.com/repository/maven-snapshots/"
-            url = version.endsWith('SNAPSHOT') ? snapshotsRepoUrl : releasesRepoUrl
-            credentials {
-                username ossrhUsername
-                password ossrhPassword
-            }
-        }
-    }
 }
 
-nexusPublishing {
-    repositories {
-        sonatype {
-            nexusUrl.set(uri("https://ossrh-staging-api.central.sonatype.com/service/local/"))
-            snapshotRepositoryUrl.set(uri("https://central.sonatype.com/repository/maven-snapshots/"))
-            username = ossrhUsername
-            password = ossrhPassword
-        }
+// Central Portal publishing through the publisher API (nmcp), replacing the legacy OSSRH staging
+// API. `USER_MANAGED` uploads the deployment and stops at VALIDATED: nothing reaches Maven Central
+// until a human publishes it, from the portal UI or through the approval-gated
+// .github/workflows/publish-central.yml.
+// Do not set `publishingTimeout` here -- nmcp rejects it under USER_MANAGED.
+nmcpAggregation {
+    centralPortal {
+        username = ossrhUsername
+        password = ossrhPassword
+        publishingType = 'USER_MANAGED'
+        // Names the pending deployment in the portal list. The deployment id itself is assigned by
+        // the server and reported by the upload task.
+        publicationName = "yaci:${project.version}"
+        // The aggregate carries every module with its sources and javadoc; the 10 minute default
+        // validation wait is tight for it.
+        validationTimeout = java.time.Duration.ofMinutes(30)
     }
 }
 
 ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
 
-if (isReleaseVersion && !project.hasProperty("skipSigning")) {
-    signing {
-//        sign configurations.archives
-        sign publishing.publications
+// CI signs with an ASCII-armored signing subkey held in memory, passed as the project properties
+// signingInMemoryKey, signingInMemoryKeyId (last 8 hex chars of the subkey id) and
+// signingInMemoryKeyPassword (ORG_GRADLE_PROJECT_* environment variables in release.yml). Without them,
+// local builds keep using the signing.* properties from ~/.gradle/gradle.properties.
+def configureReleaseSigning = { Project candidate ->
+    candidate.signing {
+        def inMemoryKey = candidate.findProperty('signingInMemoryKey')
+        if (inMemoryKey) {
+            useInMemoryPgpKeys(candidate.findProperty('signingInMemoryKeyId'), inMemoryKey,
+                    candidate.findProperty('signingInMemoryKeyPassword'))
+        }
+        sign candidate.publishing.publications
     }
+}
+
+if (isReleaseVersion && !project.hasProperty("skipSigning")) {
+    configureReleaseSigning(project)
 }
 
 def commit_id=getCheckedOutGitCommitHash()
@@ -108,10 +125,21 @@ if (project.version.endsWith("-SNAPSHOT")) {
     version = "${project.version}".replace("-SNAPSHOT", "-${commit_id}-SNAPSHOT")
 }
 
+// These projects are built with the repository but are not library artifacts and must not
+// be published to Maven repositories. Add future build-only modules here by project path.
+def mavenPublicationExcludedProjectPaths = [
+] as Set
+
 subprojects {
+    def isMavenPublishedProject = !mavenPublicationExcludedProjectPaths.contains(path)
+
     apply plugin: 'java-library'
-    apply plugin: 'maven-publish'
-    apply plugin: 'signing'
+    if (isMavenPublishedProject) {
+        apply plugin: 'maven-publish'
+        apply plugin: 'signing'
+        // Exposes this project's publications to the root nmcpAggregation.
+        apply plugin: 'com.gradleup.nmcp'
+    }
     apply plugin: 'org.unbroken-dome.test-sets'
 
     repositories {
@@ -176,36 +204,38 @@ subprojects {
         integrationTest
     }
 
-    publishing {
-        publications {
-            mavenJava(MavenPublication) {
-                from components.java
-                artifact(sourceJar) {
-                    classifier = 'sources'
-                }
-                artifact(javadocJar) {
-                    classifier = 'javadoc'
-                }
+    if (isMavenPublishedProject) {
+        publishing {
+            publications {
+                mavenJava(MavenPublication) {
+                    from components.java
+                    artifact(sourceJar) {
+                        classifier = 'sources'
+                    }
+                    artifact(javadocJar) {
+                        classifier = 'javadoc'
+                    }
 
-                artifactId 'yaci-' + project.name
-                pom {
-                    url = 'https://github.com/bloxbean/yaci'
-                    licenses {
-                        license {
-                            name = 'The MIT License'
-                            url = 'https://opensource.org/licenses/mit-license.php'
-                        }
-                    }
-                    developers {
-                        developer {
-                            id = 'satran004'
-                            name = 'Satya'
-                        }
-                    }
-                    scm {
-                        connection = 'scm:git:git://github.com/bloxbean/yaci.git'
-                        developerConnection = 'scm:git:ssh://git@github.com/bloxbean/yaci.git'
+                    artifactId 'yaci-' + project.name
+                    pom {
                         url = 'https://github.com/bloxbean/yaci'
+                        licenses {
+                            license {
+                                name = 'The MIT License'
+                                url = 'https://opensource.org/licenses/mit-license.php'
+                            }
+                        }
+                        developers {
+                            developer {
+                                id = 'satran004'
+                                name = 'Satya'
+                            }
+                        }
+                        scm {
+                            connection = 'scm:git:git://github.com/bloxbean/yaci.git'
+                            developerConnection = 'scm:git:ssh://git@github.com/bloxbean/yaci.git'
+                            url = 'https://github.com/bloxbean/yaci'
+                        }
                     }
                 }
             }
@@ -214,10 +244,8 @@ subprojects {
 
     ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
 
-    if (isReleaseVersion && !project.hasProperty("skipSigning")) {
-        signing {
-            sign publishing.publications
-        }
+    if (isMavenPublishedProject && isReleaseVersion && !project.hasProperty("skipSigning")) {
+        configureReleaseSigning(project)
     }
 
     // Make all tests use JUnit 5
@@ -230,6 +258,53 @@ subprojects {
         }
 
     }
+}
+
+// The Maven Central deployment scope: the root (yaci) and every subproject that is not a build-only
+// module listed in mavenPublicationExcludedProjectPaths.
+def centralDeploymentProjects = ([rootProject] + subprojects.toList()).findAll { candidate ->
+    !mavenPublicationExcludedProjectPaths.contains(candidate.path)
+}
+
+dependencies {
+    centralDeploymentProjects.each { candidate ->
+        nmcpAggregation(project(candidate.path))
+    }
+}
+
+// A deployment that silently loses a module, or picks up a build-only one, is worse than one that
+// fails, so the resolved scope is asserted against the publications the build actually declares.
+tasks.register('verifyMavenReleasePublicationScope') {
+    group = 'verification'
+    description = 'Asserts the Central deployment covers exactly the Maven publications the build declares.'
+    def expected = centralDeploymentProjects.collect { it.path }.toSet()
+    doLast {
+        def declared = allprojects.findAll { candidate ->
+            candidate.pluginManager.hasPlugin('maven-publish') &&
+                    !candidate.publishing.publications.withType(MavenPublication).isEmpty()
+        }.collect { it.path }.toSet()
+        def missing = declared - expected
+        def extra = expected - declared
+        if (!missing.isEmpty() || !extra.isEmpty()) {
+            throw new GradleException(
+                    'Central deployment scope does not match declared publications. ' +
+                            "Publishing but not deployed: ${missing.sort()}; " +
+                            "deployed but publishes nothing: ${extra.sort()}")
+        }
+        logger.lifecycle("Central deployment scope: ${expected.size()} projects")
+    }
+}
+
+// The scope check must gate the work itself, not the lifecycle alias. `publishAggregationToCentralPortal`
+// is an alias whose dependencies are unordered relative to each other, so hanging the check off it
+// lets the upload run first. Attaching it to the zip -- which every portal task depends on -- puts
+// the check ahead of both the bundle and the network calls.
+tasks.matching {
+    it.name in ['nmcpZipAggregation',
+                'nmcpPublishAggregationToCentralPortal',
+                'nmcpPublishAggregationToCentralPortalSnapshots']
+}.configureEach {
+    dependsOn 'verifyMavenReleasePublicationScope'
 }
 
 def getCheckedOutGitCommitHash() {
