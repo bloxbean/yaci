@@ -8,6 +8,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 @Slf4j
 public abstract class Agent<T extends AgentListener> {
@@ -74,9 +77,18 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     protected void writeMessage(Message message, Runnable onSuccess) {
+        writeMessage(message, onSuccess, null);
+    }
+
+    protected void writeMessage(Message message, Runnable onSuccess, Consumer<Throwable> onFailure) {
+        AtomicBoolean completed = new AtomicBoolean(false);
         Channel ch = this.channel; // volatile read, captured once
         if (ch == null || !ch.isActive()) {
-            log.warn("Cannot write message: channel is null or inactive");
+            IllegalStateException failure = new IllegalStateException("Cannot write message: channel is null or inactive");
+            if (onFailure != null)
+                notifyWriteFailure(onFailure, failure);
+            else
+                log.warn(failure.getMessage());
             return;
         }
 
@@ -88,7 +100,7 @@ public abstract class Agent<T extends AgentListener> {
             protocolWithFlag |= 0x8000; // Server response flag
             if (log.isDebugEnabled()) {
                 log.debug("Server mode: adding response flag - protocol {} -> {} (0x{})",
-                         this.getProtocolId(), protocolWithFlag, Integer.toHexString(protocolWithFlag));
+                        this.getProtocolId(), protocolWithFlag, Integer.toHexString(protocolWithFlag));
             }
         }
 
@@ -96,24 +108,47 @@ public abstract class Agent<T extends AgentListener> {
         int baseProtocolId = protocolWithFlag & 0x7FFF;
         if (baseProtocolId < 0 || baseProtocolId > 199) {
             log.error("🚨 Suspicious protocol ID: {} (0x{}) (base: {} 0x{})",
-                     protocolWithFlag, Integer.toHexString(protocolWithFlag),
-                     baseProtocolId, Integer.toHexString(baseProtocolId));
+                    protocolWithFlag, Integer.toHexString(protocolWithFlag),
+                    baseProtocolId, Integer.toHexString(baseProtocolId));
         }
 
         byte[] payload = message.serialize();
 
-        // Handle large payloads with automatic segmentation
-        if (payload.length > 65535) {
-            log.info("Large payload detected ({} bytes) - using mux-level segmentation", payload.length);
-            writeSegmentedMessage(ch, protocolWithFlag, payload, onSuccess);
-            return;
-        }
+        Consumer<Throwable> failureHandler = onFailure != null ? onFailure
+                : throwable -> closeChannelAfterWriteFailure(ch, throwable);
+        Consumer<Throwable> closeAfterSegmentFailure = onFailure != null
+                ? throwable -> closeChannelAfterWriteFailure(ch, throwable)
+                : throwable -> {
+                };
+        Runnable onSuccessOnce = () -> {
+            if (completed.compareAndSet(false, true) && onSuccess != null)
+                onSuccess.run();
+        };
+        Consumer<Throwable> onFailureOnce = throwable -> {
+            if (completed.compareAndSet(false, true))
+                notifyWriteFailure(failureHandler, throwable);
+        };
 
-        // Normal single segment message
-        writeSingleSegment(ch, protocolWithFlag, payload, onSuccess);
+        try {
+            // Handle large payloads with automatic segmentation
+            if (payload.length > 65535) {
+                log.info("Large payload detected ({} bytes) - using mux-level segmentation", payload.length);
+                writeSegmentedMessage(ch, protocolWithFlag, payload, onSuccessOnce, onFailureOnce,
+                        closeAfterSegmentFailure);
+                return;
+            }
+
+            // Normal single segment message
+            writeSingleSegment(ch, protocolWithFlag, payload, onSuccessOnce, onFailureOnce);
+        } catch (Throwable e) {
+            onFailureOnce.accept(e);
+            if (payload.length > 65535)
+                closeAfterSegmentFailure.accept(e);
+        }
     }
 
-    private void writeSingleSegment(Channel ch, int protocolWithFlag, byte[] payload, Runnable onSuccess) {
+    private void writeSingleSegment(Channel ch, int protocolWithFlag, byte[] payload,
+                                    Runnable onSuccess, Consumer<Throwable> onFailure) {
         int elapseTime = calculateElapsedTime();
 
         Segment segment = Segment.builder()
@@ -126,22 +161,32 @@ public abstract class Agent<T extends AgentListener> {
         synchronized (ch) {
             ch.writeAndFlush(segment).addListener(future -> {
                 if (future.isSuccess()) {
-                    if (onSuccess != null) onSuccess.run();
+                    if (onSuccess != null)
+                        onSuccess.run();
                 } else {
                     log.error("Failed to send message for protocol {}", getProtocolId(), future.cause());
+                    if (onFailure != null)
+                        onFailure.accept(writeFailureCause(future.cause()));
                 }
             });
         }
     }
 
-    private void writeSegmentedMessage(Channel ch, int protocolWithFlag, byte[] payload, Runnable onSuccess) {
+    private void writeSegmentedMessage(Channel ch, int protocolWithFlag, byte[] payload,
+                                       Runnable onSuccess, Consumer<Throwable> onFailure,
+                                       Consumer<Throwable> afterFailure) {
         final int MAX_SEGMENT_SIZE = 65535;
         final int totalSegments = (payload.length + MAX_SEGMENT_SIZE - 1) / MAX_SEGMENT_SIZE;
+        AtomicBoolean failed = new AtomicBoolean(false);
+        AtomicInteger successfulSegments = new AtomicInteger(0);
 
         log.info("Segmenting large message: {} bytes into {} segments", payload.length, totalSegments);
 
         synchronized (ch) {
             for (int i = 0; i < totalSegments; i++) {
+                if (failed.get())
+                    break;
+
                 int offset = i * MAX_SEGMENT_SIZE;
                 int segmentSize = Math.min(MAX_SEGMENT_SIZE, payload.length - offset);
 
@@ -156,24 +201,47 @@ public abstract class Agent<T extends AgentListener> {
                         .payload(segmentPayload)
                         .build();
 
-                final boolean isLastSegment = (i == totalSegments - 1);
                 final int segmentIndex = i;
 
                 log.debug("Sending segment {}/{} - {} bytes", segmentIndex + 1, totalSegments, segmentSize);
 
                 ch.writeAndFlush(segment).addListener(future -> {
                     if (future.isSuccess()) {
-                        if (isLastSegment && onSuccess != null) {
+                        int completed = successfulSegments.incrementAndGet();
+                        if (completed == totalSegments && !failed.get() && onSuccess != null) {
                             onSuccess.run();
                         }
                         log.debug("Segment {}/{} sent successfully", segmentIndex + 1, totalSegments);
                     } else {
                         log.error("Failed to send segment {}/{} for protocol {}",
                                  segmentIndex + 1, totalSegments, getProtocolId(), future.cause());
+                        if (failed.compareAndSet(false, true) && onFailure != null) {
+                            Throwable cause = writeFailureCause(future.cause());
+                            onFailure.accept(cause);
+                            afterFailure.accept(cause);
+                        }
                     }
                 });
             }
         }
+    }
+
+    private void notifyWriteFailure(Consumer<Throwable> failureHandler, Throwable throwable) {
+        try {
+            failureHandler.accept(throwable);
+        } catch (Throwable callbackError) {
+            log.error("Write failure callback threw for protocol {}", getProtocolId(), callbackError);
+        }
+    }
+
+    private Throwable writeFailureCause(Throwable cause) {
+        return cause != null ? cause : new IllegalStateException("Netty write failed without a cause");
+    }
+
+    private void closeChannelAfterWriteFailure(Channel ch, Throwable cause) {
+        log.warn("Closing channel after failed write for protocol {}", getProtocolId(), cause);
+        if (ch != null && ch.isOpen())
+            ch.close();
     }
 
     private int calculateElapsedTime() {

@@ -17,6 +17,7 @@ lombok="org.projectlombok:lombok:1.18.44"
 junit-jupiter-api="org.junit.jupiter:junit-jupiter-api:5.13.4"
 junit-jupiter-engine="org.junit.jupiter:junit-jupiter-engine:5.13.4"
 junit-platform-launcher="org.junit.platform:junit-platform-launcher:1.13.4"
+jqwik="net.jqwik:jqwik:1.10.1"
 harmcrest-library="org.hamcrest:hamcrest-library:2.2"
 
 mockito-core="org.mockito:mockito-core:5.23.0"
