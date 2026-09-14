@@ -19,6 +19,10 @@ public class LocalTxMonitorAgent extends Agent<LocalTxMonitorListener> {
     private Queue<MsgQuery> pendingQueryQueue;
 
     public LocalTxMonitorAgent() {
+        this(true);
+    }
+    public LocalTxMonitorAgent(boolean isClient) {
+        super(isClient);
         this.currenState = Idle;
         this.acquiredCommands = new ConcurrentLinkedQueue<>();
         this.pendingQueryQueue = new ConcurrentLinkedQueue<>();

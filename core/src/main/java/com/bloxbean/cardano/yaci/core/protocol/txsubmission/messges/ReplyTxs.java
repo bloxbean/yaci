@@ -18,7 +18,7 @@ public class ReplyTxs implements Message {
     private List<byte[]> txns;
 
     public ReplyTxs() {
-        this(Era.Babbage);
+        this(Era.Conway);
     }
 
     public void addTx(byte[] tx) {

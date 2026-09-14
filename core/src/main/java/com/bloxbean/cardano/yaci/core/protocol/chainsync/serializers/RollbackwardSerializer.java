@@ -1,6 +1,8 @@
 package com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers;
 
 import co.nstant.in.cbor.model.Array;
+import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Rollbackward;
@@ -18,5 +20,14 @@ public enum RollbackwardSerializer implements Serializer<Rollbackward> {
         Tip tip = TipSerializer.INSTANCE.deserializeDI(array.getDataItems().get(2));
 
         return new Rollbackward(point, tip);
+    }
+
+    @Override
+    public DataItem serializeDI(Rollbackward object) {
+        Array array = new Array();
+        array.add(new UnsignedInteger(3));
+        array.add(PointSerializer.INSTANCE.serializeDI(object.getPoint()));
+        array.add(TipSerializer.INSTANCE.serializeDI(object.getTip()));
+        return array;
     }
 }
