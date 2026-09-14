@@ -1,0 +1,37 @@
+name: Publish staged deployment to Maven Central
+
+# STUB on main. workflow_dispatch only offers workflows whose file exists on the default branch (main),
+# but the run uses the file from the ref selected in "Run workflow". This file exists so that next's
+# real publish-central.yml (nmcpPublishDeployment behind the `release` approval) can be started with
+# ref `next`.
+#
+# main stages releases with gradle-nexus (Gradle 7.5.1 / JDK 11, no nmcp), so there is nothing to run
+# here: publish main's deployments in the Central Portal UI.
+#
+# Keep the name, the workflow_dispatch inputs (names and descriptions) and the concurrency group identical
+# to next's copy: it is not verified whether the dispatch form and API validate inputs against the default
+# branch's file or the selected ref's. This stub names no environment and uses no secrets.
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploymentId:
+        description: 'Central Portal deployment id (UUID, from the release run summary)'
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: publish-central
+  cancel-in-progress: false
+
+jobs:
+  not-on-main:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse to run on this branch
+        shell: bash
+        run: |
+          echo "::error::main stages with gradle-nexus: publish its deployments in the Central Portal (https://central.sonatype.com/publishing/deployments)." >&2
+          echo "::error::For next releases, run this workflow with ref 'next'." >&2
+          exit 1
