@@ -35,13 +35,17 @@ jobs:
       github_release: ${{ steps.version.outputs.github_release }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The build never pushes; don't leave the GITHUB_TOKEN in .git/config for build code to read.
+          persist-credentials: false
 
+      # No Gradle cache here: this job holds the signing key and Central token, and a restored cache
+      # (written by another workflow run) could change what the build executes.
       - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
           java-version: '25'
           distribution: 'temurin'
-          cache: 'gradle'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew

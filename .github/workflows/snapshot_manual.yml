@@ -21,6 +21,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: 'true'
+          # The build never pushes; don't leave the GITHUB_TOKEN in .git/config for build code to read.
+          persist-credentials: false
       - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
