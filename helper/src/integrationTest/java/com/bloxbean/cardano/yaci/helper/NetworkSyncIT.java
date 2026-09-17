@@ -28,10 +28,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Opt-in full-history network sync tests.
  *
- * <p>Run one network at a time with, for example:</p>
+ * <p>The {@code YACI_FULL_SYNC} environment variable prevents these long-running tests from starting during a
+ * normal integration-test run. Set it to {@code true} and select one method with Gradle:</p>
  * <pre>{@code
  * YACI_FULL_SYNC=true ./gradlew :helper:integrationTest \
- *     --tests com.bloxbean.cardano.yaci.helper.NetworkSyncIT.syncPreprod
+ *     --tests 'com.bloxbean.cardano.yaci.helper.NetworkSyncIT.syncMainnet'
+ *
+ * YACI_FULL_SYNC=true ./gradlew :helper:integrationTest \
+ *     --tests 'com.bloxbean.cardano.yaci.helper.NetworkSyncIT.syncPreprod'
+ *
+ * YACI_FULL_SYNC=true ./gradlew :helper:integrationTest \
+ *     --tests 'com.bloxbean.cardano.yaci.helper.NetworkSyncIT.syncPreview'
+ *
+ * YACI_FULL_SYNC=true ./gradlew :helper:integrationTest \
+ *     --tests 'com.bloxbean.cardano.yaci.helper.NetworkSyncIT.syncSanchonet'
  * }</pre>
  */
 @Slf4j
