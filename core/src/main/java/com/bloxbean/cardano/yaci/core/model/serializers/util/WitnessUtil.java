@@ -109,7 +109,6 @@ public final class WitnessUtil {
         }
     }
 
-
     /** Copy immediate array children, retaining each child's tags and nested container encoding. */
     private static List<byte[]> arrayBytes(CborSlice array) throws CborException {
         List<byte[]> result = new ArrayList<>();

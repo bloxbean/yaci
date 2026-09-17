@@ -51,6 +51,10 @@ The whole-output comparison against #188 remains one-time validation evidence in
   mismatch still logs the failure, retains parsed values, and continues with later witnesses.
   Synthetic regressions cover different encodings of equal keys, interleaved duplicates,
   ordering, exact winning bytes/hashes, and unresolved mismatches.
+- Recovery must apply the same duplicate-key rules. Tests combine duplicate maps with a deeply
+  nested datum in the same or a later witness, then compare the normal and recovery redeemer
+  lists through both sync paths on 512 KB stacks. They also cover deep overwritten/winning
+  redeemer data and ensure array-form redeemers are never deduplicated.
 
 `preview2587542.txt` contains the original duplicate-key block. Independent `cbor2` stream
 inspection places the second `[Mint, 0]` value's data at byte offsets `[4098, 4101)`: `d87a80`.

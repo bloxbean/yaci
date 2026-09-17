@@ -70,6 +70,12 @@ keep their first insertion position and take the last value's original bytes. Th
 different encodings of the same key. Counts must agree after duplicate resolution before correction
 continues. Matching-count maps and array-form redeemers keep their existing extraction path.
 
+The recovery path also collapses duplicate Conway map keys before rebuilding redeemers. A deep
+datum elsewhere in the block must not change the resulting redeemer count or ordering. Recovery
+retains the first key's source encoding and the last value's original data and execution units,
+including when the overwritten or winning datum is deeply nested. Array-form redeemers keep
+every entry; map duplicate-key rules do not apply to lists.
+
 An unresolved count mismatch skips the affected collection to avoid attaching bytes to the wrong
 parsed value. Such fallback values are not guaranteed to contain exact source CBOR; this is separate
 from optional JSON conversion failures reported through `Datum.parseError`.

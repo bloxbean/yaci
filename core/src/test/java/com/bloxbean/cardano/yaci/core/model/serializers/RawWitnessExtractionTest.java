@@ -340,6 +340,100 @@ class RawWitnessExtractionTest {
         }
     }
 
+    /** Normal and recovery paths must expose the same winning redeemers when another datum cannot render. */
+    @Test
+    void duplicateRedeemerKeysStayIdenticalWhenADatumTriggersRecovery() throws Exception {
+        // A=[Spend,9], B=[Mint,1]: A0, B0, A1 -> A1, B0. A1 uses a non-minimal key encoding.
+        String entries = "8200098200820102" + "82010182182a820b15"
+                + "98021800180982" + DATA + "820a14";
+        String[] deepValues = {"a100".repeat(3000) + "00", "81".repeat(3000) + "00"};
+        for (String prefix : new String[]{"a3", "b803", "d90102a3", "bf"}) {
+            String redeemers = prefix + entries + (prefix.equals("bf") ? "ff" : "");
+            String duplicate = "a105" + redeemers;
+            var expected = SyncDataIsolationTest.throughBothSyncPaths(withWitnesses(7, duplicate))
+                    .get(0).getTransactionWitness().get(0).getRedeemers();
+            assertThat(expected).hasSize(2);
+            assertSourceData(expected.get(0).getData());
+            for (boolean full : new boolean[]{false, true}) {
+                YaciConfig.INSTANCE.setReturnFullTxCbor(full);
+                YaciConfig.INSTANCE.setReturnBlockCbor(full);
+                for (String deep : deepValues) {
+                    for (boolean sameWitness : new boolean[]{false, true}) {
+                        // Put failed data beside the map or in a later witness; both restart block parsing.
+                        String first = sameWitness ? "a205" + redeemers + "0481" + deep : duplicate;
+                        String second = sameWitness ? "a0" : "a10481" + deep;
+                        byte[] bytes = withWitnesses(7, first, second, WITNESS);
+                        for (Block block : SyncDataIsolationTest.throughBothSyncPaths(bytes)) {
+                            var actual = block.getTransactionWitness().get(0).getRedeemers();
+                            assertThat(actual).usingRecursiveComparison().isEqualTo(expected);
+                            Datum failed = block.getTransactionWitness().get(sameWitness ? 0 : 1).getDatums().get(0);
+                            assertThat(failed.getParseError()).isNotNull();
+                            assertThat(failed.getJson()).isNull();
+                            assertThat(failed.getCbor()).isEqualTo(deep);
+                            assertThat(failed.getHash()).isEqualTo(Datum.cborToHash(hex(deep)));
+                            assertSourceData(block.getTransactionWitness().get(2).getRedeemers().get(0).getData());
+                            assertThat(block.getCbor()).isEqualTo(full ? HexUtil.encodeHexString(bytes) : null);
+                            for (int i = 0; i < block.getTransactionWitness().size(); i++) {
+                                String raw = HexUtil.encodeHexString(CborSlice.arrayItem(bytes, 1, 2, i).bytes());
+                                assertThat(block.getTransactionWitness().get(i).getCbor()).isEqualTo(full ? raw : null);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Recovery must discard overwritten deep values and preserve a winning deep value's source bytes. */
+    @Test
+    void duplicateRedeemerRecoveryUsesOnlyTheLastValueWhenItsDataIsDeep() throws Exception {
+        String deep = "a100".repeat(3000) + "00";
+        for (boolean deepWins : new boolean[]{false, true}) {
+            String firstData = deepWins ? "00" : deep;
+            String lastData = deepWins ? deep : DATA;
+            // First [Spend,9] key is non-minimal; its encoding and position survive the last-value update.
+            String duplicate = "a105a298021800180982" + firstData + "820102"
+                    + "82000982" + lastData + "820a14";
+            byte[] bytes = withWitnesses(7, duplicate, WITNESS);
+            for (Block block : SyncDataIsolationTest.throughBothSyncPaths(bytes)) {
+                var redeemers = block.getTransactionWitness().get(0).getRedeemers();
+                assertThat(redeemers).hasSize(1);
+                var redeemer = redeemers.get(0);
+                assertThat(redeemer.getIndex()).isEqualTo(9);
+                assertThat(redeemer.getExUnits().getMem()).isEqualTo(10);
+                assertThat(redeemer.getExUnits().getSteps()).isEqualTo(20);
+                assertThat(redeemer.getData().getCbor()).isEqualTo(lastData);
+                assertThat(redeemer.getData().getHash()).isEqualTo(Datum.cborToHash(hex(lastData)));
+                if (deepWins) {
+                    assertThat(redeemer.getData().getParseError()).isNotNull();
+                    assertThat(redeemer.getData().getJson()).isNull();
+                    assertThat(redeemer.getCbor()).isEqualTo("8418001809" + deep + "820a14");
+                } else {
+                    assertSourceData(redeemer.getData());
+                    var expected = WitnessesSerializer.INSTANCE.deserialize(hex(
+                            "a105a182000982" + DATA + "820a14")).getRedeemers().get(0);
+                    assertThat(redeemer.getCbor()).isEqualTo(expected.getCbor());
+                }
+                assertSourceData(block.getTransactionWitness().get(1).getRedeemers().get(0).getData());
+            }
+        }
+    }
+
+    /** Duplicate resolution applies to map keys only; array-form redeemers retain every source entry. */
+    @Test
+    void arrayFormRedeemersAreNotCollapsedDuringRecovery() throws Exception {
+        String arrayWitness = "a10582" + REDEEMER + "840000182a820b15";
+        var expected = BlockSerializer.INSTANCE.deserialize(withWitnesses(7, arrayWitness))
+                .getTransactionWitness().get(0).getRedeemers();
+        assertThat(expected).hasSize(2);
+        byte[] bytes = withWitnesses(7, arrayWitness, "a10481" + "a100".repeat(3000) + "00");
+        for (Block block : SyncDataIsolationTest.throughBothSyncPaths(bytes)) {
+            assertThat(block.getTransactionWitness().get(0).getRedeemers()).usingRecursiveComparison()
+                    .isEqualTo(expected);
+            assertThat(block.getTransactionWitness().get(1).getDatums().get(0).getParseError()).isNotNull();
+        }
+    }
+
     /** Replay the observed duplicate-key block and verify every parsed redeemer reaches raw-data correction. */
     @Test
     void previewDuplicateKeyBlockCompletesRawCorrection() {
