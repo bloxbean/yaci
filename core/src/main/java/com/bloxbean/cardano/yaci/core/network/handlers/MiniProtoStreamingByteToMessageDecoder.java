@@ -55,11 +55,6 @@ public class MiniProtoStreamingByteToMessageDecoder
             bytes = BytesUtil.merge(bytes, payload);
             try {
                 while (true && bytes.length != 0) {
-                    //TODO -- Remove later after testing
-//                    DataItem di = ArrayCborDecoder.decode(bytes).get(0);
-//                    byte[] segmentBytes = CborSerializationUtil.serialize(di);
-
-
                     List<DataItem> diList = ArrayCborDecoder.decode(bytes);
                     //To handle. When multiple dataitems and non array data items which are part of message
                     //Exp. Local State Query : Current Protocol Param's maxCollateralInputs always comes as a separate

@@ -19,6 +19,14 @@ import java.util.List;
 public final class ArrayCborDecoder extends CborDecoder {
     private final PushbackInputStream input;
     private final ArrayLengthDecoder lengths;
+    // Keep allocation bounded even for an untrusted declared length.
+    private int maxArrayPreallocationSize = 4096;
+
+    @Override
+    public void setMaxPreallocationSize(int size) {
+        super.setMaxPreallocationSize(size);
+        maxArrayPreallocationSize = size;
+    }
 
     public ArrayCborDecoder(InputStream input) {
         this(new PushbackInputStream(input));
@@ -36,22 +44,27 @@ public final class ArrayCborDecoder extends CborDecoder {
 
     @Override
     public DataItem decodeNext() throws CborException {
-        Deque<Frame> arrays = new ArrayDeque<>();
+        Deque<Frame> arrays = null;
         try {
             while (true) {
                 int symbol = input.read();
                 DataItem item;
                 if (symbol == -1) {
-                    if (arrays.isEmpty()) {
+                    if (arrays == null || arrays.isEmpty()) {
                         return null;
                     }
                     throw new CborException("Unexpected end of stream");
                 }
                 if ((symbol >>> 5) == 4) {
                     long length = lengths.length(symbol);
-                    Array array = new Array();
+                    Array array = length >= 0 ? new Array((int) Math.min(length,
+                            maxArrayPreallocationSize > 0 ? Math.min(maxArrayPreallocationSize, 4096) : 4096))
+                            : new Array();
                     array.setChunked(length == -1);
                     if (length > 0 || (length == -1 && isAutoDecodeInfinitiveArrays())) {
+                        if (arrays == null) {
+                            arrays = new ArrayDeque<>();
+                        }
                         arrays.push(new Frame(array, length));
                         continue;
                     }
@@ -62,11 +75,11 @@ public final class ArrayCborDecoder extends CborDecoder {
                     // back into decodeNext also use this iterative array implementation.
                     item = super.decodeNext();
                 }
-                while (!arrays.isEmpty()) {
+                while (arrays != null && !arrays.isEmpty()) {
                     Frame frame = arrays.peek();
                     frame.array.add(item);
                     if (frame.remaining == -1) {
-                        if (item != Special.BREAK) {
+                        if (!Special.BREAK.equals(item)) {
                             break;
                         }
                     } else if (--frame.remaining != 0) {
@@ -74,7 +87,7 @@ public final class ArrayCborDecoder extends CborDecoder {
                     }
                     item = arrays.pop().array;
                 }
-                if (arrays.isEmpty()) {
+                if (arrays == null || arrays.isEmpty()) {
                     return item;
                 }
             }
