@@ -1,154 +1,205 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.common.Constants;
+import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.Block;
+import com.bloxbean.cardano.yaci.core.model.byron.ByronEbBlock;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.time.Duration;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Opt-in full-history network sync tests.
+ *
+ * <p>Run one network at a time with, for example:</p>
+ * <pre>{@code
+ * YACI_FULL_SYNC=true ./gradlew :helper:integrationTest \
+ *     --tests com.bloxbean.cardano.yaci.helper.NetworkSyncIT.syncPreprod
+ * }</pre>
+ */
 @Slf4j
-public class NetworkSyncIT {
+@EnabledIfEnvironmentVariable(named = "YACI_FULL_SYNC", matches = "true")
+class NetworkSyncIT {
+    private static final Duration TIP_TIMEOUT = Duration.ofSeconds(30);
+    private static final long SYNC_TIMEOUT_HOURS = 12;
+    private static final long LOG_INTERVAL = 10_000;
 
-    public static void syncSanchonet() throws InterruptedException {
-        BlockFetcher blockFetcher = new BlockFetcher(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.SANCHONET_PROTOCOL_MAGIC);
-
-        AtomicInteger count = new AtomicInteger(0);
-        blockFetcher.start(block -> {
-            if (count.get() % 100 == 0)
-                log.info("Block >>> {} -- {} -- {} -- {}", block.getHeader().getHeaderBody().getBlockNumber(),
-                        block.getHeader().getHeaderBody().getBlockHash(),
-                        block.getHeader().getHeaderBody().getSlot(), block.getEra());
-
-            count.incrementAndGet();
-        });
-
-        TipFinder tipFinder = new TipFinder(Constants.SANCHONET_PUBLIC_RELAY_ADDR, Constants.SANCHONET_PUBLIC_RELAY_PORT, Constants.WELL_KNOWN_SANCHONET_POINT, Constants.SANCHONET_PROTOCOL_MAGIC);
-        Tip tip = tipFinder.find().block(Duration.ofSeconds(5));
-
-        Point from = new Point(40, "70c15bed339afa78e87de8b4b436c8d2a9b61753d76978a2194b23462c89120b");
-        Point to = tip.getPoint();
-        blockFetcher.fetch(from, to);
-
-        while (true)
-            Thread.sleep(2000);
+    /** Syncs mainnet from the earliest available repository intersection to a tip captured at test start. */
+    @Test
+    void syncMainnet() throws InterruptedException {
+        sync(new Network(
+                "mainnet",
+                Constants.MAINNET_PUBLIC_RELAY_ADDR,
+                Constants.MAINNET_PUBLIC_RELAY_PORT,
+                Constants.MAINNET_PROTOCOL_MAGIC,
+                Constants.WELL_KNOWN_MAINNET_POINT,
+                // The first mainnet point currently accepted by the public relay for a complete range sync.
+                new Point(2, "52b7912de176ab76c233d6e08ccdece53ac1863c08cc59d3c5dec8d924d9b536")));
     }
 
-    public static void syncPreprod() throws InterruptedException {
-        BlockFetcher blockFetcher = new BlockFetcher(Constants.PREPROD_IOHK_RELAY_ADDR, Constants.PREPROD_IOHK_RELAY_PORT, Constants.PREPROD_PROTOCOL_MAGIC);
-
-        AtomicInteger count = new AtomicInteger(0);
-        blockFetcher.start(block -> {
-            if (count.get() % 100 == 0)
-                log.info("Block >>> {} -- {} -- {} -- {}", block.getHeader().getHeaderBody().getBlockNumber(),
-                        block.getHeader().getHeaderBody().getBlockHash(),
-                        block.getHeader().getHeaderBody().getSlot(), block.getEra());
-
-            count.incrementAndGet();
-        });
-
-        TipFinder tipFinder = new TipFinder(Constants.PREPROD_IOHK_RELAY_ADDR, Constants.PREPROD_IOHK_RELAY_PORT, Constants.WELL_KNOWN_PREPROD_POINT, Constants.PREPROD_PROTOCOL_MAGIC);
-        Tip tip = tipFinder.find().block(Duration.ofSeconds(5));
-
-        Point from = new Point(8641, "f5441700216e5516c6dc19e7eb616f0bf1d04dd1368add35e3a7fd114e30b880");
-        Point to = tip.getPoint();
-        blockFetcher.fetch(from, to);
-
-        while (true)
-            Thread.sleep(2000);
+    /** Syncs preprod from the earliest available repository intersection to a tip captured at test start. */
+    @Test
+    void syncPreprod() throws InterruptedException {
+        sync(new Network(
+                "preprod",
+                Constants.PREPROD_PUBLIC_RELAY_ADDR,
+                Constants.PREPROD_PUBLIC_RELAY_PORT,
+                Constants.PREPROD_PROTOCOL_MAGIC,
+                Constants.WELL_KNOWN_PREPROD_POINT,
+                // This is the last Byron point before the Shelley-onward preprod history.
+                new Point(8641, "f5441700216e5516c6dc19e7eb616f0bf1d04dd1368add35e3a7fd114e30b880")));
     }
 
-    public static void syncMainnet() throws InterruptedException {
-        BlockFetcher blockFetcher = new BlockFetcher(Constants.MAINNET_IOHK_RELAY_ADDR, Constants.MAINNET_IOHK_RELAY_PORT, Constants.MAINNET_PROTOCOL_MAGIC);
+    /** Syncs preview from its first block to a tip captured at test start. */
+    @Test
+    void syncPreview() throws InterruptedException {
+        sync(new Network(
+                "preview",
+                Constants.PREVIEW_PUBLIC_RELAY_ADDR,
+                Constants.PREVIEW_PUBLIC_RELAY_PORT,
+                Constants.PREVIEW_PROTOCOL_MAGIC,
+                Constants.WELL_KNOWN_PREVIEW_POINT,
+                // Preview starts in Alonzo at block 1; this point identifies that first block.
+                new Point(20, "cd619529ca62b4c37f7f728cd6d3472682115f001e1d1278bf1b7dce528db44e")));
+    }
 
-        AtomicInteger count = new AtomicInteger(0);
+    /**
+     * Captures a stable target tip, streams the configured history, and verifies that no block was lost to a
+     * parsing error.
+     *
+     * @param network relay and intersection details for the network under test
+     */
+    private void sync(Network network) throws InterruptedException {
+        Tip tip = findTip(network);
+        CountDownLatch completed = new CountDownLatch(1);
+        AtomicLong blocks = new AtomicLong();
+        AtomicReference<Point> lastPoint = new AtomicReference<>();
+        List<BlockParseRuntimeException> parsingErrors = new ArrayList<>();
+        AtomicReference<String> rangeError = new AtomicReference<>();
+        BlockFetcher blockFetcher = new BlockFetcher(network.host, network.port, network.protocolMagic);
+
         blockFetcher.addBlockFetchListener(new BlockfetchAgentListener() {
             @Override
             public void blockFound(Block block) {
-                if (count.get() % 100 == 0)
-                    log.info("Block >>> {} -- {} -- {} -- {}", block.getHeader().getHeaderBody().getBlockNumber(),
-                            block.getHeader().getHeaderBody().getBlockHash(),
-                            block.getHeader().getHeaderBody().getSlot(), block.getEra());
-
-                count.incrementAndGet();
+                Point point = new Point(block.getHeader().getHeaderBody().getSlot(),
+                        block.getHeader().getHeaderBody().getBlockHash());
+                recordProgress(network.name, blocks, lastPoint, point,
+                        block.getHeader().getHeaderBody().getBlockNumber());
             }
 
             @Override
-            public void byronBlockFound(ByronMainBlock byronBlock) {
-                if (count.get() % 100 == 0)
-                    log.info("Block >>> {} -- {} -- {} -- {}", byronBlock.getHeader().getConsensusData().getDifficulty(),
-                            byronBlock.getHeader().getBlockHash(),
-                            byronBlock.getHeader().getConsensusData().getAbsoluteSlot(), "Byron");
+            public void byronBlockFound(ByronMainBlock block) {
+                Point point = new Point(block.getHeader().getConsensusData().getAbsoluteSlot(),
+                        block.getHeader().getBlockHash());
+                recordProgress(network.name, blocks, lastPoint, point,
+                        block.getHeader().getConsensusData().getDifficulty().longValue());
+            }
 
-                count.incrementAndGet();
+            @Override
+            public void byronEbBlockFound(ByronEbBlock block) {
+                blocks.incrementAndGet();
+            }
+
+            @Override
+            public void onParsingError(BlockParseRuntimeException error) {
+                parsingErrors.add(error);
+            }
+
+            @Override
+            public void noBlockFound(Point from, Point to) {
+                rangeError.set("No blocks returned from " + from + " to " + to);
+                completed.countDown();
+            }
+
+            @Override
+            public void batchDone() {
+                completed.countDown();
             }
         });
 
-        blockFetcher.start();
+        ScheduledExecutorService keepAlive = Executors.newSingleThreadScheduledExecutor();
+        try {
+            blockFetcher.start();
+            keepAlive.scheduleAtFixedRate(() -> blockFetcher.sendKeepAliveMessage(
+                    (int) (System.nanoTime() & 0xffff)), 20, 20, TimeUnit.SECONDS);
+            blockFetcher.fetch(network.from, tip.getPoint());
 
-        TipFinder tipFinder = new TipFinder(Constants.MAINNET_IOHK_RELAY_ADDR, Constants.MAINNET_IOHK_RELAY_PORT, Constants.WELL_KNOWN_MAINNET_POINT, Constants.MAINNET_PROTOCOL_MAGIC);
-        Tip tip = tipFinder.find().block(Duration.ofSeconds(5));
+            assertThat(completed.await(SYNC_TIMEOUT_HOURS, TimeUnit.HOURS))
+                    .as("%s full sync should complete within %s hours", network.name, SYNC_TIMEOUT_HOURS)
+                    .isTrue();
+        } finally {
+            keepAlive.shutdownNow();
+            blockFetcher.shutdown();
+        }
 
-        Point from = new Point(2, "52b7912de176ab76c233d6e08ccdece53ac1863c08cc59d3c5dec8d924d9b536");
-        Point to = tip.getPoint();
-        blockFetcher.fetch(from, to);
-
-        while (true)
-            Thread.sleep(2000);
+        assertThat(rangeError.get()).isNull();
+        assertThat(parsingErrors).as("block parsing errors").isEmpty();
+        assertThat(lastPoint.get()).as("last Shelley-onward point").isEqualTo(tip.getPoint());
+        assertThat(blocks.get()).isPositive();
     }
 
-
-    public static void syncPreview() throws InterruptedException {
-        BlockFetcher blockFetcher = new BlockFetcher(Constants.PREVIEW_IOHK_RELAY_ADDR, Constants.PREVIEW_IOHK_RELAY_PORT, Constants.PREVIEW_PROTOCOL_MAGIC);
-
-        AtomicInteger count = new AtomicInteger(0);
-        blockFetcher.addBlockFetchListener(new BlockfetchAgentListener() {
-            @Override
-            public void blockFound(Block block) {
-                if (count.get() % 100 == 0)
-                    log.info("Block >>> {} -- {} -- {} -- {}", block.getHeader().getHeaderBody().getBlockNumber(),
-                            block.getHeader().getHeaderBody().getBlockHash(),
-                            block.getHeader().getHeaderBody().getSlot(), block.getEra());
-
-                count.incrementAndGet();
-            }
-
-            @Override
-            public void byronBlockFound(ByronMainBlock byronBlock) {
-                if (count.get() % 100 == 0)
-                    log.info("Block >>> {} -- {} -- {} -- {}", byronBlock.getHeader().getConsensusData().getDifficulty(),
-                            byronBlock.getHeader().getBlockHash(),
-                            byronBlock.getHeader().getConsensusData().getAbsoluteSlot(), "Byron");
-
-                count.incrementAndGet();
-            }
-        });
-        blockFetcher.start();
-
-        TipFinder tipFinder = new TipFinder(Constants.PREVIEW_IOHK_RELAY_ADDR, Constants.PREVIEW_IOHK_RELAY_PORT, Constants.WELL_KNOWN_PREVIEW_POINT, Constants.PREVIEW_PROTOCOL_MAGIC);
-        Tip tip = tipFinder.find().block(Duration.ofSeconds(5));
-
-        Point from = new Point(20, "cd619529ca62b4c37f7f728cd6d3472682115f001e1d1278bf1b7dce528db44e");
-        Point to = tip.getPoint();
-
-        blockFetcher.fetch(from, to);
-
-        while (true) {
-            blockFetcher.sendKeepAliveMessage(getRandomNumber(0, 65535));
-            Thread.sleep(3000);
+    /**
+     * Finds the target tip before starting the block-fetch range.
+     *
+     * @param network network whose current tip is required
+     * @return tip captured from the same relay used for the full sync
+     */
+    private Tip findTip(Network network) {
+        TipFinder tipFinder = new TipFinder(network.host, network.port, network.wellKnownPoint,
+                network.protocolMagic);
+        try {
+            Tip tip = tipFinder.find().block(TIP_TIMEOUT);
+            assertThat(tip).as("%s tip", network.name).isNotNull();
+            return tip;
+        } finally {
+            tipFinder.shutdown();
         }
     }
 
-    public static int getRandomNumber(int min, int max) {
-        return (int) ((Math.random() * (max - min)) + min);
+    /**
+     * Updates the latest point and logs periodic progress without retaining parsed blocks in memory.
+     *
+     * @param network network name used in the progress message
+     * @param blocks total delivered block callbacks
+     * @param lastPoint latest Shelley or Byron main-block point
+     * @param point point delivered by the current callback
+     * @param blockNumber ledger block number or Byron difficulty
+     */
+    private void recordProgress(String network, AtomicLong blocks, AtomicReference<Point> lastPoint,
+                                Point point, long blockNumber) {
+        lastPoint.set(point);
+        long count = blocks.incrementAndGet();
+        if (count % LOG_INTERVAL == 0) {
+            log.info("{} full sync: callbacks={}, block={}, slot={}, hash={}",
+                    network, count, blockNumber, point.getSlot(), point.getHash());
+        }
     }
 
-    public static void main(String[] args) throws Exception {
-        syncPreprod();
+    /** Relay and chain points needed by one independently runnable network test. */
+    @AllArgsConstructor
+    private static class Network {
+        private final String name;
+        private final String host;
+        private final int port;
+        private final long protocolMagic;
+        private final Point wellKnownPoint;
+        private final Point from;
     }
-
 }
