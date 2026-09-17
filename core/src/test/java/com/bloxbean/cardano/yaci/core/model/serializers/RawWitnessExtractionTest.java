@@ -272,18 +272,79 @@ class RawWitnessExtractionTest {
         }
     }
 
-    /** Duplicate Conway map keys collapse during decoding; ambiguous raw counts must keep the parsed value. */
+    /** Resolve duplicate keys in first-key order, taking the last value even for non-minimal key encodings. */
     @Test
-    void duplicateRedeemerKeysRemainNonblockingAndDoNotStopLaterWitnesses() throws Exception {
-        // {[Spend, 0]: [0, units], [Spend, 0]: [DATA, units]} has two raw pairs but one parsed entry.
-        String duplicate = "a105a28200008200820a1482000082" + DATA + "820a14";
-        String healthy = "a105a182000082" + DATA + "820a14";
-        Block block = BlockSerializer.INSTANCE.deserialize(withWitnesses(7, duplicate, healthy));
-        Witnesses first = block.getTransactionWitness().get(0);
-        assertThat(first.getRedeemers()).hasSize(1);
-        assertThat(first).usingRecursiveComparison()
-                .isEqualTo(WitnessesSerializer.INSTANCE.deserialize(hex(duplicate)));
-        assertSourceData(block.getTransactionWitness().get(1).getRedeemers().get(0).getData());
+    void duplicateRedeemerKeysUseWinningSourceBytesWithoutReordering() throws Exception {
+        for (String prefix : new String[]{"a5", "b805", "d90102a5", "bf"}) {
+            // A=[Spend,9], B=[Mint,9], C=[Spend,1]: A0, B0, A1, C0, B1 -> A1, B1, C0.
+            // A1's key uses non-minimal array/integer lengths but equals A0 after decoding.
+            String entries = "8200098200820102" + "8201098200820304"
+                    + "9802180018099802" + DATA + "820a14"
+                    + "82000182182b820b15" + "82010982182a820c16";
+            String duplicate = "a105" + prefix + entries + (prefix.equals("bf") ? "ff" : "");
+            String healthy = "a105a182000082" + DATA + "820a14";
+            for (Block block : SyncDataIsolationTest.throughBothSyncPaths(withWitnesses(7, duplicate, healthy))) {
+                var actual = block.getTransactionWitness().get(0).getRedeemers();
+                var initial = WitnessesSerializer.INSTANCE.deserialize(hex(duplicate)).getRedeemers();
+                assertThat(actual).hasSize(3);
+                // Count, order, purpose/index, JSON, execution units, and whole-redeemer CBOR stay unchanged.
+                assertThat(actual).usingRecursiveComparison().ignoringFields("data.cbor", "data.hash")
+                        .isEqualTo(initial);
+                assertSourceData(actual.get(0).getData());
+                assertThat(actual.get(1).getData().getCbor()).isEqualTo("182a");
+                assertThat(actual.get(1).getData().getHash()).isEqualTo(Datum.cborToHash(hex("182a")));
+                assertThat(actual.get(2).getData().getCbor()).isEqualTo("182b");
+                assertThat(actual.get(2).getData().getHash()).isEqualTo(Datum.cborToHash(hex("182b")));
+                assertSourceData(block.getTransactionWitness().get(1).getRedeemers().get(0).getData());
+            }
+        }
+    }
+
+    /** Replay the observed duplicate-key block and verify every parsed redeemer reaches raw-data correction. */
+    @Test
+    void previewDuplicateKeyBlockCompletesRawCorrection() {
+        byte[] bytes = CborLoader.getHexBytes("block/preview2587542.txt");
+        AtomicInteger corrected = new AtomicInteger();
+        Block block;
+        try (MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, invocation -> {
+            if (invocation.getMethod().getName().equals("getRedeemerFields")) corrected.incrementAndGet();
+            return invocation.callRealMethod();
+        })) {
+            block = BlockSerializer.INSTANCE.deserialize(bytes);
+        }
+        assertThat(block.getHeader().getHeaderBody().getBlockNumber()).isEqualTo(2587542);
+        assertThat(corrected.get()).isEqualTo(block.getTransactionWitness().stream()
+                .mapToInt(witness -> witness.getRedeemers().size()).sum());
+        var redeemers = block.getTransactionWitness().get(1).getRedeemers();
+        assertThat(redeemers).hasSize(1);
+        Datum datum = redeemers.get(0).getData();
+        // Independent cbor2 inspection: the last [Mint,0] value's data occupies bytes [4098,4101).
+        assertThat(datum.getCbor()).isEqualTo(HexUtil.encodeHexString(Arrays.copyOfRange(bytes, 4098, 4101)))
+                .isEqualTo("d87a80");
+        assertThat(datum.getHash()).isEqualTo("8392f0c940435c06888f9bdb8c74a95dc69f156367d6a089cf008ae05caae01e");
+    }
+
+    /** A mismatch that remains after duplicate resolution keeps parsed values and continues with later witnesses. */
+    @Test
+    void unresolvedMapCountMismatchRemainsNonblocking() throws Exception {
+        String healthy = "a105a282000082" + DATA + "820a1482010182182a820b15";
+        byte[] bytes = withWitnesses(7, healthy, healthy);
+        AtomicInteger calls = new AtomicInteger();
+        try (MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, invocation -> {
+            if (invocation.getMethod().getName().equals("getWitnessFields") && calls.getAndIncrement() == 0) {
+                @SuppressWarnings("unchecked")
+                var fields = (Map<BigInteger, byte[]>) invocation.callRealMethod();
+                // Three raw copies of one key cannot align with the two originally parsed keys.
+                fields.put(BigInteger.valueOf(5), hex("a3" + ("82000082" + DATA + "820a14").repeat(3)));
+                return fields;
+            }
+            return invocation.callRealMethod();
+        })) {
+            Block block = BlockSerializer.INSTANCE.deserialize(bytes);
+            assertThat(block.getTransactionWitness().get(0)).usingRecursiveComparison()
+                    .isEqualTo(WitnessesSerializer.INSTANCE.deserialize(hex(healthy)));
+            assertSourceData(block.getTransactionWitness().get(1).getRedeemers().get(0).getData());
+        }
     }
 
     /** A failed individual redeemer leaves the following redeemer's source correction intact. */

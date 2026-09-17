@@ -64,11 +64,15 @@ existing synthesized four-field `cbor`; their nested data bytes and hashes are c
 
 Raw extraction remains optional enrichment after the initial parse. A failure is logged with
 block/witness context and leaves the initially parsed value in place. Datum and redeemer passes
-are independent, and failures do not stop later witnesses or blocks. Count mismatches skip the
-affected collection to avoid attaching bytes to the wrong parsed value. For example, duplicate
-Conway map keys can collapse during decoding and produce a raw/parsed redeemer count mismatch.
-Fallback values are not guaranteed to contain exact source CBOR; this is separate from optional
-JSON conversion failures reported through `Datum.parseError`.
+are independent, and failures do not stop later witnesses or blocks. When Conway map counts
+mismatch, raw keys are decoded using the same key equality as the initial parser: duplicate keys
+keep their first insertion position and take the last value's original bytes. This also handles
+different encodings of the same key. Counts must agree after duplicate resolution before correction
+continues. Matching-count maps and array-form redeemers keep their existing extraction path.
+
+An unresolved count mismatch skips the affected collection to avoid attaching bytes to the wrong
+parsed value. Such fallback values are not guaranteed to contain exact source CBOR; this is separate
+from optional JSON conversion failures reported through `Datum.parseError`.
 
 See the [offline extraction fixtures and error classifications](../core/src/test/resources/block/raw-witness-expectations.md).
 

@@ -278,6 +278,17 @@ public enum BlockSerializer implements Serializer<Block> {
      * Correct redeemer data in source order, preserving the existing public CBOR representation.
      * Pre-Conway: [[tag, index, data, [memory, steps]], ...].
      * Conway also accepts: {[tag, index]: [data, [memory, steps]], ...}.
+     * On a map count mismatch, resolve duplicate keys using the decoder's last-value-wins ordering.
+     * Equal decoded keys retain their first insertion position but take the last raw value.
+     * For example, two [Spend, 0] entries decode to one redeemer:
+     * <pre>
+     * {[0, 0]: [1, [10, 20]], [0, 0]: [0, [10, 20]]}
+     * a2 820000 8201820a14 820000 821800820a14
+     * Last value: 82 1800 820a14; its data is 1800 (non-minimal integer zero).
+     * </pre>
+     * The winning datum keeps bytes 1800 and their hash, rather than re-encoding zero as 00.
+     * Counts must match after duplicate resolution before any source bytes are attached.
+     * Matching-count maps and array-form redeemers do not enter this fallback.
      * A malformed entry leaves that parsed redeemer intact and does not stop later entries.
      */
     private void correctRedeemers(long block, int witnessIndex, List<Redeemer> redeemers, byte[] bytes)
@@ -287,7 +298,20 @@ public enum BlockSerializer implements Serializer<Block> {
         boolean map = type == MajorType.MAP;
         if (map) {
             entries = new ArrayList<>();
-            for (Tuple<byte[], byte[]> entry : getRedeemerMapBytes(bytes)) entries.add(entry._2);
+            var rawEntries = getRedeemerMapBytes(bytes);
+            if (rawEntries.size() != redeemers.size()) {
+                // Conway: {[purpose, index]: [data, execution_units], ...}.
+                // The decoder uses DataItem key equality and keeps the last value at the key's
+                // first insertion position. Mirror that only on mismatch; different encodings of
+                // the same key (e.g. 00 vs 1800) must also collapse before the count check below.
+                var uniqueEntries = new LinkedHashMap<DataItem, byte[]>();
+                for (Tuple<byte[], byte[]> entry : rawEntries) {
+                    uniqueEntries.put(CborSerializationUtil.deserializeOne(entry._1), entry._2);
+                }
+                entries.addAll(uniqueEntries.values());
+            } else {
+                for (Tuple<byte[], byte[]> entry : rawEntries) entries.add(entry._2);
+            }
         } else if (type == MajorType.ARRAY) {
             entries = getArrayBytes(bytes);
         } else {

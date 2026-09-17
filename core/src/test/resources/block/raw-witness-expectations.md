@@ -47,8 +47,19 @@ transaction hashes, counts, JSON data, execution units, and headers.
   widths, container tags, empty/singleton cases, and invalid/truncated framing.
 - Duplicate Conway redeemer-map keys are a separate case. They were observed in the
   locally saved preview block 2,587,542: two raw `[Mint, 0]` keys collapse to one decoded
-  map key. A raw/parsed count mismatch retains the initially parsed redeemers, logs the
-  failure, and continues with later witnesses. A synthetic regression covers this case.
+  map key. On a mismatch, the raw entries now follow the same decoded-key equality and
+  first-key order, with the last value supplying original bytes and hashes. An unresolved
+  mismatch still logs the failure, retains parsed values, and continues with later witnesses.
+  Synthetic regressions cover different encodings of equal keys, interleaved duplicates,
+  ordering, exact winning bytes/hashes, and unresolved mismatches.
+
+`preview2587542.txt` contains the original duplicate-key block. Independent `cbor2` stream
+inspection places the second `[Mint, 0]` value's data at byte offsets `[4098, 4101)`: `d87a80`.
+Its Blake2b-256 hash is `8392f0c940435c06888f9bdb8c74a95dc69f156367d6a089cf008ae05caae01e`.
+Both values happen to contain identical data in this block, so its output remains unchanged;
+the regression also verifies that every parsed redeemer reaches raw-data correction.
+The synthetic tests deliberately use different values and non-minimal encodings to prove that
+last-value selection and original-byte hashing work.
 
 This change corrects the optional raw-byte enrichment pass. It does not make malformed
 required block fields acceptable. Extraction exceptions preserve the initially parsed
