@@ -4,21 +4,32 @@ import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
 import com.bloxbean.cardano.client.spec.Script;
 import com.bloxbean.cardano.client.transaction.spec.script.*;
-import com.bloxbean.cardano.client.util.JsonUtil;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
 
 import static com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString;
 
 //TODO -- More testing required for deserialization --> serialization
+@Slf4j
 public enum WitnessesSerializer implements Serializer<Witnesses> {
     INSTANCE;
+
+    // Each nested all/any/atLeast script adds two CBOR arrays. Bound recursive client-library
+    // parsing and Jackson serialization independently of the thread's available stack size.
+    private static final int MAX_NATIVE_SCRIPT_ARRAY_DEPTH = 256;
+    private static final ObjectWriter NATIVE_SCRIPT_JSON = new ObjectMapper().writerWithDefaultPrettyPrinter();
 
     @Override
     @SneakyThrows
@@ -199,14 +210,14 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
     }
 
     public NativeScript deserializeNativeScript(Array nativeScriptArray) {
-        List<DataItem> dataItemList = nativeScriptArray.getDataItems();
-        if (dataItemList == null || dataItemList.size() == 0) {
-            throw new CborRuntimeException("NativeScript deserialization failed. Invalid no of DataItem");
-        }
-
-        int type = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue();
-        Script script = null;
+        int type = -1;
         try {
+            List<DataItem> dataItemList = nativeScriptArray.getDataItems();
+            type = ((UnsignedInteger) dataItemList.get(0)).getValue().intValueExact();
+            if (exceedsNativeScriptDepth(nativeScriptArray)) {
+                return nativeScriptFailure(type, "Native script array nesting exceeds " + MAX_NATIVE_SCRIPT_ARRAY_DEPTH);
+            }
+            Script script;
             if (type == 0) {
                 script = ScriptPubkey.deserialize(nativeScriptArray);
             } else if (type == 1) {
@@ -222,10 +233,39 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
             } else {
                 return null;
             }
+            // Do not use JsonUtil: its error fallback invokes the recursive Script.toString().
+            return new NativeScript(type, NATIVE_SCRIPT_JSON.writeValueAsString(script));
         } catch (Exception e) {
-            throw new CborRuntimeException("Error parsing native script", e);
+            return nativeScriptFailure(type, "Native script parsing failed: " + e.getClass().getSimpleName());
+        } catch (StackOverflowError e) {
+            // Narrow fallback for recursive third-party code; other VM errors must propagate.
+            return nativeScriptFailure(type, "Native script parsing exceeded the available stack");
         }
+    }
 
-        return new NativeScript(type, JsonUtil.getPrettyJson(script));
+    private NativeScript nativeScriptFailure(int type, String reason) {
+        // Never log the script, DataItem, or exception: formatting them can recurse too.
+        log.warn("Unable to parse native script of type {}: {}", type, reason);
+        return new NativeScript(type, null, reason);
+    }
+
+    private boolean exceedsNativeScriptDepth(Array root) {
+        Deque<Iterator<DataItem>> stack = new ArrayDeque<>();
+        stack.push(root.getDataItems().iterator());
+        while (!stack.isEmpty()) {
+            Iterator<DataItem> current = stack.peek();
+            if (!current.hasNext()) {
+                stack.pop();
+                continue;
+            }
+            DataItem item = current.next();
+            if (item instanceof Array) {
+                if (stack.size() >= MAX_NATIVE_SCRIPT_ARRAY_DEPTH) {
+                    return true;
+                }
+                stack.push(((Array) item).getDataItems().iterator());
+            }
+        }
+        return false;
     }
 }

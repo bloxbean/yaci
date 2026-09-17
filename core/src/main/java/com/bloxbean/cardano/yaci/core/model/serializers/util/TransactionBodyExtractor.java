@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.util;
 
 import co.nstant.in.cbor.CborDecoder;
+import com.bloxbean.cardano.yaci.core.util.ArrayCborDecoder;
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.AdditionalInformation;
 import co.nstant.in.cbor.model.DataItem;
@@ -21,7 +22,7 @@ public class TransactionBodyExtractor {
     public static List<Tuple<DataItem, byte[]>> getTxBodiesFromBlock(byte[] blockBody) {
         List<Tuple<DataItem, byte[]>> txBodyTuples = new ArrayList<>();
         ByteArrayInputStream bais = new ByteArrayInputStream(blockBody);
-        CborDecoder decoder = new CborDecoder(bais);
+        CborDecoder decoder = new ArrayCborDecoder(bais);
 
         //era and body
         bais.read();
