@@ -8,10 +8,11 @@ import lombok.*;
 @ToString
 @Builder
 public class NativeScript {
+    /** CBOR discriminator; see {@link NativeScriptType} for the supported wire values. */
     private int type;
     /** JSON representation, or null when this script could not be parsed safely. */
     private String content;
-    /** Non-null when parsing failed; the containing block is still returned. */
+    /** Non-null when JSON conversion failed; the containing block is still returned. */
     private String parseError;
 
     public NativeScript(int type, String content) {

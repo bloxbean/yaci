@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
@@ -53,7 +54,9 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
                         Array nativeScriptsArray = (Array) nativeScriptsValueDI;
                         nativeScripts = nativeScriptsArray.getDataItems()
                                 .stream()
+                                .filter(nativeScriptDI -> !Special.BREAK.equals(nativeScriptDI))
                                 .map(nativeScriptDI -> WitnessesSerializer.INSTANCE.deserializeNativeScript((Array) nativeScriptDI))
+                                .filter(Objects::nonNull)
                                 .collect(Collectors.toList());
                     }
 
@@ -100,7 +103,10 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
                     for (DataItem auxScriptDI : auxiliaryScriptsArray.getDataItems()) {
                         if (auxScriptDI == SimpleValue.BREAK)
                             continue;
-                        nativeScripts.add(WitnessesSerializer.INSTANCE.deserializeNativeScript((Array) auxScriptDI));
+                        NativeScript script = WitnessesSerializer.INSTANCE.deserializeNativeScript((Array) auxScriptDI);
+                        if (script != null) {
+                            nativeScripts.add(script);
+                        }
                     }
                 }
             }

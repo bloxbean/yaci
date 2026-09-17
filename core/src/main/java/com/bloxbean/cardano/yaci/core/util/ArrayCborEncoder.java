@@ -25,6 +25,10 @@ final class ArrayCborEncoder extends CborEncoder {
 
     @Override
     public void encode(DataItem item) throws CborException {
+        if (!(item instanceof Array)) {
+            super.encode(item);
+            return;
+        }
         Deque<Iterator<DataItem>> arrays = new ArrayDeque<>();
         arrays.push(Collections.singletonList(item).iterator());
         while (!arrays.isEmpty()) {

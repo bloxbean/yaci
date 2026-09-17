@@ -73,4 +73,18 @@ class ArrayCborCodecTest {
         assertThat(decoder.decodeNext()).isEqualTo(new UnsignedInteger(1));
         assertThat(input.available()).isEqualTo(2);
     }
+
+    @Test
+    void allocationLimitsDoNotChangeDecodedValuesOrAcceptTruncatedHugeLengths() throws Exception {
+        byte[] bytes = HexUtil.decodeHexString("9818" + "00".repeat(24));
+        for (int limit : new int[]{-1, 0, 1, 16, 4096}) {
+            ArrayCborDecoder decoder = new ArrayCborDecoder(new ByteArrayInputStream(bytes));
+            decoder.setMaxPreallocationSize(limit);
+            assertThat(decoder.decode()).isEqualTo(CborDecoder.decode(bytes));
+            ArrayCborDecoder truncated = new ArrayCborDecoder(new ByteArrayInputStream(
+                    HexUtil.decodeHexString("9b00000000ffffffff")));
+            truncated.setMaxPreallocationSize(limit);
+            assertThatThrownBy(truncated::decode).isInstanceOf(CborException.class);
+        }
+    }
 }
