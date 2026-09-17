@@ -80,6 +80,19 @@ class NetworkSyncIT {
                 new Point(20, "cd619529ca62b4c37f7f728cd6d3472682115f001e1d1278bf1b7dce528db44e")));
     }
 
+    /** Syncs Sanchonet from its first available block to a tip captured at test start. */
+    @Test
+    void syncSanchonet() throws InterruptedException {
+        sync(new Network(
+                "sanchonet",
+                Constants.SANCHONET_PUBLIC_RELAY_ADDR,
+                Constants.SANCHONET_PUBLIC_RELAY_PORT,
+                Constants.SANCHONET_PROTOCOL_MAGIC,
+                Constants.WELL_KNOWN_SANCHONET_POINT,
+                // This point identifies the first Sanchonet block currently used by the repository sync helper.
+                new Point(40, "70c15bed339afa78e87de8b4b436c8d2a9b61753d76978a2194b23462c89120b")));
+    }
+
     /**
      * Captures a stable target tip, streams the configured history, and verifies that no block was lost to a
      * parsing error.
