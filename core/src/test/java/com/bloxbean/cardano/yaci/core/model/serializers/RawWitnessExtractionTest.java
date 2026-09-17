@@ -14,16 +14,13 @@ import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.MsgBlock;
 import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.util.CborLoader;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import java.math.BigInteger;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -54,7 +51,7 @@ class RawWitnessExtractionTest {
     /** Replay every named issue block through both sync paths with independently recorded byte offsets/hashes. */
     @Test
     void namedPreprodBlocksRetainEverySourceDatumAndRedeemerIncludingLaterWitnesses() throws Exception {
-        ObjectMapper mapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        ObjectMapper mapper = new ObjectMapper();
         JsonNode fixtures = mapper.readTree(getClass().getResourceAsStream("/block/raw-witness-expectations.json"));
         for (JsonNode fixture : fixtures) {
             byte[] bytes = CborLoader.getHexBytes("block/preprod" + fixture.get("block").asInt() + ".txt");
@@ -69,13 +66,26 @@ class RawWitnessExtractionTest {
                                 .isEqualTo(fixture.get("blockHash").asText());
                         assertThat(block.getTransactionBodies()).hasSize(fixture.get("transactions").asInt());
                         assertThat(block.getTransactionWitness()).hasSize(fixture.get("witnesses").asInt());
-                        int datumCount = 0;
-                        int redeemerCount = 0;
-                        for (Witnesses witness : block.getTransactionWitness()) {
-                            datumCount += witness.getDatums().size();
-                            redeemerCount += witness.getRedeemers().size();
+                        assertThat(fixture.get("transactionHashes").size())
+                                .isEqualTo(block.getTransactionBodies().size());
+                        for (int i = 0; i < block.getTransactionBodies().size(); i++) {
+                            assertThat(block.getTransactionBodies().get(i).getTxHash())
+                                    .as("block %s transaction %s hash", fixture.get("block"), i)
+                                    .isEqualTo(fixture.get("transactionHashes").get(i).asText());
                         }
-                        assertThat(fixture.get("values").size()).isEqualTo(datumCount + redeemerCount);
+                        assertThat(fixture.get("witnessCounts").size())
+                                .isEqualTo(block.getTransactionWitness().size());
+                        int dataCount = 0;
+                        for (int i = 0; i < block.getTransactionWitness().size(); i++) {
+                            Witnesses witness = block.getTransactionWitness().get(i);
+                            JsonNode counts = fixture.get("witnessCounts").get(i);
+                            dataCount += witness.getDatums().size() + witness.getRedeemers().size();
+                            assertThat(witness.getDatums()).as("witness %s datums", i)
+                                    .hasSize(counts.get("datums").asInt());
+                            assertThat(witness.getRedeemers()).as("witness %s redeemers", i)
+                                    .hasSize(counts.get("redeemers").asInt());
+                        }
+                        assertThat(fixture.get("values").size()).isEqualTo(dataCount);
                         for (JsonNode value : fixture.get("values")) {
                             Witnesses witness = block.getTransactionWitness().get(value.get("witness").asInt());
                             int index = value.get("index").asInt();
@@ -86,15 +96,22 @@ class RawWitnessExtractionTest {
                                     bytes, offset, offset + value.get("length").asInt())));
                             assertThat(actual.getHash()).isEqualTo(value.get("hash").asText());
                             assertThat(actual.getParseError()).isNull();
+                            if (value.get("kind").asText().equals("redeemer")) {
+                                var redeemer = witness.getRedeemers().get(index);
+                                assertThat(redeemer.getTag().name().toLowerCase())
+                                        .isEqualTo(value.get("purpose").asText());
+                                assertThat(redeemer.getIndex()).isEqualTo(value.get("redeemerIndex").asInt());
+                                assertThat(redeemer.getExUnits().getMem())
+                                        .isEqualTo(value.get("mem").bigIntegerValue());
+                                assertThat(redeemer.getExUnits().getSteps())
+                                        .isEqualTo(value.get("steps").bigIntegerValue());
+                            }
                         }
                         assertThat(block.getCbor()).isEqualTo(fullBlock ? HexUtil.encodeHexString(bytes) : null);
                         for (int i = 0; i < block.getTransactionWitness().size(); i++) {
                             String raw = HexUtil.encodeHexString(CborSlice.arrayItem(bytes, 1, 2, i).bytes());
                             assertThat(block.getTransactionWitness().get(i).getCbor()).isEqualTo(fullTx ? raw : null);
                         }
-                        // Remove only enrichment fields and optional full CBOR before comparing PR #188's output.
-                        assertThat(ordinaryOutputHash(mapper, block))
-                                .isEqualTo(fixture.get("ordinaryOutputHash").asText());
                     }
                 }
             }
@@ -170,6 +187,29 @@ class RawWitnessExtractionTest {
                 assertThat(result.getDatums()).isEmpty();
                 assertThat(result.getRedeemers()).isEmpty();
             }
+        }
+    }
+
+    /** Signature/script-only witnesses skip field extraction while later datum/redeemer witnesses are corrected. */
+    @Test
+    void witnessesWithoutOptionalDataSkipFieldExtraction() throws Exception {
+        // {0: [[vkey, signature]], 1: [[native_script_type, key_hash]]} needs no raw-data enrichment.
+        String signaturesAndScript = "a2008182404001818200581c" + "00".repeat(28);
+        byte[] bytes = withWitnesses(7, signaturesAndScript, WITNESS);
+        AtomicInteger calls = new AtomicInteger();
+        try (MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, invocation -> {
+            if (invocation.getMethod().getName().equals("getWitnessFields")) {
+                calls.incrementAndGet();
+                assertThat((byte[]) invocation.getArgument(0)).isEqualTo(hex(WITNESS));
+            }
+            return invocation.callRealMethod();
+        })) {
+            Block block = BlockSerializer.INSTANCE.deserialize(bytes);
+            assertThat(calls.get()).isEqualTo(1);
+            assertThat(block.getTransactionWitness().get(0)).usingRecursiveComparison()
+                    .isEqualTo(WitnessesSerializer.INSTANCE.deserialize(hex(signaturesAndScript)));
+            assertSourceData(block.getTransactionWitness().get(1).getDatums().get(0));
+            assertSourceData(block.getTransactionWitness().get(1).getRedeemers().get(0).getData());
         }
     }
 
@@ -387,25 +427,6 @@ class RawWitnessExtractionTest {
         assertThat(datum.getHash()).isEqualTo(Datum.cborToHash(hex(DATA)));
         assertThat(datum.getJson()).isNotNull();
         assertThat(datum.getParseError()).isNull();
-    }
-
-    /** Hash unchanged output after removing the fields that this enrichment pass intentionally corrects. */
-    private static String ordinaryOutputHash(ObjectMapper mapper, Block block) throws Exception {
-        ObjectNode node = mapper.valueToTree(block);
-        node.remove("cbor");
-        for (JsonNode tx : node.path("transactionBodies")) ((ObjectNode) tx).remove("cbor");
-        for (JsonNode aux : node.path("auxiliaryDataMap")) ((ObjectNode) aux).remove("cbor");
-        for (JsonNode witness : node.path("transactionWitness")) {
-            ((ObjectNode) witness).remove("cbor");
-            for (JsonNode datum : witness.path("datums")) {
-                ((ObjectNode) datum).remove(Arrays.asList("cbor", "hash"));
-            }
-            for (JsonNode redeemer : witness.path("redeemers")) {
-                ((ObjectNode) redeemer.path("data")).remove(Arrays.asList("cbor", "hash"));
-                ((ObjectNode) redeemer).remove("cbor");
-            }
-        }
-        return HexUtil.encodeHexString(MessageDigest.getInstance("SHA-256").digest(mapper.writeValueAsBytes(node)));
     }
 
     /** Decode a literal CBOR example used by these tests. */

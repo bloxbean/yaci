@@ -242,25 +242,32 @@ public enum BlockSerializer implements Serializer<Block> {
         }
 
         for (int witnessIndex = 0; witnessIndex < witnesses.size(); witnessIndex++) {
+            Witnesses witness = witnesses.get(witnessIndex);
+            boolean hasDatums = witness.getDatums() != null && !witness.getDatums().isEmpty();
+            boolean hasRedeemers = witness.getRedeemers() != null && !witness.getRedeemers().isEmpty();
+            // Signature/script-only witnesses need no optional data correction or field copies.
+            if (!hasDatums && !hasRedeemers) continue;
             try {
                 var fields = WitnessUtil.getWitnessFields(transactionWitness.get(witnessIndex));
-                Witnesses witness = witnesses.get(witnessIndex);
                 // Enrichment is optional. A failed datum pass must not prevent redeemer correction or
                 // correction of later witnesses; retain the initially parsed values on failure.
-                if (witness.getDatums() != null && !witness.getDatums().isEmpty()) {
+                if (hasDatums) {
                     try {
                         List<byte[]> rawDatums = getArrayBytes(fields.get(BigInteger.valueOf(4)));
                         if (rawDatums.size() != witness.getDatums().size()) {
-                            throw new CborException("Datum count mismatch");
-                        }
-                        for (int i = 0; i < rawDatums.size(); i++) {
-                            witness.getDatums().set(i, withOriginalData(witness.getDatums().get(i), rawDatums.get(i)));
+                            log.warn("Datum count mismatch. block: {}, witness: {}, parsed: {}, raw: {}",
+                                    block, witnessIndex, witness.getDatums().size(), rawDatums.size());
+                        } else {
+                            for (int i = 0; i < rawDatums.size(); i++) {
+                                witness.getDatums().set(i,
+                                        withOriginalData(witness.getDatums().get(i), rawDatums.get(i)));
+                            }
                         }
                     } catch (Exception e) {
                         log.error("Raw datum extraction failed. block: {}, witness: {}", block, witnessIndex, e);
                     }
                 }
-                if (witness.getRedeemers() != null && !witness.getRedeemers().isEmpty()) {
+                if (hasRedeemers) {
                     try {
                         correctRedeemers(block, witnessIndex, witness.getRedeemers(),
                                 fields.get(BigInteger.valueOf(5)));
@@ -295,10 +302,12 @@ public enum BlockSerializer implements Serializer<Block> {
             throws CborException {
         MajorType type = CborSlice.of(bytes).type();
         List<byte[]> entries;
+        int rawCount;
         boolean map = type == MajorType.MAP;
         if (map) {
             entries = new ArrayList<>();
             var rawEntries = getRedeemerMapBytes(bytes);
+            rawCount = rawEntries.size();
             if (rawEntries.size() != redeemers.size()) {
                 // Conway: {[purpose, index]: [data, execution_units], ...}.
                 // The decoder uses DataItem key equality and keeps the last value at the key's
@@ -314,10 +323,15 @@ public enum BlockSerializer implements Serializer<Block> {
             }
         } else if (type == MajorType.ARRAY) {
             entries = getArrayBytes(bytes);
+            rawCount = entries.size();
         } else {
             throw new CborException("Expected redeemer array or map");
         }
-        if (entries.size() != redeemers.size()) throw new CborException("Redeemer count mismatch");
+        if (entries.size() != redeemers.size()) {
+            log.warn("Redeemer count mismatch. block: {}, witness: {}, parsed: {}, raw: {}, resolved: {}",
+                    block, witnessIndex, redeemers.size(), rawCount, entries.size());
+            return;
+        }
         for (int i = 0; i < entries.size(); i++) {
             try {
                 byte[] entry = entries.get(i);

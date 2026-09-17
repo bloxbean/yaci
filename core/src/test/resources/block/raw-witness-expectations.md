@@ -28,12 +28,11 @@ array redeemers = [[tag, index, data, [memory, steps]], ...]
 map redeemers = {[tag, index]: [data, [memory, steps]], ...}
 ```
 
-`ordinaryOutputHash` is SHA-256 of PR #188's block JSON, using Jackson's default property
-order and `NON_NULL` inclusion, after removing datum `cbor`/`hash`, redeemer-data
-`cbor`/`hash`, and whole-redeemer `cbor`. Tests remove optional full block/transaction/
-witness/auxiliary CBOR as well when those flags are enabled. The baseline is commit
-`8c0b2f8e1f1793dd26002b74074b0319b692eee1`. This pins all other output, including
-transaction hashes, counts, JSON data, execution units, and headers.
+The fixture also records transaction hashes, per-witness datum/redeemer counts, redeemer
+purpose/index, and execution units captured from PR #188 at commit
+`8c0b2f8e1f1793dd26002b74074b0319b692eee1`. Tests assert those fields directly, so failures
+show the changed value without depending on Jackson property ordering or unrelated model fields.
+The whole-output comparison against #188 remains one-time validation evidence in the PR.
 
 ## Error classification and behavior
 
