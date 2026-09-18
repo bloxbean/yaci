@@ -7,6 +7,15 @@ dependencies {
 
 }
 
+// Full network sync is explicitly requested and must run again against the current tip.
+tasks.named('integrationTest', Test) {
+    if (System.getenv('YACI_FULL_SYNC') == 'true') {
+        outputs.upToDateWhen { false }
+        outputs.doNotCacheIf('Full sync validates a live network') { true }
+        testLogging.showStandardStreams = true
+    }
+}
+
 publishing {
     publications {
         mavenJava(MavenPublication) {
