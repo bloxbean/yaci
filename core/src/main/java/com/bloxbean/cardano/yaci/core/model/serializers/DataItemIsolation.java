@@ -12,11 +12,13 @@ import com.bloxbean.cardano.yaci.core.model.Witnesses;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.core.util.Tuple;
 import lombok.SneakyThrows;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 /**
@@ -90,6 +92,15 @@ final class DataItemIsolation {
 
     /**
      * Preserve tags, indexes, and execution units while decoding only each redeemer's data in isolation.
+     * Conway maps use the same decoded-key equality as the normal decoder: first key position,
+     * last value. Collapse duplicates before interpreting values so recovery cannot add redeemers.
+     * <pre>
+     * {[0, 9]: [oldData, unitsA], [1, 1]: [otherData, unitsB], [0, 9]: [newData, unitsC]}
+     * becomes [Spend/9 with newData and unitsC, Mint/1 with otherData and unitsB].
+     * Keys 820009 and 980218001809 both decode to [0, 9] and must also collapse.
+     * </pre>
+     * Retain the first key's source fields and the last value's source fields when assembling
+     * fallback CBOR; healthy values still use the legacy synthesized encoding below.
      */
     @SneakyThrows
     private static List<Redeemer> redeemers(CborSlice source) {
@@ -110,9 +121,17 @@ final class DataItemIsolation {
         } else {
             // Conway map form: {[tag, index]: [data, execution_units], ...}.
             List<CborSlice> entries = source.items(MajorType.MAP);
+            var uniqueEntries = new LinkedHashMap<DataItem, Tuple<CborSlice, CborSlice>>();
             for (int i = 0; i < entries.size(); i += 2) {
-                List<CborSlice> key = entries.get(i).items(MajorType.ARRAY);
-                List<CborSlice> value = entries.get(i + 1).items(MajorType.ARRAY);
+                CborSlice rawKey = entries.get(i);
+                DataItem decodedKey = decode(rawKey);
+                var previous = uniqueEntries.get(decodedKey);
+                uniqueEntries.put(decodedKey, new Tuple<>(previous == null ? rawKey : previous._1,
+                        entries.get(i + 1)));
+            }
+            for (var entry : uniqueEntries.values()) {
+                List<CborSlice> key = entry._1.items(MajorType.ARRAY);
+                List<CborSlice> value = entry._2.items(MajorType.ARRAY);
                 requireSize(key, 2);
                 requireSize(value, 2);
                 Redeemer redeemer = Redeemer.deserialize(new Array().add(decode(key.get(0))).add(decode(key.get(1))),
