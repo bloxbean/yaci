@@ -1,226 +1,93 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.util;
 
-import co.nstant.in.cbor.CborDecoder;
-import com.bloxbean.cardano.yaci.core.util.ArrayCborDecoder;
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.AdditionalInformation;
+import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.MajorType;
-import co.nstant.in.cbor.model.Special;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
 
-import java.io.ByteArrayInputStream;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
 
-import static com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor.getLength;
-import static com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor.getSymbolBytes;
-
+/** Extract original witness encodings without decoding or re-encoding their nested data. */
 public final class WitnessUtil {
-
     private WitnessUtil() {}
 
     /**
-     * Get transaction witnesses of a block in raw bytes
+     * Get transaction witnesses in source order. Shelley through Conway share the same positions:
+     * [era, [header, transactionBodies, witnesses, auxiliaryData, ...]].
+     * Only the first block is used, matching the block serializer's CBOR-sequence behavior.
      * @param blockBytes raw block bytes
-     * @return a list of transaction witnesses in raw bytes
-     * @throws CborException
+     * @return original witness encodings
+     * @throws CborException if the witness array or its prefix has invalid framing
      */
     public static List<byte[]> getWitnessRawData(byte[] blockBytes) throws CborException {
-        ByteArrayInputStream stream = new ByteArrayInputStream(blockBytes);
-        CborDecoder decoder = new ArrayCborDecoder(stream);
-
-        stream.read();
-        decoder.decodeNext();
-        stream.read();
-        decoder.decodeNext();
-        decoder.decodeNext();
-
-        // first element is witness
-        var witnessLengthByte = stream.read();
-        long witnessElementCount = getLength(witnessLengthByte,
-                getSymbolBytes(blockBytes.length - stream.available(), blockBytes));
-
-        // Skip extra length bytes for definite-length arrays (>23 elements)
-        int extraBytes = skipBytes(witnessLengthByte);
-        if (extraBytes > 0) {
-            stream.skip(extraBytes);
-        }
-
-        List<byte[]> witnessList = new ArrayList<>();
-
-        if (witnessElementCount != TransactionBodyExtractor.INFINITY) {
-            for (int i = 0; i < witnessElementCount; i++) {
-                final var start = blockBytes.length - stream.available(); // start cutting position
-                // find witness byte array length
-                final var previous = stream.available();
-                decoder.decodeNext();
-                final var current = stream.available();
-                final byte[] witness = new byte[previous - current];
-                System.arraycopy(blockBytes, start, witness, 0, witness.length);
-                witnessList.add(witness);
-            }
-        } else {
-            for (;;) {
-                final var start = blockBytes.length - stream.available();
-                final var previous = stream.available();
-                final var dataItem = decoder.decodeNext();
-                if (dataItem == null) {
-                    throw new CborException("Unexpected end of stream");
-                }
-
-                if (Special.BREAK.equals(dataItem)) {
-                    break;
-                }
-
-                final var current = stream.available();
-                final byte[] witness = new byte[previous - current];
-                System.arraycopy(blockBytes, start, witness, 0, witness.length);
-                witnessList.add(witness);
-            }
-        }
-
-        return witnessList;
+        return arrayBytes(CborSlice.arrayItem(blockBytes, 1, 2));
     }
 
     /**
-     * Get raw bytes of transaction witnesses fields
-     *
-     * @param witnessBytes transaction witnesses raw bytes
-     * @return a map of transaction witnesses fields raw bytes with indexes
-     * @throws CborException
+     * Get witness fields by their unsigned integer keys, retaining exact value bytes.
+     * @param witnessBytes one complete witness map
+     * @return field encodings indexed by witness key
+     * @throws CborException if the map framing or key type is invalid
      */
-    public static java.util.Map<BigInteger, byte[]> getWitnessFields(byte[] witnessBytes)
-            throws CborException {
-        var witnessMap = new HashMap<BigInteger, byte[]>();
-
-        ByteArrayInputStream stream = new ByteArrayInputStream(witnessBytes);
-        CborDecoder decoder = new ArrayCborDecoder(stream);
-        stream.read();
-
-        while (stream.available() > 0) {
-            UnsignedInteger key = (UnsignedInteger) decoder.decodeNext();
-            final int datumStartFrom = witnessBytes.length - stream.available();
-            int previousAvailable = stream.available();
-            decoder.decodeNext();
-            int currentAvailable = stream.available();
-
-            final byte[] fieldBytes = new byte[previousAvailable - currentAvailable];
-            System.arraycopy(witnessBytes, datumStartFrom, fieldBytes, 0, fieldBytes.length);
-            witnessMap.put(key.getValue(), fieldBytes);
+    public static Map<BigInteger, byte[]> getWitnessFields(byte[] witnessBytes) throws CborException {
+        var fields = new HashMap<BigInteger, byte[]>();
+        // witness = {0: vkeys, 1: nativeScripts, ..., 4: [datum, ...], 5: redeemers, ...}.
+        List<CborSlice> entries = CborSlice.of(witnessBytes).items(MajorType.MAP);
+        for (int i = 0; i < entries.size(); i += 2) {
+            if (entries.get(i).type() != MajorType.UNSIGNED_INTEGER) {
+                throw new CborException("Expected unsigned witness field key");
+            }
+            DataItem key = CborSerializationUtil.deserializeOne(entries.get(i).bytes());
+            fields.put(((UnsignedInteger) key).getValue(), entries.get(i + 1).bytes());
         }
-
-        return witnessMap;
-    }
-
-    //Conway era
-    public static List<Tuple<byte[], byte[]>> getRedeemerMapBytes(byte[] redeemerBytes)
-            throws CborException {
-        var redeemerList = new ArrayList<Tuple<byte[], byte[]>>();
-
-        ByteArrayInputStream stream = new ByteArrayInputStream(redeemerBytes);
-        CborDecoder decoder = new ArrayCborDecoder(stream);
-
-        //Skip the first byte which represents major type
-        stream.read();
-
-        //Check the type of second byte. If uint, then skip
-        //The map content should start with an array tag
-        var secondByte = MajorType.ofByte(redeemerBytes[1]);
-        if (secondByte == MajorType.UNSIGNED_INTEGER)
-            stream.read();
-
-        while (stream.available() > 0) {
-            int keyStartFrom = redeemerBytes.length - stream.available();
-            int previousAvailable = stream.available();
-            var keyDI = decoder.decodeNext();
-            int currentAvailable = stream.available();
-            final byte[] keyBytes = new byte[previousAvailable - currentAvailable];
-            System.arraycopy(redeemerBytes, keyStartFrom, keyBytes, 0, keyBytes.length);
-
-            int valueStartFrom = redeemerBytes.length - stream.available();
-            previousAvailable = stream.available();
-            var valueDI = decoder.decodeNext();
-            currentAvailable = stream.available();
-            final byte[] valueBytes = new byte[previousAvailable - currentAvailable];
-            System.arraycopy(redeemerBytes, valueStartFrom, valueBytes, 0, valueBytes.length);
-
-            redeemerList.add(new Tuple<>(keyBytes, valueBytes));
-        }
-
-        return redeemerList;
+        return fields;
     }
 
     /**
-     * Get CDDL array elements in bytes
-     * @param bytes CDDL array bytes
-     * @return a list of CDDL array elements in raw bytes
-     * @throws CborException
+     * Get Conway redeemer map entries in source order, excluding the map header and final BREAK.
+     * @param redeemerBytes one complete redeemer map
+     * @return original key/value encodings
+     * @throws CborException if the map framing is invalid
+     */
+    public static List<Tuple<byte[], byte[]>> getRedeemerMapBytes(byte[] redeemerBytes) throws CborException {
+        var result = new ArrayList<Tuple<byte[], byte[]>>();
+        // Conway: {[tag, index]: [data, [memory, steps]], ...}; map items alternate key/value.
+        List<CborSlice> entries = CborSlice.of(redeemerBytes).items(MajorType.MAP);
+        for (int i = 0; i < entries.size(); i += 2) {
+            result.add(new Tuple<>(entries.get(i).bytes(), entries.get(i + 1).bytes()));
+        }
+        return result;
+    }
+
+    /**
+     * Get exact array elements, excluding container tags, length headers, and the closing BREAK.
+     * Handles empty/singleton arrays and every definite-length width as well as indefinite arrays.
+     * @param bytes one complete array (possibly tagged)
+     * @return original item encodings
+     * @throws CborException if framing is invalid, truncated, or contains trailing values
      */
     public static List<byte[]> getArrayBytes(byte[] bytes) throws CborException {
-        ByteArrayInputStream stream = new ByteArrayInputStream(bytes);
-        final List<byte[]> dataItemBytes = new ArrayList<>();
-        CborDecoder decoder = new ArrayCborDecoder(stream);
-
-        var arraySymbol = stream.read();
-
-        //Check if it's a tag, then read the next byte
-        int tagSkipBytes = 0;
-        var type = MajorType.ofByte(arraySymbol);
-        if (type == MajorType.TAG) {
-            tagSkipBytes = skipBytes(arraySymbol);
-
-            while (tagSkipBytes-- > 0) {
-                stream.read();
-            }
-
-            arraySymbol = stream.read();
-        }
-
-        //final var arraySymbol = stream.read();
-        final var dataLength = getLength(arraySymbol,
-                getSymbolBytes(bytes.length - stream.available(), bytes));
-        int skipBytes = tagSkipBytes + skipBytes(arraySymbol);
-
-
-        if (dataLength != TransactionBodyExtractor.INFINITY) {
-            if (dataLength == BigInteger.ONE.intValue()) {
-                dataItemBytes.add(getSymbolBytes((int) dataLength, bytes));
-                return dataItemBytes;
-            }
-
-            while (skipBytes-- > 0) {
-                stream.read();
-            }
-        }
-
-        while (true) { // skip last BEAK symbol
-            final int start = bytes.length - stream.available();
-            final int previousAvailable = stream.available();
-
-            final var dataItem = decoder.decodeNext();
-            final int currentAvailable = stream.available();
-            final byte[] dataItemElement = new byte[previousAvailable - currentAvailable];
-
-            System.arraycopy(bytes, start, dataItemElement, 0, dataItemElement.length);
-
-            if (Objects.isNull(dataItem) || dataItem.equals(Special.BREAK)) {
-                break;
-            }
-            dataItemBytes.add(dataItemElement);
-        }
-
-        return dataItemBytes;
+        return arrayBytes(CborSlice.of(bytes));
     }
 
-    private static boolean isTag(int code) {
-        // Major types 6 in CBOR is reserved for tags
-        return (code & 0b111_00000) == 0b110_00000;
+    /**
+     * Get an array-form redeemer's fields, or a Conway map key/value array's fields.
+     * @param redeemer one complete array
+     * @return original field encodings
+     * @throws CborException if the array framing is invalid
+     */
+    public static List<byte[]> getRedeemerFields(byte[] redeemer) throws CborException {
+        return getArrayBytes(redeemer);
     }
 
+    /** Return the argument width used by the transaction-body and auxiliary-data extractors. */
     static int skipBytes(int initialByte) throws CborException {
          switch (AdditionalInformation.ofByte(initialByte)) {
              case DIRECT:
@@ -242,30 +109,10 @@ public final class WitnessUtil {
         }
     }
 
-    /**
-     * Get redeemer fields in raw bytes
-     * @param redeemer redeemer object raw bytes
-     * @return a list of redeemer object fields in raw bytes
-     * @throws CborException
-     */
-    public static List<byte[]> getRedeemerFields(byte[] redeemer) throws CborException {
-        var insideRedeemer = new ArrayList<byte[]>();
-
-        ByteArrayInputStream stream = new ByteArrayInputStream(redeemer);
-        CborDecoder decoder = new ArrayCborDecoder(stream);
-        stream.read();
-
-        while (stream.available() > 0) {
-            final int fieldStartFrom = redeemer.length - stream.available();
-            int previousAvailable = stream.available();
-            decoder.decodeNext();
-            int currentAvailable = stream.available();
-
-            final byte[] fieldBytes = new byte[previousAvailable - currentAvailable];
-            System.arraycopy(redeemer, fieldStartFrom, fieldBytes, 0, fieldBytes.length);
-            insideRedeemer.add(fieldBytes);
-        }
-
-        return insideRedeemer;
+    /** Copy immediate array children, retaining each child's tags and nested container encoding. */
+    private static List<byte[]> arrayBytes(CborSlice array) throws CborException {
+        List<byte[]> result = new ArrayList<>();
+        for (CborSlice item : array.items(MajorType.ARRAY)) result.add(item.bytes());
+        return result;
     }
 }

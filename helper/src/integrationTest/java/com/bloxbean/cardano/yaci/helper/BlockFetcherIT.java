@@ -19,14 +19,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
 class BlockFetcherIT extends BaseTest {
 
+    /** Verifies the PR #185 deep native-script block remains complete and exposes the unaffected script JSON. */
     @Test
-    public void fetchBlock() throws InterruptedException {
+    public void fetchBlock_withDeepNativeScript_returnsAllTransactionsAndScriptJson() throws InterruptedException {
         VersionTable versionTable = N2NVersionTableConstant.v4AndAbove(protocolMagic);
         BlockFetcher blockFetcher = new BlockFetcher(node, nodePort, versionTable);
 
@@ -51,11 +53,31 @@ class BlockFetcherIT extends BaseTest {
         blockFetcher.shutdown();
 
         assertThat(blocks).hasSize(1);
-        assertThat(blocks.get(0).getHeader().getHeaderBody().getBlockNumber()).isEqualTo(5183974);
-        assertThat(blocks.get(0).getTransactionBodies()).hasSize(23);
-        assertThat(blocks.get(0).getTransactionWitness().stream()
+        Block block = blocks.get(0);
+        assertThat(block.getHeader().getHeaderBody().getBlockNumber()).isEqualTo(5183974);
+        assertThat(block.getHeader().getHeaderBody().getSlot()).isEqualTo(133883340);
+        assertThat(block.getHeader().getHeaderBody().getBlockHash())
+                .isEqualTo("bac1660208e7a8f63fc7caf97cfefcd3066a517d3ca4d971e1b316d1e43708e5");
+        assertThat(block.getTransactionBodies()).hasSize(23);
+
+        String txHash = "f90dce5765108da976abdbb9fc618f9a6ffd9fa4d93b2f288eed1808545424c9";
+        int transactionIndex = IntStream.range(0, block.getTransactionBodies().size())
+                .filter(index -> txHash.equals(block.getTransactionBodies().get(index).getTxHash()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Transaction not found: " + txHash));
+        List<NativeScript> nativeScripts = block.getTransactionWitness().get(transactionIndex).getNativeScripts();
+
+        assertThat(nativeScripts).hasSize(1);
+        assertThat(nativeScripts.get(0).getParseError()).isNull();
+        assertThat(nativeScripts.get(0).getContent())
+                .startsWith("{\"type\":\"all\",\"scripts\":[")
+                .contains("\"type\":\"sig\",\"keyHash\":"
+                        + "\"ba386209c0f81f9570b6feb45cedc2649144440157677c720bfd314a\"");
+
+        // PR #185 prevents this deeply nested script from dropping the block or losing its JSON representation.
+        assertThat(block.getTransactionWitness().stream()
                 .flatMap(witness -> witness.getNativeScripts().stream())
-                .filter(script -> script.getParseError() != null).count()).isGreaterThan(0);
+                .map(NativeScript::getParseError)).containsOnlyNulls();
     }
 
 
