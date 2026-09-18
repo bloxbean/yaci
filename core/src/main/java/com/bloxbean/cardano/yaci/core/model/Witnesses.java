@@ -10,7 +10,7 @@ import java.util.List;
 @AllArgsConstructor
 @EqualsAndHashCode
 @ToString
-@Builder
+@Builder(toBuilder = true)
 public class Witnesses {
     private List<VkeyWitness> vkeyWitnesses = new ArrayList<>();
 

@@ -1,7 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
 
 import co.nstant.in.cbor.model.Array;
-import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.common.GenesisConfig;
 import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
@@ -14,6 +13,7 @@ import com.bloxbean.cardano.yaci.core.model.serializers.BlockHeaderSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.ByronBlockSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.ByronEbBlockSerializer;
+import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.*;
@@ -97,9 +97,8 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
     private void onReceiveBlocks(MsgBlock message) {
         byte[] body = message.getBytes();
 
-        Array array = (Array) CborSerializationUtil.deserializeOne(body);
-        int eraValue = ((UnsignedInteger)array.getDataItems().get(0)).getValue().intValue();
         try {
+            int eraValue = EraUtil.getEraValue(body);
             Era era = EraUtil.getEra(eraValue);
 
             if (era == Era.Byron) {
@@ -142,11 +141,13 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
             Long blockNumber = null;
             //Catch exception to avoid exception propagation
             try {
-                Array headerArray = (Array) ((Array) array.getDataItems().get(1)).getDataItems().get(0);
+                // Diagnostics must not decode the failing transaction data again.
+                byte[] headerBytes = CborSlice.arrayItem(body, 1, 0).bytes();
+                Array headerArray = (Array) CborSerializationUtil.deserializeOne(headerBytes);
                 BlockHeader blockHeader = BlockHeaderSerializer.INSTANCE.getBlockHeaderFromHeaderArray(headerArray);
                 log.error("BlockHeader >> Block No: " + blockHeader.getHeaderBody().getBlockNumber() + ", Slot: " + blockHeader.getHeaderBody().getSlot());
                 blockNumber = blockHeader.getHeaderBody().getBlockNumber();
-            } catch (Exception e1) {
+            } catch (Exception | StackOverflowError e1) {
                 log.error("Error in parsing block header", e1);
             }
 
