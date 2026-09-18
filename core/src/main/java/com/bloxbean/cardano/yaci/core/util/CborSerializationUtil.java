@@ -1,7 +1,6 @@
 package com.bloxbean.cardano.yaci.core.util;
 
 import co.nstant.in.cbor.CborBuilder;
-import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborEncoder;
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.*;
@@ -145,7 +144,7 @@ public class CborSerializationUtil {
             if (canonical) {
                 new CborEncoder(baos).encode(cborBuilder.build());
             } else {
-                new CborEncoder(baos).nonCanonical().encode(cborBuilder.build());
+                new ArrayCborEncoder(baos).encode(cborBuilder.build());
             }
         } catch (CborException e) {
             throw new CborRuntimeException("Cbor serialization error", e);
@@ -164,7 +163,7 @@ public class CborSerializationUtil {
      */
     public static DataItem deserializeOne(@NonNull byte[] bytes) {
         try {
-            return CborDecoder.decode(bytes).get(0);
+            return ArrayCborDecoder.decode(bytes).get(0);
         } catch (CborException e) {
             throw new CborRuntimeException("Cbor de-serialization error", e);
         }
@@ -177,7 +176,7 @@ public class CborSerializationUtil {
      */
     public static DataItem[] deserialize(@NonNull byte[] bytes) {
         try {
-            return CborDecoder.decode(bytes).toArray(new DataItem[0]);
+            return ArrayCborDecoder.decode(bytes).toArray(new DataItem[0]);
         } catch (CborException e) {
             throw new CborRuntimeException("Cbor de-serialization error", e);
         }
