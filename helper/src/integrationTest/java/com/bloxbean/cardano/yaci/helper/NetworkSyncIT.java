@@ -9,7 +9,6 @@ import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListene
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
@@ -44,7 +43,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  *     --tests 'com.bloxbean.cardano.yaci.helper.NetworkSyncIT.syncSanchonet'
  * }</pre>
  */
-@Slf4j
 @EnabledIfEnvironmentVariable(named = "YACI_FULL_SYNC", matches = "true")
 class NetworkSyncIT {
     private static final Duration TIP_TIMEOUT = Duration.ofSeconds(30);
@@ -210,8 +208,6 @@ class NetworkSyncIT {
         lastPoint.set(point);
         long count = blocks.incrementAndGet();
         if (count % LOG_INTERVAL == 0) {
-            log.info("{} full sync: callbacks={}, block={}, slot={}, hash={}",
-                    network, count, blockNumber, point.getSlot(), point.getHash());
             System.out.printf("%s full sync: callbacks=%d, block=%d, slot=%d, hash=%s%n",
                     network, count, blockNumber, point.getSlot(), point.getHash());
         }
