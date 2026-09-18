@@ -2,9 +2,6 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
-import com.bloxbean.cardano.client.spec.Script;
-import com.bloxbean.cardano.client.transaction.spec.script.*;
-import com.bloxbean.cardano.client.util.JsonUtil;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
@@ -199,33 +196,6 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
     }
 
     public NativeScript deserializeNativeScript(Array nativeScriptArray) {
-        List<DataItem> dataItemList = nativeScriptArray.getDataItems();
-        if (dataItemList == null || dataItemList.size() == 0) {
-            throw new CborRuntimeException("NativeScript deserialization failed. Invalid no of DataItem");
-        }
-
-        int type = ((UnsignedInteger) dataItemList.get(0)).getValue().intValue();
-        Script script = null;
-        try {
-            if (type == 0) {
-                script = ScriptPubkey.deserialize(nativeScriptArray);
-            } else if (type == 1) {
-                script = ScriptAll.deserialize(nativeScriptArray);
-            } else if (type == 2) {
-                script = ScriptAny.deserialize(nativeScriptArray);
-            } else if (type == 3) {
-                script = ScriptAtLeast.deserialize(nativeScriptArray);
-            } else if (type == 4) {
-                script = RequireTimeAfter.deserialize(nativeScriptArray);
-            } else if (type == 5) {
-                script = RequireTimeBefore.deserialize(nativeScriptArray);
-            } else {
-                return null;
-            }
-        } catch (Exception e) {
-            throw new CborRuntimeException("Error parsing native script", e);
-        }
-
-        return new NativeScript(type, JsonUtil.getPrettyJson(script));
+        return NativeScriptJson.parse(nativeScriptArray);
     }
 }

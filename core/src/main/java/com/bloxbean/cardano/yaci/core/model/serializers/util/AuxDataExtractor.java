@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.util;
 
 import co.nstant.in.cbor.CborDecoder;
+import com.bloxbean.cardano.yaci.core.util.ArrayCborDecoder;
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.Special;
@@ -21,7 +22,7 @@ public class AuxDataExtractor {
     public static Map<Integer, byte[]> getAuxDataFromBlock(byte[] blockBytes) {
         Map<Integer, byte[]> auxDataMap = new LinkedHashMap<>();
         ByteArrayInputStream stream = new ByteArrayInputStream(blockBytes);
-        CborDecoder decoder = new CborDecoder(stream);
+        CborDecoder decoder = new ArrayCborDecoder(stream);
 
         // era and block body array header
         stream.read();

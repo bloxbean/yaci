@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.util;
 
 import co.nstant.in.cbor.CborDecoder;
+import com.bloxbean.cardano.yaci.core.util.ArrayCborDecoder;
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.AdditionalInformation;
 import co.nstant.in.cbor.model.MajorType;
@@ -34,7 +35,7 @@ public final class WitnessUtil {
        // blockBytes = TransactionBodyExtractor.unwrapTag24IfNeeded(blockBytes);
 
         ByteArrayInputStream stream = new ByteArrayInputStream(blockBytes);
-        CborDecoder decoder = new CborDecoder(stream);
+        CborDecoder decoder = new ArrayCborDecoder(stream);
 
         stream.read();
         decoder.decodeNext();
@@ -101,7 +102,7 @@ public final class WitnessUtil {
         var witnessMap = new HashMap<BigInteger, byte[]>();
 
         ByteArrayInputStream stream = new ByteArrayInputStream(witnessBytes);
-        CborDecoder decoder = new CborDecoder(stream);
+        CborDecoder decoder = new ArrayCborDecoder(stream);
         stream.read();
 
         while (stream.available() > 0) {
@@ -125,7 +126,7 @@ public final class WitnessUtil {
         var redeemerList = new ArrayList<Tuple<byte[], byte[]>>();
 
         ByteArrayInputStream stream = new ByteArrayInputStream(redeemerBytes);
-        CborDecoder decoder = new CborDecoder(stream);
+        CborDecoder decoder = new ArrayCborDecoder(stream);
 
         //Skip the first byte which represents major type
         stream.read();
@@ -166,7 +167,7 @@ public final class WitnessUtil {
     public static List<byte[]> getArrayBytes(byte[] bytes) throws CborException {
         ByteArrayInputStream stream = new ByteArrayInputStream(bytes);
         final List<byte[]> dataItemBytes = new ArrayList<>();
-        CborDecoder decoder = new CborDecoder(stream);
+        CborDecoder decoder = new ArrayCborDecoder(stream);
 
         var arraySymbol = stream.read();
 
@@ -255,7 +256,7 @@ public final class WitnessUtil {
         var insideRedeemer = new ArrayList<byte[]>();
 
         ByteArrayInputStream stream = new ByteArrayInputStream(redeemer);
-        CborDecoder decoder = new CborDecoder(stream);
+        CborDecoder decoder = new ArrayCborDecoder(stream);
         stream.read();
 
         while (stream.available() > 0) {
