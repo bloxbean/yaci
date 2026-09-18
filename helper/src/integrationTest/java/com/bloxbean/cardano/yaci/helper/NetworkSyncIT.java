@@ -49,15 +49,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 class NetworkSyncIT {
     private static final Duration TIP_TIMEOUT = Duration.ofSeconds(30);
     private static final long SYNC_TIMEOUT_HOURS = 12;
-    private static final long LOG_INTERVAL = 10_000;
+    private static final long LOG_INTERVAL = 1_000;
 
     /** Syncs mainnet from the earliest available repository intersection to a tip captured at test start. */
     @Test
     void syncMainnet() throws InterruptedException {
         sync(new Network(
                 "mainnet",
-                Constants.MAINNET_PUBLIC_RELAY_ADDR,
-                Constants.MAINNET_PUBLIC_RELAY_PORT,
+                "localhost",
+                3002,
                 Constants.MAINNET_PROTOCOL_MAGIC,
                 Constants.WELL_KNOWN_MAINNET_POINT,
                 // The first mainnet point currently accepted by the public relay for a complete range sync.
@@ -69,8 +69,8 @@ class NetworkSyncIT {
     void syncPreprod() throws InterruptedException {
         sync(new Network(
                 "preprod",
-                Constants.PREPROD_PUBLIC_RELAY_ADDR,
-                Constants.PREPROD_PUBLIC_RELAY_PORT,
+                "localhost",
+                32000,
                 Constants.PREPROD_PROTOCOL_MAGIC,
                 Constants.WELL_KNOWN_PREPROD_POINT,
                 // This is the last Byron point before the Shelley-onward preprod history.
@@ -211,6 +211,8 @@ class NetworkSyncIT {
         long count = blocks.incrementAndGet();
         if (count % LOG_INTERVAL == 0) {
             log.info("{} full sync: callbacks={}, block={}, slot={}, hash={}",
+                    network, count, blockNumber, point.getSlot(), point.getHash());
+            System.out.printf("%s full sync: callbacks=%d, block=%d, slot=%d, hash=%s%n",
                     network, count, blockNumber, point.getSlot(), point.getHash());
         }
     }
