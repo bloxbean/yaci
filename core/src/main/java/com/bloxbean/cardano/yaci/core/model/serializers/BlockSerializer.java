@@ -232,165 +232,127 @@ public enum BlockSerializer implements Serializer<Block> {
         return blockBuilder.build();
     }
 
-    @SneakyThrows
+    /** Correct optional datum/redeemer bytes per witness; extraction failures never reject the parsed block. */
     private void handleWitnessDatumRedeemer(long block, List<Witnesses> witnesses, List<byte[]> transactionWitness) {
-        if (witnesses != null && !witnesses.isEmpty()) {
-            if (transactionWitness == null || transactionWitness.size() != witnesses.size()) {
-                log.error("block: {} witness set count mismatch. parsed: {}, raw: {}",
-                        block, witnesses.size(), transactionWitness == null ? null : transactionWitness.size());
-                return;
-            }
+        if (witnesses == null || witnesses.isEmpty()) return;
+        if (transactionWitness == null || transactionWitness.size() != witnesses.size()) {
+            log.error("block: {} witness set count mismatch. parsed: {}, raw: {}",
+                    block, witnesses.size(), transactionWitness == null ? null : transactionWitness.size());
+            return;
+        }
 
-            for (int witnessIndex = 0; witnessIndex < transactionWitness.size(); witnessIndex++) {
-
-                final var witnessFields = WitnessUtil.getWitnessFields(
-                        transactionWitness.get(witnessIndex));
-                Witnesses witness = witnesses.get(witnessIndex);
-
-                if (witness.getDatums() != null && !witness.getDatums().isEmpty()) {
-
-                    var datumBytes = getArrayBytes(witnessFields.get(BigInteger.valueOf(4L)));
-                    final List<Datum> datums = witness.getDatums();
-
-                    if (datumBytes.size() != datums.size()) {
-                        log.error("block: {} datum does not have the same size", block);
-                    } else {
-                        if (datums != null && !datums.isEmpty()) {
-                            for (int datumIndex = 0; datumIndex < datums.size(); datumIndex++) {
-
-                                final Datum datum = datums.get(datumIndex);
-                                final byte[] rawCbor = datumBytes.get(datumIndex);
-
-                                final var cbor = HexUtil.encodeHexString(rawCbor);
-                                final var hash = Datum.cborToHash(rawCbor);
-
-                                if (!datum.getHash().equals(hash)) {
-                                    log.debug("Datum Hash Mismatch : {} - {} - {}", block, datum.getHash(), hash);
-                                }
-
-                                var updatedDatum = datum.toBuilder()
-                                        .cbor(cbor)
-                                        .hash(hash)
-                                        .build();
-
-                                datums.set(datumIndex, updatedDatum);
+        for (int witnessIndex = 0; witnessIndex < witnesses.size(); witnessIndex++) {
+            Witnesses witness = witnesses.get(witnessIndex);
+            boolean hasDatums = witness.getDatums() != null && !witness.getDatums().isEmpty();
+            boolean hasRedeemers = witness.getRedeemers() != null && !witness.getRedeemers().isEmpty();
+            // Signature/script-only witnesses need no optional data correction or field copies.
+            if (!hasDatums && !hasRedeemers) continue;
+            try {
+                var fields = WitnessUtil.getWitnessFields(transactionWitness.get(witnessIndex));
+                // Enrichment is optional. A failed datum pass must not prevent redeemer correction or
+                // correction of later witnesses; retain the initially parsed values on failure.
+                if (hasDatums) {
+                    try {
+                        List<byte[]> rawDatums = getArrayBytes(fields.get(BigInteger.valueOf(4)));
+                        if (rawDatums.size() != witness.getDatums().size()) {
+                            log.warn("Datum count mismatch. block: {}, witness: {}, parsed: {}, raw: {}",
+                                    block, witnessIndex, witness.getDatums().size(), rawDatums.size());
+                        } else {
+                            for (int i = 0; i < rawDatums.size(); i++) {
+                                witness.getDatums().set(i,
+                                        withOriginalData(witness.getDatums().get(i), rawDatums.get(i)));
                             }
                         }
+                    } catch (Exception e) {
+                        log.error("Raw datum extraction failed. block: {}, witness: {}", block, witnessIndex, e);
                     }
                 }
-
-                /*
-                 * redeemers =
-                 *     [ + [ tag: redeemer_tag, index: uint, data: plutus_data, ex_units: ex_units ] ]
-                 *     / { + [ tag: redeemer_tag, index: uint ] => [ data: plutus_data, ex_units: ex_units ] }
-                 */
-                List<Redeemer> redeemers = witness.getRedeemers();
-                if (redeemers != null && !redeemers.isEmpty()) {
-
-                    var redeemersBytes = witnessFields.get(BigInteger.valueOf(5L));
-
-                    //Isolate the first 3 bits of the byte, which represent the "major type" in CBOR's encoding structure. (0xe0 = 11100000)
-                    var majorType = MajorType.ofByte(redeemersBytes[0] & 0xe0);
-
-                     if (majorType == MajorType.ARRAY) {
-                        List<byte[]> redeemerArrayBytes = null;
-                        try {
-                            redeemerArrayBytes = getArrayBytes(redeemersBytes);
-                        } catch (Exception e) {
-                            log.error("Error parsing redeemer array bytes", e);
-                            redeemerArrayBytes = new ArrayList<>();
-                        }
-
-                        if (redeemerArrayBytes.size() != redeemers.size()) {
-                            log.error("block: {} redeemer does not have the same size", block);
-                        } else {
-                            for (int redeemerIdx = 0; redeemerIdx < redeemers.size(); redeemerIdx++) {
-                                var redeemer = redeemers.get(redeemerIdx);
-                                var redeemerBytes = redeemerArrayBytes.get(redeemerIdx);
-                                var redeemerFields = getRedeemerFields(redeemerBytes);
-
-                                if (redeemerFields.size() != 4) {
-                                    log.error("Missing redeemer fields. Expected size 4, but found {}", redeemerFields.size());
-                                    continue;
-                                    //throw new IllegalStateException("Redeemer missing field");
-                                }
-
-                                var actualRedeemerData = redeemerFields.get(2);
-                                var redeemerData = redeemer.getData();
-                                final var cbor = HexUtil.encodeHexString(actualRedeemerData);
-                                final var hash = Datum.cborToHash(actualRedeemerData);
-
-                                if (!redeemerData.getHash().equals(hash)) {
-                                    log.debug("Redeemer data hash mismatch : {} - {} - {}",
-                                            block, redeemerData.getHash(), hash);
-                                }
-
-                                var updatedRedeemerData = redeemerData.toBuilder()
-                                        .cbor(cbor)
-                                        .hash(hash)
-                                        .build();
-
-                                var updatedRedeemer = redeemer.toBuilder()
-                                        .cbor(HexUtil.encodeHexString(redeemerBytes))
-                                        .data(updatedRedeemerData)
-                                        .build();
-
-                                redeemers.set(redeemerIdx, updatedRedeemer);
-                            }
-                        }
-                    } else if (majorType == MajorType.MAP) {
-                         List<Tuple<byte[], byte[]>> redeemerMapEntriesBytes = null;
-                         try {
-                            redeemerMapEntriesBytes = getRedeemerMapBytes(redeemersBytes);
-                        } catch (Exception e) {
-                            log.error("Error parsing redeemer map bytes", e);
-                            redeemerMapEntriesBytes = new ArrayList<>();
-                        }
-                        if (redeemerMapEntriesBytes.size() != redeemers.size()) {
-                            log.error("block: {} redeemer does not have the same size", block);
-                        } else {
-                            for (int redeemerIdx = 0; redeemerIdx < redeemers.size(); redeemerIdx++) {
-                                var redeemer = redeemers.get(redeemerIdx);
-                                var redeemerBytesKeyValueTuple = redeemerMapEntriesBytes.get(redeemerIdx);
-
-                                //Get value field, as we only need redeemer data
-                                var redeemerFields = getRedeemerFields(redeemerBytesKeyValueTuple._2);
-
-                                if (redeemerFields.size() != 2) {
-                                    log.error("Missing redeemer fields in value. Expected size 2, but found {}", redeemerFields.size());
-                                    continue;
-                                }
-
-                                var actualRedeemerData = redeemerFields.get(0);
-                                var redeemerData = redeemer.getData();
-                                final var cbor = HexUtil.encodeHexString(actualRedeemerData);
-                                final var hash = Datum.cborToHash(actualRedeemerData);
-
-                                if (!redeemerData.getHash().equals(hash)) {
-                                    log.debug("Redeemer data hash mismatch : {} - {} - {}",
-                                            block, redeemerData.getHash(), hash);
-                                }
-
-                                var updatedRedeemerData = redeemerData.toBuilder()
-                                        .cbor(cbor)
-                                        .hash(hash)
-                                        .build();
-
-                                var updatedRedeemer = redeemer.toBuilder()
-                                        //.cbor(HexUtil.encodeHexString(redeemerBytes))
-                                        .data(updatedRedeemerData)
-                                        .build();
-
-                                redeemers.set(redeemerIdx, updatedRedeemer);
-                            }
-                        }
-                    } else {
-                        throw new IllegalStateException("Invalid major type for redeemer list bytes : " + majorType);
+                if (hasRedeemers) {
+                    try {
+                        correctRedeemers(block, witnessIndex, witness.getRedeemers(),
+                                fields.get(BigInteger.valueOf(5)));
+                    } catch (Exception e) {
+                        log.error("Raw redeemer extraction failed. block: {}, witness: {}", block, witnessIndex, e);
                     }
                 }
-
+            } catch (Exception e) {
+                log.error("Raw witness field extraction failed. block: {}, witness: {}", block, witnessIndex, e);
             }
         }
+    }
+
+    /**
+     * Correct redeemer data in source order, preserving the existing public CBOR representation.
+     * Pre-Conway: [[tag, index, data, [memory, steps]], ...].
+     * Conway also accepts: {[tag, index]: [data, [memory, steps]], ...}.
+     * On a map count mismatch, resolve duplicate keys using the decoder's last-value-wins ordering.
+     * Equal decoded keys retain their first insertion position but take the last raw value.
+     * For example, two [Spend, 0] entries decode to one redeemer:
+     * <pre>
+     * {[0, 0]: [1, [10, 20]], [0, 0]: [0, [10, 20]]}
+     * a2 820000 8201820a14 820000 821800820a14
+     * Last value: 82 1800 820a14; its data is 1800 (non-minimal integer zero).
+     * </pre>
+     * The winning datum keeps bytes 1800 and their hash, rather than re-encoding zero as 00.
+     * Counts must match after duplicate resolution before any source bytes are attached.
+     * Matching-count maps and array-form redeemers do not enter this fallback.
+     * A malformed entry leaves that parsed redeemer intact and does not stop later entries.
+     */
+    private void correctRedeemers(long block, int witnessIndex, List<Redeemer> redeemers, byte[] bytes)
+            throws CborException {
+        MajorType type = CborSlice.of(bytes).type();
+        List<byte[]> entries;
+        int rawCount;
+        boolean map = type == MajorType.MAP;
+        if (map) {
+            entries = new ArrayList<>();
+            var rawEntries = getRedeemerMapBytes(bytes);
+            rawCount = rawEntries.size();
+            if (rawEntries.size() != redeemers.size()) {
+                // Conway: {[purpose, index]: [data, execution_units], ...}.
+                // The decoder uses DataItem key equality and keeps the last value at the key's
+                // first insertion position. Mirror that only on mismatch; different encodings of
+                // the same key (e.g. 00 vs 1800) must also collapse before the count check below.
+                var uniqueEntries = new LinkedHashMap<DataItem, byte[]>();
+                for (Tuple<byte[], byte[]> entry : rawEntries) {
+                    uniqueEntries.put(CborSerializationUtil.deserializeOne(entry._1), entry._2);
+                }
+                entries.addAll(uniqueEntries.values());
+            } else {
+                for (Tuple<byte[], byte[]> entry : rawEntries) entries.add(entry._2);
+            }
+        } else if (type == MajorType.ARRAY) {
+            entries = getArrayBytes(bytes);
+            rawCount = entries.size();
+        } else {
+            throw new CborException("Expected redeemer array or map");
+        }
+        if (entries.size() != redeemers.size()) {
+            log.warn("Redeemer count mismatch. block: {}, witness: {}, parsed: {}, raw: {}, resolved: {}",
+                    block, witnessIndex, redeemers.size(), rawCount, entries.size());
+            return;
+        }
+        for (int i = 0; i < entries.size(); i++) {
+            try {
+                byte[] entry = entries.get(i);
+                List<byte[]> fields = getRedeemerFields(entry);
+                if (fields.size() != (map ? 2 : 4)) throw new CborException("Unexpected redeemer field count");
+                Redeemer redeemer = redeemers.get(i);
+                Datum data = withOriginalData(redeemer.getData(), fields.get(map ? 0 : 2));
+                // Array-form CBOR is the original whole redeemer. Conway map-form CBOR keeps the
+                // existing synthesized four-field array for API compatibility; only data is corrected.
+                redeemers.set(i, redeemer.toBuilder().data(data)
+                        .cbor(map ? redeemer.getCbor() : HexUtil.encodeHexString(entry)).build());
+            } catch (Exception e) {
+                log.error("Raw redeemer data extraction failed. block: {}, witness: {}, redeemer: {}",
+                        block, witnessIndex, i, e);
+            }
+        }
+    }
+
+    /** Replace only source CBOR and its Blake2b-256 hash, retaining JSON and any existing parse error. */
+    private Datum withOriginalData(Datum datum, byte[] bytes) {
+        return datum.toBuilder().cbor(HexUtil.encodeHexString(bytes)).hash(Datum.cborToHash(bytes)).build();
     }
 
     private void setWitnessCbor(long block, List<Witnesses> witnesses, List<byte[]> transactionWitness) {
