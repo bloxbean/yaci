@@ -52,8 +52,35 @@ No global Jackson constraint or new depth cutoff is introduced. Failed values us
 encoding, without canonicalization; metadata CBOR is only the metadata value, not the full
 auxiliary-data structure used for its transaction hash.
 
-Inline datums already expose their embedded CBOR directly. The separate existing witness/redeemer
-extraction problem in #187 is not changed on the normal parsing path.
+Inline datums already expose their embedded CBOR directly.
+
+## Raw witness correction
+
+The ordinary block path also uses the same boundary scanner to retain exact witness datum and
+redeemer-data bytes (#187). It handles tagged/untagged and definite/indefinite containers, all
+length-header widths, and empty/singleton containers without re-encoding their contents.
+Array-form redeemers retain their whole source encoding. Conway map-form redeemers keep the
+existing synthesized four-field `cbor`; their nested data bytes and hashes are corrected.
+
+Raw extraction remains optional enrichment after the initial parse. A failure is logged with
+block/witness context and leaves the initially parsed value in place. Datum and redeemer passes
+are independent, and failures do not stop later witnesses or blocks. When Conway map counts
+mismatch, raw keys are decoded using the same key equality as the initial parser: duplicate keys
+keep their first insertion position and take the last value's original bytes. This also handles
+different encodings of the same key. Counts must agree after duplicate resolution before correction
+continues. Matching-count maps and array-form redeemers keep their existing extraction path.
+
+The recovery path also collapses duplicate Conway map keys before rebuilding redeemers. A deep
+datum elsewhere in the block must not change the resulting redeemer count or ordering. Recovery
+retains the first key's source encoding and the last value's original data and execution units,
+including when the overwritten or winning datum is deeply nested. Array-form redeemers keep
+every entry; map duplicate-key rules do not apply to lists.
+
+An unresolved count mismatch skips the affected collection to avoid attaching bytes to the wrong
+parsed value. Such fallback values are not guaranteed to contain exact source CBOR; this is separate
+from optional JSON conversion failures reported through `Datum.parseError`.
+
+See the [offline extraction fixtures and error classifications](../core/src/test/resources/block/raw-witness-expectations.md).
 
 ## Era coverage
 
