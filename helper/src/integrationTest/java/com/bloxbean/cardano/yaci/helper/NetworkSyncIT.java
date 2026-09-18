@@ -54,8 +54,8 @@ class NetworkSyncIT {
     void syncMainnet() throws InterruptedException {
         sync(new Network(
                 "mainnet",
-                "localhost",
-                3002,
+                Constants.MAINNET_PUBLIC_RELAY_ADDR,
+                Constants.MAINNET_PUBLIC_RELAY_PORT,
                 Constants.MAINNET_PROTOCOL_MAGIC,
                 Constants.WELL_KNOWN_MAINNET_POINT,
                 // The first mainnet point currently accepted by the public relay for a complete range sync.
@@ -67,8 +67,8 @@ class NetworkSyncIT {
     void syncPreprod() throws InterruptedException {
         sync(new Network(
                 "preprod",
-                "localhost",
-                32000,
+                Constants.PREPROD_PUBLIC_RELAY_ADDR,
+                Constants.PREPROD_PUBLIC_RELAY_PORT,
                 Constants.PREPROD_PROTOCOL_MAGIC,
                 Constants.WELL_KNOWN_PREPROD_POINT,
                 // This is the last Byron point before the Shelley-onward preprod history.
