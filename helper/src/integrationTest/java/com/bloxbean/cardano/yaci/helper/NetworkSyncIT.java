@@ -156,6 +156,7 @@ class NetworkSyncIT {
         });
 
         ScheduledExecutorService keepAlive = Executors.newSingleThreadScheduledExecutor();
+        long syncStartedAt = System.nanoTime();
         try {
             blockFetcher.start();
             keepAlive.scheduleAtFixedRate(() -> blockFetcher.sendKeepAliveMessage(
@@ -168,6 +169,10 @@ class NetworkSyncIT {
         } finally {
             keepAlive.shutdownNow();
             blockFetcher.shutdown();
+            long elapsedSeconds = TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - syncStartedAt);
+            System.out.printf("%s total sync time: %02d:%02d:%02d, callbacks=%d%n",
+                    network.name, elapsedSeconds / 3_600, (elapsedSeconds % 3_600) / 60,
+                    elapsedSeconds % 60, blocks.get());
         }
 
         assertThat(rangeError.get()).isNull();
