@@ -12,6 +12,7 @@ import com.bloxbean.cardano.yaci.core.model.HeaderBody;
 import com.bloxbean.cardano.yaci.core.model.TransactionBody;
 import com.bloxbean.cardano.yaci.core.model.Witnesses;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
+import com.bloxbean.cardano.yaci.core.model.serializers.TransactionOutputSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.AuxDataExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
@@ -37,6 +38,21 @@ class BlockFetchAgentListenerAdapterTest {
     @AfterEach
     void tearDown() {
         YaciConfig.INSTANCE.setReturnFullTxCbor(false);
+    }
+
+    @Test
+    void referenceHashReachesNormalAndCollateralUtxos() {
+        var output = TransactionOutputSerializer.INSTANCE
+                .deserialize(HexUtil.decodeHexString("a2010003d81846820143010203"));
+        var body = txBody("tx1", null).toBuilder().outputs(List.of(output)).collateralReturn(output).build();
+        CapturingListener listener = new CapturingListener();
+        new BlockFetchAgentListenerAdapter(listener).blockFound(block(List.of(body), List.of(witness("a0")),
+                Collections.emptyMap(), Collections.emptyList()));
+        var tx = listener.transactions.get(0);
+        String expected = "bc8f82996834417a91ad5f5bbf06a35e1fdbfe42f21ff91485f443f1";
+        assertThat(tx.getUtxos().get(0).getScriptHash()).isEqualTo(expected);
+        assertThat(tx.getCollateralReturnUtxo().getScriptHash()).isEqualTo(expected);
+        assertThat(tx.getUtxos().get(0).getScriptRef()).isEqualTo("820143010203");
     }
 
     @Test

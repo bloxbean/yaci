@@ -20,4 +20,11 @@ public class Utxo {
     private String datumHash;
     private String inlineDatum;
     private String scriptRef;
+    /** Reference-script hash, or null when absent or its encoding cannot be interpreted. */
+    private String scriptHash;
+
+    public Utxo(String txHash, int index, String address, List<Amount> amounts,
+                String datumHash, String inlineDatum, String scriptRef) {
+        this(txHash, index, address, amounts, datumHash, inlineDatum, scriptRef, null);
+    }
 }

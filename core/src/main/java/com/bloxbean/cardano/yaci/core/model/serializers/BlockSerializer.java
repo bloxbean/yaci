@@ -5,7 +5,6 @@ import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
-import com.bloxbean.cardano.yaci.core.model.serializers.util.AuxDataExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
@@ -38,10 +37,14 @@ public enum BlockSerializer implements Serializer<Block> {
             // JSON may fail even when CBOR decoding succeeds. Recover from source bytes in that
             // case too, rather than returning CBOR produced by re-encoding the failed value.
             for (Witnesses witness : result.getTransactionWitness()) {
-                if (DataItemIsolation.hasDataError(witness)) return deserializeWithIsolatedData(bytes);
+                if (DataItemIsolation.hasDataError(witness)) {
+                    return deserializeWithIsolatedData(bytes);
+                }
             }
             for (AuxData aux : result.getAuxiliaryDataMap().values()) {
-                if (aux.getMetadataParseError() != null) return deserializeWithIsolatedData(bytes);
+                if (aux.getMetadataParseError() != null) {
+                    return deserializeWithIsolatedData(bytes);
+                }
             }
             return result;
         } catch (StackOverflowError e) {
@@ -76,7 +79,7 @@ public enum BlockSerializer implements Serializer<Block> {
         List<Witnesses> witnesses = new ArrayList<>();
         for (CborSlice slice : witnessSlice.items(MajorType.ARRAY)) {
             byte[] raw = slice.bytes();
-            Witnesses witness = DataItemIsolation.witness(raw);
+            Witnesses witness = ScriptHashes.witness(DataItemIsolation.witness(raw), raw);
             if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
                 witness = witness.toBuilder().cbor(HexUtil.encodeHexString(raw)).build();
             }
@@ -87,7 +90,7 @@ public enum BlockSerializer implements Serializer<Block> {
         for (int i = 0; i < entries.size(); i += 2) {
             int index = DataItemIsolation.unsigned(entries.get(i));
             byte[] raw = entries.get(i + 1).bytes();
-            AuxData aux = DataItemIsolation.auxiliary(raw);
+            AuxData aux = ScriptHashes.auxiliary(DataItemIsolation.auxiliary(raw), raw);
             // Check the original auxiliary-data bytes against the transaction's hash, as on the normal path.
             if (YaciConfig.INSTANCE.isReturnFullTxCbor()
                     && isAuxDataHashValid(skeleton.getHeader().getHeaderBody().getBlockNumber(),
@@ -163,10 +166,9 @@ public enum BlockSerializer implements Serializer<Block> {
             }
         }
 
-        //To fix #37 incorrect redeemer & datum hash due to cbor serialization <--> deserialization issue
-        //Get redeemer and datum bytes directly without full deserialization
+        // Reuse original witness bytes for script hashes and datum/redeemer correction (#37).
         try {
-            handleWitnessDatumRedeemer(blockHeader.getHeaderBody().getBlockNumber(), witnessesSet, transactionWitnessRawBytes);
+            handleWitnessRawData(blockHeader.getHeaderBody().getBlockNumber(), witnessesSet, transactionWitnessRawBytes);
         } catch (Exception e) {
             log.error("Extraction of redeemer and datum bytes without serialization/deserialization failed for block : "
                     + blockHeader.getHeaderBody().getBlockNumber(), e);
@@ -174,37 +176,17 @@ public enum BlockSerializer implements Serializer<Block> {
 
         blockBuilder.transactionWitness(witnessesSet);
 
-        java.util.Map<Integer, byte[]> auxDataRawBytes = Collections.emptyMap();
-        if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
-            try {
-                auxDataRawBytes = AuxDataExtractor.getAuxDataFromBlock(blockBody);
-            } catch (Exception e) {
-                log.error("Extraction of auxiliary data bytes failed for block : "
-                        + blockHeader.getHeaderBody().getBlockNumber(), e);
-            }
-        }
-
-        //auxiliary data
+        // Parse auxiliary data first, then extract source bytes once only if needed.
         java.util.Map<Integer, AuxData> auxDataMap = new LinkedHashMap<>();
         Map auxDataMapDI = (Map) blockArray.getDataItems().get(3);
-        for (DataItem txIdDI: auxDataMapDI.getKeys()) {
-            if (txIdDI == SimpleValue.BREAK)
-                continue;
-            int txIndex = toInt(txIdDI);
-            AuxData auxData = AuxDataSerializer.INSTANCE.deserializeDI(auxDataMapDI.get(txIdDI));
-            if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
-                byte[] auxBytes = auxDataRawBytes.get(txIndex);
-                if (auxBytes != null && isAuxDataHashValid(blockHeader.getHeaderBody().getBlockNumber(),
-                        txIndex, txnBodies, auxBytes)) {
-                    auxData = auxData.toBuilder()
-                            .cbor(HexUtil.encodeHexString(auxBytes))
-                            .build();
-                } else if (auxBytes == null) {
-                    log.debug("Missing raw auxiliary data bytes for block: {}, tx index: {}",
-                            blockHeader.getHeaderBody().getBlockNumber(), txIndex);
-                }
-            }
-            auxDataMap.put(txIndex, auxData);
+        for (DataItem txIdDI : auxDataMapDI.getKeys()) {
+            if (txIdDI == SimpleValue.BREAK) continue;
+            auxDataMap.put(toInt(txIdDI), AuxDataSerializer.INSTANCE.deserializeDI(auxDataMapDI.get(txIdDI)));
+        }
+        boolean hasAuxNativeScripts = auxDataMap.values().stream()
+                .anyMatch(aux -> aux.getNativeScripts() != null && !aux.getNativeScripts().isEmpty());
+        if (hasAuxNativeScripts || YaciConfig.INSTANCE.isReturnFullTxCbor()) {
+            handleAuxiliaryRawData(blockBody, blockHeader.getHeaderBody().getBlockNumber(), txnBodies, auxDataMap);
         }
         blockBuilder.auxiliaryDataMap(auxDataMap);
 
@@ -232,8 +214,34 @@ public enum BlockSerializer implements Serializer<Block> {
         return blockBuilder.build();
     }
 
-    /** Correct optional datum/redeemer bytes per witness; extraction failures never reject the parsed block. */
-    private void handleWitnessDatumRedeemer(long block, List<Witnesses> witnesses, List<byte[]> transactionWitness) {
+    /** Locate auxiliary values once, sharing each original encoding between hashes and optional CBOR. */
+    private void handleAuxiliaryRawData(byte[] bytes, long block, List<TransactionBody> transactions,
+                                       java.util.Map<Integer, AuxData> auxiliary) {
+        try {
+            List<CborSlice> entries = CborSlice.arrayItem(bytes, 1, 3).items(MajorType.MAP);
+            // Match the decoder's last-value-wins behavior before enriching parsed values.
+            java.util.Map<Integer, CborSlice> sources = new LinkedHashMap<>();
+            for (int i = 0; i < entries.size(); i += 2) {
+                sources.put(DataItemIsolation.unsigned(entries.get(i)), entries.get(i + 1));
+            }
+            for (var entry : sources.entrySet()) {
+                int index = entry.getKey();
+                AuxData aux = auxiliary.get(index);
+                boolean hasNativeScripts = aux.getNativeScripts() != null && !aux.getNativeScripts().isEmpty();
+                if (!hasNativeScripts && !YaciConfig.INSTANCE.isReturnFullTxCbor()) continue;
+                byte[] raw = entry.getValue().bytes();
+                if (hasNativeScripts) ScriptHashes.auxiliary(aux, raw);
+                if (YaciConfig.INSTANCE.isReturnFullTxCbor() && isAuxDataHashValid(block, index, transactions, raw)) {
+                    auxiliary.put(index, aux.toBuilder().cbor(HexUtil.encodeHexString(raw)).build());
+                }
+            }
+        } catch (Exception e) {
+            log.error("Extraction of auxiliary data bytes failed for block : " + block, e);
+        }
+    }
+
+    /** Share one witness-field extraction between native hashes and optional datum/redeemer correction. */
+    private void handleWitnessRawData(long block, List<Witnesses> witnesses, List<byte[]> transactionWitness) {
         if (witnesses == null || witnesses.isEmpty()) return;
         if (transactionWitness == null || transactionWitness.size() != witnesses.size()) {
             log.error("block: {} witness set count mismatch. parsed: {}, raw: {}",
@@ -245,10 +253,17 @@ public enum BlockSerializer implements Serializer<Block> {
             Witnesses witness = witnesses.get(witnessIndex);
             boolean hasDatums = witness.getDatums() != null && !witness.getDatums().isEmpty();
             boolean hasRedeemers = witness.getRedeemers() != null && !witness.getRedeemers().isEmpty();
-            // Signature/script-only witnesses need no optional data correction or field copies.
-            if (!hasDatums && !hasRedeemers) continue;
+            boolean hasNativeScripts = witness.getNativeScripts() != null && !witness.getNativeScripts().isEmpty();
+            if (!hasDatums && !hasRedeemers && !hasNativeScripts) continue;
             try {
                 var fields = WitnessUtil.getWitnessFields(transactionWitness.get(witnessIndex));
+                if (hasNativeScripts) {
+                    try {
+                        ScriptHashes.witnessNativeScripts(witness, fields.get(BigInteger.ONE));
+                    } catch (Exception e) {
+                        log.error("Native script hashing failed. block: {}, witness: {}", block, witnessIndex, e);
+                    }
+                }
                 // Enrichment is optional. A failed datum pass must not prevent redeemer correction or
                 // correction of later witnesses; retain the initially parsed values on failure.
                 if (hasDatums) {

@@ -190,26 +190,33 @@ class RawWitnessExtractionTest {
         }
     }
 
-    /** Signature/script-only witnesses skip field extraction while later datum/redeemer witnesses are corrected. */
+    /** Skip signatures-only witnesses and share one field scan for native scripts, datums and redeemers. */
     @Test
-    void witnessesWithoutOptionalDataSkipFieldExtraction() throws Exception {
-        // {0: [[vkey, signature]], 1: [[native_script_type, key_hash]]} needs no raw-data enrichment.
-        String signaturesAndScript = "a2008182404001818200581c" + "00".repeat(28);
-        byte[] bytes = withWitnesses(7, signaturesAndScript, WITNESS);
+    void witnessFieldsAreExtractedOnceOnlyWhenNeeded() throws Exception {
+        String signatures = "a10081824040";
+        String nativeScript = "01818200581c" + "00".repeat(28);
+        String signaturesAndScript = "a20081824040" + nativeScript;
+        String scriptAndData = "a3" + WITNESS.substring(2) + nativeScript;
+        byte[] bytes = withWitnesses(7, signatures, signaturesAndScript, scriptAndData);
         AtomicInteger calls = new AtomicInteger();
         try (MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, invocation -> {
             if (invocation.getMethod().getName().equals("getWitnessFields")) {
-                calls.incrementAndGet();
-                assertThat((byte[]) invocation.getArgument(0)).isEqualTo(hex(WITNESS));
+                int index = calls.getAndIncrement();
+                assertThat((byte[]) invocation.getArgument(0))
+                        .isEqualTo(hex(index == 0 ? signaturesAndScript : scriptAndData));
             }
             return invocation.callRealMethod();
         })) {
             Block block = BlockSerializer.INSTANCE.deserialize(bytes);
-            assertThat(calls.get()).isEqualTo(1);
-            assertThat(block.getTransactionWitness().get(0)).usingRecursiveComparison()
+            assertThat(calls.get()).isEqualTo(2);
+            assertThat(block.getTransactionWitness().get(1)).usingRecursiveComparison()
                     .isEqualTo(WitnessesSerializer.INSTANCE.deserialize(hex(signaturesAndScript)));
-            assertSourceData(block.getTransactionWitness().get(1).getDatums().get(0));
-            assertSourceData(block.getTransactionWitness().get(1).getRedeemers().get(0).getData());
+            Witnesses combined = block.getTransactionWitness().get(2);
+            assertThat(combined.getNativeScripts().get(0).getHash())
+                    .isEqualTo(block.getTransactionWitness().get(1).getNativeScripts().get(0).getHash())
+                    .isNotNull();
+            assertSourceData(combined.getDatums().get(0));
+            assertSourceData(combined.getRedeemers().get(0).getData());
         }
     }
 
