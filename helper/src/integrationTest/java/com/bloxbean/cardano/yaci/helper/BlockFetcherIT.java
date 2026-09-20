@@ -43,14 +43,19 @@ class BlockFetcherIT extends BaseTest {
 //        Point from = new Point(0, "f0f7892b5c333cffc4b3c4344de48af4cc63f55e44936196f365a9ef2244134f");
 //        Point to = new Point(5, "365201e928da50760fce4bdad09a7338ba43a43aff1c0e8d3ec458388c932ec8");
 
-        Point from = new Point(13006114, "86dabb90d316b104af0bb926a999fecd17c59be3fa377302790ad70495c4b509");
-        Point to = new Point(13006114, "86dabb90d316b104af0bb926a999fecd17c59be3fa377302790ad70495c4b509");
+        Point from = new Point(133883340, "bac1660208e7a8f63fc7caf97cfefcd3066a517d3ca4d971e1b316d1e43708e5");
+        Point to = new Point(133883340, "bac1660208e7a8f63fc7caf97cfefcd3066a517d3ca4d971e1b316d1e43708e5");
         blockFetcher.fetch(from, to);
 
         countDownLatch.await(10, TimeUnit.SECONDS);
         blockFetcher.shutdown();
 
-        assertThat(blocks.get(0).getHeader().getHeaderBody().getBlockNumber()).isEqualTo(287622);
+        assertThat(blocks).hasSize(1);
+        assertThat(blocks.get(0).getHeader().getHeaderBody().getBlockNumber()).isEqualTo(5183974);
+        assertThat(blocks.get(0).getTransactionBodies()).hasSize(23);
+        assertThat(blocks.get(0).getTransactionWitness().stream()
+                .flatMap(witness -> witness.getNativeScripts().stream())
+                .filter(script -> script.getParseError() != null).count()).isZero();
     }
 
 
