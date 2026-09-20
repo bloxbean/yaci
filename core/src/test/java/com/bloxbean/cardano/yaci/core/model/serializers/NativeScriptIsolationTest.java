@@ -12,6 +12,8 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.core.StreamWriteConstraints;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigInteger;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
@@ -31,6 +33,9 @@ class NativeScriptIsolationTest {
         assertThat(script.getType()).isEqualTo(1);
         assertThat(script.getContent()).isNull();
         assertThat(script.getParseError()).contains("JSON conversion failed");
+        JsonNode json = new ObjectMapper().valueToTree(script);
+        assertThat(json.get("parseError").asText()).isEqualTo(script.getParseError());
+        assertThat(json.get("content").isNull()).isTrue();
     }
 
     @Test
@@ -59,6 +64,10 @@ class NativeScriptIsolationTest {
             NativeScript script = WitnessesSerializer.INSTANCE.deserializeNativeScript(nestedScript(type, 5));
             assertThat(script.getParseError()).isNull();
             assertThat(script.getContent()).contains("keyHash", "scripts");
+            JsonNode json = new ObjectMapper().valueToTree(script);
+            assertThat(json.has("parseError")).isFalse();
+            assertThat(json.get("type").asInt()).isEqualTo(type);
+            assertThat(json.get("content").asText()).isEqualTo(script.getContent());
         }
     }
 
