@@ -31,9 +31,7 @@ public enum LocalRollForwardSerializer implements Serializer<LocalRollForward> {
 
         ByteString blockContent = (ByteString) contentDI.get(1);
         byte[] blockBytes = blockContent.getBytes();
-        Array blockArray = (Array) CborSerializationUtil.deserializeOne(blockBytes);
-
-        int eraValue = ((UnsignedInteger)blockArray.getDataItems().get(0)).getValue().intValue();
+        int eraValue = EraUtil.getEraValue(blockBytes);
         Era era = EraUtil.getEra(eraValue);
 
         Block block = null;

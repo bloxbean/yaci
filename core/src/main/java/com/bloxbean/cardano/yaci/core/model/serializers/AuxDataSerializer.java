@@ -12,7 +12,7 @@ import com.bloxbean.cardano.yaci.core.model.PlutusScript;
 import com.bloxbean.cardano.yaci.core.model.PlutusScriptType;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
-import lombok.extern.slf4j.Slf4j;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,9 +21,21 @@ import java.util.stream.Collectors;
 
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
 
-@Slf4j
 public enum AuxDataSerializer implements Serializer<AuxData> {
     INSTANCE;
+
+    @Override
+    public AuxData deserialize(byte[] bytes) {
+        try {
+            AuxData result = Serializer.super.deserialize(bytes);
+            if (result == null) return null; // Preserve the default serializer's empty-input behavior.
+            // Recovery needs the original buffer, which deserializeDI alone does not have.
+            return result.getMetadataParseError() == null ? result : DataItemIsolation.auxiliary(bytes);
+        } catch (StackOverflowError e) {
+            // Restart at a known boundary; the decoder's partially consumed state is discarded.
+            return DataItemIsolation.auxiliary(bytes);
+        }
+    }
 
     @Override
     public AuxData deserializeDI(DataItem di) {
@@ -113,17 +125,40 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
 
             String metadataCbor = null;
             String metadataJson = null;
+            String metadataParseError = null;
             if (metadata != null) {
+                byte[] cbor;
                 try {
-                    metadataJson = MetadataToJsonNoSchemaConverter.cborBytesToJson(metadata.serialize());
-                } catch (Exception e) {
-                    log.error("Error converting metadata cbor to json", e);
+                    // Preserve the existing canonical representation for ordinary metadata.
+                    cbor = metadata.serialize();
+                } catch (StackOverflowError e) {
+                    // The canonical encoder is recursive. Retain valid CBOR using the existing
+                    // iterative array encoder, and skip optional JSON for this oversized tree.
+                    cbor = CborSerializationUtil.serialize(((CBORMetadata) metadata).getData(), false);
+                    metadataParseError = "Metadata JSON conversion skipped: recursive CBOR serialization "
+                            + "exceeded the available stack";
                 }
-
-                metadataCbor = HexUtil.encodeHexString(metadata.serialize());
+                metadataCbor = HexUtil.encodeHexString(cbor);
+                if (metadataParseError == null) {
+                    try {
+                        metadataJson = MetadataToJsonNoSchemaConverter.cborBytesToJson(cbor);
+                    } catch (Exception e) {
+                        metadataParseError = "Metadata JSON conversion failed: " + e.getClass().getSimpleName();
+                    } catch (StackOverflowError e) {
+                        metadataParseError = "Metadata JSON conversion exceeded the available stack";
+                    }
+                }
             }
 
-            return new AuxData(metadataCbor, metadataJson, nativeScripts, plutusV1scripts, plutusV2scripts, plutusV3scripts);
+            return AuxData.builder()
+                    .metadataCbor(metadataCbor)
+                    .metadataJson(metadataJson)
+                    .metadataParseError(metadataParseError)
+                    .nativeScripts(nativeScripts)
+                    .plutusV1Scripts(plutusV1scripts)
+                    .plutusV2Scripts(plutusV2scripts)
+                    .plutusV3Scripts(plutusV3scripts)
+                    .build();
 
         } catch (CborDeserializationException e) {
             throw new CborRuntimeException("AuxiliaryData deserialization failed", e);

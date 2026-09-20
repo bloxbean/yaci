@@ -1,10 +1,12 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
+import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.AuxDataExtractor;
+import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
@@ -16,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,8 +32,75 @@ public enum BlockSerializer implements Serializer<Block> {
 
     @Override
     public Block deserialize(byte[] bytes) {
-        DataItem dataItem = CborSerializationUtil.deserializeOne(bytes);
-        return deserializeBlock(dataItem, bytes);
+        try {
+            DataItem dataItem = CborSerializationUtil.deserializeOne(bytes);
+            Block result = deserializeBlock(dataItem, bytes);
+            // JSON may fail even when CBOR decoding succeeds. Recover from source bytes in that
+            // case too, rather than returning CBOR produced by re-encoding the failed value.
+            for (Witnesses witness : result.getTransactionWitness()) {
+                if (DataItemIsolation.hasDataError(witness)) return deserializeWithIsolatedData(bytes);
+            }
+            for (AuxData aux : result.getAuxiliaryDataMap().values()) {
+                if (aux.getMetadataParseError() != null) return deserializeWithIsolatedData(bytes);
+            }
+            return result;
+        } catch (StackOverflowError e) {
+            // Restart from original bytes; never resume a decoder whose stream position is uncertain.
+            return deserializeWithIsolatedData(bytes);
+        }
+    }
+
+    /**
+     * Failure-only path for Shelley through Conway blocks. Keep header and transaction bodies intact,
+     * temporarily remove witnesses/auxiliary data, then restore those fields from their source slices.
+     * Byron blocks have separate serializers and do not enter this path.
+     */
+    @SneakyThrows
+    private Block deserializeWithIsolatedData(byte[] bytes) {
+        // deserializeOne historically accepts multiple top-level values and returns the first.
+        CborSlice root = CborSlice.first(bytes);
+        List<CborSlice> envelope = root.items(MajorType.ARRAY);
+        if (envelope.size() != 2) throw new CborException("Invalid block envelope");
+        // Network envelope: [era, block]. The first four block fields have the same positions from
+        // Shelley onward: header, transaction bodies, witnesses, auxiliary data. Alonzo adds invalid txs.
+        List<CborSlice> body = envelope.get(1).items(MajorType.ARRAY);
+        if (body.size() < 4) throw new CborException("Invalid block body");
+        CborSlice witnessSlice = body.get(2);
+        CborSlice auxiliarySlice = body.get(3);
+        // Empty array/map encodings let the existing parser process required fields without visiting
+        // the problematic data. This temporary block is never exposed to the caller.
+        byte[] skeletonBytes = root.replacing(Arrays.asList(witnessSlice, auxiliarySlice),
+                (byte) 0x80, (byte) 0xa0);
+        Block skeleton = deserializeBlock(CborSerializationUtil.deserializeOne(skeletonBytes), skeletonBytes);
+
+        List<Witnesses> witnesses = new ArrayList<>();
+        for (CborSlice slice : witnessSlice.items(MajorType.ARRAY)) {
+            byte[] raw = slice.bytes();
+            Witnesses witness = DataItemIsolation.witness(raw);
+            if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
+                witness = witness.toBuilder().cbor(HexUtil.encodeHexString(raw)).build();
+            }
+            witnesses.add(witness);
+        }
+        LinkedHashMap<Integer, AuxData> auxiliaryData = new LinkedHashMap<>();
+        List<CborSlice> entries = auxiliarySlice.items(MajorType.MAP);
+        for (int i = 0; i < entries.size(); i += 2) {
+            int index = DataItemIsolation.unsigned(entries.get(i));
+            byte[] raw = entries.get(i + 1).bytes();
+            AuxData aux = DataItemIsolation.auxiliary(raw);
+            // Check the original auxiliary-data bytes against the transaction's hash, as on the normal path.
+            if (YaciConfig.INSTANCE.isReturnFullTxCbor()
+                    && isAuxDataHashValid(skeleton.getHeader().getHeaderBody().getBlockNumber(),
+                    index, skeleton.getTransactionBodies(), raw)) {
+                aux = aux.toBuilder().cbor(HexUtil.encodeHexString(raw)).build();
+            }
+            auxiliaryData.put(index, aux);
+        }
+        // Transaction-body bytes were never replaced. Full block/witness/auxiliary CBOR must also
+        // come from the original input, never from the temporary skeleton encoding.
+        return new Block(skeleton.getEra(), skeleton.getHeader(), skeleton.getTransactionBodies(), witnesses,
+                auxiliaryData, skeleton.getInvalidTransactions(),
+                YaciConfig.INSTANCE.isReturnBlockCbor() ? HexUtil.encodeHexString(bytes) : null);
     }
 
     private Block deserializeBlock(DataItem di, byte[] blockBody) {
