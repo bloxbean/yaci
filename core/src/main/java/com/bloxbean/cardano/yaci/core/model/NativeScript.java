@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
 
 @Getter
@@ -13,6 +14,7 @@ public class NativeScript {
     /** JSON representation, or null when this script could not be parsed safely. */
     private String content;
     /** Non-null when JSON conversion failed; the containing block is still returned. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String parseError;
 
     public NativeScript(int type, String content) {
