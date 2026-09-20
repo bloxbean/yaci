@@ -55,7 +55,7 @@ class BlockFetcherIT extends BaseTest {
         assertThat(blocks.get(0).getTransactionBodies()).hasSize(23);
         assertThat(blocks.get(0).getTransactionWitness().stream()
                 .flatMap(witness -> witness.getNativeScripts().stream())
-                .filter(script -> script.getParseError() != null).count()).isGreaterThan(0);
+                .filter(script -> script.getParseError() != null).count()).isZero();
     }
 
 
