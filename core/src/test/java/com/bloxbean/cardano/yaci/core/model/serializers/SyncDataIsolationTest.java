@@ -151,7 +151,8 @@ class SyncDataIsolationTest {
         assertThat(error.get()).isNotNull(); // Even malformed era prefixes now reach the error callback.
     }
 
-    private static List<Block> throughBothSyncPaths(byte[] bytes) throws Exception {
+    /** Parse through block-fetch and local chain-sync, checking that both deliver a block without errors. */
+    static List<Block> throughBothSyncPaths(byte[] bytes) throws Exception {
         AtomicReference<Block> received = new AtomicReference<>();
         AtomicReference<BlockParseRuntimeException> error = new AtomicReference<>();
         BlockfetchAgent agent = agent(received, error);
@@ -186,7 +187,7 @@ class SyncDataIsolationTest {
     }
 
     /** Synthetic parser fixtures: retain the header layout for each era, without claiming ledger validity. */
-    private static byte[] eraBlock(int era, String auxiliary) throws Exception {
+    static byte[] eraBlock(int era, String auxiliary) throws Exception {
         Array sample = (Array) CborSerializationUtil.deserializeOne(CborLoader.getHexBytes("block/preprod292683.txt"));
         Array header = (Array) ((Array) sample.getDataItems().get(1)).getDataItems().get(0);
         if (era < 6) {
