@@ -4,7 +4,6 @@ import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.address.Address;
 import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.client.transaction.spec.*;
-import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.common.TxBodyType;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2CVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
@@ -13,6 +12,7 @@ import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.UtxoByAddressQ
 import com.bloxbean.cardano.yaci.core.protocol.localtx.LocalTxSubmissionListener;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgAcceptTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgRejectTx;
+import com.bloxbean.cardano.yaci.core.protocol.localtx.model.TxSubmissionError;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.model.TxSubmissionRequest;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.SneakyThrows;
@@ -48,6 +48,7 @@ class LocalTxSubmissionClientIT extends BaseTest {
             @Override
             public void txRejected(TxSubmissionRequest txSubmissionRequest, MsgRejectTx msgRejectTx) {
                 System.out.println("Rejected: " + msgRejectTx.getReasonCbor());
+                System.out.println("Rejected (decoded reason) : " + msgRejectTx.getErrors());
                 countDownLatch.countDown();
             }
         });
@@ -131,6 +132,42 @@ class LocalTxSubmissionClientIT extends BaseTest {
         System.out.println(signedTransaction.serializeToHex());
         System.out.println(txResult);
         assertThat(txResult.isAccepted()).isTrue();
+    }
+
+    // ========== Error parsing integration tests ==========
+
+    /**
+     * Submit a stale Babbage-era tx to preprod node.
+     * The inputs no longer exist, so the node should reject with a parsed error.
+     */
+    @SneakyThrows
+    @Test
+    void submitTx_staleTx_parsedErrors() {
+        LocalClientProvider localClientProvider = new LocalClientProvider(nodeSocketFile, N2CVersionTableConstant.v1AndAbove(protocolMagic));
+        LocalTxSubmissionClient localTxSubmissionClient = localClientProvider.getTxSubmissionClient();
+        localClientProvider.start();
+
+        byte[] txBytes = HexUtil.decodeHexString("84a300818258204d77bc019ede3afd35785a801693c3e96a85c2d6ea05e8a5b2b225bc947c9e3f010182825839001c1ffaf141ebbb8e3a7072bb15f50f938b994c82de2d175f358fc942441f00edfe1b8d6a84f0d19c25a9c8829442160c0b5c758094c423441a002dc6c0825839008c5bf0f2af6f1ef08bb3f6ec702dd16e1c514b7e1d12f7549b47db9f4d943c7af0aaec774757d4745d1a2c8dd3220e6ec2c9df23f757a2f81b00000002534a872c021a00029075a100818258209518c18103cbdab9c6e60b58ecc3e2eb439fef6519bb22570f391327381900a85840da208874993a6ac5955c090f2aed7d54d2d98d47b84ed79edaf3bb7d69844c9fa9ac62a56c5d26a807b2fb264c869efaf4e6889b6c6ac7555e1b5f570c77f405f5f6");
+        TxSubmissionRequest txnRequest = new TxSubmissionRequest(TxBodyType.BABBAGE, txBytes);
+
+        var txResult = localTxSubmissionClient.submitTx(txnRequest).block(Duration.ofSeconds(20));
+
+        System.out.println("TxResult: " + txResult);
+        System.out.println("Error Message: " + txResult.getErrorMessage());
+        System.out.println("Errors: " + txResult.getErrors());
+        for (TxSubmissionError error : txResult.getErrors()) {
+            System.out.println("Full error chain:\n" + error.toFullMessage());
+        }
+
+        assertThat(txResult.isAccepted()).isFalse();
+        assertThat(txResult.getErrorMessage()).isNotNull();
+        assertThat(txResult.getErrorCbor()).isNotNull();
+        // Either parsed errors or era mismatch should be populated
+        assertThat(txResult.getErrors().isEmpty() && txResult.getErrorMessage().equals(txResult.getErrorCbor()))
+                .as("Expected parsed errors or meaningful error message")
+                .isFalse();
+
+        localClientProvider.shutdown();
     }
 
 }

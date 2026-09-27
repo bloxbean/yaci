@@ -9,9 +9,13 @@ import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgAcceptTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgDone;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgRejectTx;
 import com.bloxbean.cardano.yaci.core.protocol.localtx.messages.MsgSubmitTx;
+import com.bloxbean.cardano.yaci.core.protocol.localtx.model.ParsedRejection;
+import com.bloxbean.cardano.yaci.core.protocol.localtx.model.TxSubmissionErrorParser;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
+
+import java.util.List;
 
 @Slf4j
 public class LocalTxSubmissionSerializers {
@@ -62,7 +66,17 @@ public class LocalTxSubmissionSerializers {
             if (log.isDebugEnabled())
                 log.debug("MsgRejectTx (serialized) : {}", reasonCbor);
 
-            return new MsgRejectTx(reasonCbor);
+            // Extract error payload (index 1 of the [2, payload] array) and parse
+            DataItem errorPayload = null;
+            if (di instanceof Array) {
+                List<DataItem> items = ((Array) di).getDataItems();
+                if (items.size() > 1) {
+                    errorPayload = items.get(1);
+                }
+            }
+
+            ParsedRejection parsed = TxSubmissionErrorParser.parse(errorPayload, reasonCbor);
+            return new MsgRejectTx(reasonCbor, parsed.getErrors(), parsed.getEraMismatch());
         }
     }
 
