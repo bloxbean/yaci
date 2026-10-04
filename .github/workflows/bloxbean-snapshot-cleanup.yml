@@ -1,0 +1,34 @@
+name: Clean up old snapshots in the BloxBean Maven repository
+
+# STUB on main. workflow_dispatch only offers workflows whose file exists on the default branch (main), but the run
+# uses the file from the ref selected in "Run workflow". This file exists so that next's real
+# bloxbean-snapshot-cleanup.yml (release-ops docs/12-bloxbean-maven-repository.md) can be started with ref `next`:
+#   gh workflow run bloxbean-snapshot-cleanup.yml --repo bloxbean/yaci --ref next -f dry_run=true
+#
+# main builds the 0.4.x line with Gradle 7.5.1 / JDK 11 and publishes no snapshots to the BloxBean Maven repository,
+# so there is nothing to clean from here.
+#
+# Keep the name and the workflow_dispatch inputs (names, descriptions, defaults) identical to next's copy. Same
+# pattern as publish-central.yml (release-ops templates/workflows/publish-central-stub.yml). It names no environment
+# and uses no secrets.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only report what would be removed'
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  not-on-main:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse to run on this branch
+        shell: bash
+        run: |
+          echo "::error::main (0.4.x) publishes no snapshots to the BloxBean Maven repository." >&2
+          echo "::error::Snapshots are cleaned up from next: run this workflow with ref 'next'." >&2
+          exit 1
