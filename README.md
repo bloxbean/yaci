@@ -4,6 +4,7 @@
 <h4>A Cardano Mini Protocols implementation in Java</h4>
 
 [![Clean, Build](https://github.com/bloxbean/yaci-core/actions/workflows/build.yml/badge.svg)](https://github.com/bloxbean/yaci-core/actions/workflows/build.yml)
+[![snapshot](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Frepo.bloxbean.org%2Fmaven%2Fsnapshots%2Fcom%2Fbloxbean%2Fcardano%2Fyaci%2Fmaven-metadata.xml&strategy=latestProperty&label=snapshot)](#development-snapshots)
 </div>
 
 ## Overview
@@ -32,6 +33,28 @@ Gradle
 
 ```xml
  implementation('com.bloxbean.cardano:yaci:{version}')
+```
+
+New 0.5.x releases (branch `next`) are also in the BloxBean Maven repository, `https://repo.bloxbean.org/maven/releases`,
+with the same files as on Maven Central. 0.4.x releases are on Maven Central only.
+
+### Development snapshots
+
+Development snapshots of the `next` branch are in the BloxBean Maven repository, one version per commit, for example
+`0.5.0-pre14-1a2b3c4-SNAPSHOT`. The snapshot badge above shows the newest version.
+
+```gradle
+repositories {
+    mavenCentral()
+    maven {
+        url = uri('https://repo.bloxbean.org/maven/snapshots')
+        mavenContent { snapshotsOnly() }
+    }
+}
+
+dependencies {
+    implementation 'com.bloxbean.cardano:yaci:<snapshot version>'
+}
 ```
 
 ## How to Use?
