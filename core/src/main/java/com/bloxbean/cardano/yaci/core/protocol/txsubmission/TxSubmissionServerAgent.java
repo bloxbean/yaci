@@ -114,9 +114,23 @@ public class TxSubmissionServerAgent extends Agent<TxSubmissionListener> {
             handleReplyTxIds((ReplyTxIds) message);
         } else if (message instanceof ReplyTxs) {
             handleReplyTxs((ReplyTxs) message);
+        } else if (message instanceof MsgDone) {
+            handleDone();
         } else {
             log.warn("Unexpected message type: {}", message.getClass().getSimpleName());
         }
+    }
+
+    /**
+     * The client terminated the tx-submission protocol with MsgDone. The state machine has already
+     * advanced to {@link TxSubmissionState#Done} (see {@link TxSubmissionState}), so the inbound
+     * handler stops routing to this agent and the session can be torn down; a fresh agent is created
+     * when the peer reconnects. Drop any in-flight bookkeeping so nothing leaks.
+     */
+    private void handleDone() {
+        log.info("Received MsgDone from client - tx-submission protocol terminated, agent is Done");
+        outstandingTxIds.clear();
+        pendingRequest = null;
     }
 
     private void handleInit() {

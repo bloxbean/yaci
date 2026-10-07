@@ -377,6 +377,35 @@ class TxSubmissionServerAgentTest {
     }
 
     @Test
+    void testMsgDoneFromTxIdsBlockingTransitionsToDone() {
+        // Move to Idle, then have the server send a blocking RequestTxIds so we land in TxIdsBlocking
+        agent.receiveResponse(new Init());
+        assertEquals(TxSubmissionState.Idle, agent.getCurrentState());
+
+        agent.sendRequest(new RequestTxIds(true, (short) 0, (short) 10));
+        assertEquals(TxSubmissionState.TxIdsBlocking, agent.getCurrentState());
+        assertFalse(agent.isDone());
+
+        // Client terminates the protocol with MsgDone while we are blocking-waiting.
+        // Before the fix the agent stayed wedged in TxIdsBlocking forever; now it must reach Done.
+        agent.receiveResponse(new MsgDone());
+
+        assertEquals(TxSubmissionState.Done, agent.getCurrentState());
+        assertTrue(agent.isDone());
+        assertEquals(0, agent.getOutstandingTxCount());
+    }
+
+    @Test
+    void testMsgDoneStateTransition() {
+        // Per the node-to-node tx-submission spec, MsgDone is only legal (and only handled)
+        // in TxIdsBlocking. The other client-agency states are not part of the spec for MsgDone,
+        // so they must ignore it and stay put rather than transition to Done.
+        assertEquals(TxSubmissionState.Done, TxSubmissionState.TxIdsBlocking.nextState(new MsgDone()));
+        assertEquals(TxSubmissionState.TxIdsNonBlocking, TxSubmissionState.TxIdsNonBlocking.nextState(new MsgDone()));
+        assertEquals(TxSubmissionState.Txs, TxSubmissionState.Txs.nextState(new MsgDone()));
+    }
+
+    @Test
     void testConfigurationValidation() {
         // Valid config should not log warnings
         TxSubmissionConfig validConfig = TxSubmissionConfig.createDefault();
