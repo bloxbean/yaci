@@ -547,10 +547,12 @@ class ChainSyncServerAgentConcurrencyTest {
         deliverInbound(new RequestNext());
         assertThat(channel.writtenMessageIds()).containsExactly(INTERSECT_FOUND, ROLL_BACKWARD, AWAIT_REPLY);
         assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.MustReply);
+        assertThat(agent.isClientAtTip()).isTrue();
         channel.written.clear();
 
         agent.receiveResponse(new FindIntersect(new Point[]{chainState.pointAt(105)}));
         assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Intersect);
+        assertThat(agent.isClientAtTip()).isFalse();
         assertThat(agent.hasAgency()).isTrue();
         agent.sendNextMessage();
         assertThat(channel.writtenMessageIds()).containsExactly(INTERSECT_FOUND);
@@ -578,10 +580,12 @@ class ChainSyncServerAgentConcurrencyTest {
         agent.receiveResponse(new RequestNext());
         agent.receiveResponse(new RequestNext());
         assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.CanAwait);
+        assertThat(agent.isClientAtTip()).isTrue();
         assertThat(channel.written).isEmpty();
 
         agent.receiveResponse(new FindIntersect(new Point[]{chainState.pointAt(105)}));
         assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.CanAwait);
+        assertThat(agent.isClientAtTip()).isFalse();
         assertThat(agent.hasAgency()).isTrue();
         assertThat(channel.written).isEmpty();
         agent.sendNextMessage();
