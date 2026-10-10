@@ -1,12 +1,16 @@
 package com.bloxbean.cardano.yaci.core.protocol.chainsync;
 
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
+import co.nstant.in.cbor.model.Array;
+import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
+import com.bloxbean.cardano.yaci.core.protocol.Segment;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.*;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncServerAgent;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncState;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import io.netty.channel.*;
 import io.netty.util.Attribute;
@@ -33,14 +37,21 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ChainSyncServerAgentConcurrencyTest {
 
+    private static final int AWAIT_REPLY = 1;
+    private static final int ROLL_FORWARD = 2;
+    private static final int ROLL_BACKWARD = 3;
+    private static final int INTERSECT_FOUND = 5;
+
     private ChainSyncServerAgent agent;
     private FakeChainState chainState;
+    private StubChannel channel;
 
     @BeforeEach
     void setup() {
         chainState = new FakeChainState();
         agent = new ChainSyncServerAgent(chainState);
-        agent.setChannel(new StubChannel());
+        channel = new StubChannel();
+        agent.setChannel(channel);
     }
 
     /**
@@ -310,6 +321,103 @@ class ChainSyncServerAgentConcurrencyTest {
         assertThat(agent.getLastSentPoint().getSlot()).isGreaterThan(100L);
     }
 
+    /**
+     * A pipelining client parks several RequestNext at the tip. Each must get exactly one reply, in order,
+     * with at most one AwaitReply outstanding at a time.
+     */
+    @Test
+    void pipelinedRequestsAtTip_eachGetsExactlyOneReply() {
+        populateChain(100, 110);
+        Point tip = chainState.pointAt(110);
+        deliverInbound(new FindIntersect(new Point[]{tip}));
+        deliverInbound(new RequestNext());
+        channel.written.clear();
+
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        assertThat(channel.writtenMessageIds()).containsExactly(AWAIT_REPLY);
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.MustReply);
+
+        chainState.addBlock(111);
+        agent.onNewDataAvailable();
+        assertThat(channel.writtenMessageIds()).containsExactly(AWAIT_REPLY, ROLL_FORWARD, AWAIT_REPLY);
+
+        chainState.addBlock(112);
+        chainState.addBlock(113);
+        agent.onNewDataAvailable();
+        assertThat(channel.writtenMessageIds())
+                .containsExactly(AWAIT_REPLY, ROLL_FORWARD, AWAIT_REPLY, ROLL_FORWARD, ROLL_FORWARD);
+        assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(113));
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Idle);
+
+        // Nothing is owed any more, so a new block waits for the next RequestNext
+        chainState.addBlock(114);
+        agent.onNewDataAvailable();
+        assertThat(channel.writtenMessageIds()).hasSize(5);
+    }
+
+    /**
+     * Pipelined RequestNext read before the previous reply's write completed must not strand that reply
+     * in the queue: every request gets its RollForward without waiting for another inbound message.
+     */
+    @Test
+    void pipelinedRequestsBeforeWriteCompletion_noReplyStranded() {
+        populateChain(100, 110);
+        Point from = chainState.pointAt(100);
+        deliverInbound(new FindIntersect(new Point[]{from}));
+        deliverInbound(new RequestNext());
+        channel.written.clear();
+        channel.holdWriteCompletion();
+
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+
+        assertThat(channel.writtenMessageIds()).containsExactly(ROLL_FORWARD, ROLL_FORWARD, ROLL_FORWARD);
+        assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(103));
+        assertThat(agent.hasAgency()).isFalse();
+    }
+
+    /**
+     * Replies queued from a block-producer thread are written on the channel's event loop, in queue order,
+     * so they cannot be overtaken by a reply written inline by the inbound handler.
+     */
+    @Test
+    void repliesQueuedOffTheEventLoop_areWrittenOnTheEventLoopInOrder() throws Exception {
+        DefaultEventLoop loop = new DefaultEventLoop();
+        try {
+            channel.useEventLoop(loop);
+            populateChain(100, 110);
+            deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(110)}));
+            deliverInbound(new RequestNext());
+            deliverInbound(new RequestNext());
+
+            chainState.addBlock(111);
+            agent.onNewDataAvailable();
+            loop.submit(() -> { }).sync();
+
+            assertThat(channel.writtenMessageIds())
+                    .containsExactly(INTERSECT_FOUND, ROLL_BACKWARD, AWAIT_REPLY, ROLL_FORWARD);
+            assertThat(channel.writerThreads).allMatch(loop::inEventLoop);
+        } finally {
+            loop.shutdownGracefully().sync();
+        }
+    }
+
+    @Test
+    void firstRequestAfterIntersect_isAnsweredWithRollbackward() {
+        populateChain(100, 110);
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(105)}));
+        channel.written.clear();
+
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+
+        assertThat(channel.writtenMessageIds()).containsExactly(ROLL_BACKWARD, ROLL_FORWARD);
+        assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(106));
+    }
+
     @Test
     void agentStateUpdatesAreVisibleAcrossNettyAndProducerThreads() throws Exception {
         var currentState = Agent.class.getDeclaredField("currentState");
@@ -320,6 +428,13 @@ class ChainSyncServerAgentConcurrencyTest {
     }
 
     // ---- Helper methods ----
+
+    /** Same dispatch as MiniProtoServerInboundHandler: receive, then send if the server has agency. */
+    private void deliverInbound(Message message) {
+        agent.receiveResponse(message);
+        if (agent.hasAgency())
+            agent.sendNextMessage();
+    }
 
     private void populateChain(int fromBlock, int toBlock) {
         for (int i = fromBlock; i <= toBlock; i++) {
@@ -372,16 +487,44 @@ class ChainSyncServerAgentConcurrencyTest {
 
     static class StubChannel implements Channel {
         private final StubChannelFuture successFuture = new StubChannelFuture();
+        private final List<Object> written = new CopyOnWriteArrayList<>();
+        private final List<Thread> writerThreads = new CopyOnWriteArrayList<>();
+        private volatile ChannelFuture writeFuture = successFuture;
+        private volatile EventLoop eventLoop;
+
+        void useEventLoop(EventLoop eventLoop) {
+            this.eventLoop = eventLoop;
+        }
+
+        /** Leave write futures incomplete, as when the socket is not immediately writable. */
+        void holdWriteCompletion() {
+            writeFuture = new StubChannelFuture() {
+                @Override
+                public ChannelFuture addListener(GenericFutureListener<? extends Future<? super Void>> listener) {
+                    return this;
+                }
+            };
+        }
+
+        /** ChainSync message ids of the segments written so far. */
+        List<Integer> writtenMessageIds() {
+            return written.stream()
+                    .map(segment -> (Array) CborSerializationUtil.deserializeOne(((Segment) segment).getPayload()))
+                    .map(array -> ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue())
+                    .toList();
+        }
 
         @Override public ChannelFuture writeAndFlush(Object msg) {
-            return successFuture;
+            written.add(msg);
+            writerThreads.add(Thread.currentThread());
+            return writeFuture;
         }
         @Override public boolean isActive() { return true; }
         @Override public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) { return successFuture; }
 
         // -- Remaining Channel methods (unused, minimal stubs) --
         @Override public ChannelId id() { return null; }
-        @Override public EventLoop eventLoop() { return null; }
+        @Override public EventLoop eventLoop() { return eventLoop; }
         @Override public Channel parent() { return null; }
         @Override public ChannelConfig config() { return null; }
         @Override public boolean isOpen() { return true; }
