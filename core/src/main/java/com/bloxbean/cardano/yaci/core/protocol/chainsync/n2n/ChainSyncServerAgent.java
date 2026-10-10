@@ -73,6 +73,8 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
      * Replies are polled and written only on the channel's event loop. A write from another thread (the block
      * producer calling {@link #onNewDataAvailable()}) is queued as an event-loop task, so writing it directly
      * could let the reply to a later request, written inline by the inbound handler, overtake it.
+     * <p>
+     * Once the client has sent Done nothing more is written; a drain scheduled earlier must not revive the agent.
      */
     @Override
     public synchronized void sendNextMessage() {
@@ -81,6 +83,8 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
             channel.eventLoop().execute(this::sendNextMessage);
             return;
         }
+        if (isDone())
+            return;
 
         Message response;
         while ((response = buildNextMessage()) != null) {
@@ -91,7 +95,10 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
         updateState();
     }
 
+    /** Done is terminal until {@link #reset()}. */
     private void updateState() {
+        if (isDone())
+            return;
         Message next = pendingResponses.peek();
         if (next instanceof IntersectFound || next instanceof IntersectNotFound)
             currentState = ChainSyncState.Intersect;
@@ -670,6 +677,17 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     }
 
     /**
+     * Push new blocks to the client if it is waiting at the tip.
+     *
+     * @deprecated the point is not needed: pending requests are answered in order from the chain state. Use
+     * {@link #onNewDataAvailable()}.
+     */
+    @Deprecated
+    public void notifyNewBlock(Point newBlockPoint) {
+        onNewDataAvailable();
+    }
+
+    /**
      * Create a complete RollForward message from stored wrapped header bytes and tip
      * @param wrappedHeaderBytes Complete wrapped header bytes (includes era variant)
      * @param tip Chain tip
@@ -711,7 +729,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
      */
     @Override
     public synchronized void onNewDataAvailable() {
-        if (unansweredRequests == 0)
+        if (isDone() || unansweredRequests == 0)
             return;
 
         try {
