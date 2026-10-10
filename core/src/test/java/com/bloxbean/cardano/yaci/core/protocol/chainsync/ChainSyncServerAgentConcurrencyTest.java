@@ -534,6 +534,69 @@ class ChainSyncServerAgentConcurrencyTest {
         assertThat(Modifier.isSynchronized(sendRequest.getModifiers())).isTrue();
     }
 
+    /**
+     * ADR 0013 D3: an out-of-order intersection abandons parked requests, even after AwaitReply was sent.
+     * This characterizes permissive peer handling; the sequence is not protocol-legal.
+     */
+    @Test
+    void findIntersectWithParkedRequests_afterAwaitReplyDrains_discardsOldObligations() {
+        populateChain(100, 110);
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(110)}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        assertThat(channel.writtenMessageIds()).containsExactly(INTERSECT_FOUND, ROLL_BACKWARD, AWAIT_REPLY);
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.MustReply);
+        channel.written.clear();
+
+        agent.receiveResponse(new FindIntersect(new Point[]{chainState.pointAt(105)}));
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Intersect);
+        assertThat(agent.hasAgency()).isTrue();
+        agent.sendNextMessage();
+        assertThat(channel.writtenMessageIds()).containsExactly(INTERSECT_FOUND);
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Idle);
+
+        chainState.addBlock(111);
+        agent.onNewDataAvailable();
+        chainState.addBlock(112);
+        agent.onNewDataAvailable();
+        assertThat(channel.writtenMessageIds()).containsExactly(INTERSECT_FOUND);
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Idle);
+        assertThat(agent.hasAgency()).isFalse();
+    }
+
+    /**
+     * ADR 0013 D3: abandoning parked requests does not clear an older queued AwaitReply.
+     * Defer the inbound handler's drain to observe the queue-head state and FIFO order.
+     */
+    @Test
+    void findIntersectWithParkedRequests_beforeAwaitReplyDrains_preservesQueuedReply() {
+        populateChain(100, 110);
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(110)}));
+        deliverInbound(new RequestNext());
+        channel.written.clear();
+        agent.receiveResponse(new RequestNext());
+        agent.receiveResponse(new RequestNext());
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.CanAwait);
+        assertThat(channel.written).isEmpty();
+
+        agent.receiveResponse(new FindIntersect(new Point[]{chainState.pointAt(105)}));
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.CanAwait);
+        assertThat(agent.hasAgency()).isTrue();
+        assertThat(channel.written).isEmpty();
+        agent.sendNextMessage();
+        assertThat(channel.writtenMessageIds()).containsExactly(AWAIT_REPLY, INTERSECT_FOUND);
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Idle);
+
+        chainState.addBlock(111);
+        agent.onNewDataAvailable();
+        chainState.addBlock(112);
+        agent.onNewDataAvailable();
+        assertThat(channel.writtenMessageIds()).containsExactly(AWAIT_REPLY, INTERSECT_FOUND);
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Idle);
+        assertThat(agent.hasAgency()).isFalse();
+    }
+
     // ---- Helper methods ----
 
     /** Same dispatch as MiniProtoServerInboundHandler: receive, then send if the server has agency. */

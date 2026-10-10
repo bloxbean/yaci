@@ -7,6 +7,8 @@ Status: Proposed
 Related: [issue #205](https://github.com/bloxbean/yaci/issues/205),
 [PR #206](https://github.com/bloxbean/yaci/pull/206).
 
+The original filename is retained so links in the review history keep working.
+
 ## Context
 
 Yaci normally applies protocol transitions through `State.nextState(Message)`.
@@ -130,7 +132,8 @@ obligations are discarded without final replies. The existing response queue is
 not cleared. Preserve this permissive behavior without declaring the sequence
 protocol-legal or extending I2 to it. After processing the intersection, the
 agent selects `Intersect` if the intersect reply is first in the queue, or
-`CanAwait` if an older `AwaitReply` is still at its head. Queue draining then
+`CanAwait` if an older non-intersect reply, such as `AwaitReply`, is still at its
+head. Queue draining then
 follows the existing FIFO order. Capture both cases in M1.
 
 ### D3a: Synchronized reset proposal (withdrawn in r3)
@@ -153,8 +156,9 @@ an ADR series or that a refactor belongs in the same PR.
 
 `main` and `next` currently have no tracked `adr/` tree. Historical commit
 `cdd7a79c9e4dcd096297ae0bbc4ae6edeecf08e0` removed UTxO ADRs after they moved to
-other projects. Adding this record does not restore those documents or decide
-a repository-wide migration of design documentation.
+other projects. The maintainer has since confirmed that Yaci ADRs belong in
+`adr/`, as recorded in [reviewer3's placement follow-up](https://github.com/bloxbean/yaci/pull/206#issuecomment-6098182089).
+This record starts that tracked series without restoring the removed UTxO ADRs.
 
 Number 0013 avoids numbers 0001–0012 already used by local records and feature
 branches; those earlier records are not asserted to exist on `next`.
@@ -209,9 +213,7 @@ or unconditional at-least-once callback-delivery guarantee.
 The peer and timing of inbound messages are untrusted. Socket writes complete
 asynchronously, and new-data notifications can originate on producer threads.
 Tests must control those schedules rather than assume immediate completion.
-Pending-work counts and the reply queue are internal to the agent. The peer
-does not supply a state snapshot. No secrets or persisted data formats are
-introduced.
+Pending-work counts and the reply queue are internal to the agent.
 
 Keep `State.nextState(Message)`, `hasAgency(boolean)`, `getCurrentState()`,
 `confirmBlock(Point)`, reset entry points, and the deprecated
@@ -268,25 +270,18 @@ D3's two additional traces start with two requests parked at tip and then
 receive `FindIntersect`: one has already drained `AwaitReply`, the other still
 has it queued. Assert discarded obligations, `Intersect` versus `CanAwait`
 before draining, FIFO output, and no later final replies for the abandoned
-requests. The author independently reproduced both with temporary probes.
-Promote them to characterization tests if a later change touches that behavior.
+requests. The author independently reproduced both with temporary probes;
+the characterization tests are
+`findIntersectWithParkedRequests_afterAwaitReplyDrains_discardsOldObligations`
+and `findIntersectWithParkedRequests_beforeAwaitReplyDrains_preservesQueuedReply`.
 I9 already has the committed `AW, RF, AW, RF, RF` trace; do not add a second test
 that merely repeats it through a newly introduced resolver.
 
 ### M3: Downstream release QA
 
-Downstream yaci-store and Yano campaigns belong to release QA, with the exact
-candidate artifacts and dependency/toolchain setup recorded. They are not a
-merge gate for this documentation-only decision or an automatic requirement
-for every behavior-preserving extraction. Include catch-up, live blocks,
-slow consumers, forks, rollbacks, reconnects, and pipelined pause/resume in that
-QA. A future change to observable behavior must define its own additional
-regression checks based on the affected paths.
-
-Record commands, revisions, results, and skipped/unavailable scenarios honestly.
-Earlier PR #206 results do not validate a future implementation. Failed-write
-recovery and durable consumer checkpoints need their own failure testing before
-stronger delivery guarantees can be claimed.
+Downstream yaci-store and Yano campaigns are release QA rather than an automatic
+merge gate for this contract; record the exact artifacts, commands, coverage,
+and limitations, and define additional checks when observable behavior changes.
 
 ## Consequences, risks, and audit gates
 
@@ -343,8 +338,8 @@ Additional references verified for r3:
 
 - [NodeServerSession: new chain-sync agent per connection](https://github.com/bloxbean/yaci/blob/45d0728ec9c39fb58354a0b0e1cb3dcc2de646ba/core/src/main/java/com/bloxbean/cardano/yaci/core/network/server/NodeServerSession.java)
 - [Historical removal of the UTxO ADRs](https://github.com/bloxbean/yaci/commit/cdd7a79c9e4dcd096297ae0bbc4ae6edeecf08e0)
-- [ouroboros-network chain-sync time limits, `stateToLimit`](https://github.com/IntersectMBO/ouroboros-network/blob/2fb69829a19b5c04e4fb212bdd78fb63f9d2d776/cardano-diffusion/protocols/lib/Cardano/Network/Protocol/ChainSync/Codec/TimeLimits.hs#L61)
-- [ouroboros-network `shortWait` definition](https://github.com/IntersectMBO/ouroboros-network/blob/2fb69829a19b5c04e4fb212bdd78fb63f9d2d776/ouroboros-network/api/lib/Ouroboros/Network/Protocol/Limits.hs#L104)
+- [ouroboros-network chain-sync time limits, `stateToLimit`](https://github.com/IntersectMBO/ouroboros-network/blob/2fb69829a19b5c04e4fb212bdd78fb63f9d2d776/cardano-diffusion/protocols/lib/Cardano/Network/Protocol/ChainSync/Codec/TimeLimits.hs#L64)
+- [ouroboros-network `shortWait` definition](https://github.com/IntersectMBO/ouroboros-network/blob/2fb69829a19b5c04e4fb212bdd78fb63f9d2d776/ouroboros-network/api/lib/Ouroboros/Network/Protocol/Limits.hs#L111-L112)
 
 ## Revision history
 
@@ -366,3 +361,9 @@ Additional references verified for r3:
   because no snapshot/adapter is proposed; R3-F7 numbers the contract rows,
   moves risk classification into Consequences, marks Q2 not planned, and adds
   the agency-only alternative. Prior decision and finding IDs are retained.
+- **r4 (2026-10-10; follows reviewer3's design approval at
+  `dec8fb05718878adae13dd5357fd3ac6df77661e`):** Promotes the two D3 traces to
+  characterization tests under the maintainer's implementation instruction.
+  R3-F8 corrects reference anchors; R3-F9 explains the retained filename,
+  removes obsolete snapshot wording, and clarifies the non-intersect queue
+  head; R3-F10 shortens M3; R3-F11 cites the confirmed `adr/` placement.
