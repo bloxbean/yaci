@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n;
 
-import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.State;
@@ -15,6 +14,10 @@ import co.nstant.in.cbor.model.UnsignedInteger;
 import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.Deque;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -25,8 +28,12 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 @Slf4j
 public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
+    // A rollback is never deeper than the security parameter k of the public networks
+    private static final int MAX_CLIENT_CHAIN_POINTS = 2160;
+
     private final ChainState chainState;
-    private volatile Point intersectedPoint;
+    // Points on the client's chain, oldest first: those from FindIntersect, then each block sent. Guarded by this.
+    private final Deque<Point> clientChain = new ArrayDeque<>();
     private final Queue<Message> pendingResponses = new ConcurrentLinkedQueue<>(); // Thread-safe queue for pipelined responses
     private volatile Point lastSentPoint; // Track the last point sent to client
     private volatile boolean clientAtTip; // AwaitReply sent for the oldest unanswered RequestNext
@@ -191,7 +198,16 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
             if (intersectionPoint != null) {
                 // Found intersection
-                this.intersectedPoint = intersectionPoint;
+                // The offered points older than the intersection are on the client's chain too
+                long intersectionSlot = intersectionPoint.getSlot();
+                clientChain.clear();
+                Arrays.stream(clientPoints)
+                        .filter(point -> point != null && point.getSlot() < intersectionSlot)
+                        .sorted(Comparator.comparingLong(Point::getSlot))
+                        .forEach(clientChain::addLast);
+                clientChain.addLast(intersectionPoint);
+                // The next RequestNext is answered with a Rollbackward to the intersection
+                lastSentPoint = null;
 
                 Tip tip = createTipFromChainTip(currentTip);
                 IntersectFound intersectFound = new IntersectFound(intersectionPoint, tip);
@@ -272,7 +288,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     private boolean answerOldestRequest() {
         try {
 
-            if (intersectedPoint == null) {
+            if (clientChain.isEmpty()) {
                 log.warn("Client requested next without finding intersection first");
                 sendAwaitReplyResponse();
                 return false;
@@ -316,8 +332,8 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
             if (nextPoint != null) {
                 if (log.isDebugEnabled()) {
-                    log.debug("Found next block: slot={}, hash={}, previous intersection: slot={}",
-                            nextPoint.getSlot(), nextPoint.getHash(), intersectedPoint.getSlot());
+                    log.debug("Found next block: slot={}, hash={}, last sent: slot={}",
+                            nextPoint.getSlot(), nextPoint.getHash(), lastSentPoint.getSlot());
                 }
 
                 // Check if we have block header data
@@ -354,7 +370,9 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
                         // Update tracking variables
                         this.lastSentPoint = nextPoint;
-                        this.intersectedPoint = nextPoint;
+                        clientChain.addLast(nextPoint);
+                        if (clientChain.size() > MAX_CLIENT_CHAIN_POINTS)
+                            clientChain.removeFirst();
 
                         // Notify listeners with proper block header information
                         notifyListenersRollForward(rollForward, tip);
@@ -500,8 +518,6 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 Rollbackward rollbackMessage = new Rollbackward(rollbackPoint, tip);
                 enqueueReply(rollbackMessage);
 
-                // Update our tracking
-                this.intersectedPoint = rollbackPoint;
                 this.lastSentPoint = rollbackPoint;
 
                 log.info("ChainSyncServerAgent: Enqueued Rollbackward message to point: slot={}, new tip: slot={}",
@@ -521,8 +537,12 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 });
                 return true;
             } else {
-                log.warn("Could not find rollback point - sending AwaitReply");
-                sendAwaitReplyResponse();
+                // AwaitReply would leave the client on a fork we no longer have; it re-intersects on reconnect
+                log.error("None of the points known to be on the chain of client {} is on ours. Closing the connection.",
+                        getChannel() != null ? getChannel().remoteAddress() : "unknown");
+                currentState = ChainSyncState.Done;
+                if (getChannel() != null)
+                    getChannel().close();
                 return false;
             }
         } catch (Exception e) {
@@ -533,92 +553,15 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     }
 
     /**
-     * Find the rollback point (common ancestor) by traversing backwards from the current position
-     * to find a point that still exists in the chain. This handles deep reorganizations.
+     * The client's chain and ours agree up to the fork point, so the newest point sent to the client that is still on
+     * our chain is where the client has to roll back to. Points after it are dropped.
+     *
+     * @return the rollback point, or null if none of the tracked points is on our chain
      */
     private Point findRollbackPoint() {
-        if (intersectedPoint == null) {
-            log.warn("Cannot find rollback point - no intersection point set");
-            return null;
-        }
-
-        // Start from the last sent point and work backwards to find a common ancestor
-        Point candidatePoint = lastSentPoint;
-
-        // First, try the last sent point
-        if (candidatePoint != null && chainState.hasPoint(candidatePoint)) {
-            log.debug("Last sent point is still valid in chain, using it as rollback point");
-            return candidatePoint;
-        }
-
-        // Next, try the current intersection point
-        if (chainState.hasPoint(intersectedPoint)) {
-            log.debug("Using current intersection point as rollback point");
-            return intersectedPoint;
-        }
-
-        // If both are invalid, we have a deep reorganization
-        log.warn("Deep chain reorganization detected - both last sent point and intersection point are invalid");
-
-        // Try to find a valid point by checking previous slots
-        // Start from the intersection point and work backwards
-        long currentSlot = intersectedPoint.getSlot();
-
-        // Strategy: Try to go back in steps, checking if blocks exist at those slots
-        // Start with small steps, then increase if needed
-        long[] stepSizes = {10, 50, 100, 500}; // Progressive step sizes
-
-        for (long stepSize : stepSizes) {
-            long trySlot = currentSlot;
-
-            // Try up to 10 steps with current step size
-            for (int i = 0; i < 10 && trySlot > 0; i++) {
-                trySlot = Math.max(0, trySlot - stepSize);
-
-                if (trySlot == 0) {
-                    // Reached genesis
-                    log.info("Rollback search reached genesis, returning Point.ORIGIN");
-                    return Point.ORIGIN;
-                }
-
-                // Check if a block exists at this slot
-                Long blockNumber = chainState.getBlockNumberBySlot(trySlot);
-                if (blockNumber != null) {
-                    // Found a block at this slot, get its hash
-                    byte[] blockHeader = chainState.getBlockHeaderByNumber(blockNumber);
-                    if (blockHeader != null) {
-                        // Extract the hash from the header to create a proper Point
-                        // For now, we'll create a Point with the slot
-                        // In a real implementation, we'd parse the header to get the hash
-                        log.info("Found valid block at slot {} (block number {}) for rollback", trySlot, blockNumber);
-
-                        // Try to get the block to extract its hash
-                        byte[] block = chainState.getBlockByNumber(blockNumber);
-                        if (block != null) {
-                            var blockObj = BlockSerializer.INSTANCE.deserialize(block);
-                            String blockHash = blockObj.getHeader().getHeaderBody().getBlockHash();
-                            // Create a Point with slot but without hash
-                            // The client will need to verify this
-                            Point rollbackPoint = new Point(trySlot, blockHash);
-                            log.warn("Creating rollback point at slot {} without hash - client will need to verify", trySlot);
-                            return rollbackPoint;
-                        }
-                    }
-                }
-            }
-        }
-
-        // If we've searched back far and found nothing, try genesis
-        log.warn("No valid rollback point found after extensive search, trying Point.ORIGIN");
-        Long genesisBlock = chainState.getBlockNumberBySlot(0L);
-        if (genesisBlock != null) {
-            return Point.ORIGIN;
-        }
-
-        // If we can't find any valid rollback point, return null
-        // This will force the client to send AwaitReply and potentially reconnect
-        log.error("Could not find any valid rollback point after deep reorganization - chain state may be corrupted");
-        return null;
+        while (!clientChain.isEmpty() && !chainState.hasPoint(clientChain.peekLast()))
+            clientChain.removeLast();
+        return clientChain.peekLast();
     }
 
     /**
@@ -714,9 +657,9 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     }
 
     @Override
-    public void reset() {
+    public synchronized void reset() {
         this.currentState = ChainSyncState.Idle;
-        this.intersectedPoint = null;
+        this.clientChain.clear();
         this.pendingResponses.clear();
         this.lastSentPoint = null;
         this.clientAtTip = false;
