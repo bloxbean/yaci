@@ -84,7 +84,7 @@ public class TransactionBodyExtractor {
             case DIRECT:
                 return initialByte & 31;
             case ONE_BYTE:
-                return symbols[0];
+                return symbols[0] & 0xFF; // a count of 128-255 must not read as a negative byte
             case TWO_BYTES:
                 long twoByteValue = 0;
                 twoByteValue |= (symbols[0] & 0xFF) << 8;
