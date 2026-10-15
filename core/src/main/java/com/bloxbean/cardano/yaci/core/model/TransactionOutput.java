@@ -20,4 +20,11 @@ public class TransactionOutput {
     //babbage
     private String inlineDatum;
     private String scriptRef;
+    /** Reference-script hash, or null when absent or its encoding cannot be interpreted. */
+    private String scriptHash;
+
+    public TransactionOutput(String address, List<Amount> amounts, String datumHash,
+                             String inlineDatum, String scriptRef) {
+        this(address, amounts, datumHash, inlineDatum, scriptRef, null);
+    }
 }

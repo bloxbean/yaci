@@ -74,7 +74,9 @@ public enum TransactionOutputSerializer implements Serializer<TransactionOutput>
         //script_ref
         ByteString scriptRefBs = (ByteString) ouptutItem.get(new UnsignedInteger(3));
         if (scriptRefBs != null) {
-            outputBuilder.scriptRef(HexUtil.encodeHexString(scriptRefBs.getBytes()));
+            byte[] scriptRef = scriptRefBs.getBytes();
+            outputBuilder.scriptRef(HexUtil.encodeHexString(scriptRef));
+            outputBuilder.scriptHash(ScriptHashes.reference(scriptRef));
         }
 
         return outputBuilder.build();
