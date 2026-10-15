@@ -96,11 +96,21 @@ nexusPublishing {
 
 ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
 
-if (isReleaseVersion && !project.hasProperty("skipSigning")) {
-    signing {
-//        sign configurations.archives
-        sign publishing.publications
+// Reuse main's signing setup: CI supplies the ASCII-armored subkey through project properties.
+// Without an in-memory key, local builds continue using their existing signing.* properties.
+def configureReleaseSigning = { Project candidate ->
+    candidate.signing {
+        def inMemoryKey = candidate.findProperty('signingInMemoryKey')
+        if (inMemoryKey) {
+            useInMemoryPgpKeys(candidate.findProperty('signingInMemoryKeyId'), inMemoryKey,
+                    candidate.findProperty('signingInMemoryKeyPassword'))
+        }
+        sign candidate.publishing.publications
     }
+}
+
+if (isReleaseVersion && !project.hasProperty("skipSigning")) {
+    configureReleaseSigning(project)
 }
 
 def commit_id=getCheckedOutGitCommitHash()
@@ -220,9 +230,7 @@ subprojects {
     ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
 
     if (isReleaseVersion && !project.hasProperty("skipSigning")) {
-        signing {
-            sign publishing.publications
-        }
+        configureReleaseSigning(project)
     }
 }
 
