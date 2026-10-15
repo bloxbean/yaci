@@ -12,6 +12,7 @@ import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Queue;
@@ -28,7 +29,10 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     private volatile Point intersectedPoint;
     private final Queue<Message> pendingResponses = new ConcurrentLinkedQueue<>(); // Thread-safe queue for pipelined responses
     private volatile Point lastSentPoint; // Track the last point sent to client
-    private volatile boolean clientAtTip; // Flag to track if client is at tip
+    private volatile boolean clientAtTip; // AwaitReply sent for the oldest unanswered RequestNext
+    // RequestNext messages not yet answered with RollForward/Rollbackward. A pipelining client can have many
+    // outstanding; each must get exactly one reply, in order.
+    private int unansweredRequests;
 
     public ChainSyncServerAgent(ChainState chainState) {
         super(false); // This is a server agent
@@ -43,29 +47,73 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
     @Override
     public Message buildNextMessage() {
-        // Return next pending response when server has agency
-        if (!pendingResponses.isEmpty() && hasAgency()) {
-            Message response = pendingResponses.poll();
-            // Don't update state here - it will be updated in Agent.sendRequest
-            if (log.isDebugEnabled()) {
-                log.debug("ChainSyncServerAgent.buildNextMessage() - Sending: {} in state: {} (hasAgency: {})",
-                         response.getClass().getSimpleName(), currentState, hasAgency());
-            }
-            return response;
-        } else if (!pendingResponses.isEmpty()) {
-            // We have a pending response but don't have agency - this is a protocol violation
-            log.warn("ChainSyncServerAgent: Attempted to send {} but server doesn't have agency in state {}. Client has agency: {}",
-                     pendingResponses.peek().getClass().getSimpleName(), currentState, !hasAgency());
-            // Don't send the message - wait for proper state
+        return pendingResponses.poll();
+    }
+
+    /**
+     * Agency is derived from what the server owes the client rather than from the single-request state
+     * transitions, which cannot represent pipelined RequestNext messages.
+     */
+    @Override
+    public synchronized void receiveResponse(Message message) {
+        State oldState = currentState;
+        if (message instanceof ChainSyncMsgDone) {
+            currentState = ChainSyncState.Done;
+        } else {
+            processResponse(message);
+            updateState();
         }
-        return null;
+        getAgentListeners().forEach(listener -> listener.onStateUpdate(oldState, currentState));
+    }
+
+    /**
+     * Send every queued reply. Each one answers a request the client already sent, so none of them can
+     * be held back waiting for another inbound message.
+     * <p>
+     * Replies are polled and written only on the channel's event loop. A write from another thread (the block
+     * producer calling {@link #onNewDataAvailable()}) is queued as an event-loop task, so writing it directly
+     * could let the reply to a later request, written inline by the inbound handler, overtake it.
+     * <p>
+     * Once the client has sent Done nothing more is written; a drain scheduled earlier must not revive the agent.
+     */
+    @Override
+    public synchronized void sendNextMessage() {
+        Channel channel = getChannel();
+        if (channel != null && channel.eventLoop() != null && !channel.eventLoop().inEventLoop()) {
+            channel.eventLoop().execute(this::sendNextMessage);
+            return;
+        }
+        if (isDone())
+            return;
+
+        Message response;
+        while ((response = buildNextMessage()) != null) {
+            if (log.isDebugEnabled())
+                log.debug("ChainSyncServerAgent sending {}", response.getClass().getSimpleName());
+            writeMessage(response, null);
+        }
+        updateState();
+    }
+
+    /** Done is terminal until {@link #reset()}. */
+    private void updateState() {
+        if (isDone())
+            return;
+        Message next = pendingResponses.peek();
+        if (next instanceof IntersectFound || next instanceof IntersectNotFound)
+            currentState = ChainSyncState.Intersect;
+        else if (next != null)
+            currentState = ChainSyncState.CanAwait;
+        else if (unansweredRequests > 0)
+            currentState = ChainSyncState.MustReply;
+        else
+            currentState = ChainSyncState.Idle;
     }
 
     @Override
     public void processResponse(Message message) {
         if (message == null) return;
 
-        // Don't update state here - it's already updated in Agent.receiveResponse
         if (log.isDebugEnabled()) {
             log.debug("ChainSyncServerAgent.processResponse() - Received: {} in state: {} (hasAgency: {})",
                      message.getClass().getSimpleName(), currentState, hasAgency());
@@ -87,6 +135,9 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     }
 
     private void handleFindIntersect(FindIntersect findIntersect) {
+        // A new intersection starts a new cursor; the client cannot have requests outstanding here
+        unansweredRequests = 0;
+        clientAtTip = false;
         try {
             if (findIntersect.getPoints() == null || findIntersect.getPoints().length == 0) {
                 log.warn("FindIntersect received with no points");
@@ -200,13 +251,31 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     }
 
     private synchronized void handleRequestNext(RequestNext requestNext) {
+        log.debug("Handling RequestNext from client");
+        unansweredRequests++;
+        answerPendingRequests();
+    }
+
+    /**
+     * Answer unanswered requests in order until one has to wait for a new block.
+     */
+    private void answerPendingRequests() {
+        while (unansweredRequests > 0) {
+            if (!answerOldestRequest())
+                break;
+        }
+    }
+
+    /**
+     * @return true if the oldest unanswered request got its RollForward/Rollbackward, false if it has to wait
+     */
+    private boolean answerOldestRequest() {
         try {
-            log.debug("Handling RequestNext from client");
 
             if (intersectedPoint == null) {
                 log.warn("Client requested next without finding intersection first");
                 sendAwaitReplyResponse();
-                return;
+                return false;
             }
 
             // Per Cardano ChainSync protocol: after FindIntersect, the first RequestNext
@@ -214,14 +283,12 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
             // position before forward sync begins, and is essential for reconnection scenarios
             // where the server may have rolled back while the client was offline.
             if (lastSentPoint == null) {
-                handleRollback();
-                return;
+                return handleRollback();
             }
 
             // Check if we need to handle rollback scenario
             if (shouldRollback()) {
-                handleRollback();
-                return;
+                return handleRollback();
             }
 
             // Find the next block after the current position
@@ -237,14 +304,14 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
             } catch (Exception e) {
                 log.error("Error finding next block after point: {}", lastSentPoint, e);
                 sendAwaitReplyResponse();
-                return;
+                return false;
             }
 
             ChainTip currentTip = chainState.getTip();
             if (currentTip == null) {
                 log.error("Chain state returned null tip during RequestNext");
                 sendAwaitReplyResponse();
-                return;
+                return false;
             }
 
             if (nextPoint != null) {
@@ -260,7 +327,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 } catch (Exception e) {
                     log.error("Error getting block header for point: {}", nextPoint, e);
                     sendAwaitReplyResponse();
-                    return;
+                    return false;
                 }
 
                 if (blockHeaderBytes != null && blockHeaderBytes.length > 0) {
@@ -283,38 +350,51 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                                     tip.getPoint().getSlot(), tip.getBlock(), currentTip.getBlockNumber());
                         }
 
-                        this.pendingResponses.add(rollForward);
+                        enqueueReply(rollForward);
 
                         // Update tracking variables
                         this.lastSentPoint = nextPoint;
                         this.intersectedPoint = nextPoint;
-                        this.clientAtTip = false;
 
                         // Notify listeners with proper block header information
                         notifyListenersRollForward(rollForward, tip);
+                        return true;
 
                     } catch (Exception e) {
                         log.error("Error creating RollForward message from block header bytes", e);
                         sendAwaitReplyResponse();
+                        return false;
                     }
                 } else {
                     log.warn("No block header bytes found for point: {}", nextPoint);
                     sendAwaitReplyResponse();
+                    return false;
                 }
             } else {
                 // No next block available, client is at tip
                 sendAwaitReplyResponse();
+                return false;
             }
         } catch (Exception e) {
             log.error("Error handling RequestNext", e);
             sendAwaitReplyResponse();
+            return false;
         }
+    }
+
+    /**
+     * Queue the RollForward/Rollbackward that answers the oldest unanswered request.
+     */
+    private void enqueueReply(Message reply) {
+        pendingResponses.add(reply);
+        unansweredRequests--;
+        clientAtTip = false;
     }
 
     private void sendAwaitReplyResponse() {
         try {
-            // AwaitReply is only valid in CanAwait state (transitions to MustReply).
-            // Guard: only send once — pipelined RequestNext messages can cause multiple calls.
+            // AwaitReply is only valid in CanAwait state (transitions to MustReply), so the oldest
+            // unanswered request gets at most one; later pipelined requests wait behind it.
             if (clientAtTip) {
                 return;
             }
@@ -387,7 +467,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     /**
      * Handle rollback scenario
      */
-    private void handleRollback() {
+    private boolean handleRollback() {
         try {
             log.info("Handling rollback scenario - last sent point no longer in chain");
 
@@ -398,7 +478,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
             } catch (Exception e) {
                 log.error("Error finding rollback point", e);
                 sendAwaitReplyResponse();
-                return;
+                return false;
             }
 
             if (rollbackPoint != null) {
@@ -412,18 +492,17 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 if (currentTip == null) {
                     log.error("Chain state returned null tip during rollback");
                     sendAwaitReplyResponse();
-                    return;
+                    return false;
                 }
 
                 Tip tip = createTipFromChainTip(currentTip);
 
                 Rollbackward rollbackMessage = new Rollbackward(rollbackPoint, tip);
-                this.pendingResponses.add(rollbackMessage);
+                enqueueReply(rollbackMessage);
 
                 // Update our tracking
                 this.intersectedPoint = rollbackPoint;
                 this.lastSentPoint = rollbackPoint;
-                this.clientAtTip = false;
 
                 log.info("ChainSyncServerAgent: Enqueued Rollbackward message to point: slot={}, new tip: slot={}",
                         rollbackPoint.getSlot(), tip.getPoint().getSlot());
@@ -440,13 +519,16 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                         log.error("Error notifying listener about rollback", e);
                     }
                 });
+                return true;
             } else {
                 log.warn("Could not find rollback point - sending AwaitReply");
                 sendAwaitReplyResponse();
+                return false;
             }
         } catch (Exception e) {
             log.error("Error handling rollback", e);
             sendAwaitReplyResponse();
+            return false;
         }
     }
 
@@ -595,35 +677,14 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     }
 
     /**
-     * Push new blocks to client if they're waiting at tip
-     * This method can be called externally when new blocks arrive
+     * Push new blocks to the client if it is waiting at the tip.
+     *
+     * @deprecated the point is not needed: pending requests are answered in order from the chain state. Use
+     * {@link #onNewDataAvailable()}.
      */
+    @Deprecated
     public void notifyNewBlock(Point newBlockPoint) {
-        synchronized (this) {
-            if (!clientAtTip || !hasAgency()) {
-                return;
-            }
-            log.info("Notifying client about new block: {}", newBlockPoint);
-            try {
-                ChainTip currentTip = chainState.getTip();
-                byte[] blockHeaderBytes = chainState.getBlockHeader(HexUtil.decodeHexString(newBlockPoint.getHash()));
-
-                if (blockHeaderBytes != null) {
-                    Tip tip = createTipFromChainTip(currentTip);
-                    RollForward rollForward = new RollForward(null, null, null, tip, blockHeaderBytes);
-
-                    this.pendingResponses.add(rollForward);
-                    this.lastSentPoint = newBlockPoint;
-                    this.intersectedPoint = newBlockPoint;
-                    this.clientAtTip = false;
-
-                    sendNextMessage();
-                    notifyListenersRollForward(rollForward, tip);
-                }
-            } catch (Exception e) {
-                log.error("Error notifying client about new block", e);
-            }
-        }
+        onNewDataAvailable();
     }
 
     /**
@@ -659,55 +720,27 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
         this.pendingResponses.clear();
         this.lastSentPoint = null;
         this.clientAtTip = false;
+        this.unansweredRequests = 0;
     }
 
     /**
-     * Called when new blockchain data becomes available.
-     * If client is waiting at tip (MustReply state), send ONE RollForward.
-     * The client will then send RequestNext to continue catching up.
+     * Called when new blockchain data becomes available. Answers, in order, the requests that are waiting at
+     * the tip. Without unanswered requests there is nothing to do: the next RequestNext picks up the new data.
      */
     @Override
     public synchronized void onNewDataAvailable() {
+        if (isDone() || unansweredRequests == 0)
+            return;
+
         try {
-            // Check for rollback scenarios first
-            if (lastSentPoint != null && hasAgency()) {
-                if (shouldRollback()) {
-                    log.info("ChainSyncServerAgent: Detected chain rollback - last sent point no longer valid");
-                    handleRollback();
-                    return;
-                }
-
-                ChainTip currentTip = chainState.getTip();
-                if (currentTip != null) {
-                    Point currentTipPoint = new Point(currentTip.getSlot(),
-                            HexUtil.encodeHexString(currentTip.getBlockHash()));
-                    if (currentTipPoint.getSlot() < lastSentPoint.getSlot()) {
-                        log.info("ChainSyncServerAgent: Chain reorganization detected");
-                        handleRollback();
-                        return;
-                    }
-                }
+            ChainTip currentTip = chainState.getTip();
+            if (lastSentPoint != null && currentTip != null && currentTip.getSlot() < lastSentPoint.getSlot()) {
+                log.info("ChainSyncServerAgent: Chain reorganization detected");
+                handleRollback();
             }
 
-            if (!clientAtTip || !hasAgency()) {
-                return;
-            }
-
-            Point lastSent = lastSentPoint;
-            if (lastSent == null) {
-                return;
-            }
-
-            Point nextBlock = findNextBlockAfterPoint(lastSent);
-            if (nextBlock == null) {
-                return;
-            }
-
-            log.info("ChainSyncServerAgent: New block available: slot={}, hash={} (after lastSent slot={})",
-                    nextBlock.getSlot(), nextBlock.getHash(), lastSent.getSlot());
-
-            notifyNewBlock(nextBlock);
-
+            answerPendingRequests();
+            sendNextMessage();
         } catch (Exception e) {
             log.error("ChainSyncServerAgent: Error handling new data notification", e);
         }
