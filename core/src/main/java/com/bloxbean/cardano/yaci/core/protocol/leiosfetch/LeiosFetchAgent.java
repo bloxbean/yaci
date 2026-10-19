@@ -105,16 +105,16 @@ public class LeiosFetchAgent extends Agent<LeiosFetchAgentListener> {
 
     @Override
     protected void processResponse(Message message) {
-        try {
-            if (message instanceof MsgLeiosBlock block) {
-                handleBlock(block);
-            } else if (message instanceof MsgLeiosBlockTxs blockTxs) {
-                handleBlockTxs(blockTxs);
-            } else {
-                log.warn("Unexpected LeiosFetch message: {}", messageName(message));
-            }
-        } finally {
-            outstandingRequest = null;
+        //Clear before notifying listeners: a listener may send the next request from its callback, and that
+        //request becomes the new outstanding request
+        Message request = outstandingRequest;
+        outstandingRequest = null;
+        if (message instanceof MsgLeiosBlock block) {
+            handleBlock(request, block);
+        } else if (message instanceof MsgLeiosBlockTxs blockTxs) {
+            handleBlockTxs(request, blockTxs);
+        } else {
+            log.warn("Unexpected LeiosFetch message: {}", messageName(message));
         }
     }
 
@@ -178,8 +178,8 @@ public class LeiosFetchAgent extends Agent<LeiosFetchAgentListener> {
         return outstandingRequest;
     }
 
-    private void handleBlock(MsgLeiosBlock block) {
-        if (!(outstandingRequest instanceof MsgLeiosBlockRequest request)) {
+    private void handleBlock(Message outstanding, MsgLeiosBlock block) {
+        if (!(outstanding instanceof MsgLeiosBlockRequest request)) {
             notifyError(new IllegalStateException("Received block without matching block request"));
             return;
         }
@@ -187,8 +187,8 @@ public class LeiosFetchAgent extends Agent<LeiosFetchAgentListener> {
                 "onBlock", request.getPoint());
     }
 
-    private void handleBlockTxs(MsgLeiosBlockTxs blockTxs) {
-        if (!(outstandingRequest instanceof MsgLeiosBlockTxsRequest request)) {
+    private void handleBlockTxs(Message outstanding, MsgLeiosBlockTxs blockTxs) {
+        if (!(outstanding instanceof MsgLeiosBlockTxsRequest request)) {
             notifyError(new IllegalStateException("Received block txs without matching tx request"));
             return;
         }

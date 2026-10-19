@@ -148,6 +148,47 @@ class LeiosFetchAgentTest {
     }
 
     @Test
+    void requestSentFromInsideOnBlockGetsItsAnswer() {
+        //A client that fetches an EB and then its transactions sends the second request from the onBlock callback.
+        //EmbeddedChannel completes writes inline, as the event loop can: the new request must stay outstanding.
+        LeiosFetchAgent agent = new LeiosFetchAgent();
+        EmbeddedChannel channel = new EmbeddedChannel();
+        agent.setChannel(channel);
+        LeiosPoint eb = point(7);
+        LeiosTxBitmap bitmap = LeiosTxBitmap.firstN(3);
+        AtomicReference<LeiosPoint> txsFor = new AtomicReference<>();
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        agent.addListener(new LeiosFetchAgentListener() {
+            @Override
+            public void onBlock(LeiosPoint requestedPoint, LeiosRawCbor endorserBlock) {
+                agent.requestBlockTxs(requestedPoint, bitmap);
+            }
+
+            @Override
+            public void onBlockTxs(LeiosPoint requested, LeiosPoint response, LeiosTxBitmap responseBitmap,
+                                   LeiosRawCbor txList) {
+                txsFor.set(requested);
+            }
+
+            @Override
+            public void onFetchError(Throwable observed) {
+                error.set(observed);
+            }
+        });
+
+        agent.requestBlock(eb);
+        channel.readOutbound();
+        agent.receiveResponse(new MsgLeiosBlock(LeiosCborUtil.toRawCbor(rawArray(1, 2))));
+        assertInstanceOf(MsgLeiosBlockTxsRequest.class,
+                LeiosFetchStateBase.deserialize(((Segment) channel.readOutbound()).getPayload()));
+        agent.receiveResponse(new MsgLeiosBlockTxs(eb, bitmap, LeiosCborUtil.toRawCbor(rawArray(3, 4))));
+
+        assertNull(error.get());
+        assertEquals(eb, txsFor.get());
+        assertEquals(LeiosFetchState.StIdle, agent.getCurrentState());
+    }
+
+    @Test
     void doesNotDuplicateRequestWhileAsyncWriteIsPending() {
         LeiosFetchAgent agent = new LeiosFetchAgent();
         PendingWriteHandler pendingWrites = new PendingWriteHandler();
