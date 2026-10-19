@@ -1,13 +1,10 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.leios;
 
-import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
-import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.leios.EndorserBlockTx;
-import com.bloxbean.cardano.yaci.core.protocol.leios.serializers.LeiosCborUtil;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -16,7 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Decodes Leios EB transaction-list responses while preserving each tag-24 full transaction byte string.
+ * Decodes the LeiosFetch {@code MsgLeiosBlockTxs} tx list (Musashi w40a: {@code [* bytes]}), keeping each item's bytes.
  */
 public enum EndorserBlockTxListSerializer implements Serializer<List<EndorserBlockTx>> {
     INSTANCE;
@@ -46,35 +43,24 @@ public enum EndorserBlockTxListSerializer implements Serializer<List<EndorserBlo
         return deserialize(CborSerializationUtil.serialize(di, false));
     }
 
+    /**
+     * Musashi w40a: each transaction is a plain byte string holding the transaction CBOR (mempool encoding).
+     * The endorser block references it by blake2b-256 of those inner bytes (the Haskell {@code hashLeiosTx}).
+     */
     private EndorserBlockTx readTx(int index, LeiosCborReader.DecodedItem item) {
         String itemCbor = HexUtil.encodeHexString(item.rawBytes());
-        try {
-            if (!(item.dataItem() instanceof Array txArray)) {
-                return rawOnly(index, itemCbor);
-            }
-
-            List<DataItem> items = LeiosCborUtil.arrayItems(txArray, "Endorser Block tx");
-            if (items.size() != 2 || !(items.get(0) instanceof UnsignedInteger eraItem)
-                    || !(items.get(1) instanceof ByteString txBytesItem)
-                    || !LeiosCborUtil.hasTag(txBytesItem, 24)) {
-                return rawOnly(index, itemCbor);
-            }
-
-            int txEraIndex = LeiosCborUtil.toInt(eraItem, "tx era index");
-            Era era = LeiosEraUtil.fromTxEraIndex(txEraIndex);
-            byte[] txBytes = txBytesItem.getBytes();
-            return EndorserBlockTx.builder()
-                    .index(index)
-                    .txEraIndex(txEraIndex)
-                    .era(era)
-                    .txCbor(HexUtil.encodeHexString(txBytes))
-                    .txHash(HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(txBytes)))
-                    .cbor(itemCbor)
-                    .parsed(era != null)
-                    .build();
-        } catch (Exception e) {
+        if (!(item.dataItem() instanceof ByteString txBytesItem)) {
             return rawOnly(index, itemCbor);
         }
+        byte[] txBytes = txBytesItem.getBytes();
+        return EndorserBlockTx.builder()
+                .index(index)
+                .era(Era.Dijkstra)
+                .txCbor(HexUtil.encodeHexString(txBytes))
+                .txHash(HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(txBytes)))
+                .cbor(itemCbor)
+                .parsed(true)
+                .build();
     }
 
     private EndorserBlockTx rawOnly(int index, String itemCbor) {

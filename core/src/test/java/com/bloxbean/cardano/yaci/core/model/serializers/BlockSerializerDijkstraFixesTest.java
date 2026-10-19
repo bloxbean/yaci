@@ -37,7 +37,7 @@ class BlockSerializerDijkstraFixesTest {
     @Test
     void indefiniteLengthInnerBlockArrayRoutesToDijkstraParser() {
         Array transactions = new Array();
-        Array body = blockBody(SimpleValue.NULL, transactions, SimpleValue.NULL, SimpleValue.NULL);
+        Array body = blockBody(transactions, SimpleValue.NULL, SimpleValue.NULL);
 
         Array innerBlock = new Array();
         innerBlock.setChunked(true); //indefinite-length [header, block_body]
@@ -54,26 +54,6 @@ class BlockSerializerDijkstraFixesTest {
         assertEquals(Era.Dijkstra, parsed.getEra());
         assertTrue(parsed.getTransactionBodies().isEmpty());
         assertTrue(parsed.getInvalidTransactions().isEmpty());
-    }
-
-    @Test
-    void parsesLiveW27MusashiBlockFixture() throws IOException {
-        //Captured from the public Musashi relay (prototype-2026w27 respin) on 2026-07-07
-        String hex = new String(getClass().getResourceAsStream("/leios/w27/block-Dijkstra-27142.hex")
-                .readAllBytes()).trim();
-        byte[] blockBytes = HexUtil.decodeHexString(hex);
-
-        Block parsed = BlockSerializer.INSTANCE.deserialize(blockBytes);
-
-        assertEquals(Era.Dijkstra, parsed.getEra());
-        assertEquals(27142, parsed.getHeader().getHeaderBody().getBlockNumber());
-        //w27 header body has 12 fixed items: leios_certified bool + leios_announcement/nil
-        assertEquals(Boolean.FALSE, parsed.getHeader().getHeaderBody().getLeiosCertified());
-        assertNull(parsed.getHeader().getHeaderBody().getLeiosAnnouncement());
-        assertTrue(parsed.getTransactionBodies().isEmpty());
-        assertTrue(parsed.getInvalidTransactions().isEmpty());
-        assertNull(parsed.getLeiosCertificate());
-        assertNull(parsed.getPerasCertCbor());
     }
 
     @Test
@@ -97,6 +77,17 @@ class BlockSerializerDijkstraFixesTest {
         assertEquals(Era.Conway, parsed.getEra());
         assertNull(parsed.getLeiosCertificate());
         assertNull(parsed.getPerasCertCbor());
+    }
+
+    @Test
+    void conwayBlockJsonHasNoLeiosOrPerasKeys() throws Exception {
+        //Leios fields are null for pre-Leios blocks and must not appear in their JSON (same JSON as on next)
+        byte[] conway = com.bloxbean.cardano.yaci.core.util.CborLoader.getHexBytes("block/preprod292683.txt");
+        String json = new com.fasterxml.jackson.databind.ObjectMapper()
+                .writeValueAsString(BlockSerializer.INSTANCE.deserialize(conway));
+
+        assertTrue(json.contains("\"blockNumber\""));
+        assertTrue(!json.contains("leios") && !json.contains("peras"), json.substring(0, 300));
     }
 
     @Test
@@ -144,6 +135,27 @@ class BlockSerializerDijkstraFixesTest {
     }
 
     @Test
+    void dijkstraCredentialGuardsKeepKeyHashSignersAndSkipScriptGuards() {
+        byte[] keyHash = new byte[28];
+        byte[] scriptHash = new byte[28];
+        java.util.Arrays.fill(keyHash, (byte) 0x11);
+        java.util.Arrays.fill(scriptHash, (byte) 0x22);
+        co.nstant.in.cbor.model.Map bodyMap = new co.nstant.in.cbor.model.Map();
+        bodyMap.put(new UnsignedInteger(0), new Array());
+        bodyMap.put(new UnsignedInteger(1), new Array());
+        bodyMap.put(new UnsignedInteger(2), new UnsignedInteger(5));
+        Array guards = new Array();
+        guards.add(new Array().add(new UnsignedInteger(0)).add(new ByteString(keyHash)));    //key-hash credential
+        guards.add(new Array().add(new UnsignedInteger(1)).add(new ByteString(scriptHash))); //script guard
+        bodyMap.put(new UnsignedInteger(14), guards);
+
+        var body = TransactionBodySerializer.INSTANCE.deserializeDI(bodyMap,
+                CborSerializationUtil.serialize(bodyMap, false));
+
+        assertEquals(java.util.Set.of(HexUtil.encodeHexString(keyHash)), body.getRequiredSigners());
+    }
+
+    @Test
     void nonByteStringRequiredSignerFailsLoud() {
         co.nstant.in.cbor.model.Map bodyMap = new co.nstant.in.cbor.model.Map();
         bodyMap.put(new UnsignedInteger(0), new Array());
@@ -159,9 +171,9 @@ class BlockSerializerDijkstraFixesTest {
                 () -> TransactionBodySerializer.INSTANCE.deserializeDI(bodyMap, bodyBytes));
     }
 
-    private Array blockBody(DataItem invalidTransactions, Array transactions, DataItem certificate, DataItem peras) {
+    //w40a block_body = [transactions, leios_certificate / nil, peras_certificate / nil]
+    private Array blockBody(Array transactions, DataItem certificate, DataItem peras) {
         Array blockBody = new Array();
-        blockBody.add(invalidTransactions);
         blockBody.add(transactions);
         blockBody.add(certificate);
         blockBody.add(peras);

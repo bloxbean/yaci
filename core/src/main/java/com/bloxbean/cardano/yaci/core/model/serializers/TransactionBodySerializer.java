@@ -176,6 +176,15 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
 
                 if (requiredSigDI instanceof ByteString requiredSigBS) {
                     requiredSigners.add(HexUtil.encodeHexString(requiredSigBS.getBytes()));
+                } else if (isCredential(requiredSigDI)) {
+                    //Dijkstra guards: credential = [0, addr_keyhash] / [1, script_hash]. A key hash is a required
+                    //signer; a script guard is not a signer and is not modelled yet
+                    List<DataItem> credential = ((Array) requiredSigDI).getDataItems();
+                    if (((UnsignedInteger) credential.get(0)).getValue().intValue() == 0) {
+                        requiredSigners.add(HexUtil.encodeHexString(((ByteString) credential.get(1)).getBytes()));
+                    } else if (log.isDebugEnabled()) {
+                        log.debug("Skipping script guard {}", HexUtil.encodeHexString(((ByteString) credential.get(1)).getBytes()));
+                    }
                 } else {
                     //Fail loud: silently hex-encoding the CBOR framing would ship a bogus signer downstream
                     throw new IllegalStateException("required_signers element is not a byte string. Major type: "
@@ -260,5 +269,12 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
 
         return transactionBodyBuilder.build();
 
+    }
+
+    private static boolean isCredential(DataItem dataItem) {
+        if (!(dataItem instanceof Array array)) return false;
+        List<DataItem> items = array.getDataItems();
+        return items.size() == 2 && items.get(0) instanceof UnsignedInteger type
+                && type.getValue().intValue() <= 1 && items.get(1) instanceof ByteString;
     }
 }

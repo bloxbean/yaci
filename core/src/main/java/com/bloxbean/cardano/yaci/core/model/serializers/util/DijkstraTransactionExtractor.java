@@ -1,161 +1,98 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.util;
 
-import co.nstant.in.cbor.model.DataItem;
-import com.bloxbean.cardano.yaci.core.model.serializers.leios.LeiosCborReader;
+import co.nstant.in.cbor.CborException;
+import co.nstant.in.cbor.model.MajorType;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Extracts byte-exact slices from the w27 Dijkstra block layout:
- * {@code [era, [header, [invalid_transactions, transactions, leios_certificate, peras_certificate]]]}.
+ * Cuts a Dijkstra block into byte-exact slices, without building a CBOR tree (so deep nesting cannot overflow
+ * the stack here). Layout pinned to the deployed Musashi network, prototype-2026w40a
+ * (cardano-blueprint {@code src/ledger/eras/dijkstra.cddl} @ 131cc95a):
+ * <pre>
+ * [era, [header, block_body]]
+ * block_body        = [transactions : [* block_transaction], leios_certificate / nil, peras_certificate / nil]
+ * block_transaction = [transaction_body, transaction_witness_set, auxiliary_data / nil, is_valid : bool]
+ * </pre>
+ * The same {@code block_transaction} encoding is used for endorser block transactions, so
+ * {@link #readTransaction(int, byte[])} serves both ranking blocks and endorser blocks.
  */
 public final class DijkstraTransactionExtractor {
+    private static final byte CBOR_NULL = (byte) 0xf6;
+    private static final byte CBOR_TRUE = (byte) 0xf5;
+    private static final byte CBOR_FALSE = (byte) 0xf4;
 
     private DijkstraTransactionExtractor() {
     }
 
-    public static BlockBodySlice extractBlockBody(byte[] rawBlockBytes) {
-        LeiosCborReader reader = new LeiosCborReader(rawBlockBytes);
-        long outerLength = reader.readLength(LeiosCborReader.MAJOR_TYPE_ARRAY);
-        reader.readDataItem(); // era
-        LeiosCborReader.DecodedItem blockItem = reader.readDataItem();
-        requireArrayEnd(reader, outerLength, 2, "era-wrapped block");
-        reader.requireEnd();
+    public static BlockBodySlice extractBlockBody(byte[] rawBlockBytes) throws CborException {
+        List<CborSlice> envelope = CborSlice.of(rawBlockBytes).items(MajorType.ARRAY);
+        require(envelope.size() == 2, "Dijkstra block must be [era, block]");
+        List<CborSlice> block = envelope.get(1).items(MajorType.ARRAY);
+        require(block.size() == 2, "Dijkstra block must be [header, block_body]");
+        List<CborSlice> body = block.get(1).items(MajorType.ARRAY);
+        require(body.size() >= 3, "Dijkstra block_body must have 3 items, found " + body.size());
 
-        LeiosCborReader blockReader = new LeiosCborReader(blockItem.rawBytes());
-        long blockLength = blockReader.readLength(LeiosCborReader.MAJOR_TYPE_ARRAY);
-        blockReader.readDataItem(); // header
-        LeiosCborReader.DecodedItem blockBodyItem = blockReader.readDataItem();
-        requireArrayEnd(blockReader, blockLength, 2, "Dijkstra block");
-        blockReader.requireEnd();
-
-        return readBlockBody(blockBodyItem);
+        List<CborSlice> txItems = body.get(0).items(MajorType.ARRAY);
+        List<TransactionSlice> transactions = new ArrayList<>(txItems.size());
+        for (int i = 0; i < txItems.size(); i++) {
+            transactions.add(readTransaction(i, txItems.get(i)));
+        }
+        return new BlockBodySlice(block.get(0).bytes(), transactions,
+                nilToNull(body.get(1)), nilToNull(body.get(2)), body.size() - 3);
     }
 
-    private static BlockBodySlice readBlockBody(LeiosCborReader.DecodedItem blockBodyItem) {
-        LeiosCborReader bodyReader = new LeiosCborReader(blockBodyItem.rawBytes());
-        long blockBodyLength = bodyReader.readLength(LeiosCborReader.MAJOR_TYPE_ARRAY);
-        if (blockBodyLength != LeiosCborReader.INDEFINITE && blockBodyLength < 4) {
-            throw new IllegalArgumentException("Dijkstra block_body must have at least 4 items");
-        }
-
-        LeiosCborReader.DecodedItem invalidTransactions = readRequiredItem(bodyReader, "Dijkstra block_body");
-        LeiosCborReader.DecodedItem transactions = readRequiredItem(bodyReader, "Dijkstra block_body");
-        LeiosCborReader.DecodedItem leiosCertificate = readRequiredItem(bodyReader, "Dijkstra block_body");
-        LeiosCborReader.DecodedItem perasCertificate = readRequiredItem(bodyReader, "Dijkstra block_body");
-        int extraItems = consumeArrayExtras(bodyReader, blockBodyLength, 4);
-        bodyReader.requireEnd();
-
-        return new BlockBodySlice(
-                invalidTransactions.dataItem(),
-                invalidTransactions.rawBytes(),
-                readTransactions(transactions),
-                leiosCertificate.dataItem(),
-                leiosCertificate.rawBytes(),
-                perasCertificate.dataItem(),
-                perasCertificate.rawBytes(),
-                extraItems);
+    public static TransactionSlice readTransaction(int index, byte[] blockTransactionBytes) throws CborException {
+        return readTransaction(index, CborSlice.of(blockTransactionBytes));
     }
 
-    private static List<TransactionSlice> readTransactions(LeiosCborReader.DecodedItem transactionsItem) {
-        LeiosCborReader txListReader = new LeiosCborReader(transactionsItem.rawBytes());
-        long txListLength = txListReader.readLength(LeiosCborReader.MAJOR_TYPE_ARRAY);
-        List<TransactionSlice> transactions = new ArrayList<>();
-        int index = 0;
-        if (txListLength == LeiosCborReader.INDEFINITE) {
-            while (!txListReader.nextIsBreak()) {
-                transactions.add(readTransaction(index++, txListReader.readDataItem()));
-            }
-            txListReader.readBreak();
-        } else {
-            for (long i = 0; i < txListLength; i++) {
-                transactions.add(readTransaction(index++, txListReader.readDataItem()));
-            }
-        }
-        txListReader.requireEnd();
-        return transactions;
+    private static TransactionSlice readTransaction(int index, CborSlice transaction) throws CborException {
+        List<CborSlice> parts = transaction.items(MajorType.ARRAY);
+        require(parts.size() == 4, "block_transaction must be [body, witness_set, auxiliary_data, is_valid], found "
+                + parts.size() + " items");
+        return new TransactionSlice(index, transaction.bytes(), parts.get(0).bytes(), parts.get(1).bytes(),
+                nilToNull(parts.get(2)), isValid(parts.get(3)));
     }
 
-    private static TransactionSlice readTransaction(int index, LeiosCborReader.DecodedItem transactionItem) {
-        LeiosCborReader transactionReader = new LeiosCborReader(transactionItem.rawBytes());
-        long transactionLength = transactionReader.readLength(LeiosCborReader.MAJOR_TYPE_ARRAY);
-        if (transactionLength != LeiosCborReader.INDEFINITE && transactionLength != 3) {
-            throw new IllegalArgumentException("Dijkstra block transaction must have exactly 3 items");
-        }
-
-        LeiosCborReader.DecodedItem body = readRequiredItem(transactionReader, "Dijkstra block transaction");
-        LeiosCborReader.DecodedItem witnesses = readRequiredItem(transactionReader, "Dijkstra block transaction");
-        LeiosCborReader.DecodedItem auxiliaryData = readRequiredItem(transactionReader, "Dijkstra block transaction");
-        requireArrayEnd(transactionReader, transactionLength, 3, "Dijkstra block transaction");
-        transactionReader.requireEnd();
-
-        return new TransactionSlice(
-                index,
-                transactionItem.dataItem(),
-                transactionItem.rawBytes(),
-                body.dataItem(),
-                body.rawBytes(),
-                witnesses.dataItem(),
-                witnesses.rawBytes(),
-                auxiliaryData.dataItem(),
-                auxiliaryData.rawBytes());
+    private static boolean isValid(CborSlice slice) throws CborException {
+        byte[] bytes = slice.bytes();
+        if (bytes.length == 1 && bytes[0] == CBOR_TRUE) return true;
+        if (bytes.length == 1 && bytes[0] == CBOR_FALSE) return false;
+        throw new CborException("block_transaction is_valid must be a bool");
     }
 
-    private static int consumeArrayExtras(LeiosCborReader reader, long length, int consumed) {
-        int extraItems = 0;
-        if (length == LeiosCborReader.INDEFINITE) {
-            while (!reader.nextIsBreak()) {
-                reader.readDataItem();
-                extraItems++;
-            }
-            reader.readBreak();
-            return extraItems;
-        }
-
-        for (long i = consumed; i < length; i++) {
-            reader.readDataItem();
-            extraItems++;
-        }
-        return extraItems;
+    private static byte[] nilToNull(CborSlice slice) {
+        byte[] bytes = slice.bytes();
+        return bytes.length == 1 && bytes[0] == CBOR_NULL ? null : bytes;
     }
 
-    private static LeiosCborReader.DecodedItem readRequiredItem(LeiosCborReader reader, String name) {
-        if (reader.nextIsBreak()) {
-            throw new IllegalArgumentException(name + " ended before all required items were present");
-        }
-        return reader.readDataItem();
+    private static void require(boolean condition, String message) throws CborException {
+        if (!condition) throw new CborException(message);
     }
 
-    private static void requireArrayEnd(LeiosCborReader reader, long length, int consumed, String name) {
-        if (length == LeiosCborReader.INDEFINITE) {
-            if (!reader.nextIsBreak()) {
-                throw new IllegalArgumentException(name + " has more than " + consumed + " items");
-            }
-            reader.readBreak();
-        } else if (length != consumed) {
-            throw new IllegalArgumentException(name + " must have " + consumed + " items");
-        }
-    }
-
-    public record BlockBodySlice(DataItem invalidTransactions,
-                                 byte[] invalidTransactionsBytes,
+    /**
+     * @param headerBytes            the encoded header
+     * @param leiosCertificateBytes  null when the block certifies no endorser block
+     * @param perasCertificateBytes  null when absent
+     * @param extraItems             block_body items after the three known ones (ignored)
+     */
+    public record BlockBodySlice(byte[] headerBytes,
                                  List<TransactionSlice> transactions,
-                                 DataItem leiosCertificate,
                                  byte[] leiosCertificateBytes,
-                                 DataItem perasCertificate,
                                  byte[] perasCertificateBytes,
                                  int extraItems) {
     }
 
+    /**
+     * @param auxiliaryDataBytes null when the transaction has no auxiliary data
+     * @param valid              false for a phase-2 invalid transaction (collateral is spent instead)
+     */
     public record TransactionSlice(int index,
-                                   DataItem transaction,
                                    byte[] transactionBytes,
-                                   DataItem body,
                                    byte[] bodyBytes,
-                                   DataItem witnesses,
                                    byte[] witnessesBytes,
-                                   DataItem auxiliaryData,
-                                   byte[] auxiliaryDataBytes) {
+                                   byte[] auxiliaryDataBytes,
+                                   boolean valid) {
     }
 }

@@ -4,6 +4,7 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.SimpleValue;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.leios.EndorserBlock;
 import com.bloxbean.cardano.yaci.core.model.leios.EndorserBlockTx;
@@ -133,25 +134,21 @@ class LeiosModelSerializersTest {
     }
 
     @Test
-    void decodesTxListWithDedicatedNs8EraMapping() {
-        byte[] txBytes = new byte[]{(byte) 0x84, 1, 2, 3, 4};
-        ByteString txCbor = new ByteString(txBytes);
-        txCbor.setTag(24L);
-
-        Array tx = new Array();
-        tx.add(new UnsignedInteger(7));
-        tx.add(txCbor);
+    void decodesW40aTxListOfPlainByteStrings() {
+        //w40a MsgLeiosBlockTxs tx_list = [* bytes], each holding one transaction's CBOR
+        byte[] txBytes = new byte[]{(byte) 0x83, (byte) 0xa0, (byte) 0xa0, (byte) 0xf6};
 
         Array txList = new Array();
-        txList.add(tx);
+        txList.add(new ByteString(txBytes));
 
         List<EndorserBlockTx> decoded = EndorserBlockTxListSerializer.INSTANCE.deserialize(
                 CborSerializationUtil.serialize(txList, false));
 
         assertEquals(1, decoded.size());
-        assertEquals(7, decoded.get(0).getTxEraIndex());
         assertEquals(Era.Dijkstra, decoded.get(0).getEra());
         assertEquals(HexUtil.encodeHexString(txBytes), decoded.get(0).getTxCbor());
+        //the endorser block references a tx by blake2b-256 of these inner bytes
+        assertEquals(HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(txBytes)), decoded.get(0).getTxHash());
         assertTrue(decoded.get(0).isParsed());
     }
 

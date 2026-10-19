@@ -1,8 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.Array;
-import co.nstant.in.cbor.model.DataItem;
-import co.nstant.in.cbor.model.SimpleValue;
+import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.AuxData;
 import com.bloxbean.cardano.yaci.core.model.Block;
@@ -11,117 +10,122 @@ import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.TransactionBody;
 import com.bloxbean.cardano.yaci.core.model.Witnesses;
 import com.bloxbean.cardano.yaci.core.model.serializers.leios.LeiosCertificateSerializer;
+import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.DijkstraTransactionExtractor;
+import com.bloxbean.cardano.yaci.core.model.serializers.util.DijkstraTransactionExtractor.TransactionSlice;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toInt;
-
 /**
- * Maps the w27 Dijkstra nested block body into Yaci's existing block model.
+ * Parses a Dijkstra (Leios) ranking block into Yaci's existing {@link Block} model.
+ * See {@link DijkstraTransactionExtractor} for the wire layout.
+ * <p>
+ * Each transaction gets the same treatment {@link BlockSerializer} gives Shelley through Conway blocks:
+ * transaction bodies keep their original bytes (so tx hashes are correct), datum/redeemer bytes are taken from
+ * the source, and a witness set or metadata that cannot be parsed normally (too deeply nested, or bad JSON) is
+ * recovered with {@link DataItemIsolation}. Recovery is per transaction, so one bad item never affects the rest.
  */
 @Slf4j
 public enum DijkstraBlockBodySerializer {
     INSTANCE;
 
-    public Block deserialize(Block.BlockBuilder blockBuilder, byte[] rawBlockBytes, BlockHeader blockHeader) {
-        DijkstraTransactionExtractor.BlockBodySlice bodySlice =
-                DijkstraTransactionExtractor.extractBlockBody(rawBlockBytes);
-        if (bodySlice.extraItems() > 0 && log.isDebugEnabled()) {
-            log.debug("Ignoring {} extra Dijkstra block_body item(s) at block {}",
-                    bodySlice.extraItems(), blockHeader.getHeaderBody().getBlockNumber());
+    /**
+     * True when the block's era tag is Dijkstra. Reads only the era tag; any decoding problem returns false so
+     * the caller's original path handles the block exactly as before.
+     */
+    static boolean isDijkstraBlock(byte[] blockBytes) {
+        try {
+            return EraUtil.getEra(DataItemIsolation.unsigned(CborSlice.arrayItem(blockBytes, 0))) == Era.Dijkstra;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @SneakyThrows
+    public Block deserialize(byte[] blockBytes) {
+        DijkstraTransactionExtractor.BlockBodySlice slice = DijkstraTransactionExtractor.extractBlockBody(blockBytes);
+        BlockHeader header = BlockHeaderSerializer.INSTANCE.getBlockHeaderFromHeaderArray(
+                (Array) CborSerializationUtil.deserializeOne(slice.headerBytes()));
+        long blockNumber = header.getHeaderBody().getBlockNumber();
+        if (slice.extraItems() > 0) {
+            log.debug("Ignoring {} extra Dijkstra block_body item(s) at block {}", slice.extraItems(), blockNumber);
         }
 
         List<TransactionBody> transactionBodies = new ArrayList<>();
         List<Witnesses> witnessesSet = new ArrayList<>();
         List<byte[]> witnessRawBytes = new ArrayList<>();
         Map<Integer, AuxData> auxiliaryDataMap = new LinkedHashMap<>();
+        List<Integer> invalidTransactions = new ArrayList<>();
 
-        for (DijkstraTransactionExtractor.TransactionSlice transaction : bodySlice.transactions()) {
+        for (TransactionSlice tx : slice.transactions()) {
             transactionBodies.add(TransactionBodySerializer.INSTANCE.deserializeDI(
-                    transaction.body(), transaction.bodyBytes()));
-            Witnesses witnesses = WitnessesSerializer.INSTANCE.deserializeDI(transaction.witnesses());
-            witnessesSet.add(witnesses);
-            witnessRawBytes.add(transaction.witnessesBytes());
-
-            if (isPresentCborItem(transaction.auxiliaryData())) {
-                auxiliaryDataMap.put(transaction.index(),
-                        AuxDataSerializer.INSTANCE.deserializeDI(transaction.auxiliaryData()));
+                    CborSerializationUtil.deserializeOne(tx.bodyBytes()), tx.bodyBytes()));
+            witnessesSet.add(witnesses(tx.witnessesBytes()));
+            witnessRawBytes.add(tx.witnessesBytes());
+            if (tx.auxiliaryDataBytes() != null) {
+                auxiliaryDataMap.put(tx.index(), auxiliaryData(blockNumber, tx, transactionBodies));
+            }
+            if (!tx.valid()) {
+                invalidTransactions.add(tx.index());
             }
         }
 
-        try {
-            BlockSerializer.INSTANCE.handleWitnessDatumRedeemer(blockHeader.getHeaderBody().getBlockNumber(),
-                    witnessesSet, witnessRawBytes);
-        } catch (Exception e) {
-            log.error("Extraction of Dijkstra redeemer and datum bytes failed for block: {}",
-                    blockHeader.getHeaderBody().getBlockNumber(), e);
+        if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
+            BlockSerializer.INSTANCE.setWitnessCbor(blockNumber, witnessesSet, witnessRawBytes);
         }
+        //To fix #37 (datum/redeemer hash after a CBOR round trip): take their bytes from the source
+        BlockSerializer.INSTANCE.handleWitnessDatumRedeemer(blockNumber, witnessesSet, witnessRawBytes);
 
-        blockBuilder.transactionBodies(transactionBodies);
-        blockBuilder.transactionWitness(witnessesSet);
-        blockBuilder.auxiliaryDataMap(auxiliaryDataMap);
-        blockBuilder.invalidTransactions(readInvalidTransactions(bodySlice.invalidTransactions(),
-                transactionBodies.size()));
-
-        if (isPresentCborItem(bodySlice.leiosCertificate())) {
-            blockBuilder.leiosCertificate(LeiosCertificateSerializer.INSTANCE.deserialize(
-                    bodySlice.leiosCertificateBytes()));
+        Block.BlockBuilder blockBuilder = Block.builder()
+                .era(Era.Dijkstra)
+                .header(header)
+                .transactionBodies(transactionBodies)
+                .transactionWitness(witnessesSet)
+                .auxiliaryDataMap(auxiliaryDataMap)
+                .invalidTransactions(invalidTransactions);
+        if (slice.leiosCertificateBytes() != null) {
+            blockBuilder.leiosCertificate(LeiosCertificateSerializer.INSTANCE.deserialize(slice.leiosCertificateBytes()));
         }
-        if (isPresentCborItem(bodySlice.perasCertificate())) {
-            blockBuilder.perasCertCbor(HexUtil.encodeHexString(bodySlice.perasCertificateBytes()));
+        if (slice.perasCertificateBytes() != null) {
+            blockBuilder.perasCertCbor(HexUtil.encodeHexString(slice.perasCertificateBytes()));
         }
         if (YaciConfig.INSTANCE.isReturnBlockCbor()) {
-            blockBuilder.cbor(HexUtil.encodeHexString(rawBlockBytes));
+            blockBuilder.cbor(HexUtil.encodeHexString(blockBytes));
         }
-
         return blockBuilder.build();
     }
 
-    private List<Integer> readInvalidTransactions(DataItem invalidTransactions, int transactionCount) {
-        if (!isPresentCborItem(invalidTransactions)) {
-            return Collections.emptyList();
+    private Witnesses witnesses(byte[] raw) {
+        try {
+            Witnesses witnesses = WitnessesSerializer.INSTANCE.deserializeDI(CborSerializationUtil.deserializeOne(raw));
+            return DataItemIsolation.hasDataError(witnesses) ? DataItemIsolation.witness(raw) : witnesses;
+        } catch (StackOverflowError e) {
+            return DataItemIsolation.witness(raw);
         }
-        if (!(invalidTransactions instanceof Array invalidArray)) {
-            throw new IllegalArgumentException("Dijkstra invalid_transactions must be nil or an array/set");
-        }
-
-        List<Integer> indexes = new ArrayList<>();
-        for (DataItem txIndex : invalidArray.getDataItems()) {
-            if (txIndex == SimpleValue.BREAK) {
-                continue;
-            }
-            int index = toInt(txIndex);
-            if (index < 0 || index >= transactionCount) {
-                throw new IllegalArgumentException("Dijkstra invalid transaction index out of range: " + index);
-            }
-            indexes.add(index);
-        }
-        return indexes;
     }
 
-    /**
-     * A Dijkstra block is {@code [header, block_body]}; Shelley through Conway blocks have four or five items.
-     */
-    static boolean isDijkstraBlock(Era era, Array blockArray) {
-        if (era != Era.Dijkstra) {
-            return false;
+    private AuxData auxiliaryData(long blockNumber, TransactionSlice tx, List<TransactionBody> transactionBodies) {
+        byte[] raw = tx.auxiliaryDataBytes();
+        AuxData auxData;
+        try {
+            auxData = AuxDataSerializer.INSTANCE.deserializeDI(CborSerializationUtil.deserializeOne(raw));
+            if (auxData.getMetadataParseError() != null) {
+                auxData = DataItemIsolation.auxiliary(raw);
+            }
+        } catch (StackOverflowError e) {
+            auxData = DataItemIsolation.auxiliary(raw);
         }
-        List<DataItem> items = blockArray.getDataItems();
-        int itemCount = items.size();
-        if (itemCount > 0 && items.get(itemCount - 1) == SimpleValue.BREAK) {
-            itemCount--; //indefinite-length arrays carry a trailing BREAK in getDataItems()
+        if (YaciConfig.INSTANCE.isReturnFullTxCbor()
+                && BlockSerializer.INSTANCE.isAuxDataHashValid(blockNumber, tx.index(), transactionBodies, raw)) {
+            auxData = auxData.toBuilder().cbor(HexUtil.encodeHexString(raw)).build();
         }
-        return itemCount == 2 && items.get(1) instanceof Array;
-    }
-
-    private boolean isPresentCborItem(DataItem dataItem) {
-        return dataItem != null && dataItem != SimpleValue.NULL && dataItem != SimpleValue.BREAK;
+        return auxData;
     }
 }
