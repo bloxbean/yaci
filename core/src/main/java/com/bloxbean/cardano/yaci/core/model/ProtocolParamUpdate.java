@@ -77,4 +77,71 @@ public class ProtocolParamUpdate {
     private BigInteger drepDeposit; //31
     private Integer drepActivity; //32
     private NonNegativeInterval minFeeRefScriptCostPerByte; //33
+
+    //Dijkstra era fields
+    private Long maxRefScriptSizePerBlock; //34
+    private Long maxRefScriptSizePerTx; //35
+    private Long refScriptCostStride; //36
+    private NonNegativeInterval refScriptCostMultiplier; //37
+    private NonNegativeInterval maxPledgeLeverage; //38, null when absent or nil
+    private Boolean maxPledgeLeverageNoLimit; //38, true when the update sets nil (no limit)
+    private UnitInterval minPoolMargin; //39
+
+    //Leios fields (Dijkstra era)
+    private Long leiosAnnouncementPeriodMs; //40
+    private Long leiosVotePeriodMs; //41
+    private Long leiosDiffusionPeriodMs; //42
+    private Integer leiosCommitteeSize; //43
+    private UnitInterval leiosQuorumStakeThreshold; //44
+    private Long maxEndorserBlockRefsSize; //45
+    private Long maxEndorserBlockTxsSize; //46
+    private BigInteger maxEndorserBlockExMem; //47
+    private BigInteger maxEndorserBlockExSteps; //47
+    private Long maxRefScriptSizePerEndorserBlock; //48
+
+    /**
+     * Pre-Dijkstra constructor, kept so existing callers compile and behave unchanged.
+     */
+    public ProtocolParamUpdate(Integer minFeeA,
+                               Integer minFeeB,
+                               Integer maxBlockSize,
+                               Integer maxTxSize,
+                               Integer maxBlockHeaderSize,
+                               BigInteger keyDeposit,
+                               BigInteger poolDeposit,
+                               Integer maxEpoch,
+                               Integer nOpt,
+                               NonNegativeInterval poolPledgeInfluence,
+                               UnitInterval expansionRate,
+                               UnitInterval treasuryGrowthRate,
+                               UnitInterval decentralisationParam,
+                               Tuple<Integer, String> extraEntropy,
+                               Integer protocolMajorVer,
+                               Integer protocolMinorVer,
+                               BigInteger minUtxo,
+                               BigInteger minPoolCost,
+                               BigInteger adaPerUtxoByte,
+                               Map<Integer, String> costModels,
+                               String costModelsHash,
+                               NonNegativeInterval priceMem,
+                               NonNegativeInterval priceStep,
+                               BigInteger maxTxExMem,
+                               BigInteger maxTxExSteps,
+                               BigInteger maxBlockExMem,
+                               BigInteger maxBlockExSteps,
+                               Long maxValSize,
+                               Integer collateralPercent,
+                               Integer maxCollateralInputs,
+                               PoolVotingThresholds poolVotingThresholds,
+                               DrepVoteThresholds drepVotingThresholds,
+                               Integer committeeMinSize,
+                               Integer committeeMaxTermLength,
+                               Integer govActionLifetime,
+                               BigInteger govActionDeposit,
+                               BigInteger drepDeposit,
+                               Integer drepActivity,
+                               NonNegativeInterval minFeeRefScriptCostPerByte) {
+        this(minFeeA, minFeeB, maxBlockSize, maxTxSize, maxBlockHeaderSize, keyDeposit, poolDeposit, maxEpoch, nOpt, poolPledgeInfluence, expansionRate, treasuryGrowthRate, decentralisationParam, extraEntropy, protocolMajorVer, protocolMinorVer, minUtxo, minPoolCost, adaPerUtxoByte, costModels, costModelsHash, priceMem, priceStep, maxTxExMem, maxTxExSteps, maxBlockExMem, maxBlockExSteps, maxValSize, collateralPercent, maxCollateralInputs, poolVotingThresholds, drepVotingThresholds, committeeMinSize, committeeMaxTermLength, govActionLifetime, govActionDeposit, drepDeposit, drepActivity, minFeeRefScriptCostPerByte,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
 }

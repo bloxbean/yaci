@@ -140,7 +140,7 @@ public enum DijkstraBlockBodySerializer {
 
         for (TransactionSlice tx : slices) {
             transactionBodies.add(TransactionBodySerializer.INSTANCE.deserializeDI(
-                    CborSerializationUtil.deserializeOne(tx.bodyBytes()), tx.bodyBytes()));
+                    CborSerializationUtil.deserializeOne(tx.bodyBytes()), tx.bodyBytes(), true));
             witnessesSet.add(witnesses(tx.witnessesBytes()));
             witnessRawBytes.add(tx.witnessesBytes());
             if (tx.auxiliaryDataBytes() != null) {
@@ -163,7 +163,7 @@ public enum DijkstraBlockBodySerializer {
                                       Map<Integer, AuxData> auxiliaryData, List<Integer> invalidIndexes) {
     }
 
-    private Witnesses witnesses(byte[] raw) {
+    Witnesses witnesses(byte[] raw) {
         try {
             Witnesses witnesses = WitnessesSerializer.INSTANCE.deserializeDI(CborSerializationUtil.deserializeOne(raw));
             return DataItemIsolation.hasDataError(witnesses) ? DataItemIsolation.witness(raw) : witnesses;
@@ -173,7 +173,10 @@ public enum DijkstraBlockBodySerializer {
     }
 
     private AuxData auxiliaryData(long blockNumber, TransactionSlice tx, List<TransactionBody> transactionBodies) {
-        byte[] raw = tx.auxiliaryDataBytes();
+        return auxiliaryData(blockNumber, tx.index(), transactionBodies, tx.auxiliaryDataBytes());
+    }
+
+    AuxData auxiliaryData(long blockNumber, int index, List<TransactionBody> transactionBodies, byte[] raw) {
         AuxData auxData;
         try {
             auxData = AuxDataSerializer.INSTANCE.deserializeDI(CborSerializationUtil.deserializeOne(raw));
@@ -184,7 +187,7 @@ public enum DijkstraBlockBodySerializer {
             auxData = DataItemIsolation.auxiliary(raw);
         }
         if (YaciConfig.INSTANCE.isReturnFullTxCbor()
-                && BlockSerializer.INSTANCE.isAuxDataHashValid(blockNumber, tx.index(), transactionBodies, raw)) {
+                && BlockSerializer.INSTANCE.isAuxDataHashValid(blockNumber, index, transactionBodies, raw)) {
             auxData = auxData.toBuilder().cbor(HexUtil.encodeHexString(raw)).build();
         }
         return auxData;

@@ -45,6 +45,13 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
         String operator = toHex(dataItemList.get(1));
         String vrfKeyHash = toHex(dataItemList.get(2));
         int o = dataItemList.size() - 10; //1 when a Dijkstra bls_key (or nil) sits at index 3, else 0
+        String blsPublicKey = null;
+        String blsPossessionProof = null;
+        if (o == 1 && !SimpleValue.NULL.equals(dataItemList.get(3))) {
+            List<DataItem> blsKey = ((Array) dataItemList.get(3)).getDataItems();
+            blsPublicKey = toHex(blsKey.get(0));
+            blsPossessionProof = toHex(blsKey.get(1));
+        }
         BigInteger pledge = toBigInteger(dataItemList.get(3 + o));
         BigInteger cost = toBigInteger(dataItemList.get(4 + o));
 
@@ -90,6 +97,8 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
                 .relays(relays)
                 .poolMetadataUrl(metadataUrl)
                 .poolMetadataHash(metadataHash)
+                .blsPublicKey(blsPublicKey)
+                .blsPossessionProof(blsPossessionProof)
                 .build();
 
         return new PoolRegistration(poolParams);

@@ -25,4 +25,18 @@ public class PoolParams {
     //pool_metadata
     private String poolMetadataUrl;
     private String poolMetadataHash;
+
+    //Dijkstra era bls_key = [bls_pubkey, bls_possession_proof] (hex); null when absent or nil
+    private String blsPublicKey;
+    private String blsPossessionProof;
+
+    /**
+     * Pre-Dijkstra constructor, kept so existing callers compile and behave unchanged.
+     */
+    public PoolParams(String operator, String vrfKeyHash, BigInteger pledge, BigInteger cost, UnitInterval margin,
+                      String rewardAccount, Set<String> poolOwners, List<Relay> relays, String poolMetadataUrl,
+                      String poolMetadataHash) {
+        this(operator, vrfKeyHash, pledge, cost, margin, rewardAccount, poolOwners, relays, poolMetadataUrl,
+                poolMetadataHash, null, null);
+    }
 }

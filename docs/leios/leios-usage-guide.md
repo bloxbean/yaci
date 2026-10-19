@@ -170,6 +170,29 @@ try (LeiosNetworkClient client = new LeiosNetworkClient(host, 3001)) { // magic 
 
 ---
 
+## Dijkstra transaction fields
+
+All Dijkstra-era structures of the deployed CDDL are parsed. New fields are null for earlier eras, so Conway
+objects and their JSON are unchanged.
+
+| CDDL | Yaci |
+| :--- | :--- |
+| tx body 14 `guards` | `TransactionBody.guards` (credentials, in order). Key-hash guards are also in `requiredSigners`, as before. |
+| tx body 23 `sub_transactions` | `TransactionBody.subTransactions`: each `SubTransaction` has its own `body` (with `txHash`), `witnesses` and `auxData`. |
+| tx body 24 `required_top_level_guards` | `TransactionBody.requiredTopLevelGuards` (credential, datum CBOR or null) |
+| tx body 25 `direct_deposits` | `TransactionBody.directDeposits` (reward account hex → coin, like `withdrawals`) |
+| tx body 26, 27 balance intervals | `accountBalanceIntervals`, `startingAccountBalanceIntervals` (`AccountBalanceInterval`; the plain `coin` form is an exact balance) |
+| native script 6 `require_guard` | `NativeScript` type 6, JSON `{"type":"requireGuard","keyHash"\|"scriptHash":…}` |
+| redeemer tag 6 | `RedeemerTag.Guarding` |
+| pool `bls_key` | `PoolParams.blsPublicKey`, `blsPossessionProof` |
+| protocol parameter update keys 34–48 | `ProtocolParamUpdate` (reference script limits, `maxPledgeLeverage`, `minPoolMargin`, Leios parameters) |
+| Plutus V4 | `PlutusScriptType.PlutusScriptV4`, `AuxData.plutusV4Scripts` |
+| hard-fork era index 7 | `localstate.api.Era.Dijkstra`, `TxBodyType.DIJKSTRA` (local state queries, transaction submission) |
+
+The Haskell golden vectors used to test this are in `core/src/test/resources/leios/haskell/`.
+
+---
+
 ## Settings
 
 | Setting | Default | Meaning |
@@ -191,10 +214,10 @@ You do not need separate builds or feature flags.
 ## Current limitations
 
 - Certificates are parsed and kept raw, **not** BLS-verified. Yaci trusts the node's chain selection.
-- Dijkstra transaction bodies: key 14 is `guards`. Key-hash guards appear in `TransactionBody.requiredSigners`;
-  script guards are not modelled yet. Sub-transactions (key 23), keys 24–27, native-script `require_guard` and
-  the guarding redeemer tag are not modelled yet.
-- The pool registration `bls_key` is accepted but not exposed.
+- Plutus V4 scripts are read where the deployed CDDL allows them: reference scripts (raw `scriptRef`, as for
+  other versions) and auxiliary data (`AuxData.plutusV4Scripts`). The witness set has no Plutus V4 key in w40a.
+- Local state query results for the Dijkstra era (for example current protocol parameters) are not verified yet:
+  no local Musashi node was available.
 - How long nodes keep old certified EBs is not specified yet; four weeks is verified on Musashi.
 - If the first block after a start certifies an EB and its parent is more than 1,000 slots older (a long block
   gap), the parent search fails and the block waits; tip sync uses the intersection point and does not search.

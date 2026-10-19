@@ -7,7 +7,8 @@ public enum Era {
     Mary(3),
     Alonzo(4),
     Babbage(5),
-    Conway(6);
+    Conway(6),
+    Dijkstra(7);
 
     public final int value;
     Era(int value) {

@@ -91,6 +91,10 @@ How to re-check the baseline:
 | 5 | N2N range sync: fetch historical EBs over LeiosFetch so N2N gives full tx data through the same interface | done with step 4: live range test matches db-sync | `MusashiCompleteBlocksIT` | |
 | 6 | N2C: accept the node's inlined certifying blocks (secondary, most downstream uses N2N) | done: parses unchanged; gap logged | `N2CInlinedCertifyingBlockTest` | reviewed: approve; 4 small fixes applied |
 | 7 | Run an unmodified Yaci Store against Musashi and check tx counts | done: PASS, 50/50 blocks and 83,540/83,540 txs = db-sync (24 certifying) | `adr/leios-evidence/step7-yaci-store-musashi.md` | |
+| 7b | Full Musashi sync with an unmodified Yaci Store (Postgres), compared with db-sync | in progress: no gaps or mismatches so far; 400 random txs compared field by field | `adr/leios-evidence/step7-yaci-store-musashi.md` | |
+| 9 | Parse every Dijkstra structure of the deployed CDDL (keys 14, 23-27, require_guard, redeemer tag 6, Plutus V4, bls_key, pparam keys 34-48, era index 7); backward compatible | done | branch `feat/leios_dijkstra_cddl` (stacked on #221); Haskell golden vectors in `core/src/test/resources/leios/haskell/` | review in progress |
+| 10 | Yaci Store changes for Leios on `develop/leios` | PRs open: #1274 (Plutus V4 reference scripts), #1275 (Alonzo genesis price keys) | bloxbean/yaci-store | reviewed |
+| 11 | N2C local state query results in the Dijkstra era (e.g. current protocol parameters) | todo: needs a local Musashi node | | |
 | 8 | Push / merge (each push or merge needs explicit approval) | push approved by owner 2026-10-19: rebased branches force-pushed to the PR #167 / #171 branches (old heads `1fa64f6` / `d7f538c` kept in local branches); **merge not done** | PRs #167, #171 | |
 
 ## Step notes
@@ -306,3 +310,26 @@ ADR 0013 prerequisites: all done.
   on `batchDone`. The run used `blocks-batch-size=7`; details are in the evidence file.
 - Before Yaci Store can use the `next` line it needs Java 25 support (Gradle 9, a Spring version that reads class
   version 69), or Yaci needs a Java 21 build. This is a separate item, not about Leios.
+
+### 9. Dijkstra CDDL (2026-10-19)
+- Reference: cardano-ledger `d93c6546` (pinned by consensus `cbd10033`). Its `dijkstra.cddl` is byte-identical to
+  blueprint `131cc95a`. Haskell golden vectors: the ledger `golden/tx.cbor` (`exampleDijkstraTx`) and the consensus
+  `GenTx_Dijkstra`, `Header_Dijkstra` and `LeiosVote`, all parsed in `DijkstraGoldenVectorsTest`.
+- Cases with no Haskell vector are tested with hand-built CBOR in `DijkstraCddlTest`: `require_guard`, the
+  exact-coin interval, key 27, bare key-hash guards, pparam keys 34-48 and nil `max_pledge_leverage`.
+- Notes from the Haskell code:
+  - Plutus V4 is not allowed in the witness set (no key 8); it appears only in script refs and aux data key 5.
+  - Guards never mix the key-hash and credential forms.
+  - `sub_transactions` may or may not carry tag 258.
+  - `bls_key` is omitted (not nil) when absent.
+  - `[nil, nil]` intervals are invalid.
+- Backward compatibility:
+  - All new fields are null for earlier eras (`@JsonInclude(NON_NULL)`).
+  - The old constructors of `TransactionBody`, `ProtocolParamUpdate`, `PoolParams` and `AuxData` are kept.
+  - `apicompare.py` against `874ffa0`: 0 incompatibilities (core: 867 public types, helper: 118).
+  - Behaviour change: native-script type 6 is now `require_guard`, so a malformed type-6 script fails like any
+    malformed script.
+- Not covered:
+  - N2C local-state query result decoders for the Dijkstra era (step 11).
+  - Tx-submission errors in Dijkstra format (ADR 0001 parser).
+
