@@ -90,7 +90,7 @@ How to re-check the baseline:
 | 4 | Build the complete-block assembler in the helper (announcement memory, EB resolver, reorder buffer, merger, ordered delivery) and `YaciConfig.inlineEndorserBlockTxs` (default true) | done | branch `feat/leios_complete_blocks` (PR stacked on #171) | reviewed; all findings addressed |
 | 5 | N2N range sync: fetch historical EBs over LeiosFetch so N2N gives full tx data through the same interface | done with step 4: live range test matches db-sync | `MusashiCompleteBlocksIT` | |
 | 6 | N2C: accept the node's inlined certifying blocks (secondary, most downstream uses N2N) | done: parses unchanged; gap logged | `N2CInlinedCertifyingBlockTest` | reviewed: approve; 4 small fixes applied |
-| 7 | Run an unmodified Yaci Store against Musashi and check tx counts | todo | | |
+| 7 | Run an unmodified Yaci Store against Musashi and check tx counts | done: PASS, 50/50 blocks and 83,540/83,540 txs = db-sync (24 certifying) | `adr/leios-evidence/step7-yaci-store-musashi.md` | |
 | 8 | Push / merge (each push or merge needs explicit approval) | push approved by owner 2026-10-19: rebased branches force-pushed to the PR #167 / #171 branches (old heads `1fa64f6` / `d7f538c` kept in local branches); **merge not done** | PRs #167, #171 | |
 
 ## Step notes
@@ -295,3 +295,14 @@ ADR 0013 prerequisites: all done.
   **5,255/5,255** tx hashes match the EB references
   (`python3 adr/leios-evidence/leios_fetch_probe.py 3495655 77714b7b…08be "" all`).
   w40a EB transactions are the 3-element mempool form `[body, witnesses, aux/nil]` (16 of 16 sampled).
+
+### 7. Unmodified Yaci Store (2026-10-19)
+- Yaci Store `main` @ `ef856acaf`. The only change is the Yaci version line; Yaci is `2cad020` built with Java 21
+  bytecode, because Yaci Store cannot read Java 25 classes yet.
+- Synced blocks 156,611–156,660 over N2N with parallel processing. Block slot, hash and tx count are equal to
+  db-sync for all 50 blocks: 83,540 txs, 24 certifying blocks. The first block certifies an EB, and its parent
+  lookup worked.
+- Yaci Store setting, not a Yaci issue: in range-only mode (stop slot set) a partial parallel batch is not written
+  on `batchDone`. The run used `blocks-batch-size=7`; details are in the evidence file.
+- Before Yaci Store can use the `next` line it needs Java 25 support (Gradle 9, a Spring version that reads class
+  version 69), or Yaci needs a Java 21 build. This is a separate item, not about Leios.
