@@ -32,7 +32,7 @@ class N2CInlinedCertifyingBlockTest {
 
     @Test
     void parsesCertifyingBlockWithInlinedEndorserBlockTransactions() throws Exception {
-        byte[] wireBlock = fixture("block-156613.hex");
+        byte[] wireBlock = fixture("certifying-block-156613.hex");
         byte[] txList = fixture("eb-3bca1a2b-txs.hex"); //LeiosFetch tx list: [* bytes(mempool tx)]
         Block onWire = BlockSerializer.INSTANCE.deserialize(wireBlock);
         assertTrue(onWire.getTransactionBodies().isEmpty()); //over node-to-node the certifying block has no txs

@@ -11,7 +11,7 @@ Tool: `./gradlew :helper:captureW27Fixtures -PfixtureDir=<dir> -PfixtureSeconds=
 | `block-163000.hex` | normal block: 354 txs, announces an EB |
 | `block-163003.hex` | normal block: 274 txs, no announcement |
 | `block-163013.hex` | normal block: 362 txs, announces an EB, header protocol version 12.67 |
-| `block-156613.hex` | certifying block #156613 (certifies EB `3bca1a2b…`, 345 txs per db-sync) |
+| `certifying-block-156613.hex` | certifying block #156613 (certifies EB `3bca1a2b…`, 345 txs per db-sync) |
 | `eb-3bca1a2b-txs.hex` | the 345 transactions of EB `3bca1a2b…` as served by LeiosFetch (`[* bytes]`) |
 | `endorser-block-3639947.hex` | an endorser block (`MsgLeiosBlock` payload: map tx hash -> size) |
 | `vote-*.hex` | votes: `[announcing_rb_hash, voter_id, signature]` |
