@@ -117,12 +117,11 @@ class LeiosMusashiSmokeTest {
                 for (LeiosRawCbor rawVote : votes) {
                     LeiosVote vote = decodeVote(rawVote);
                     decodedVotes.incrementAndGet();
-                    log.info("Leios vote decoded: point={}, voterId={}, signatureBytes={}",
-                            formatPoint(vote.point()), vote.voterId(), vote.signatureBytes());
+                    log.info("Leios vote decoded: announcingRbHash={}, voterId={}, signatureBytes={}",
+                            HexUtil.encodeHexString(vote.announcingRbHash()), vote.voterId(), vote.signatureBytes());
                     if (fetchFromVote && voteFetchRequested.compareAndSet(false, true)) {
-                        voteFetchRequests.incrementAndGet();
-                        log.info("Requesting EB body from vote point: {}", formatPoint(vote.point()));
-                        client.requestBlock(vote.point());
+                        //A w40a vote names the announcing RB, not an EB point, so it cannot drive an EB fetch
+                        log.info("Skipping fetch-from-vote: w40a votes carry the announcing RB hash, not an EB point");
                     }
                 }
             }
@@ -260,24 +259,16 @@ class LeiosMusashiSmokeTest {
             throw new IllegalArgumentException("Leios vote must be a CBOR array");
         }
 
+        //w40a vote: [announcing_rb_hash, voter_id, vote_signature(48 bytes)]
         List<DataItem> items = array.getDataItems();
-        if (items.size() != 4) {
-            throw new IllegalArgumentException("Leios vote must have 4 fields");
+        if (items.size() != 3) {
+            throw new IllegalArgumentException("Leios vote must have 3 fields");
         }
 
-        long slot = toLong((UnsignedInteger) items.get(0), "vote slot");
-        byte[] ebHash = ((ByteString) items.get(1)).getBytes();
-        int voterId = toWord16((UnsignedInteger) items.get(2));
-        int signatureBytes = ((ByteString) items.get(3)).getBytes().length;
-        return new LeiosVote(new LeiosPoint(slot, ebHash), voterId, signatureBytes);
-    }
-
-    private static long toLong(UnsignedInteger value, String name) {
-        BigInteger bigint = value.getValue();
-        if (bigint.signum() < 0 || bigint.compareTo(LONG_MAX) > 0) {
-            throw new IllegalArgumentException(name + " must fit in signed long");
-        }
-        return bigint.longValue();
+        byte[] announcingRbHash = ((ByteString) items.get(0)).getBytes();
+        int voterId = toWord16((UnsignedInteger) items.get(1));
+        int signatureBytes = ((ByteString) items.get(2)).getBytes().length;
+        return new LeiosVote(announcingRbHash, voterId, signatureBytes);
     }
 
     private static int toWord16(UnsignedInteger value) {
@@ -309,6 +300,6 @@ class LeiosMusashiSmokeTest {
         return Boolean.parseBoolean(value);
     }
 
-    private record LeiosVote(LeiosPoint point, int voterId, int signatureBytes) {
+    private record LeiosVote(byte[] announcingRbHash, int voterId, int signatureBytes) {
     }
 }

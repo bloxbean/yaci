@@ -12,14 +12,11 @@ import java.util.Map;
  * before parallel processing) code against. One logical call resolves many EBs;
  * implementations may chunk large requests internally.
  *
- * <p><b>Status: placeholder — not implementable on the current Musashi prototype.</b>
- * Resolving arbitrary (historical) Endorser Blocks requires the final CIP-0164
- * {@code MsgLeiosMultiBlockRequest} — the bulk "EBs plus all referenced transactions"
- * fetch designed for catch-up. The prototype's leios-fetch protocol has only offer-gated
- * single-point requests, its batch/range messages are commented out of the pinned CDDL,
- * and it has no error/not-found response: requesting an EB a peer never offered risks a
- * stalled agent or a connection reset, and peer retention of old EBs is unspecified.
- * See ADR 0012 (Phase 2).
+ * <p><b>Status: placeholder, superseded by ADR 0013.</b> ADR 0013 resolves certified EBs inside Yaci and delivers
+ * complete blocks through {@code BlockChainDataListener.onBlock}, so applications do not need this pull API.
+ * A live probe on Musashi {@code prototype-2026w40a} (2026-10-19, {@code adr/leios-evidence/leios_fetch_probe.py})
+ * showed that peers serve old certified EBs and their transactions on request without an offer
+ * (tested up to 4 weeks back); uncertified EBs come back empty.
  *
  * <p>TODO: implement over {@code MsgLeiosMultiBlockRequest} (or the blueprint range
  * messages) once a target network ships them, then wire into range-mode sync per

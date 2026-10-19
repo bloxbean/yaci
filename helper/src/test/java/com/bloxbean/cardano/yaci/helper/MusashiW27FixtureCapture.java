@@ -106,6 +106,15 @@ public class MusashiW27FixtureCapture {
             @Override
             public void onParsingError(com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException e) {
                 System.err.println("PARSE ERROR block " + e.getBlockNumber() + ": " + e.getCause());
+                //Keep the raw bytes: a re-pin starts from blocks the current parser cannot read yet
+                try {
+                    if (e.getBlockCbor() != null) {
+                        write(outDir, "unparsed-block-" + e.getBlockNumber() + ".hex",
+                                com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(e.getBlockCbor()));
+                    }
+                } catch (Exception ex) {
+                    System.err.println("could not write unparsed block: " + ex);
+                }
             }
         });
 

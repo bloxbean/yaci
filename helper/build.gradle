@@ -23,5 +23,6 @@ publishing {
 tasks.register('captureW27Fixtures', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.bloxbean.cardano.yaci.helper.MusashiW27FixtureCapture'
-    args = ["${rootProject.projectDir}/core/src/test/resources/leios/w27", '150']
+    args = [project.findProperty('fixtureDir') ?: "${rootProject.projectDir}/core/src/test/resources/leios/w27",
+            project.findProperty('fixtureSeconds') ?: '150']
 }
