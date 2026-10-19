@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.common.Constants;
+import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionData;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
@@ -41,6 +42,14 @@ public class LeiosConfig {
     @Builder.Default
     private Mode mode = Mode.AUTO;
     /**
+     * Only used when endorser block transactions are inlined ({@code YaciConfig.isInlineEndorserBlockTxs()}).
+     * False (default): a certifying block is delivered only with its endorser block transactions; Yaci waits and
+     * retries. True: after a few failed attempts the block is delivered without them, and the gap is reported
+     * through {@code BlockChainDataListener.onEndorserBlockUnavailable}.
+     */
+    @Builder.Default
+    private boolean skipUnavailableEndorserBlocks = false;
+    /**
      * When true, fetch EB transaction bytes after an Endorser Block and matching tx offer are seen.
      */
     @Builder.Default
@@ -67,6 +76,22 @@ public class LeiosConfig {
 
     public static LeiosConfig disabled() {
         return LeiosConfig.builder().mode(Mode.DISABLED).build();
+    }
+
+    /**
+     * True when certifying blocks should be completed with their endorser block transactions on this network:
+     * inlining is on ({@code YaciConfig}) and Leios is active (AUTO: Musashi magic; ENABLED: any network).
+     * Used by both tip sync and range sync.
+     */
+    public boolean shouldInlineEndorserBlockTxs(long protocolMagic) {
+        if (!YaciConfig.INSTANCE.isInlineEndorserBlockTxs()) {
+            return false;
+        }
+        return switch (mode) {
+            case DISABLED -> false;
+            case ENABLED -> true;
+            case AUTO -> protocolMagic == Constants.MUSASHI_PROTOCOL_MAGIC;
+        };
     }
 
     public boolean shouldAttach(long protocolMagic) {

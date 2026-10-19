@@ -13,6 +13,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
 import com.bloxbean.cardano.yaci.helper.LeiosConfig;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
 import com.bloxbean.cardano.yaci.helper.model.leios.EndorserBlockEvent;
+import com.bloxbean.cardano.yaci.helper.model.leios.EndorserBlockUnavailableEvent;
 import com.bloxbean.cardano.yaci.helper.model.leios.LeiosVotesEvent;
 
 import java.util.List;
@@ -34,6 +35,13 @@ public interface BlockChainDataListener {
      * Called for Leios vote notifications when vote delivery is enabled through {@link LeiosConfig}.
      */
     default void onLeiosVotes(LeiosVotesEvent event) {}
+
+    /**
+     * Leios: called when Yaci cannot (yet) get the transactions of an endorser block that a ranking block
+     * certifies. By default Yaci waits and retries, so the certifying block reaches {@link #onBlock} only once it is
+     * complete; this callback makes such a pause visible.
+     */
+    default void onEndorserBlockUnavailable(EndorserBlockUnavailableEvent event) {}
 
     default void onRollback(Point point) {}
 

@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.TransactionBody;
 import com.bloxbean.cardano.yaci.core.model.Witnesses;
+import com.bloxbean.cardano.yaci.core.model.leios.LeiosEndorserBlockRef;
 import com.bloxbean.cardano.yaci.core.model.serializers.leios.LeiosCertificateSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.DijkstraTransactionExtractor;
@@ -58,13 +59,86 @@ public enum DijkstraBlockBodySerializer {
             log.debug("Ignoring {} extra Dijkstra block_body item(s) at block {}", slice.extraItems(), blockNumber);
         }
 
+        ParsedTransactions txs = parseTransactions(blockNumber, slice.transactions());
+
+        Block.BlockBuilder blockBuilder = Block.builder()
+                .era(Era.Dijkstra)
+                .header(header)
+                .transactionBodies(txs.bodies())
+                .transactionWitness(txs.witnesses())
+                .auxiliaryDataMap(txs.auxiliaryData())
+                .invalidTransactions(txs.invalidIndexes());
+        if (slice.leiosCertificateBytes() != null) {
+            blockBuilder.leiosCertificate(LeiosCertificateSerializer.INSTANCE.deserialize(slice.leiosCertificateBytes()));
+        }
+        if (slice.perasCertificateBytes() != null) {
+            blockBuilder.perasCertCbor(HexUtil.encodeHexString(slice.perasCertificateBytes()));
+        }
+        if (YaciConfig.INSTANCE.isReturnBlockCbor()) {
+            blockBuilder.cbor(HexUtil.encodeHexString(blockBytes));
+        }
+        return blockBuilder.build();
+    }
+
+    /**
+     * Returns a copy of a certifying block whose transaction lists start with the endorser block's transactions
+     * (in EB order), followed by the block's own transactions. Auxiliary-data keys and invalid-transaction indexes
+     * of the block's own transactions move up by the number of EB transactions. The header, certificate and raw
+     * block CBOR stay as received.
+     *
+     * @param certifyingBlock    the block as parsed from the wire
+     * @param endorserBlock      the EB it certifies; its {@code txCount} is set from {@code ebTransactionBytes}
+     * @param ebTransactionBytes each EB transaction's bytes as served by LeiosFetch, in EB order
+     */
+    @SneakyThrows
+    public Block mergeEndorserBlockTransactions(Block certifyingBlock, LeiosEndorserBlockRef endorserBlock,
+                                                List<byte[]> ebTransactionBytes) {
+        long blockNumber = certifyingBlock.getHeader().getHeaderBody().getBlockNumber();
+        List<TransactionSlice> slices = new ArrayList<>(ebTransactionBytes.size());
+        for (int i = 0; i < ebTransactionBytes.size(); i++) {
+            slices.add(DijkstraTransactionExtractor.readEndorserBlockTransaction(i, ebTransactionBytes.get(i)));
+        }
+        ParsedTransactions eb = parseTransactions(blockNumber, slices);
+        int n = slices.size();
+
+        List<TransactionBody> bodies = new ArrayList<>(eb.bodies());
+        if (certifyingBlock.getTransactionBodies() != null) bodies.addAll(certifyingBlock.getTransactionBodies());
+        List<Witnesses> witnesses = new ArrayList<>(eb.witnesses());
+        if (certifyingBlock.getTransactionWitness() != null) witnesses.addAll(certifyingBlock.getTransactionWitness());
+        Map<Integer, AuxData> auxiliaryData = new LinkedHashMap<>(eb.auxiliaryData());
+        if (certifyingBlock.getAuxiliaryDataMap() != null) {
+            certifyingBlock.getAuxiliaryDataMap().forEach((index, aux) -> auxiliaryData.put(index + n, aux));
+        }
+        List<Integer> invalid = new ArrayList<>(eb.invalidIndexes());
+        if (certifyingBlock.getInvalidTransactions() != null) {
+            certifyingBlock.getInvalidTransactions().forEach(index -> invalid.add(index + n));
+        }
+
+        return Block.builder()
+                .era(certifyingBlock.getEra())
+                .header(certifyingBlock.getHeader())
+                .transactionBodies(bodies)
+                .transactionWitness(witnesses)
+                .auxiliaryDataMap(auxiliaryData)
+                .invalidTransactions(invalid)
+                .leiosCertificate(certifyingBlock.getLeiosCertificate())
+                .perasCertCbor(certifyingBlock.getPerasCertCbor())
+                .leiosEndorserBlock(endorserBlock.toBuilder().txCount(n).build())
+                .cbor(certifyingBlock.getCbor())
+                .build();
+    }
+
+    /**
+     * Per-transaction parsing shared by ranking blocks and endorser blocks. Indexes come from the slices.
+     */
+    private ParsedTransactions parseTransactions(long blockNumber, List<TransactionSlice> slices) {
         List<TransactionBody> transactionBodies = new ArrayList<>();
         List<Witnesses> witnessesSet = new ArrayList<>();
         List<byte[]> witnessRawBytes = new ArrayList<>();
         Map<Integer, AuxData> auxiliaryDataMap = new LinkedHashMap<>();
         List<Integer> invalidTransactions = new ArrayList<>();
 
-        for (TransactionSlice tx : slice.transactions()) {
+        for (TransactionSlice tx : slices) {
             transactionBodies.add(TransactionBodySerializer.INSTANCE.deserializeDI(
                     CborSerializationUtil.deserializeOne(tx.bodyBytes()), tx.bodyBytes()));
             witnessesSet.add(witnesses(tx.witnessesBytes()));
@@ -82,24 +156,11 @@ public enum DijkstraBlockBodySerializer {
         }
         //To fix #37 (datum/redeemer hash after a CBOR round trip): take their bytes from the source
         BlockSerializer.INSTANCE.handleWitnessDatumRedeemer(blockNumber, witnessesSet, witnessRawBytes);
+        return new ParsedTransactions(transactionBodies, witnessesSet, auxiliaryDataMap, invalidTransactions);
+    }
 
-        Block.BlockBuilder blockBuilder = Block.builder()
-                .era(Era.Dijkstra)
-                .header(header)
-                .transactionBodies(transactionBodies)
-                .transactionWitness(witnessesSet)
-                .auxiliaryDataMap(auxiliaryDataMap)
-                .invalidTransactions(invalidTransactions);
-        if (slice.leiosCertificateBytes() != null) {
-            blockBuilder.leiosCertificate(LeiosCertificateSerializer.INSTANCE.deserialize(slice.leiosCertificateBytes()));
-        }
-        if (slice.perasCertificateBytes() != null) {
-            blockBuilder.perasCertCbor(HexUtil.encodeHexString(slice.perasCertificateBytes()));
-        }
-        if (YaciConfig.INSTANCE.isReturnBlockCbor()) {
-            blockBuilder.cbor(HexUtil.encodeHexString(blockBytes));
-        }
-        return blockBuilder.build();
+    private record ParsedTransactions(List<TransactionBody> bodies, List<Witnesses> witnesses,
+                                      Map<Integer, AuxData> auxiliaryData, List<Integer> invalidIndexes) {
     }
 
     private Witnesses witnesses(byte[] raw) {
