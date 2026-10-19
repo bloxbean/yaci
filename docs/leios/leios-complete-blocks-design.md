@@ -35,9 +35,10 @@ What an application must see for RB n+1: one block with the 5,255 EB A transacti
 
 ![Containers (C4 level 2)](diagrams/2-c4-container.svg)
 
-On mainnet and preprod the assembler sees no certifying blocks and passes every block straight through.
-The Leios agents are attached only when Leios is active (`LeiosConfig` `AUTO`: Musashi magic 164),
-for both tip sync and range sync.
+The assembler and its Leios connection exist only when `LeiosConfig.shouldInlineEndorserBlockTxs(magic)` is
+true: inlining on and Leios active (`AUTO`: Musashi magic 164). On mainnet and preprod `BlockSync` and
+`BlockRangeSync` keep using the application's own listener object, and no second connection is opened.
+The main connection is unchanged in every case.
 
 ---
 
@@ -47,9 +48,9 @@ for both tip sync and range sync.
 
 | Part | Holds | Rule |
 |---|---|---|
-| Announcement memory | announcements of recent RBs, by RB hash | look up by the certifying block's `prevHash`; when sync starts from a point, fetch that block once to learn its announcement |
-| EB resolver | the EB being fetched | ask only for **certified** EBs (exception: an early fetch at the tip of an EB this peer offered); check `blake2b-256(tx bytes as received) == EB reference hash` |
-| Reorder buffer | the first waiting block and every block after it | release strictly in chain order; never skip a block |
+| Announcement memory | the last 4,096 announcements, by RB hash | look up by the certifying block's `prevHash`; if the parent was never seen, fetch it once (ChainSync `FindIntersect` for that hash over the 1,000 slots before the child, then BlockFetch; or the sync start point directly) |
+| EB resolver | requests in flight, by EB point | ask only for **certified** EBs; check the EB's hash; fetch all its transactions in one request; check `blake2b-256(tx bytes as received) == EB reference hash` for every one |
+| Ordered queue | up to 256 callbacks | deliver strictly in arrival order on one thread; a certifying block waits for its EB and holds every event behind it; a full queue makes the main connection's thread wait |
 | Merger | nothing | certifying block + EB transactions → complete block |
 
 ---
@@ -60,9 +61,9 @@ What changes in a certifying block (RB n+1 in the picture above) before it reach
 
 ![A certifying block before and after](diagrams/4-complete-block.svg)
 
-With `inlineEndorserBlockTxs = false`, the block is delivered as it is on the wire (left side, plus
-`leiosEndorserBlock` with txCount 0 as the pointer), and the EB with its transactions arrives through the
-optional `onEndorserBlock(EndorserBlockEvent)` callback.
+With `inlineEndorserBlockTxs = false`, nothing is wrapped: the block is delivered exactly as today (left side;
+`leiosEndorserBlock` is null). The certified EB is the one announced in the parent block's header, and EB data
+arrives through the optional `onEndorserBlock(EndorserBlockEvent)` callback.
 
 Every block that certifies nothing is delivered exactly as before.
 
@@ -72,8 +73,9 @@ Every block that certifies nothing is delivered exactly as before.
 
 ![Tip sync](diagrams/5-tip-sync.svg)
 
-Without an offer, the EB is fetched when the certifying block arrives. Either way the application receives
-RB n+1 only once it is complete.
+The EB fetch starts as soon as the certifying block arrives; it does not wait for the peer to offer anything.
+On the live network a 5,255-transaction EB takes about one second. The application receives RB n+1 only once it
+is complete.
 
 ---
 
@@ -81,8 +83,10 @@ RB n+1 only once it is complete.
 
 ![Range sync](diagrams/6-range-sync.svg)
 
-- Yaci never stops reading the connection: the EB answers arrive on the same connection as the blocks.
-  Memory stays bounded because the block range is requested in parts.
+- Memory stays bounded: at most 256 queued callbacks. When the queue is full, the main connection's thread
+  waits, so Yaci reads blocks more slowly, the same back-pressure a busy listener gives today. EB answers keep
+  arriving on the separate Leios connection. `stop()`, `restart()` and `startSync()` close the assembler before
+  the connection, which releases a network thread waiting for queue space, so stopping cannot deadlock either.
 - Yaci Store's batch of 100 blocks receives complete blocks in order, and `batchDone` arrives after the last
   block of the range, through the same ordered queue. Its parallel pipeline is unchanged.
 
@@ -94,13 +98,14 @@ RB n+1 only once it is complete.
 |---|---|---|
 | resolved, every transaction checks | merge and release | merge and release |
 | not found, timeout or a transaction that does not match | report `onEndorserBlockUnavailable`, retry with a growing delay; delivery waits (a visible pause, no gap) | report `onEndorserBlockUnavailable`, release the block without the EB transactions |
-| peer has no Leios protocols | fail at start with a clear message | same |
+| peer has no Leios protocols | reported through `onEndorserBlockUnavailable` with that reason; retried | reported; released without EB transactions |
 
 A transaction that does not match the EB is never delivered: it is treated like "not found".
 
 Rollback: the node rolls back ranking blocks. EB transactions belong to the certifying block, so they roll back
-with it. The assembler drops buffered blocks and announcements after the rollback point, then delivers
-`onRollback` through the ordered queue. Nothing new is needed in the application.
+with it. A certifying block still waiting when a rollback arrives behind it stops waiting and is delivered as on
+the wire (as today), followed by `onRollback` through the ordered queue. Announcements are keyed by block hash, so
+blocks from an abandoned fork never match. Nothing new is needed in the application.
 
 ---
 

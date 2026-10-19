@@ -87,8 +87,8 @@ How to re-check the baseline:
 | 2c | Re-pin #171 block format to the deployed w40a (3-item body, `block_transaction`, tx body keys, pool BLS key) | done | same branch; 18 live blocks parse | reviewed |
 | 2b | Check the rebased code against the live Musashi w40a network | done: PASS | `adr/leios-evidence/step2b-w40a-rebased-171.md` | |
 | 3 | Write ADR 0013 (complete blocks) and the design doc with C4 block diagrams. **Owner review checkpoint.** | done: approved by owner 2026-10-19, with an added inline flag | `adr/0013-leios-complete-blocks.md`, `docs/leios/leios-complete-blocks-design.md` | review agent running |
-| 4 | Build the complete-block assembler in the helper (announcement memory, EB resolver, reorder buffer, merger, ordered delivery) and `YaciConfig.inlineEndorserBlockTxs` (default true) | todo | | |
-| 5 | N2N range sync: fetch historical EBs over LeiosFetch so N2N gives full tx data through the same interface | open question answered: **yes on w40a** (see notes); build in step 4 | `adr/leios-evidence/leios_fetch_probe.py` | |
+| 4 | Build the complete-block assembler in the helper (announcement memory, EB resolver, reorder buffer, merger, ordered delivery) and `YaciConfig.inlineEndorserBlockTxs` (default true) | done | branch `feat/leios_complete_blocks` (PR stacked on #171) | reviewed; all findings addressed |
+| 5 | N2N range sync: fetch historical EBs over LeiosFetch so N2N gives full tx data through the same interface | done with step 4: live range test matches db-sync | `MusashiCompleteBlocksIT` | |
 | 6 | N2C: accept the node's inlined certifying blocks (secondary, most downstream uses N2N) | todo | | |
 | 7 | Run an unmodified Yaci Store against Musashi and check tx counts | todo | | |
 | 8 | Push / merge (each push or merge needs explicit approval) | push approved by owner 2026-10-19: rebased branches force-pushed to the PR #167 / #171 branches (old heads `1fa64f6` / `d7f538c` kept in local branches); **merge not done** | PRs #167, #171 | |
@@ -218,6 +218,50 @@ Block format (#171 branch), **needed now for w40a** (also valid for w42 except w
 - Protocol parameter update: new keys 38–48 in w40a (Leios periods, committee, EB limits); 49–56 in w42 (Peras, ref-input fees).
 - w42 only: Plutus V4 scripts in the witness set (key 8).
 
+### 4. Complete blocks (step 4, 2026-10-19)
+What was built (branch `feat/leios_complete_blocks`):
+- `CompleteBlockAssembler` wraps the app listener (only when `LeiosConfig.shouldInlineEndorserBlockTxs(magic)`):
+  announcement memory by RB hash, ordered bounded queue (256) delivered on one thread, waits for EB transactions.
+- `EndorserBlockResolver`: separate Leios connection (`LeiosNetworkClient`), verifies EB hash and every tx.
+- `ParentBlockLookup`: parent never seen → ChainSync `FindIntersect` over 1,000 candidate slots + BlockFetch.
+- Core: `DijkstraBlockBodySerializer.mergeEndorserBlockTransactions`, EB tx reader for all 3 encodings,
+  `LeiosEndorserBlockRef`, `Block.leiosEndorserBlock`, `YaciConfig.inlineEndorserBlockTxs` (default true),
+  `LeiosConfig.skipUnavailableEndorserBlocks` (default false), `onEndorserBlockUnavailable` callback.
+- `TransactionListBuilder`: the adapter's transaction-list code moved unchanged (diff-checked) for reuse.
+- **Bug found and fixed (from #167):** `LeiosFetchAgent` cleared the outstanding request *after* calling listeners,
+  so a request sent from inside `onBlock` (EB → its transactions) was dropped and its answer never matched;
+  the error had no point and the request hung. Fixed by clearing before the callbacks; regression test fails on
+  the old code and passes on the new.
+Evidence:
+- Unit: 1,135 tests, 0 failures; API check 0 incompatibilities (core, helper).
+- Live `MusashiCompleteBlocksIT` (unmodified listener), all = db-sync (KleioScan):
+  range #156612..#156615 → 354, **345**, **5,255** (last tx `c82dae27…2327`), 356, ~6 s;
+  range starting at a certifying block → parent found, same counts;
+  tip sync 4 min → 12 blocks, 5 certifying, all complete (5,555 / 5,555 / 559 / 4,085).
+- EB fetch through Yaci: 345 txs in 1.1 s, 5,255 txs (1.3 MB) in 1.05 s.
+Step 4 review (independent review agent) and what was done:
+1. (high) **Deadlock** when stopping while the queue is full: `stop()`/`restart()`/`startSync()` shut the connection
+   down (needs the network thread) before closing the assembler (frees that thread). Reachable from Yaci Store's
+   `stopSyncOnError`. **Fixed**: assembler closed first; regression test `stopWhileQueueIsFullDoesNotDeadlock`.
+2. (medium) Retry after timeout reused the stuck request. **Fixed**: pending request cancelled on timeout; a peer
+   without Leios fails new requests at once with that reason. Test `timedOutEndorserBlockIsRequestedAgain`.
+3. (medium) A failed LeiosFetch agent was never reset. **Fixed**: next request starts a new Leios connection
+   (from the caller's thread, never the connection's own thread).
+4. (medium) `close()` interrupted application code. **Fixed**: no interrupt; the waiting block is woken instead.
+   Test `closeNeverInterruptsApplicationCode`.
+5. (low-medium) Rollback race between `take()` and `current`. **Fixed**: rollbacks recorded with a sequence
+   number; a certifying block checks rollbacks since its arrival before every wait.
+6. (low-medium) Leaked selectors when an assembler never resolved an EB. **Fixed**: Leios client created lazily.
+7. (low) `onBlock` exceptions used to reach `onParsingError`. **Fixed** to keep that behaviour (test added);
+   `onEndorserBlockUnavailable` exceptions guarded; tip sync uses the intersection point as the known parent;
+   1,000-slot search limit and duplicate notify traffic documented.
+8. (low) Doc mismatches. **Fixed** in ADR 0013, design doc and usage guide.
+After fixes: 1,139 unit tests pass; API check 0 incompatibilities; live `MusashiCompleteBlocksIT` 3/3.
+
+ADR 0013 prerequisites: all done.
+- 2: the "4 disconnects" were 2 events reported twice (both adapters forward `onDisconnect`; existing behaviour).
+- 3: 10-minute run: 16 EB offers, 5 transactions offers (`adr/leios-evidence/observation-10min-2026-10-19.txt`).
+
 ### 5. N2N must provide full tx data
 - Requirement (owner, 2026-10-19): N2N must deliver the full transaction data through the same interface.
   N2C is secondary.
@@ -235,3 +279,8 @@ Block format (#171 branch), **needed now for w40a** (also valid for w42 except w
   So certified EBs are kept and served on request (at least 4 weeks back, i.e. since early in the current chain);
   uncertified EBs are discarded. N2N can therefore provide the full transaction data for range sync.
   Note for w41+: the server "disconnects a request it cannot answer", so Yaci must only ask for certified EBs.
+- **ADR 0013 prerequisite 1 met (2026-10-19):** a full certified EB fetched in **one** `MsgLeiosBlockTxsRequest`:
+  EB `77714b7b…08be` (slot 3,495,655, certified by #156614, 2 days old): 5,255 txs, 1,309,375 bytes in 0.7–1.0 s,
+  **5,255/5,255** tx hashes match the EB references
+  (`python3 adr/leios-evidence/leios_fetch_probe.py 3495655 77714b7b…08be "" all`).
+  w40a EB transactions are the 3-element mempool form `[body, witnesses, aux/nil]` (16 of 16 sampled).
