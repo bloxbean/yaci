@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model;
 
 import com.bloxbean.cardano.yaci.core.model.leios.LeiosCertificate;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
 
 import java.util.*;
@@ -22,7 +23,9 @@ public class Block {
     private Map<Integer, AuxData> auxiliaryDataMap = new LinkedHashMap();
     private List<Integer> invalidTransactions = new ArrayList<>();
 
+    @JsonInclude(JsonInclude.Include.NON_NULL) //absent from JSON for pre-Leios blocks, as before
     private LeiosCertificate leiosCertificate;
+    @JsonInclude(JsonInclude.Include.NON_NULL) //absent from JSON for pre-Leios blocks, as before
     private String perasCertCbor;
     private String cbor;
 
