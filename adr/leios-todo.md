@@ -89,7 +89,7 @@ How to re-check the baseline:
 | 3 | Write ADR 0013 (complete blocks) and the design doc with C4 block diagrams. **Owner review checkpoint.** | done: approved by owner 2026-10-19, with an added inline flag | `adr/0013-leios-complete-blocks.md`, `docs/leios/leios-complete-blocks-design.md` | review agent running |
 | 4 | Build the complete-block assembler in the helper (announcement memory, EB resolver, reorder buffer, merger, ordered delivery) and `YaciConfig.inlineEndorserBlockTxs` (default true) | done | branch `feat/leios_complete_blocks` (PR stacked on #171) | reviewed; all findings addressed |
 | 5 | N2N range sync: fetch historical EBs over LeiosFetch so N2N gives full tx data through the same interface | done with step 4: live range test matches db-sync | `MusashiCompleteBlocksIT` | |
-| 6 | N2C: accept the node's inlined certifying blocks (secondary, most downstream uses N2N) | todo | | |
+| 6 | N2C: accept the node's inlined certifying blocks (secondary, most downstream uses N2N) | done: parses unchanged; gap logged | `N2CInlinedCertifyingBlockTest` | reviewed: approve; 4 small fixes applied |
 | 7 | Run an unmodified Yaci Store against Musashi and check tx counts | todo | | |
 | 8 | Push / merge (each push or merge needs explicit approval) | push approved by owner 2026-10-19: rebased branches force-pushed to the PR #167 / #171 branches (old heads `1fa64f6` / `d7f538c` kept in local branches); **merge not done** | PRs #167, #171 | |
 
@@ -261,6 +261,17 @@ After fixes: 1,139 unit tests pass; API check 0 incompatibilities; live `Musashi
 ADR 0013 prerequisites: all done.
 - 2: the "4 disconnects" were 2 events reported twice (both adapters forward `onDisconnect`; existing behaviour).
 - 3: 10-minute run: 16 EB offers, 5 transactions offers (`adr/leios-evidence/observation-10min-2026-10-19.txt`).
+
+### 6. Node-to-client (2026-10-19)
+- w40a node (ouroboros-consensus `cbd10033`, `MiniProtocol/ChainSync/Server.hs` `resolve`): for a block whose
+  header says it carries a certificate, the server splices the EB closure announced by the predecessor into the
+  body (`inlineLeiosClosure`: transaction list replaced, header and certificate kept, re-encoded with
+  `encodeDisk`). If the closure cannot be read: "Serve what we have" (block without the EB transactions).
+- Yaci: the N2C path (`LocalRollForwardSerializer` → `BlockSerializer`) already handles it. No local node is
+  available here, so the test rebuilds the N2C message from live data the way the Haskell code does:
+  block #156613 + the 345 txs of EB `3bca1a2b…` → 345 txs, ids at index 343/344 = db-sync.
+- Gap: `N2CChainSyncFetcher` logs a warning for a certified block without transactions (it cannot fetch EBs
+  over N2C). Documented in ADR 0013 §5 and the usage guide.
 
 ### 5. N2N must provide full tx data
 - Requirement (owner, 2026-10-19): N2N must deliver the full transaction data through the same interface.

@@ -143,6 +143,15 @@ Notes:
 
 ---
 
+## Node-to-client (`N2CChainSyncFetcher`)
+
+Over node-to-client the node completes certifying blocks itself: it splices the certified EB's transactions into
+the block body, and Yaci parses that block like any other. Nothing to configure. If the node cannot read the EB,
+it sends the certifying block without them; Yaci logs a warning, and you can detect it as
+`header.getLeiosCertified() == TRUE` with no transactions. `Block.getLeiosEndorserBlock()` is set only for
+node-to-node (Yaci does the merge there). The header is kept but the body is replaced, so the header's body hash
+and size do not match the node-to-client body, and `Block.getCbor()` is the node's re-encoded block.
+
 ## Pattern 4: Raw protocol access (`LeiosNetworkClient`)
 
 For tooling and diagnostics: opaque CBOR in, no policy.

@@ -171,9 +171,16 @@ yet; this is what makes back-pressure safe (see "How it works"). If the peer doe
 protocols, every EB is reported through `onEndorserBlockUnavailable` with that reason (immediately, without
 waiting for a timeout).
 
-Node-to-client is secondary. The node inlines EB transactions into certifying blocks there, but it may send a
-certifying block without them when it cannot read the EB. Yaci treats a certifying block with no EB transactions
-over node-to-client as an unresolved EB (rule 2).
+Node-to-client is secondary, and needs no extra work in Yaci: for a certifying block the node itself splices the
+certified EB's transactions into the block body (ouroboros-consensus: the ChainSync server's `resolve` calls
+`inlineLeiosClosure` from `Shelley/Ledger/Leios.hs`; the transaction list is replaced, header and certificate
+kept), so the block reaches `LocalChainSync` already
+complete and Yaci parses it like any Dijkstra block (`N2CInlinedCertifyingBlockTest`: block #156613 with its 345
+EB transactions, ids equal to db-sync). If the node cannot read the EB it serves the certifying block without its
+transactions; Yaci cannot fetch EBs over node-to-client, so `N2CChainSyncFetcher` logs a warning and the
+application sees a block with `leiosCertified == true` and no transactions. Because the node keeps the header but
+replaces the body, the header's body hash and size do not match the body served over node-to-client, and
+`Block.getCbor()` is the node's re-encoded block, not the bytes on chain.
 
 ### 6. Production networks are untouched
 
