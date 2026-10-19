@@ -42,6 +42,15 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
      *                 Dijkstra-only keys 23-27. With false the result is the same as before Dijkstra support.
      */
     public TransactionBody deserializeDI(DataItem di, byte[] txBytes, boolean dijkstra) {
+        return deserialize(di, txBytes, dijkstra, false);
+    }
+
+    /** A Dijkstra sub_transaction_body: like a transaction body, without keys 23 and 27. */
+    TransactionBody deserializeSubTransactionBody(DataItem di, byte[] txBytes) {
+        return deserialize(di, txBytes, true, true);
+    }
+
+    private TransactionBody deserialize(DataItem di, byte[] txBytes, boolean dijkstra, boolean subTransaction) {
         Map bodyMap = (Map) di;
 
         TransactionBody.TransactionBodyBuilder transactionBodyBuilder = TransactionBody.builder();
@@ -288,47 +297,66 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         }
 
         if (dijkstra) {
-            readDijkstraFields(bodyMap, txBytes, transactionBodyBuilder);
+            readDijkstraFields(bodyMap, txBytes, transactionBodyBuilder, subTransaction);
         }
 
         return transactionBodyBuilder.build();
 
     }
 
-    private void readDijkstraFields(Map bodyMap, byte[] txBytes, TransactionBody.TransactionBodyBuilder builder) {
+    /**
+     * Dijkstra-only keys 23-27. Each key is read on its own: a value Yaci cannot read is logged and left null, and
+     * the rest of the transaction (and block) is still delivered, as before these keys were read.
+     *
+     * @param subTransaction true for a sub_transaction_body, which has no keys 23 and 27
+     */
+    private void readDijkstraFields(Map bodyMap, byte[] txBytes, TransactionBody.TransactionBodyBuilder builder,
+                                    boolean subTransaction) {
         //23: sub_transactions, from the original bytes so each sub-transaction keeps its own id
-        if (bodyMap.get(new UnsignedInteger(23)) != null) {
-            builder.subTransactions(SubTransactionSerializer.INSTANCE.deserialize(bodyValue(txBytes, 23)));
+        if (!subTransaction && bodyMap.get(new UnsignedInteger(23)) != null) {
+            readField(23, txBytes, () -> builder.subTransactions(
+                    SubTransactionSerializer.INSTANCE.deserialize(bodyValue(txBytes, 23))));
         }
 
         //24: required_top_level_guards = {+ credential => plutus_data / nil}
-        CborSlice topLevelGuards = bodyMap.get(new UnsignedInteger(24)) != null ? bodyValue(txBytes, 24) : null;
-        if (topLevelGuards != null) {
-            List<RequiredTopLevelGuard> guards = new ArrayList<>();
-            List<CborSlice> entries = slices(topLevelGuards, MajorType.MAP);
-            for (int i = 0; i < entries.size(); i += 2) {
-                byte[] datum = entries.get(i + 1).bytes();
-                guards.add(new RequiredTopLevelGuard(
-                        Credential.deserialize((Array) CborSerializationUtil.deserializeOne(entries.get(i).bytes())),
-                        isNil(datum) ? null : HexUtil.encodeHexString(datum))); //datum bytes as on chain
-            }
-            builder.requiredTopLevelGuards(guards);
+        if (bodyMap.get(new UnsignedInteger(24)) != null) {
+            readField(24, txBytes, () -> {
+                List<RequiredTopLevelGuard> guards = new ArrayList<>();
+                List<CborSlice> entries = slices(bodyValue(txBytes, 24), MajorType.MAP);
+                for (int i = 0; i < entries.size(); i += 2) {
+                    byte[] datum = entries.get(i + 1).bytes();
+                    guards.add(new RequiredTopLevelGuard(
+                            Credential.deserialize((Array) CborSerializationUtil.deserializeOne(entries.get(i).bytes())),
+                            isNil(datum) ? null : HexUtil.encodeHexString(datum))); //datum bytes as on chain
+                }
+                builder.requiredTopLevelGuards(guards);
+            });
         }
 
         //25: direct_deposits = {+ reward_account => coin}
-        Map directDeposits = (Map) bodyMap.get(new UnsignedInteger(25));
+        DataItem directDeposits = bodyMap.get(new UnsignedInteger(25));
         if (directDeposits != null) {
-            builder.directDeposits(WithdrawalsSerializer.INSTANCE.deserializeDI(directDeposits));
+            readField(25, txBytes, () -> builder.directDeposits(WithdrawalsSerializer.INSTANCE.deserializeDI(directDeposits)));
         }
 
         //26, 27: {+ reward_account => account_balance_interval}
-        Map balanceIntervals = (Map) bodyMap.get(new UnsignedInteger(26));
+        DataItem balanceIntervals = bodyMap.get(new UnsignedInteger(26));
         if (balanceIntervals != null) {
-            builder.accountBalanceIntervals(accountBalanceIntervals(balanceIntervals));
+            readField(26, txBytes, () -> builder.accountBalanceIntervals(accountBalanceIntervals((Map) balanceIntervals)));
         }
-        Map startingBalanceIntervals = (Map) bodyMap.get(new UnsignedInteger(27));
-        if (startingBalanceIntervals != null) {
-            builder.startingAccountBalanceIntervals(accountBalanceIntervals(startingBalanceIntervals));
+        DataItem startingBalanceIntervals = bodyMap.get(new UnsignedInteger(27));
+        if (!subTransaction && startingBalanceIntervals != null) {
+            readField(27, txBytes, () -> builder.startingAccountBalanceIntervals(
+                    accountBalanceIntervals((Map) startingBalanceIntervals)));
+        }
+    }
+
+    private static void readField(int key, byte[] txBytes, Runnable read) {
+        try {
+            read.run();
+        } catch (RuntimeException | StackOverflowError e) {
+            log.warn("Dijkstra transaction body key {} could not be read and is left null. Tx: {}, error: {}",
+                    key, TxUtil.calculateTxHash(txBytes), e.toString());
         }
     }
 

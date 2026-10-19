@@ -189,6 +189,13 @@ objects and their JSON are unchanged.
 | Plutus V4 | `PlutusScriptType.PlutusScriptV4`, `AuxData.plutusV4Scripts` |
 | hard-fork era index 7 | `localstate.api.Era.Dijkstra`, `TxBodyType.DIJKSTRA` (local state queries, transaction submission) |
 
+Notes:
+
+- **UTxO indexers:** a sub-transaction's inputs and outputs are only in `TransactionBody.subTransactions`, not in
+  the block's transaction list. To keep a complete UTxO set, walk the sub-transactions of each transaction.
+- A Dijkstra field Yaci cannot read is logged and left null; the transaction and block are still delivered.
+- `requireGuard` is Yaci's JSON name; cardano-api has no JSON form for guard scripts yet.
+
 The Haskell golden vectors used to test this are in `core/src/test/resources/leios/haskell/`.
 
 ---

@@ -92,7 +92,7 @@ How to re-check the baseline:
 | 6 | N2C: accept the node's inlined certifying blocks (secondary, most downstream uses N2N) | done: parses unchanged; gap logged | `N2CInlinedCertifyingBlockTest` | reviewed: approve; 4 small fixes applied |
 | 7 | Run an unmodified Yaci Store against Musashi and check tx counts | done: PASS, 50/50 blocks and 83,540/83,540 txs = db-sync (24 certifying) | `adr/leios-evidence/step7-yaci-store-musashi.md` | |
 | 7b | Full Musashi sync with an unmodified Yaci Store (Postgres), compared with db-sync | in progress: no gaps or mismatches so far; 400 random txs compared field by field | `adr/leios-evidence/step7-yaci-store-musashi.md` | |
-| 9 | Parse every Dijkstra structure of the deployed CDDL (keys 14, 23-27, require_guard, redeemer tag 6, Plutus V4, bls_key, pparam keys 34-48, era index 7); backward compatible | done | branch `feat/leios_dijkstra_cddl` (stacked on #221); Haskell golden vectors in `core/src/test/resources/leios/haskell/` | review in progress |
+| 9 | Parse every Dijkstra structure of the deployed CDDL (keys 14, 23-27, require_guard, redeemer tag 6, Plutus V4, bls_key, pparam keys 34-48, era index 7); backward compatible | done | branch `feat/leios_dijkstra_cddl` (stacked on #221); Haskell golden vectors in `core/src/test/resources/leios/haskell/`; PR #222 | reviewed; findings addressed |
 | 10 | Yaci Store changes for Leios on `develop/leios` | PRs open: #1274 (Plutus V4 reference scripts), #1275 (Alonzo genesis price keys) | bloxbean/yaci-store | reviewed |
 | 11 | N2C local state query results in the Dijkstra era (e.g. current protocol parameters) | todo: needs a local Musashi node | | |
 | 8 | Push / merge (each push or merge needs explicit approval) | push approved by owner 2026-10-19: rebased branches force-pushed to the PR #167 / #171 branches (old heads `1fa64f6` / `d7f538c` kept in local branches); **merge not done** | PRs #167, #171 | |
@@ -332,4 +332,14 @@ ADR 0013 prerequisites: all done.
 - Not covered:
   - N2C local-state query result decoders for the Dijkstra era (step 11).
   - Tx-submission errors in Dijkstra format (ADR 0001 parser).
+- Review (independent agent, 2026-10-19): nothing blocking. All findings addressed:
+  - Conway JSON gained null keys from `PoolParams` / `ProtocolParamUpdate`: now `NON_NULL`, and tested.
+  - A malformed new field failed the whole block: each Dijkstra key is now read on its own; an unreadable one is
+    logged and left null, the same for `bls_key`.
+  - Sub-transaction bodies read keys 23 and 27, which the CDDL forbids: now skipped, so there is no recursion.
+  - The sub-transaction javadoc overstated the stack-overflow recovery: corrected.
+  - Key 47 is serialized only with both values.
+  - Usage guide: UTxO indexers must walk `subTransactions`.
+  - New tests: tagged sub-transactions with nil aux, forbidden keys ignored, malformed fields, and a ranking
+    block that carries the golden tx.
 

@@ -564,10 +564,10 @@ public enum UpdateSerializer implements Serializer<Update> {
         if (ppu.getLeiosQuorumStakeThreshold() != null) map.put(cborUInt(44), serializeRational(ppu.getLeiosQuorumStakeThreshold()));
         if (ppu.getMaxEndorserBlockRefsSize() != null) map.put(cborUInt(45), cborUInt(ppu.getMaxEndorserBlockRefsSize()));
         if (ppu.getMaxEndorserBlockTxsSize() != null) map.put(cborUInt(46), cborUInt(ppu.getMaxEndorserBlockTxsSize()));
-        if (ppu.getMaxEndorserBlockExMem() != null || ppu.getMaxEndorserBlockExSteps() != null) {
+        if (ppu.getMaxEndorserBlockExMem() != null && ppu.getMaxEndorserBlockExSteps() != null) {
             Array exUnits = new Array();
-            exUnits.add(ppu.getMaxEndorserBlockExMem() != null ? cborUInt(ppu.getMaxEndorserBlockExMem()) : cborUInt(0));
-            exUnits.add(ppu.getMaxEndorserBlockExSteps() != null ? cborUInt(ppu.getMaxEndorserBlockExSteps()) : cborUInt(0));
+            exUnits.add(cborUInt(ppu.getMaxEndorserBlockExMem()));
+            exUnits.add(cborUInt(ppu.getMaxEndorserBlockExSteps()));
             map.put(cborUInt(47), exUnits);
         }
         if (ppu.getMaxRefScriptSizePerEndorserBlock() != null) map.put(cborUInt(48), cborUInt(ppu.getMaxRefScriptSizePerEndorserBlock()));

@@ -86,6 +86,78 @@ class DijkstraCddlTest {
     }
 
     @Test
+    void conwayPoolParamsAndProtocolParamUpdateJsonUnchanged() throws Exception {
+        //Conway pool registration (10 items, no bls_key) and a Conway-only parameter update
+        String poolJson = new ObjectMapper().writeValueAsString(PoolRegistrationSerializer.INSTANCE.deserializeDI(
+                CborSerializationUtil.deserializeOne(bytes(CONWAY_POOL_REGISTRATION))).getPoolParams());
+        assertThat(poolJson).doesNotContain("bls");
+
+        Map conway = new Map();
+        conway.put(new UnsignedInteger(0), new UnsignedInteger(44));
+        String updateJson = new ObjectMapper().writeValueAsString(UpdateSerializer.INSTANCE.getProtocolParams(conway));
+        assertThat(updateJson).doesNotContain("maxRefScriptSize", "refScriptCost", "maxPledgeLeverage", "minPoolMargin",
+                "leios", "EndorserBlock");
+    }
+
+    @Test
+    void subTransactionsTaggedWithNilAuxAndForbiddenKeysIgnored() {
+        //sub_transaction_body has no keys 23 and 27: present anyway, they are not read
+        Map subBody = minimalBody();
+        subBody.remove(new UnsignedInteger(2));
+        subBody.put(new UnsignedInteger(23), subTransactions(minimalBody()));
+        Map starting = new Map();
+        starting.put(new ByteString(bytes(REWARD_ACCOUNT)), new UnsignedInteger(5));
+        subBody.put(new UnsignedInteger(27), starting);
+
+        Array tagged = subTransactions(subBody);
+        tagged.setTag(258); //nonempty_oset, with tag
+        Map body = minimalBody();
+        body.put(new UnsignedInteger(23), tagged);
+
+        TransactionBody tx = TransactionBodySerializer.INSTANCE.deserializeDI(body, CborSerializationUtil.serialize(body), true);
+
+        assertThat(tx.getSubTransactions()).hasSize(1);
+        SubTransaction subTx = tx.getSubTransactions().get(0);
+        assertThat(subTx.getAuxData()).isNull();
+        assertThat(subTx.getWitnesses()).isNotNull();
+        assertThat(subTx.getBody().getSubTransactions()).isNull();
+        assertThat(subTx.getBody().getStartingAccountBalanceIntervals()).isNull();
+        assertThat(subTx.getBody().getTxHash())
+                .isEqualTo(com.bloxbean.cardano.yaci.core.util.TxUtil.calculateTxHash(CborSerializationUtil.serialize(subBody)));
+    }
+
+    @Test
+    void unreadableDijkstraFieldIsLeftNullAndTheTransactionIsKept() {
+        Map body = minimalBody();
+        Array broken = new Array();
+        broken.add(new Array().add(minimalBody()).add(new Map())); //sub_transaction with 2 items instead of 3
+        body.put(new UnsignedInteger(23), broken);
+        body.put(new UnsignedInteger(25), new UnsignedInteger(1)); //not a map
+        body.put(new UnsignedInteger(26), new Map().put(new ByteString(bytes(REWARD_ACCOUNT)), new Array())); //no bounds
+
+        TransactionBody tx = TransactionBodySerializer.INSTANCE.deserializeDI(body, CborSerializationUtil.serialize(body), true);
+
+        assertThat(tx.getFee()).isEqualTo(0);
+        assertThat(tx.getSubTransactions()).isNull();
+        assertThat(tx.getDirectDeposits()).isNull();
+        assertThat(tx.getAccountBalanceIntervals()).isNull();
+    }
+
+    @Test
+    void unreadableBlsKeyIsLeftNull() {
+        //An 11-item registration whose bls_key is a byte string instead of [bls_pubkey, proof]
+        String conway = CONWAY_POOL_REGISTRATION;
+        int afterVrf = 4 + 2 * (2 + 28) + 2 * (2 + 32);
+        String dijkstra = "8b" + conway.substring(2, afterVrf) + "4100" + conway.substring(afterVrf);
+
+        PoolParams params = PoolRegistrationSerializer.INSTANCE.deserializeDI(
+                CborSerializationUtil.deserializeOne(bytes(dijkstra))).getPoolParams();
+
+        assertThat(params.getBlsPublicKey()).isNull();
+        assertThat(params.getPledge()).isEqualTo(100000000);
+    }
+
+    @Test
     void protocolParamUpdateDijkstraAndLeiosKeys() {
         ProtocolParamUpdate update = ProtocolParamUpdate.builder()
                 .minFeeA(44)
@@ -162,6 +234,17 @@ class DijkstraCddlTest {
     //As on the wire: decoding turns #6.30 rationals into RationalNumber
     private static Map viaBytes(co.nstant.in.cbor.model.DataItem map) {
         return (Map) CborSerializationUtil.deserializeOne(CborSerializationUtil.serialize(map));
+    }
+
+    private static final String CONWAY_POOL_REGISTRATION = "8a03581ce319e1a85cf976abef526d34d223392b5a3f4a799d090492828999915820ca6306b471f5937ac69bda9b04915ff71a450644f36ea6163403dc2666659b8b1a05f5e1001a1443fd00d81e82011864581de1ab737aaf2b421c22a15de788d61d375b135da0cbf1850fbd285d5a7481581cab737aaf2b421c22a15de788d61d375b135da0cbf1850fbd285d5a74828400191770442f5b1524f68400191770442f4a2a5ef6827668747470733a2f2f6269742e6c792f334166777652515820e413cf3890f9a323c4b0e2cbdf06c6f66a2b0ff1f84b1a2346178e9b54dfff0c";
+
+    /** [[sub_transaction_body, {}, nil]] */
+    private static Array subTransactions(Map subBody) {
+        Array subTransaction = new Array();
+        subTransaction.add(subBody);
+        subTransaction.add(new Map());
+        subTransaction.add(SimpleValue.NULL);
+        return new Array().add(subTransaction);
     }
 
     private static Map minimalBody() {

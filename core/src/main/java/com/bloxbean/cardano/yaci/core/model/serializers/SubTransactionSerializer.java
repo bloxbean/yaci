@@ -18,7 +18,9 @@ import static com.bloxbean.cardano.yaci.core.model.serializers.TransactionBodySe
  * Dijkstra era {@code sub_transactions = nonempty_oset<sub_transaction>} (tx body key 23), with
  * {@code sub_transaction = [sub_transaction_body, transaction_witness_set, auxiliary_data / nil]}.
  * Parsed from the original bytes, like a top-level transaction: each body's txHash is the hash of its bytes as
- * on chain, and witnesses and auxiliary data get the same handling as in a block.
+ * on chain, and witnesses and auxiliary data go through the same readers as in a block (original datum, redeemer
+ * and auxiliary data bytes). Note: the outer transaction body, which contains the sub-transactions, is decoded
+ * whole first, so the deep-nesting recovery of a block's witnesses does not apply inside it.
  */
 enum SubTransactionSerializer {
     INSTANCE;
@@ -34,8 +36,8 @@ enum SubTransactionSerializer {
             byte[] witnessBytes = parts.get(1).bytes();
             byte[] auxBytes = parts.get(2).bytes();
 
-            TransactionBody body = TransactionBodySerializer.INSTANCE.deserializeDI(
-                    CborSerializationUtil.deserializeOne(bodyBytes), bodyBytes, true);
+            TransactionBody body = TransactionBodySerializer.INSTANCE.deserializeSubTransactionBody(
+                    CborSerializationUtil.deserializeOne(bodyBytes), bodyBytes);
 
             List<Witnesses> witnesses = new ArrayList<>(List.of(DijkstraBlockBodySerializer.INSTANCE.witnesses(witnessBytes)));
             List<byte[]> witnessRawBytes = List.of(witnessBytes);

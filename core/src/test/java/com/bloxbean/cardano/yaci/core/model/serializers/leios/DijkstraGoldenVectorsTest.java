@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.model.serializers.leios;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.MajorType;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.certs.PoolRegistration;
 import com.bloxbean.cardano.yaci.core.model.certs.StakeCredType;
@@ -11,11 +12,13 @@ import com.bloxbean.cardano.yaci.core.model.leios.LeiosVote;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockHeaderSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.DijkstraBlockBodySerializer;
+import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
 import com.bloxbean.cardano.yaci.core.model.serializers.leios.LeiosVoteSerializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.math.BigInteger;
 import java.nio.file.Files;
@@ -108,6 +111,37 @@ class DijkstraGoldenVectorsTest {
     }
 
     @Test
+    void ledgerExampleTransactionInARankingBlock() throws Exception {
+        //The same transaction as a block_transaction [body, witnesses, aux, is_valid = true] in a ranking block body
+        List<CborSlice> tx = CborSlice.of(resource("dijkstra-golden-tx.cbor")).items(MajorType.ARRAY);
+        ByteArrayOutputStream blockTx = new ByteArrayOutputStream();
+        blockTx.write(0x84);
+        for (CborSlice part : tx) blockTx.writeBytes(part.bytes());
+        blockTx.write(0xf5);
+
+        List<CborSlice> wire = CborSlice.of(certifyingBlockBytes()).items(MajorType.ARRAY).get(1).items(MajorType.ARRAY);
+        List<CborSlice> body = wire.get(1).items(MajorType.ARRAY);
+        ByteArrayOutputStream block = new ByteArrayOutputStream();
+        block.writeBytes(HexUtil.decodeHexString("820882"));
+        block.writeBytes(wire.get(0).bytes());                      //header
+        block.write(0x83);
+        block.write(0x81);                                          //one transaction
+        block.writeBytes(blockTx.toByteArray());
+        block.writeBytes(body.get(1).bytes());                      //leios certificate
+        block.writeBytes(body.get(2).bytes());                      //peras certificate
+
+        Block parsed = BlockSerializer.INSTANCE.deserialize(block.toByteArray());
+
+        TransactionBody txBody = parsed.getTransactionBodies().get(0);
+        assertThat(txBody.getTxHash()).isEqualTo(TX_ID);
+        assertThat(txBody.getSubTransactions()).hasSize(1);
+        assertThat(txBody.getSubTransactions().get(0).getBody().getTxHash()).isEqualTo(SUB_TX_ID);
+        assertThat(txBody.getGuards()).hasSize(3);
+        assertThat(parsed.getAuxiliaryDataMap().get(0).getPlutusV4Scripts()).hasSize(1);
+        assertThat(parsed.getInvalidTransactions()).isEmpty();
+    }
+
+    @Test
     void consensusGenTxWrapsTheSameTransaction() throws Exception {
         //[7, #6.24(bytes .cbor tx)]: hard-fork era index 7 = Dijkstra
         Array genTx = (Array) CborSerializationUtil.deserializeOne(resource("dijkstra-golden-gentx.cbor"));
@@ -154,11 +188,15 @@ class DijkstraGoldenVectorsTest {
 
     /** Parse a mempool transaction the way Yaci reads an endorser block transaction. */
     private static Block asEndorserBlockTx(byte[] tx) throws Exception {
-        Block certifying = BlockSerializer.INSTANCE.deserialize(HexUtil.decodeHexString(
-                Files.readString(Path.of(DijkstraGoldenVectorsTest.class
-                        .getResource("/leios/w40a/certifying-block-156613.hex").toURI())).trim()));
+        Block certifying = BlockSerializer.INSTANCE.deserialize(certifyingBlockBytes());
         return DijkstraBlockBodySerializer.INSTANCE.mergeEndorserBlockTransactions(certifying,
                 LeiosEndorserBlockRef.builder().build(), List.of(tx));
+    }
+
+    //Live Musashi block #156613 (w40a), as on the wire
+    private static byte[] certifyingBlockBytes() throws Exception {
+        return HexUtil.decodeHexString(Files.readString(Path.of(DijkstraGoldenVectorsTest.class
+                .getResource("/leios/w40a/certifying-block-156613.hex").toURI())).trim());
     }
 
     private static byte[] resource(String name) throws Exception {

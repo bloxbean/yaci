@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.model;
 import com.bloxbean.cardano.yaci.core.types.NonNegativeInterval;
 import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
 
@@ -79,24 +80,41 @@ public class ProtocolParamUpdate {
     private NonNegativeInterval minFeeRefScriptCostPerByte; //33
 
     //Dijkstra era fields
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Long maxRefScriptSizePerBlock; //34
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Long maxRefScriptSizePerTx; //35
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Long refScriptCostStride; //36
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private NonNegativeInterval refScriptCostMultiplier; //37
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private NonNegativeInterval maxPledgeLeverage; //38, null when absent or nil
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean maxPledgeLeverageNoLimit; //38, true when the update sets nil (no limit)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private UnitInterval minPoolMargin; //39
 
     //Leios fields (Dijkstra era)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Long leiosAnnouncementPeriodMs; //40
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Long leiosVotePeriodMs; //41
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Long leiosDiffusionPeriodMs; //42
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Integer leiosCommitteeSize; //43
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private UnitInterval leiosQuorumStakeThreshold; //44
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Long maxEndorserBlockRefsSize; //45
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Long maxEndorserBlockTxsSize; //46
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private BigInteger maxEndorserBlockExMem; //47
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private BigInteger maxEndorserBlockExSteps; //47
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private Long maxRefScriptSizePerEndorserBlock; //48
 
     /**
