@@ -1,0 +1,29 @@
+@startuml 5-tip-sync
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+title Tip sync (BlockSync): a certifying block reaches the app only when complete
+participant "Node" as N
+participant "Yaci core\n(agents, codecs)" as C
+participant "Complete-block\nassembler" as A
+participant "App" as P
+
+N -> C : ChainSync header RB n, BlockFetch RB n
+C -> A : parsed RB n
+A -> A : record "RB n -> EB A"
+A -> P : onBlock(RB n)
+N -> C : LeiosNotify: offer EB A (optional)
+C -> A : offer
+A -> C : BlockRequest(A)\n(early fetch: offered by this peer)
+N -> C : ChainSync header RB n+1, BlockFetch RB n+1
+C -> A : parsed RB n+1 (certified)
+A -> A : prevHash -> EB A; hold RB n+1
+A -> C : BlockTxsRequest(A)
+N -> C : transactions of A
+C -> A : transactions
+A -> A : check every tx against EB A; merge
+A -> P : onBlock(RB n+1 + 5,255 txs)
+note over A
+  Without an offer, EB A is fetched when RB n+1 arrives.
+end note
+@enduml

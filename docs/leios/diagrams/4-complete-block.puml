@@ -1,0 +1,24 @@
+@startuml 4-complete-block
+!pragma layout smetana
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam rectangle {
+  RoundCorner 8
+  BorderColor #555555
+}
+title A certifying block before and after (inlineEndorserBlockTxs = true, default)
+left to right direction
+
+rectangle "**On the wire: RB n+1**\n\nheader\n   certified = true\n   body size 169 bytes\nbody\n   transactions: []\n   Leios certificate" as wire #E9DDFF
+
+rectangle "**Delivered to onBlock**\n\nheader                          (unchanged)\n   blockBodySize / blockBodyHash describe\n   the on-chain body\ntransactionBodies     [0 .. 5254] from EB A\ntransactionWitness    [0 .. 5254]\nauxiliaryDataMap      keys = merged index\ninvalidTransactions   merged indexes\nleiosCertificate          (unchanged)\nleiosEndorserBlock    NEW: hash A, slot,\n                                   txCount 5255\n\ntransactions list: 5,255 Transaction objects,\nblockNumber/slot = RB n+1,\ntxCbor = bytes the peer sent for each tx" as out #D5F5E3
+
+wire --> out : merge EB A\n(EB transactions first)
+
+note bottom of out
+  inlineEndorserBlockTxs = false:
+  the block is delivered as on the wire
+  (leiosEndorserBlock is the pointer, txCount 0),
+  and EB A arrives through onEndorserBlock(EndorserBlockEvent).
+end note
+@enduml

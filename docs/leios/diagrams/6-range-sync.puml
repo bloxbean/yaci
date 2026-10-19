@@ -1,0 +1,31 @@
+@startuml 6-range-sync
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+title Range sync (BlockRangeSync): order kept, memory bounded
+participant "Node" as N
+participant "Yaci core" as C
+participant "Reorder buffer" as B
+participant "EB resolver" as R
+participant "App" as P
+
+C -> N : BlockFetch part 1 (RB 100..149)
+N -> C : RB 100, RB 101 (announces X)
+C -> B : RB 100, RB 101
+B -> P : onBlock(100), onBlock(101)
+N -> C : RB 102 (certifies X), RB 103, RB 104 (certifies Y), RB 105
+C -> B : RB 102..105
+B -> R : resolve X
+note over B : 102 waits for X;\n103..105 wait behind it
+R -> N : LeiosFetch BlockRequest(X), BlockTxsRequest(X)
+N -> R : EB X + transactions
+R -> B : X resolved
+B -> P : onBlock(102 + X), onBlock(103)
+B -> R : resolve Y
+R -> N : LeiosFetch for Y
+N -> R : EB Y + transactions
+R -> B : Y resolved
+B -> P : onBlock(104 + Y), onBlock(105)
+C -> N : BlockFetch part 2 (RB 150..199)\nonly when the buffer has room
+B -> P : ... batchDone() after the last block, same ordered queue
+@enduml

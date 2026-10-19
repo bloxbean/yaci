@@ -1,0 +1,25 @@
+@startuml 2-c4-container
+!pragma layout smetana
+!include <C4/C4_Container>
+LAYOUT_TOP_DOWN()
+title Containers (C4 level 2): Yaci modules involved
+
+System_Ext(app, "Downstream application", "BlockChainDataListener")
+System_Ext(node, "Cardano node with Leios", "Musashi relay")
+
+System_Boundary(yaci, "Yaci") {
+  Container(sync, "BlockSync / BlockRangeSync", "yaci-helper", "Tip sync and history sync, as today")
+  Container(asm, "Complete-block assembler", "yaci-helper, NEW", "Resolves certified EBs, keeps chain order, one ordered delivery thread")
+  Container(agents, "Mini-protocol agents", "yaci-core", "ChainSync, BlockFetch, LeiosNotify (18), LeiosFetch (19)")
+  Container(codecs, "Codecs", "yaci-core", "BlockSerializer (Shelley..Conway, unchanged), DijkstraBlockBodySerializer, EB serializers")
+  Container(cfg, "YaciConfig", "yaci-core", "inlineEndorserBlockTxs (default true)")
+}
+
+Rel(sync, asm, "parsed blocks, in order")
+Rel(asm, app, "complete blocks + all other callbacks")
+Rel(sync, agents, "uses")
+Rel(asm, agents, "fetches EBs with", "LeiosFetch")
+Rel(agents, codecs, "decode with")
+Rel(asm, cfg, "reads")
+Rel(agents, node, "N2N", "one connection")
+@enduml

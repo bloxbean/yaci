@@ -1,0 +1,27 @@
+@startuml 3-c4-component
+!pragma layout smetana
+!include <C4/C4_Component>
+LAYOUT_TOP_DOWN()
+title Components (C4 level 3): inside the complete-block assembler
+
+Container(sync, "BlockSync / BlockRangeSync", "yaci-helper", "parsed blocks, chain order")
+Container(fetch, "LeiosFetch agent", "yaci-core", "same connection as BlockFetch")
+System_Ext(app, "Application listener", "onBlock, onRollback, batchDone, ...")
+
+Container_Boundary(asm, "Complete-block assembler") {
+  Component(mem, "1. Announcement memory", "RB hash -> announced EB", "Recent RBs (a few hundred). Certifying block looks up its parent by prevHash. Seeded from the sync start point.")
+  Component(buf, "3. Reorder buffer", "chain order", "The first block waiting for its EB holds every block after it. Never skips a block.")
+  Component(res, "2. EB resolver", "LeiosFetch client", "Asks only for certified EBs (or EBs this peer offered). Checks blake2b-256(tx bytes) against the EB. One EB at a time for now.")
+  Component(mrg, "4. Merger", "pure function", "EB transactions first, then the block's own")
+  Component(q, "Ordered delivery queue", "one thread", "All callbacks, in order")
+}
+
+Rel(sync, mem, "every block")
+Rel(mem, buf, "block + EB it certifies")
+Rel(buf, res, "resolve EB A")
+Rel(res, buf, "EB A resolved / unavailable")
+Rel(res, fetch, "BlockRequest, BlockTxsRequest")
+Rel(buf, mrg, "first block ready")
+Rel(mrg, q, "complete block")
+Rel(q, app, "callbacks")
+@enduml

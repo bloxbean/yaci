@@ -1,0 +1,31 @@
+@startuml 0-leios-overview
+!pragma layout smetana
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam rectangle {
+  RoundCorner 8
+  BorderColor #555555
+}
+title Leios in one picture: announce, certify, discard
+left to right direction
+
+rectangle "**RB n**\nown txs: 354\nannounces EB A" as RBn #DCEBFF
+rectangle "**RB n+1**\nown txs: 0\ncertified: yes\n+ Leios certificate" as RBn1 #E9DDFF
+rectangle "**RB n+2**\nown txs: 356\nannounces EB B" as RBn2 #DCEBFF
+
+rectangle "**EB A**\n5,255 tx references\n(reference hash -> size)" as EBA #FFF2CC
+rectangle "**EB B**\nnext RB did not certify it\n-> discarded" as EBB #EEEEEE
+
+RBn -right-> RBn1 : next block
+RBn1 -right-> RBn2 : next block
+RBn ..> EBA : announces
+RBn1 ..> EBA : certifies\n(EB of its parent)
+RBn2 ..> EBB : announces
+
+note bottom of RBn1
+  Ledger order at RB n+1:
+  the 5,255 EB A transactions,
+  then RB n+1's own transactions (none).
+  Yaci delivers RB n+1 as one complete block.
+end note
+@enduml

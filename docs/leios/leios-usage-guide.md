@@ -1,6 +1,6 @@
 # Leios Usage Guide — Patterns for Application Developers
 
-Last verified: 2026-07-07 (Musashi `prototype-2026w27`)
+Last verified: 2026-07-07 (Musashi `prototype-2026w27`). Being updated for `prototype-2026w40a` and ADR 0013; see `adr/leios-todo.md`.
 
 How to use Yaci's Linear Leios support in your application. Everything here
 targets the **Musashi** prototype testnet (network magic `164`, Dijkstra era)

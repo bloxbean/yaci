@@ -1,0 +1,13 @@
+@startuml 1-c4-context
+!pragma layout smetana
+!include <C4/C4_Context>
+LAYOUT_TOP_DOWN()
+title System context (C4 level 1)
+
+System_Ext(app, "Downstream application", "Yaci Store, indexers, wallets. Implements BlockChainDataListener: onBlock(era, block, transactions)")
+System(yaci, "Yaci", "Java library. Follows the chain, fetches blocks and resolves endorser blocks")
+System_Ext(node, "Cardano node with Leios", "Musashi relay, network magic 164, prototype-2026w40a")
+
+Rel(yaci, app, "Complete blocks, in chain order", "same API as today")
+Rel(yaci, node, "One node-to-node connection", "ChainSync, BlockFetch, KeepAlive, LeiosNotify, LeiosFetch")
+@enduml
