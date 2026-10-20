@@ -343,3 +343,41 @@ ADR 0013 prerequisites: all done.
   - New tests: tagged sub-transactions with nil aux, forbidden keys ignored, malformed fields, and a ranking
     block that carries the golden tx.
 
+### 7b. Full Musashi sync: relay incident (2026-10-20 04:10 +08)
+- The public relay pool behind `leios-node.play.dev.cardano.org` went partly down:
+  - 5 relays refused connections, 1 timed out, and 2 were at origin, re-syncing.
+  - DNS also listed a healthy relay (`144.76.1.222`) whose chain held our blocks.
+  - KleioScan (its own node) kept following the chain, so this was not a respin.
+- Yaci reconnected to a relay at origin, which answered BlockFetch `RequestRange` with **NoBlocks**. Range sync
+  then **stalled for good**: `BlockfetchAgent` has no retry after NoBlocks.
+- This is a general Yaci robustness gap, not Leios: with several relays behind one name, a reconnect can reach a
+  peer that lacks the range.
+- Proposed fix (for `main`/`next`): when a reconnect is answered with NoBlocks, retry with backoff and resolve DNS
+  again or move to the next candidate. Do not wait forever.
+- Data was safe: the cursor matched the stored blocks (105,253, no gaps). Yaci Store was stopped and resumed
+  against `144.76.1.222`.
+- Also seen: under heavy blocks, Yaci Store's batch writes (30-60 s) hold back-pressure long enough for the node to
+  drop the main connection (about 70 reconnects over 9 hours). Each one resumed from the last received block with
+  no loss.
+- **Stall at block 128,473 (06:48-07:21 +08), cause found in Yaci core, not Leios.**
+  `MiniProtoStreamingByteToMessageDecoder` decodes all buffered bytes of a mini-protocol at once
+  (`ArrayCborDecoder.decode`, all-or-nothing), so it emits a message only when a mux SDU ends exactly at a message
+  boundary. Under back-pressure the node's mux packs queued BlockFetch messages back to back across SDUs. The
+  buffer then only grows, each SDU re-decodes all of it, and nothing comes out. Observed: the Netty thread at
+  100% CPU in `ArrayCborDecoder`, a 9 GB heap, and no blocks for 33 minutes. This is probably also behind many of
+  the earlier reconnects.
+  - Fix: frame values one at a time (`CborSlice.valueEnd`), emit each complete message, keep only the incomplete
+    tail. Branch `fix/mux-decoder-split-messages` from `next`, with a regression test that fails on the old
+    decoder. `main` (0.4.x) has the same code and needs a back-port.
+  - Verified live: the patched Java 21 build resumed the sync at about 146 blocks/min, with 23% CPU and 3.5 GB RSS
+    (before: 100% CPU, 12 GB, stalled).
+- **First live sub-transaction on Musashi (block 153,727, tx `7faf3e35…f10d`), seen 2026-10-20 13:10 +08.**
+  - The sub-transaction registers a DRep (cert 16), delegates a vote (cert 9) and spends 1 input / creates 1 output.
+  - The top-level tx then updates (18) and unregisters (17) that DRep.
+  - The Yaci in this run (`2cad020`) does not read sub-transactions (that is PR #222). So Yaci Store logged
+    "Cannot find recent dRep registration" and missed the sub-transaction's UTxO and spend: its UTxO set and DRep
+    state differ from the chain for this tx.
+  - Needed: a Yaci Store change on `develop/leios` that processes `TransactionBody.subTransactions` (UTxOs, spends,
+    certificates, withdrawals, deposits) with the Yaci from PR #222. It depends on how Yaci Store gets a Leios Yaci
+    build: Java 25 for Yaci Store, or a Java 21 Yaci build.
+

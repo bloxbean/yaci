@@ -17,3 +17,4 @@ Tool: `./gradlew :helper:captureW27Fixtures -PfixtureDir=<dir> -PfixtureSeconds=
 | `vote-*.hex` | votes: `[announcing_rb_hash, voter_id, signature]` |
 
 Block files are the BlockFetch payload: `[8, [header, block_body]]`.
+- `subtx-7faf3e35.cbor`: mempool form `[body, witnesses, aux]` of tx `7faf3e35…f10d` (block 153,727), the first live sub-transaction seen on Musashi (sub-tx `db6deec1…`). From the KleioScan (db-sync) tx CBOR.

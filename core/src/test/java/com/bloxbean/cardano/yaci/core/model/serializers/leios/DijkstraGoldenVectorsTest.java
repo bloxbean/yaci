@@ -142,6 +142,27 @@ class DijkstraGoldenVectorsTest {
     }
 
     @Test
+    void liveMusashiSubTransaction() throws Exception {
+        //Musashi block #153,727: the first live sub-transaction seen. It registers a DRep that the parent then
+        //updates and unregisters. Values from db-sync (KleioScan)
+        byte[] tx = Files.readAllBytes(Path.of(DijkstraGoldenVectorsTest.class
+                .getResource("/leios/w40a/subtx-7faf3e35.cbor").toURI()));
+        TransactionBody parent = asEndorserBlockTx(tx).getTransactionBodies().get(0);
+
+        assertThat(parent.getTxHash()).isEqualTo("7faf3e35f2fc624ba416a00de088537a5ebb22d35a9f262c46e646eb0af4f10d");
+        assertThat(parent.getCertificates()).extracting(c -> c.getType().toString())
+                .containsExactly("UPDATE_DREP_CERT", "UNREG_DREP_CERT");
+        SubTransaction subTx = parent.getSubTransactions().get(0);
+        assertThat(subTx.getBody().getTxHash()).isEqualTo("db6deec17d1b322f2d67d5c800ff1bdf2a0cd43c1b6772d662af5e0494e47908");
+        assertThat(subTx.getBody().getFee()).isNull();
+        assertThat(subTx.getBody().getCertificates()).extracting(c -> c.getType().toString())
+                .containsExactly("REG_DREP_CERT", "VOTE_DELEG_CERT");
+        assertThat(subTx.getBody().getOutputs()).hasSize(1);
+        assertThat(subTx.getBody().getOutputs().get(0).getAmounts().get(0).getQuantity()).isEqualTo(864834821);
+        assertThat(subTx.getWitnesses().getVkeyWitnesses()).hasSize(2);
+    }
+
+    @Test
     void consensusGenTxWrapsTheSameTransaction() throws Exception {
         //[7, #6.24(bytes .cbor tx)]: hard-fork era index 7 = Dijkstra
         Array genTx = (Array) CborSerializationUtil.deserializeOne(resource("dijkstra-golden-gentx.cbor"));
