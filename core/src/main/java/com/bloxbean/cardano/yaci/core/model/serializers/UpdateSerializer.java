@@ -275,6 +275,40 @@ public enum UpdateSerializer implements Serializer<Update> {
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(48));
         Long maxRefScriptSizePerEndorserBlock = itemDI != null ? toLong(itemDI) : null;
 
+        //Peras and reference input fees
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(49));
+        Long perasMinCandidateBlockAge = itemDI != null ? toLong(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(50)); //positive_interval
+        NonNegativeInterval perasHealingFactor = itemDI != null ? toNonNegativeInterval(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(51));
+        Integer perasCertBoost = itemDI != null ? toInt(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(52));
+        Integer perasTargetCommitteeSize = itemDI != null ? toInt(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(53)); //uint / nil
+        Long perasBootstrapRound = null;
+        Boolean perasBootstrapRoundNone = null;
+        if (itemDI != null) {
+            if (SimpleValue.NULL.equals(itemDI)) {
+                perasBootstrapRoundNone = true;
+            } else {
+                perasBootstrapRound = toLong(itemDI);
+                perasBootstrapRoundNone = false;
+            }
+        }
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(54));
+        UnitInterval perasQuorumThresholdSafetyMargin = itemDI != null ? toUnitInterval(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(55));
+        BigInteger refInputsCostPerMultiAssetPolicy = itemDI != null ? toBigInteger(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(56));
+        BigInteger refInputsCostPerDatumByte = itemDI != null ? toBigInteger(itemDI) : null;
+
         ProtocolParamUpdate protocolParamUpdate = ProtocolParamUpdate.builder()
                 .minFeeA(minFeeA)
                 .minFeeB(minFeeB)
@@ -332,6 +366,15 @@ public enum UpdateSerializer implements Serializer<Update> {
                 .maxEndorserBlockExMem(maxEndorserBlockExMem)
                 .maxEndorserBlockExSteps(maxEndorserBlockExSteps)
                 .maxRefScriptSizePerEndorserBlock(maxRefScriptSizePerEndorserBlock)
+                .perasMinCandidateBlockAge(perasMinCandidateBlockAge)
+                .perasHealingFactor(perasHealingFactor)
+                .perasCertBoost(perasCertBoost)
+                .perasTargetCommitteeSize(perasTargetCommitteeSize)
+                .perasBootstrapRound(perasBootstrapRound)
+                .perasBootstrapRoundNone(perasBootstrapRoundNone)
+                .perasQuorumThresholdSafetyMargin(perasQuorumThresholdSafetyMargin)
+                .refInputsCostPerMultiAssetPolicy(refInputsCostPerMultiAssetPolicy)
+                .refInputsCostPerDatumByte(refInputsCostPerDatumByte)
                 .build();
         return protocolParamUpdate;
     }
@@ -571,6 +614,17 @@ public enum UpdateSerializer implements Serializer<Update> {
             map.put(cborUInt(47), exUnits);
         }
         if (ppu.getMaxRefScriptSizePerEndorserBlock() != null) map.put(cborUInt(48), cborUInt(ppu.getMaxRefScriptSizePerEndorserBlock()));
+
+        // 49-56: Peras and reference input fees
+        if (ppu.getPerasMinCandidateBlockAge() != null) map.put(cborUInt(49), cborUInt(ppu.getPerasMinCandidateBlockAge()));
+        if (ppu.getPerasHealingFactor() != null) map.put(cborUInt(50), serializeRational(ppu.getPerasHealingFactor()));
+        if (ppu.getPerasCertBoost() != null) cborMapPutUInt(map, 51, ppu.getPerasCertBoost());
+        if (ppu.getPerasTargetCommitteeSize() != null) cborMapPutUInt(map, 52, ppu.getPerasTargetCommitteeSize());
+        if (Boolean.TRUE.equals(ppu.getPerasBootstrapRoundNone())) map.put(cborUInt(53), SimpleValue.NULL);
+        else if (ppu.getPerasBootstrapRound() != null) map.put(cborUInt(53), cborUInt(ppu.getPerasBootstrapRound()));
+        if (ppu.getPerasQuorumThresholdSafetyMargin() != null) map.put(cborUInt(54), serializeRational(ppu.getPerasQuorumThresholdSafetyMargin()));
+        if (ppu.getRefInputsCostPerMultiAssetPolicy() != null) map.put(cborUInt(55), cborUInt(ppu.getRefInputsCostPerMultiAssetPolicy()));
+        if (ppu.getRefInputsCostPerDatumByte() != null) map.put(cborUInt(56), cborUInt(ppu.getRefInputsCostPerDatumByte()));
 
         return map;
     }

@@ -36,8 +36,7 @@ public interface LeiosDataListener {
     default void onBlock(LeiosPoint requestedPoint, LeiosRawCbor endorserBlock) {
     }
 
-    default void onBlockTxs(LeiosPoint requestedPoint, LeiosPoint responsePoint,
-                            LeiosTxBitmap responseBitmap, LeiosRawCbor txList) {
+    default void onBlockTxs(LeiosPoint requestedPoint, LeiosTxBitmap requestedBitmap, LeiosRawCbor txList) {
     }
 
     default void onNotifyError(Throwable error) {

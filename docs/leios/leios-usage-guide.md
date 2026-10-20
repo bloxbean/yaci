@@ -1,12 +1,12 @@
 # Leios Usage Guide: Patterns for Application Developers
 
-Last verified: 2026-10-19 (Musashi `prototype-2026w40a`). Design: `adr/0013-leios-complete-blocks.md`.
+Last verified: 2026-10-20 (Musashi `rc-2026w42`). Design: `adr/0013-leios-complete-blocks.md`.
 
 How to use Yaci's Linear Leios support in your application. Everything here targets the **Musashi** test
 network (network magic `164`, Dijkstra era) and works with the same jar, unchanged, on mainnet and preprod:
 Leios code paths never engage on non-Leios networks.
 
-> **Status:** experimental, pinned to the deployed Musashi build `prototype-2026w40a`. Musashi is respun on
+> **Status:** experimental, pinned to the deployed Musashi build `rc-2026w42`. Musashi is respun on
 > breaking releases; the pin and how to re-check it are in `adr/leios-todo.md` and
 > [leios-musashi-source-tracking-guide.md](leios-musashi-source-tracking-guide.md).
 
@@ -128,7 +128,7 @@ blockSync.startSync(point, new BlockChainDataListener() {
     @Override
     public void onLeiosVotes(LeiosVotesEvent event) {
         for (LeiosVote vote : event.getVotes()) {
-            vote.getAnnouncingRbHash();               // w40a vote: [announcing_rb_hash, voter_id, signature]
+            vote.getAnnouncingRbHash();               // vote: [announcing_rb_hash, voter_id, signature]
         }
     }
 });
@@ -186,7 +186,8 @@ objects and their JSON are unchanged.
 | redeemer tag 6 | `RedeemerTag.Guarding` |
 | pool `bls_key` | `PoolParams.blsPublicKey`, `blsPossessionProof` |
 | protocol parameter update keys 34–48 | `ProtocolParamUpdate` (reference script limits, `maxPledgeLeverage`, `minPoolMargin`, Leios parameters) |
-| Plutus V4 | `PlutusScriptType.PlutusScriptV4`, `AuxData.plutusV4Scripts` |
+| protocol parameter update keys 49–56 (w42) | `ProtocolParamUpdate` (`peras*` parameters, `refInputsCostPerMultiAssetPolicy`, `refInputsCostPerDatumByte`). Key 53 `nil` sets `perasBootstrapRoundNone = true`. |
+| Plutus V4 | `PlutusScriptType.PlutusScriptV4`; witness set key 8 (w42) `Witnesses.plutusV4Scripts`; aux data key 5 `AuxData.plutusV4Scripts`. Both are null when absent. |
 | hard-fork era index 7 | `localstate.api.Era.Dijkstra`, `TxBodyType.DIJKSTRA` (local state queries, transaction submission) |
 
 Notes:
@@ -196,7 +197,8 @@ Notes:
 - A Dijkstra field Yaci cannot read is logged and left null; the transaction and block are still delivered.
 - `requireGuard` is Yaci's JSON name; cardano-api has no JSON form for guard scripts yet.
 
-The Haskell golden vectors used to test this are in `core/src/test/resources/leios/haskell/`.
+The Haskell golden vectors used to test this are in `core/src/test/resources/leios/haskell-w42/` (and the w40a
+ones in `core/src/test/resources/leios/haskell/`).
 
 ---
 
@@ -221,14 +223,15 @@ You do not need separate builds or feature flags.
 ## Current limitations
 
 - Certificates are parsed and kept raw, **not** BLS-verified. Yaci trusts the node's chain selection.
-- Plutus V4 scripts are read where the deployed CDDL allows them: reference scripts (raw `scriptRef`, as for
-  other versions) and auxiliary data (`AuxData.plutusV4Scripts`). The witness set has no Plutus V4 key in w40a.
-- Local state query results for the Dijkstra era (for example current protocol parameters) are not verified yet:
-  no local Musashi node was available.
+- Plutus V4 scripts are read everywhere the deployed CDDL allows them: the witness set (`Witnesses.plutusV4Scripts`),
+  reference scripts (raw `scriptRef`, as for other versions) and auxiliary data (`AuxData.plutusV4Scripts`).
+- Local state query results for the Dijkstra era (for example current protocol parameters, 55 fields in w42) are
+  not verified yet: no local Musashi node was available. The w42 queries `GetStakePoolState` (40) and
+  `GetLeiosCommittee` (41) are not implemented.
 - How long nodes keep old certified EBs is not specified yet; four weeks is verified on Musashi.
 - If the first block after a start certifies an EB and its parent is more than 1,000 slots older (a long block
   gap), the parent search fails and the block waits; tip sync uses the intersection point and does not search.
 - With inlining on, the Leios connection also receives LeiosNotify traffic, and Pattern 3 (if enabled on the main
   connection) fetches some EB transactions a second time. This costs bandwidth only.
-- Musashi is respun on breaking node releases; this guide and the code are pinned to `prototype-2026w40a`.
+- Musashi is respun on breaking node releases; this guide and the code are pinned to `rc-2026w42`.
   Check `adr/leios-todo.md` before assuming compatibility.

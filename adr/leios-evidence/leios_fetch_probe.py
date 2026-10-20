@@ -1,5 +1,7 @@
-"""Ask the Musashi relay (w40a codecs) for an EB and its first 8 txs WITHOUT any prior offer.
-Usage: leios_fetch_probe.py <slot> <eb_hash> [label] [all]   ("all" requests every tx, else the first 8)"""
+"""Ask the Musashi relay (rc-2026w42 codecs) for an EB and its first 8 txs WITHOUT any prior offer.
+Usage: leios_fetch_probe.py <slot> <eb_hash> [label] [all] [out_dir]
+("all" requests every tx, else the first 8; out_dir saves both message payloads as hex).
+The point is the slot of the block that announced the EB, and the EB hash."""
 import socket, struct, sys, time
 
 HOST, PORT = "leios-node.play.dev.cardano.org", 3001
@@ -70,6 +72,7 @@ def items(b, i):
         j = skip(b, i); yield i, j; i = j; k += 1
 
 def bstr(b, i):
+    if b[i] == 0xd8 and b[i + 1] == 0x18: i += 2                     # #6.24 CBOR-in-CBOR wrapper
     ai = b[i] & 31
     if ai < 24: return b[i + 1:i + 1 + ai]
     n = {24: 1, 25: 2, 26: 4, 27: 8}[ai]; ln = int.from_bytes(b[i + 1:i + 1 + n], "big")
@@ -77,9 +80,9 @@ def bstr(b, i):
 
 def verify(eb_msg, txs_msg):
     import hashlib
-    eb_children = list(items(eb_msg, 0)); eb_map = eb_children[1][0]          # [1, eb]
+    eb_children = list(items(eb_msg, 0)); eb_map = eb_children[1][0]          # [2, eb]
     refs = [bstr(eb_msg, a).hex() for idx, (a, _) in enumerate(items(eb_msg, eb_map)) if idx % 2 == 0]
-    tx_children = list(items(txs_msg, 0)); tx_list = tx_children[3][0]        # [3, point, bitmaps, tx_list]
+    tx_children = list(items(txs_msg, 0)); tx_list = tx_children[1][0]        # [4, [* #6.24(bytes)]]
     got = [hashlib.blake2b(bstr(txs_msg, a), digest_size=32).hexdigest() for a, _ in items(txs_msg, tx_list)]
     return f"{sum(1 for r, g in zip(refs, got) if r == g)}/{len(got)} received txs match (EB has {len(refs)} refs)"
 
@@ -88,7 +91,7 @@ point = b"\x82" + cbor_uint(slot) + b"\x58\x20" + eb_hash
 s = socket.create_connection((HOST, PORT), timeout=15)
 s.sendall(frame(0, bytes.fromhex("8200a10f8418a4f500f4")))           # handshake N2N v15, magic 164
 read_message(s, 0, 10)
-s.sendall(frame(19, b"\x82\x00" + point))                              # MsgLeiosBlockRequest [0, point]
+s.sendall(frame(19, b"\x82\x01" + point))                              # MsgLeiosBlockRequest [1, point]
 status, eb = read_message(s, 19, 30)
 print(f"{label} EB request: {status}, {len(eb)} bytes, starts {eb[:6].hex()}")
 if status == "ok":
@@ -100,9 +103,14 @@ if status == "ok":
         bitmaps += cbor_uint(w) + b"\x1b" + (((1 << count) - 1) << (64 - count)).to_bytes(8, "big")
     bitmaps += b"\xff"
     started = time.time()
-    s.sendall(frame(19, b"\x83\x02" + point + bitmaps))               # MsgLeiosBlockTxsRequest [2, point, bitmaps]
+    s.sendall(frame(19, b"\x83\x03" + point + bitmaps))               # MsgLeiosBlockTxsRequest [3, point, bitmaps]
     status, txs = read_message(s, 19, 120)
     print(f"{label} BlockTxs request for {n} txs (no offer): {status}, {len(txs)} bytes in {time.time() - started:.1f}s, starts {txs[:6].hex()}")
     if status == "ok":
         print(f"{label} tx hashes vs EB references: {verify(eb, txs)}")
+        if len(sys.argv) > 5:
+            import os
+            short = sys.argv[2][:8]                                   # names as in core/src/test/resources/leios/w42
+            open(os.path.join(sys.argv[5], f"msg-leios-block-{short}.hex"), "w").write(eb.hex())
+            open(os.path.join(sys.argv[5], f"msg-leios-block-txs-{short}.hex"), "w").write(txs.hex())
 s.close()

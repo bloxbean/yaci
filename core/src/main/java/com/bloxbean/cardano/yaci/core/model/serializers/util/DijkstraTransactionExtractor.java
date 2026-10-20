@@ -8,8 +8,8 @@ import java.util.List;
 
 /**
  * Cuts a Dijkstra block into byte-exact slices, without building a CBOR tree (so deep nesting cannot overflow
- * the stack here). Layout pinned to the deployed Musashi network, prototype-2026w40a
- * (cardano-blueprint {@code src/ledger/eras/dijkstra.cddl} @ 131cc95a):
+ * the stack here). Layout of the Musashi network from prototype-2026w40a on; unchanged in rc-2026w42
+ * (cardano-ledger {@code dijkstra.cddl} @ 9df9f98c):
  * <pre>
  * [era, [header, block_body]]
  * block_body        = [transactions : [* block_transaction], leios_certificate / nil, peras_certificate / nil]
@@ -59,7 +59,7 @@ public final class DijkstraTransactionExtractor {
      * <ul>
      *   <li>{@code [body, witness_set, auxiliary_data / nil]}: mempool encoding (w40a), always valid</li>
      *   <li>{@code [body, witness_set, is_valid, auxiliary_data / nil]}: legacy mempool encoding</li>
-     *   <li>{@code [body, witness_set, auxiliary_data / nil, is_valid]}: block encoding (w42)</li>
+     *   <li>{@code [body, witness_set, auxiliary_data / nil, is_valid]}: block encoding (w42 and later)</li>
      * </ul>
      */
     public static TransactionSlice readEndorserBlockTransaction(int index, byte[] transactionBytes) throws CborException {

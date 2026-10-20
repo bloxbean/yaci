@@ -117,6 +117,26 @@ public class ProtocolParamUpdate {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Long maxRefScriptSizePerEndorserBlock; //48
 
+    //Peras and reference input fees (Dijkstra era, Musashi rc-2026w42 onwards)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long perasMinCandidateBlockAge; //49, slots
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private NonNegativeInterval perasHealingFactor; //50, positive_interval
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer perasCertBoost; //51
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer perasTargetCommitteeSize; //52
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long perasBootstrapRound; //53, null when absent or nil
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean perasBootstrapRoundNone; //53, true when the update sets nil (no bootstrap round)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private UnitInterval perasQuorumThresholdSafetyMargin; //54
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigInteger refInputsCostPerMultiAssetPolicy; //55
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigInteger refInputsCostPerDatumByte; //56
+
     /**
      * Pre-Dijkstra constructor, kept so existing callers compile and behave unchanged.
      */
@@ -160,6 +180,7 @@ public class ProtocolParamUpdate {
                                Integer drepActivity,
                                NonNegativeInterval minFeeRefScriptCostPerByte) {
         this(minFeeA, minFeeB, maxBlockSize, maxTxSize, maxBlockHeaderSize, keyDeposit, poolDeposit, maxEpoch, nOpt, poolPledgeInfluence, expansionRate, treasuryGrowthRate, decentralisationParam, extraEntropy, protocolMajorVer, protocolMinorVer, minUtxo, minPoolCost, adaPerUtxoByte, costModels, costModelsHash, priceMem, priceStep, maxTxExMem, maxTxExSteps, maxBlockExMem, maxBlockExSteps, maxValSize, collateralPercent, maxCollateralInputs, poolVotingThresholds, drepVotingThresholds, committeeMinSize, committeeMaxTermLength, govActionLifetime, govActionDeposit, drepDeposit, drepActivity, minFeeRefScriptCostPerByte,
-                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null);
     }
 }

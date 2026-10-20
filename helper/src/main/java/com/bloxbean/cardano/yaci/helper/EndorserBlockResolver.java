@@ -81,8 +81,7 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
             }
 
             @Override
-            public void onBlockTxs(LeiosPoint requestedPoint, LeiosPoint responsePoint, LeiosTxBitmap responseBitmap,
-                                   LeiosRawCbor txList) {
+            public void onBlockTxs(LeiosPoint requestedPoint, LeiosTxBitmap requestedBitmap, LeiosRawCbor txList) {
                 Request request = requests.get(key(requestedPoint));
                 if (request != null) {
                     request.onTransactions(txList);

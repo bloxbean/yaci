@@ -193,7 +193,7 @@ public class LeiosFetchAgent extends Agent<LeiosFetchAgentListener> {
             return;
         }
         dispatchListener(listener -> listener.onBlockTxs(
-                        request.getPoint(), blockTxs.getPoint(), blockTxs.getBitmap(), blockTxs.getTxList()),
+                        request.getPoint(), request.getBitmap(), blockTxs.getTxList()),
                 "onBlockTxs", request.getPoint());
     }
 
