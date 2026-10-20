@@ -103,3 +103,34 @@ is 169 bytes on chain and carries no transactions of its own.
 | 156660 | 3496663 | `c2a847c8…` | yes | 5,145 | 5,145 | 5,145 |
 
 Totals: db-sync 83,540, Yaci Store 83,540. The reference data is db-sync, via the KleioScan explorer.
+
+## Full sync from genesis (2026-10-19 19:14 to 2026-10-20 15:33 +08)
+
+Setup:
+- The same unmodified Yaci Store `main`, on Postgres. Genesis: Musashi's `alonzo-genesis.json` with the
+  `prSteps`/`prMem` key names (bloxbean/yaci-store#1275).
+- From block 128,773 on, the Yaci build also had the mux decoder fix (see below).
+
+Result, blocks 0-158,298:
+- All blocks stored, with no gaps and no duplicates.
+- **158,263 blocks** compared with db-sync (KleioScan, blocks 36-158,298): hash, slot, `no_of_txs` and the
+  `transaction` row count are equal for every block. That is **80,100,191 transactions, 0 mismatches**, including
+  **27,041 certifying blocks** that carry **64,199,852** endorser-block transactions.
+- 400 random transactions (half of them EB transactions) compared field by field with db-sync: inputs, outputs,
+  assets, datums, reference scripts, mint, scripts, required signers, metadata, withdrawals and spends.
+  - Equal except two known Yaci Store items: a Plutus V4 reference script (bloxbean/yaci-store#1274), and
+    script rows lost for the first block of an epoch in parallel mode (a Yaci Store bug, not Leios).
+
+The run ended at block 158,298 of 166,365. Musashi was respun to `rc-2026w42`, and the public relays no longer
+serve the w40a chain.
+
+Found during the run, not caused by Leios:
+1. Yaci core: `MiniProtoStreamingByteToMessageDecoder` stalls under back-pressure. Fixed on branch
+   `fix/mux-decoder-split-messages` (not pushed yet).
+2. Yaci: range sync stalls for good after NoBlocks from a re-syncing relay.
+3. Yaci Store:
+   - in parallel mode, script rows for the first block of each epoch are lost;
+   - in range-only mode, the last partial batch is not written;
+   - the 5-minute `processing-threads-timeout` is too short for heavy blocks on slow storage.
+4. Musashi itself: the first live sub-transaction (block 153,727) needs sub-transaction support in Yaci Store.
+

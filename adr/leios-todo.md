@@ -91,7 +91,7 @@ How to re-check the baseline:
 | 5 | N2N range sync: fetch historical EBs over LeiosFetch so N2N gives full tx data through the same interface | done with step 4: live range test matches db-sync | `MusashiCompleteBlocksIT` | |
 | 6 | N2C: accept the node's inlined certifying blocks (secondary, most downstream uses N2N) | done: parses unchanged; gap logged | `N2CInlinedCertifyingBlockTest` | reviewed: approve; 4 small fixes applied |
 | 7 | Run an unmodified Yaci Store against Musashi and check tx counts | done: PASS, 50/50 blocks and 83,540/83,540 txs = db-sync (24 certifying) | `adr/leios-evidence/step7-yaci-store-musashi.md` | |
-| 7b | Full Musashi sync with an unmodified Yaci Store (Postgres), compared with db-sync | in progress: no gaps or mismatches so far; 400 random txs compared field by field | `adr/leios-evidence/step7-yaci-store-musashi.md` | |
+| 7b | Full Musashi sync with an unmodified Yaci Store (Postgres), compared with db-sync | done: blocks 0-158,298 (95%, until the w42 respin), 80.1 M txs and 27,041 certifying blocks equal to db-sync, 0 mismatches; 400 random txs compared field by field | `adr/leios-evidence/step7-yaci-store-musashi.md` | |
 | 9 | Parse every Dijkstra structure of the deployed CDDL (keys 14, 23-27, require_guard, redeemer tag 6, Plutus V4, bls_key, pparam keys 34-48, era index 7); backward compatible | done | branch `feat/leios_dijkstra_cddl` (stacked on #221); Haskell golden vectors in `core/src/test/resources/leios/haskell/`; PR #222 | reviewed; findings addressed |
 | 10 | Yaci Store changes for Leios on `develop/leios` | PRs open: #1274 (Plutus V4 reference scripts), #1275 (Alonzo genesis price keys) | bloxbean/yaci-store | reviewed |
 | 11 | N2C local state query results in the Dijkstra era (e.g. current protocol parameters) | todo: needs a local Musashi node | | |
@@ -380,4 +380,13 @@ ADR 0013 prerequisites: all done.
   - Needed: a Yaci Store change on `develop/leios` that processes `TransactionBody.subTransactions` (UTxOs, spends,
     certificates, withdrawals, deposits) with the Yaci from PR #222. It depends on how Yaci Store gets a Leios Yaci
     build: Java 25 for Yaci Store, or a Java 21 Yaci build.
+
+## Musashi respun to `rc-2026w42` (seen 2026-10-20 15:33 +08)
+- The operator page now says `rc-2026w42`. All public relays serve a new chain (tip block 9,788 at 15:35), with
+  no intersection with the w40a chain. The 04:10 relay outage was probably the start of the switch.
+- Yaci's Leios code is pinned to w40a, so it must be re-pinned to w42 next:
+  - Transport: `adr/leios-patches/w42-transport-repin.patch` (prepared, not applied).
+  - CDDL: check the w42 `dijkstra.cddl` and the w42 consensus/ledger pins against the w40a ones (see the re-pin
+    checklist above).
+  - Fixtures: the w40a live fixtures stay valid as w40a tests. New w42 fixtures are needed.
 
