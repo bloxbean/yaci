@@ -19,6 +19,7 @@ public class BlockSync {
     private LeiosConfig leiosConfig = LeiosConfig.defaultConfig();
 
     private N2NChainSyncFetcher n2NChainSyncFetcher;
+    private CompleteBlockAssembler completeBlockAssembler;
 
     /**
      * Construct a BlockSync instance
@@ -73,6 +74,8 @@ public class BlockSync {
      * @param blockChainDataListener {@link BlockChainDataListener} instance
      */
     public void startSync(Point point, BlockChainDataListener blockChainDataListener) {
+        //Close the assembler first: it releases a network thread that waits for queue space, which shutdown needs
+        closeCompleteBlockAssembler();
         if (n2NChainSyncFetcher != null && n2NChainSyncFetcher.isRunning())
             n2NChainSyncFetcher.shutdown();
 
@@ -86,13 +89,38 @@ public class BlockSync {
             n2NChainSyncFetcher = new N2NChainSyncFetcher(host, port, point, protocolMagic, syncFromTip, leiosConfig);
         }
 
-        BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(blockChainDataListener);
-        ChainSyncListenerAdapter chainSyncAgentListener = new ChainSyncListenerAdapter(blockChainDataListener);
+        BlockChainDataListener listener = completeBlocksListener(blockChainDataListener, syncFromTip ? null : point);
+        BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(listener);
+        ChainSyncListenerAdapter chainSyncAgentListener = new ChainSyncListenerAdapter(listener);
         n2NChainSyncFetcher.addChainSyncListener(chainSyncAgentListener);
         n2NChainSyncFetcher.addBlockFetchListener(blockfetchAgentListener);
-        n2NChainSyncFetcher.addLeiosDataListener(blockChainDataListener);
+        n2NChainSyncFetcher.addLeiosDataListener(listener);
 
         n2NChainSyncFetcher.start();
+    }
+
+    /**
+     * Leios (ADR 0013): when endorser block transactions are inlined, wrap the listener so that certifying blocks
+     * arrive complete. Otherwise the application's listener is used as is.
+     */
+    private BlockChainDataListener completeBlocksListener(BlockChainDataListener blockChainDataListener, Point startPoint) {
+        closeCompleteBlockAssembler();
+        long magic = protocolMagic != null ? protocolMagic : -1;
+        if (!leiosConfig.shouldInlineEndorserBlockTxs(magic)) {
+            return blockChainDataListener;
+        }
+        VersionTable table = versionTable != null ? versionTable : LeiosConfig.versionTableFor(magic, leiosConfig);
+        completeBlockAssembler = new CompleteBlockAssembler(blockChainDataListener, host, port, magic, table,
+                leiosConfig.isSkipUnavailableEndorserBlocks());
+        completeBlockAssembler.setStartPoint(startPoint);
+        return completeBlockAssembler;
+    }
+
+    private void closeCompleteBlockAssembler() {
+        if (completeBlockAssembler != null) {
+            completeBlockAssembler.close();
+            completeBlockAssembler = null;
+        }
     }
 
     /**
@@ -100,7 +128,8 @@ public class BlockSync {
      * @param blockChainDataListener {@link BlockChainDataListener} instance
      */
     public void startSyncFromTip(BlockChainDataListener blockChainDataListener) {
-
+        //Close the assembler first: it releases a network thread that waits for queue space, which shutdown needs
+        closeCompleteBlockAssembler();
         if (n2NChainSyncFetcher != null && n2NChainSyncFetcher.isRunning())
             n2NChainSyncFetcher.shutdown();
 
@@ -136,6 +165,8 @@ public class BlockSync {
      * Stop the fetcher
      */
     public void stop() {
+        //Close the assembler first: it releases a network thread that waits for queue space, which shutdown needs
+        closeCompleteBlockAssembler();
         n2NChainSyncFetcher.shutdown();
     }
 

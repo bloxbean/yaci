@@ -206,6 +206,13 @@ public class N2CChainSyncFetcher implements Fetcher<Block> {
                 if (log.isDebugEnabled()) {
                     log.debug("Rolled to slot: {}, block: {}", slot, block.getHeader().getHeaderBody().getBlockNumber());
                 }
+                //Leios: over node-to-client the node inlines the certified endorser block's transactions into a
+                //certifying block. If it cannot read them it serves the block without them; make that visible
+                if (Boolean.TRUE.equals(block.getHeader().getHeaderBody().getLeiosCertified())
+                        && block.getTransactionBodies().isEmpty()) {
+                    log.warn("Block {} certifies an endorser block but the node served it without the endorser block's "
+                            + "transactions", block.getHeader().getHeaderBody().getBlockNumber());
+                }
 
                 if (log.isDebugEnabled())
                     log.debug("Trying to fetch block for {}", new Point(slot, hash));

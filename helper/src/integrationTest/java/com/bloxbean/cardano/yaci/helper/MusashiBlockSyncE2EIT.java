@@ -61,8 +61,9 @@ class MusashiBlockSyncE2EIT {
     private static final int DEFAULT_MIN_DIJKSTRA_RANKING_BLOCKS = 1;
     private static final int DEFAULT_MIN_ENDORSER_BLOCKS = 0;
     private static final int DEFAULT_MIN_COMPLETE_ENDORSER_BLOCKS = 0;
-    private static final Point DEFAULT_INTERSECT_POINT = new Point(540_887L,
-            "e780814dec26ab4121f6e2cfc8bb916b8a84eeff0a4e878b00fc82e6e02b5e4a");
+    //Musashi rc-2026w42 block #9099; certifying blocks start at #9092 and follow often from #9100
+    private static final Point DEFAULT_INTERSECT_POINT = new Point(185_624L,
+            "c65c894d7a306d618ce8602653318f71a701ee583c4a7aa55b3a3e9fd72231d9");
 
     @Test
     void blockSyncReceivesRankingBlocksAndLeiosEventsForConfiguredWindow() throws Exception {

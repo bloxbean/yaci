@@ -88,6 +88,8 @@ public class Redeemer {
             redeemer.setTag(RedeemerTag.Voting);
         } else if (tagValue == 5) {
             redeemer.setTag(RedeemerTag.Proposing);
+        } else if (tagValue == 6) {
+            redeemer.setTag(RedeemerTag.Guarding);
         }
 
         // Index

@@ -18,15 +18,57 @@ Musashi is the public Leios test network. It is respun whenever wire formats cha
 so everything here must be checked against the version that is **currently deployed**,
 not the newest release tag.
 
-**Deployed now: `prototype-2026w40a`** (checked 2026-10-19). This is the base we change against.
+**Deployed now: `rc-2026w42`** (respun 2026-10-20 about 04:10 +08; checked 2026-10-20). This is the base we change
+against. Until then Musashi ran `prototype-2026w40a` (history below).
 
-| Item | Value | How it was checked (2026-10-19) |
+| Item | Value | How it was checked (2026-10-20) |
 |---|---|---|
-| Deployed node build | `ouroboros-leios` **`prototype-2026w40a`** (2026-10-06) | Operator page https://book.play.dev.cardano.org/adv-musashi.html: "The latest version available is ... prototype-2026w40a" |
-| Node version string | `cardano-node 11.1.0.164` | KleioScan (2026-10-17). w41+ is built on node 11.2, so 11.1 confirms pre-w41. |
-| Network magic | 164 | handshake |
-| Public relay | `leios-node.play.dev.cardano.org:3001` | handshake accepts N2N v15 and v16 |
-| Live wire check | old LeiosNotify numbering | Probe `[0]` (RequestNext) gets `[1, announcement]` back; the w42 form `[3]` gets the connection reset. Probe script: `adr/leios-evidence/leios_probe.py` |
+| Deployed node build | `ouroboros-leios` **`rc-2026w42`** (`49f7c4a2`, 2026-10-16); no later w42 tag | Operator page https://book.play.dev.cardano.org/adv-musashi.html: "The latest version available is the ouroboros-leios prototype build rc-2026w42" |
+| Release binary | cardano-node `2d6a2a66` (flake input `cardano-node-leios`) | `.github/workflows/cardano-node-leios.yaml` builds `.#cardano-node-release` |
+| Network magic | 164; every era forks at epoch 0, so the whole chain is Dijkstra | handshake, `config.json` |
+| Public relay | `leios-node.play.dev.cardano.org:3001` (8 addresses; `52.29.179.71` did not answer on 2026-10-20) | handshake accepts N2N v15 and v16 |
+| Live wire check | w42 LeiosNotify numbering | Probe `[0]` gets the connection reset; `[3]` (RequestNext) is accepted. `adr/leios-evidence/leios_probe.py` |
+| Chain | new chain from genesis, no intersection with w40a; tip #10,449 at 19:22 +08; 389 certifying blocks (first #9,092) | KleioScan (db-sync) follows w42 |
+
+Pins for w42 (all read at these commits; full report in the step 12 notes):
+
+| Component | w40a | **w42** |
+|---|---|---|
+| ouroboros-consensus | `cbd10033` | **`840e789b`** (`LeiosDemoOnlyTestNotify.hs`, `LeiosDemoOnlyTestFetch.hs`, `Leios/Types.hs`) |
+| cardano-ledger | `d93c6546` | **`9df9f98c`** (`eras/dijkstra/impl/cddl/data/dijkstra.cddl`) |
+| ouroboros-network | `4b3ab766` | **`96ee6e0e`** (only error-message changes in the codecs Yaci uses) |
+| cardano-blueprint `main` | `131cc95a` (= ledger CDDL) | `0460c5a6` (= ledger CDDL minus the unused `eb_references` rules) |
+
+## w40a → w42 changes (Musashi respun 2026-10-20)
+
+| Area | w40a | w42 | Yaci |
+|---|---|---|---|
+| LeiosNotify tags | RequestNext=0, Announcement=1, Offer=2, TxsOffer=3, Votes=4, ClientDone=5 | Done=0, Quit=1, Canceled=2, RequestNext=3, Announcement=4, Offer=5, TxsOffer=6, Votes=7 | done |
+| Notify shutdown | client sends ClientDone | client sends Quit (new state `StQuit`), server answers Done; outstanding requests may get Canceled | done |
+| LeiosFetch tags | BlockRequest=0, Block=1, TxsRequest=2, BlockTxs=3, Done=9 | Done=0, BlockRequest=1, Block=2, TxsRequest=3, BlockTxs=4 | done |
+| `MsgLeiosBlockTxs` | `[3, point, bitmaps, [* bytes(mempool tx)]]` | `[4, [* #6.24(bytes .cbor block_transaction)]]` (definite or indefinite list) | done |
+| EB entry | `hash => size` of the mempool encoding | `hash => size` of the block encoding (the bytes inside `#6.24`, with `is_valid`) | done (no code change: Yaci hashes the inner bytes) |
+| LeiosFetch limits | `largeByteLimit` | EB message ≤ 660,000 bytes, tx batch ≤ 550,000 bytes, ≤ 17,142 txs per EB | no change: Musashi caps an EB's txs at 260,000 bytes, one request fits |
+| Header index 9 | `protocol_version` | `header_version_info [word32, word32]`, filled with the protocol version (same shape) | no change |
+| Header index 11 | `eb_announcement` | renamed `eb_references_announcement`, same meaning | no change |
+| Pre-Dijkstra headers | 12 fields in every era | Babbage/Conway back to 10 fields (none on Musashi) | no change |
+| Block body | `[txs, leios_cert/nil, peras_cert/nil]` | same; a Peras certificate makes the block invalid | no change |
+| Witness set | keys 0–7 | **key 8: Plutus V4 scripts** | done: `Witnesses.plutusV4Scripts` |
+| Protocol parameter update | keys 0–48 | **keys 49–56** (Peras, reference-input fees) | done |
+| Required top-level guards (24) | map | duplicate keys rejected by the ledger | no change (validation) |
+| Pool relay IPv4 | ledger read the 4 bytes little-endian | network order, as Yaci reads them | no change |
+| N2C | V16–V23 | V23 only; new queries 40 (`GetStakePoolState`), 41 (`GetLeiosCommittee`); full parameters 55 fields | V23 already offered; queries not implemented (step 11) |
+| Votes, EB map shape, announcement, offers | | unchanged | no change |
+
+How to re-check the baseline:
+1. Read the operator page above for the deployed build, and the latest tag on
+   https://github.com/input-output-hk/ouroboros-leios/releases (`rc-` tags are candidates, not deployed).
+2. Run `python3 adr/leios-evidence/leios_probe.py` to see which numbering the live relay answers.
+3. Run the live tests (`MusashiCompleteBlocksIT`, `MusashiBlockSyncE2EIT`, `LeiosMusashiSmokeTest`; see step 12).
+4. Update the tables above, including the date. The full pin history lives in
+   `docs/leios/leios-spec-tracking.md` and the procedure in `docs/leios/leios-musashi-source-tracking-guide.md`.
+
+### History: the w40a baseline (deployed 2026-10-06 to 2026-10-20)
 
 Spec pins for the deployed w40a network (cardano-blueprint, `leios-prototype` history now merged into `main`):
 
@@ -47,32 +89,6 @@ What changed since PRs #167/#171 were written (w27, July 2026):
   `block_transaction = [body, witnesses, aux/nil, is_valid]`. Transaction body keys 24/27,
   pool `bls_key` and protocol-parameter keys up to 48 also arrived. This is why every live block fails today.
 
-## Next respin: rc-2026w42 (prepared, not deployed)
-
-`rc-2026w41` and `rc-2026w42` are release candidates. The w42 notes say "w41 was not yet used on a public testnet".
-When Musashi is respun to w42, Yaci needs these extra changes (spec pin: cardano-blueprint `main` @ `0460c5a6`, 2026-10-16):
-
-| Area | w40a (deployed) | w42 (next respin) |
-|---|---|---|
-| LeiosNotify tags | RequestNext=0, Announcement=1, Offer=2, TxsOffer=3, Votes=4, ClientDone=5 | Done=0, Quit=1, Canceled=2, RequestNext=3, Announcement=4, Offer=5, TxsOffer=6, Votes=7 |
-| Notify shutdown | client sends ClientDone | client sends Quit, server answers Done; server may send Canceled |
-| LeiosFetch tags | BlockRequest=0, Block=1, TxsRequest=2, BlockTxs=3, Done=9 | Done=0, BlockRequest=1, Block=2, TxsRequest=3, BlockTxs=4 |
-| `MsgLeiosBlockTxs` | `[3, point, bitmaps, tx_list]` | `[4, [* #6.24(bytes .cbor block_transaction)]]` |
-| Header index 9 | `protocol_version` | `header_version_info` (same `[uint, uint]` shape) |
-| Ledger extras | | protocol-parameter keys 49–56, Plutus V4 scripts (witness key 8) |
-
-The transport part is already written and unit-tested as a patch:
-`adr/leios-patches/w42-transport-repin.patch` (applies to the rebased #167 branch; 1083 unit tests pass with it).
-It is **not applied**, because the live network would reset the connection.
-
-How to re-check the baseline:
-1. Read the operator page above for the deployed build, and the latest tag on
-   https://github.com/input-output-hk/ouroboros-leios/releases (`rc-` tags are candidates, not deployed).
-2. Run `python3 adr/leios-evidence/leios_probe.py` to see which numbering the live relay answers.
-3. Run the live tests (`LeiosMusashiSmokeTest`, `MusashiBlockSyncE2EIT`; see step 2b).
-4. Update the tables above, including the date. The full pin history lives in
-   `docs/leios/leios-spec-tracking.md` and the procedure in `docs/leios/leios-musashi-source-tracking-guide.md`.
-
 ## Steps
 
 | # | Step | Status | Where | Review |
@@ -81,16 +97,21 @@ How to re-check the baseline:
 | 0b | Baseline: run the original #171 code against live Musashi (w40a) | done (fails as expected) | `adr/leios-evidence/baseline-w42-original-171.md` | n/a |
 | 1 | Rebase PR #167 (LeiosNotify/LeiosFetch transport) onto `next-leios` | done (local) | branch `feat/leios_protocol_impl-rebase` @ `dce5a78`; clean rebase, 1079 tests pass | reviewed: OK (see step 1 review) |
 | 1a | Transport for the deployed w40a network | done: no change needed, live smoke test passes | live relay | |
-| 1b | Prepare the w42 transport re-pin for the next respin | done (patch, not applied) | `adr/leios-patches/w42-transport-repin.patch` | |
+| 1b | Prepare the w42 transport re-pin for the next respin | done; applied in step 12 (the patch file was removed) | branch `feat/leios_w42` | |
 | 2 | Rebase PR #171 (Dijkstra serialization + listener) onto rebased #167 and resolve conflicts with `next` | done | branch `feat/leios_mushashi_serialization-rebase` | reviewed; fixes applied (see step 2 review) |
 | 2a | Port `next`'s hardening to the Dijkstra block path (deep nesting, original bytes, full tx CBOR) | done | same branch | reviewed |
 | 2c | Re-pin #171 block format to the deployed w40a (3-item body, `block_transaction`, tx body keys, pool BLS key) | done | same branch; 18 live blocks parse | reviewed |
 | 2b | Check the rebased code against the live Musashi w40a network | done: PASS | `adr/leios-evidence/step2b-w40a-rebased-171.md` | |
 | 3 | Write ADR 0013 (complete blocks) and the design doc with C4 block diagrams. **Owner review checkpoint.** | done: approved by owner 2026-10-19, with an added inline flag | `adr/0013-leios-complete-blocks.md`, `docs/leios/leios-complete-blocks-design.md` | review agent running |
-| 4 | Build the complete-block assembler in the helper (announcement memory, EB resolver, reorder buffer, merger, ordered delivery) and `YaciConfig.inlineEndorserBlockTxs` (default true) | todo | | |
-| 5 | N2N range sync: fetch historical EBs over LeiosFetch so N2N gives full tx data through the same interface | open question answered: **yes on w40a** (see notes); build in step 4 | `adr/leios-evidence/leios_fetch_probe.py` | |
-| 6 | N2C: accept the node's inlined certifying blocks (secondary, most downstream uses N2N) | todo | | |
-| 7 | Run an unmodified Yaci Store against Musashi and check tx counts | todo | | |
+| 4 | Build the complete-block assembler in the helper (announcement memory, EB resolver, reorder buffer, merger, ordered delivery) and `YaciConfig.inlineEndorserBlockTxs` (default true) | done | branch `feat/leios_complete_blocks` (PR stacked on #171) | reviewed; all findings addressed |
+| 5 | N2N range sync: fetch historical EBs over LeiosFetch so N2N gives full tx data through the same interface | done with step 4: live range test matches db-sync | `MusashiCompleteBlocksIT` | |
+| 6 | N2C: accept the node's inlined certifying blocks (secondary, most downstream uses N2N) | done: parses unchanged; gap logged | `N2CInlinedCertifyingBlockTest` | reviewed: approve; 4 small fixes applied |
+| 7 | Run an unmodified Yaci Store against Musashi and check tx counts | done: PASS, 50/50 blocks and 83,540/83,540 txs = db-sync (24 certifying) | `adr/leios-evidence/step7-yaci-store-musashi.md` | |
+| 7b | Full Musashi sync with an unmodified Yaci Store (Postgres), compared with db-sync | done: blocks 0-158,298 (95%, until the w42 respin), 80.1 M txs and 27,041 certifying blocks equal to db-sync, 0 mismatches; 400 random txs compared field by field | `adr/leios-evidence/step7-yaci-store-musashi.md` | |
+| 9 | Parse every Dijkstra structure of the deployed CDDL (keys 14, 23-27, require_guard, redeemer tag 6, Plutus V4, bls_key, pparam keys 34-48, era index 7); backward compatible | done | branch `feat/leios_dijkstra_cddl` (stacked on #221); Haskell golden vectors in `core/src/test/resources/leios/haskell/`; PR #222 | reviewed; findings addressed |
+| 10 | Yaci Store changes for Leios on `develop/leios` | PRs open: #1274 (Plutus V4 reference scripts), #1275 (Alonzo genesis price keys) | bloxbean/yaci-store | reviewed |
+| 11 | N2C local state query results in the Dijkstra era (e.g. current protocol parameters) | todo: needs a local Musashi node | | |
+| 12 | Re-pin to Musashi `rc-2026w42` (transport, witness key 8, parameter keys 49–56, live fixtures, Haskell w42 vectors) | done (local): live range test, E2E (423 blocks) and smoke test pass on w42 | branch `feat/leios_w42` (stacked on #222) | review agent |
 | 8 | Push / merge (each push or merge needs explicit approval) | push approved by owner 2026-10-19: rebased branches force-pushed to the PR #167 / #171 branches (old heads `1fa64f6` / `d7f538c` kept in local branches); **merge not done** | PRs #167, #171 | |
 
 ## Step notes
@@ -114,12 +135,13 @@ w40a wire codecs OK. Follow-ups:
 2. (medium) LeiosFetch `BlockTxs` has never been verified live (0b: `fetchedEndorserBlockTxs: 0`, 4 unexplained
    disconnects). Verify in step 2b and log disconnect causes. **todo**
 3. (medium, w42 patch) A decode error while in `StQuit` resets to `StIdle` and sends a second `MsgQuit`.
-   Treat any error in `StQuit` as terminal. **todo (patch)**
+   Treat any error in `StQuit` as terminal. **done (step 12)**
 4. (low/medium) `LeiosRawCbor` holds re-encoded bytes, not wire bytes; slice raw bytes (as ADR 0009 does) before
    tx hashes are checked against the EB map (steps 4–5). **todo**
 5. (low) Probe varies version and tag together; add `[3]` on v15 and `[0]` on v16; protocol 19 not probed. **todo**
 6. (low) After a parse error in `StBusy` the notify agent re-requests; a Haskell peer treats it as fatal. Consider ending the protocol.
 7. (low, w42 patch) Re-request right after `MsgCanceled` with no backoff; check the server's use of Canceled.
+   **done (step 12)**: Canceled only answers requests after a Quit; an unexpected one stops requesting.
 8. (low) Lenient validation: empty vote list, w40a BlockTxs echo vs request, tx count vs bitmap popcount.
 
 ### 2. Rebase PR #171
@@ -218,6 +240,61 @@ Block format (#171 branch), **needed now for w40a** (also valid for w42 except w
 - Protocol parameter update: new keys 38–48 in w40a (Leios periods, committee, EB limits); 49–56 in w42 (Peras, ref-input fees).
 - w42 only: Plutus V4 scripts in the witness set (key 8).
 
+### 4. Complete blocks (step 4, 2026-10-19)
+What was built (branch `feat/leios_complete_blocks`):
+- `CompleteBlockAssembler` wraps the app listener (only when `LeiosConfig.shouldInlineEndorserBlockTxs(magic)`):
+  announcement memory by RB hash, ordered bounded queue (256) delivered on one thread, waits for EB transactions.
+- `EndorserBlockResolver`: separate Leios connection (`LeiosNetworkClient`), verifies EB hash and every tx.
+- `ParentBlockLookup`: parent never seen → ChainSync `FindIntersect` over 1,000 candidate slots + BlockFetch.
+- Core: `DijkstraBlockBodySerializer.mergeEndorserBlockTransactions`, EB tx reader for all 3 encodings,
+  `LeiosEndorserBlockRef`, `Block.leiosEndorserBlock`, `YaciConfig.inlineEndorserBlockTxs` (default true),
+  `LeiosConfig.skipUnavailableEndorserBlocks` (default false), `onEndorserBlockUnavailable` callback.
+- `TransactionListBuilder`: the adapter's transaction-list code moved unchanged (diff-checked) for reuse.
+- **Bug found and fixed (from #167):** `LeiosFetchAgent` cleared the outstanding request *after* calling listeners,
+  so a request sent from inside `onBlock` (EB → its transactions) was dropped and its answer never matched;
+  the error had no point and the request hung. Fixed by clearing before the callbacks; regression test fails on
+  the old code and passes on the new.
+Evidence:
+- Unit: 1,135 tests, 0 failures; API check 0 incompatibilities (core, helper).
+- Live `MusashiCompleteBlocksIT` (unmodified listener), all = db-sync (KleioScan):
+  range #156612..#156615 → 354, **345**, **5,255** (last tx `c82dae27…2327`), 356, ~6 s;
+  range starting at a certifying block → parent found, same counts;
+  tip sync 4 min → 12 blocks, 5 certifying, all complete (5,555 / 5,555 / 559 / 4,085).
+- EB fetch through Yaci: 345 txs in 1.1 s, 5,255 txs (1.3 MB) in 1.05 s.
+Step 4 review (independent review agent) and what was done:
+1. (high) **Deadlock** when stopping while the queue is full: `stop()`/`restart()`/`startSync()` shut the connection
+   down (needs the network thread) before closing the assembler (frees that thread). Reachable from Yaci Store's
+   `stopSyncOnError`. **Fixed**: assembler closed first; regression test `stopWhileQueueIsFullDoesNotDeadlock`.
+2. (medium) Retry after timeout reused the stuck request. **Fixed**: pending request cancelled on timeout; a peer
+   without Leios fails new requests at once with that reason. Test `timedOutEndorserBlockIsRequestedAgain`.
+3. (medium) A failed LeiosFetch agent was never reset. **Fixed**: next request starts a new Leios connection
+   (from the caller's thread, never the connection's own thread).
+4. (medium) `close()` interrupted application code. **Fixed**: no interrupt; the waiting block is woken instead.
+   Test `closeNeverInterruptsApplicationCode`.
+5. (low-medium) Rollback race between `take()` and `current`. **Fixed**: rollbacks recorded with a sequence
+   number; a certifying block checks rollbacks since its arrival before every wait.
+6. (low-medium) Leaked selectors when an assembler never resolved an EB. **Fixed**: Leios client created lazily.
+7. (low) `onBlock` exceptions used to reach `onParsingError`. **Fixed** to keep that behaviour (test added);
+   `onEndorserBlockUnavailable` exceptions guarded; tip sync uses the intersection point as the known parent;
+   1,000-slot search limit and duplicate notify traffic documented.
+8. (low) Doc mismatches. **Fixed** in ADR 0013, design doc and usage guide.
+After fixes: 1,139 unit tests pass; API check 0 incompatibilities; live `MusashiCompleteBlocksIT` 3/3.
+
+ADR 0013 prerequisites: all done.
+- 2: the "4 disconnects" were 2 events reported twice (both adapters forward `onDisconnect`; existing behaviour).
+- 3: 10-minute run: 16 EB offers, 5 transactions offers (`adr/leios-evidence/observation-10min-2026-10-19.txt`).
+
+### 6. Node-to-client (2026-10-19)
+- w40a node (ouroboros-consensus `cbd10033`, `MiniProtocol/ChainSync/Server.hs` `resolve`): for a block whose
+  header says it carries a certificate, the server splices the EB closure announced by the predecessor into the
+  body (`inlineLeiosClosure`: transaction list replaced, header and certificate kept, re-encoded with
+  `encodeDisk`). If the closure cannot be read: "Serve what we have" (block without the EB transactions).
+- Yaci: the N2C path (`LocalRollForwardSerializer` → `BlockSerializer`) already handles it. No local node is
+  available here, so the test rebuilds the N2C message from live data the way the Haskell code does:
+  block #156613 + the 345 txs of EB `3bca1a2b…` → 345 txs, ids at index 343/344 = db-sync.
+- Gap: `N2CChainSyncFetcher` logs a warning for a certified block without transactions (it cannot fetch EBs
+  over N2C). Documented in ADR 0013 §5 and the usage guide.
+
 ### 5. N2N must provide full tx data
 - Requirement (owner, 2026-10-19): N2N must deliver the full transaction data through the same interface.
   N2C is secondary.
@@ -235,3 +312,141 @@ Block format (#171 branch), **needed now for w40a** (also valid for w42 except w
   So certified EBs are kept and served on request (at least 4 weeks back, i.e. since early in the current chain);
   uncertified EBs are discarded. N2N can therefore provide the full transaction data for range sync.
   Note for w41+: the server "disconnects a request it cannot answer", so Yaci must only ask for certified EBs.
+- **ADR 0013 prerequisite 1 met (2026-10-19):** a full certified EB fetched in **one** `MsgLeiosBlockTxsRequest`:
+  EB `77714b7b…08be` (slot 3,495,655, certified by #156614, 2 days old): 5,255 txs, 1,309,375 bytes in 0.7–1.0 s,
+  **5,255/5,255** tx hashes match the EB references
+  (`python3 adr/leios-evidence/leios_fetch_probe.py 3495655 77714b7b…08be "" all`).
+  w40a EB transactions are the 3-element mempool form `[body, witnesses, aux/nil]` (16 of 16 sampled).
+
+### 7. Unmodified Yaci Store (2026-10-19)
+- Yaci Store `main` @ `ef856acaf`. The only change is the Yaci version line; Yaci is `2cad020` built with Java 21
+  bytecode, because Yaci Store cannot read Java 25 classes yet.
+- Synced blocks 156,611–156,660 over N2N with parallel processing. Block slot, hash and tx count are equal to
+  db-sync for all 50 blocks: 83,540 txs, 24 certifying blocks. The first block certifies an EB, and its parent
+  lookup worked.
+- Yaci Store setting, not a Yaci issue: in range-only mode (stop slot set) a partial parallel batch is not written
+  on `batchDone`. The run used `blocks-batch-size=7`; details are in the evidence file.
+- Before Yaci Store can use the `next` line it needs Java 25 support (Gradle 9, a Spring version that reads class
+  version 69), or Yaci needs a Java 21 build. This is a separate item, not about Leios.
+
+### 9. Dijkstra CDDL (2026-10-19)
+- Reference: cardano-ledger `d93c6546` (pinned by consensus `cbd10033`). Its `dijkstra.cddl` is byte-identical to
+  blueprint `131cc95a`. Haskell golden vectors: the ledger `golden/tx.cbor` (`exampleDijkstraTx`) and the consensus
+  `GenTx_Dijkstra`, `Header_Dijkstra` and `LeiosVote`, all parsed in `DijkstraGoldenVectorsTest`.
+- Cases with no Haskell vector are tested with hand-built CBOR in `DijkstraCddlTest`: `require_guard`, the
+  exact-coin interval, key 27, bare key-hash guards, pparam keys 34-48 and nil `max_pledge_leverage`.
+- Notes from the Haskell code:
+  - Plutus V4 is not allowed in the witness set (no key 8); it appears only in script refs and aux data key 5.
+  - Guards never mix the key-hash and credential forms.
+  - `sub_transactions` may or may not carry tag 258.
+  - `bls_key` is omitted (not nil) when absent.
+  - `[nil, nil]` intervals are invalid.
+- Backward compatibility:
+  - All new fields are null for earlier eras (`@JsonInclude(NON_NULL)`).
+  - The old constructors of `TransactionBody`, `ProtocolParamUpdate`, `PoolParams` and `AuxData` are kept.
+  - `apicompare.py` against `874ffa0`: 0 incompatibilities (core: 867 public types, helper: 118).
+  - Behaviour change: native-script type 6 is now `require_guard`, so a malformed type-6 script fails like any
+    malformed script.
+- Not covered:
+  - N2C local-state query result decoders for the Dijkstra era (step 11).
+  - Tx-submission errors in Dijkstra format (ADR 0001 parser).
+- Review (independent agent, 2026-10-19): nothing blocking. All findings addressed:
+  - Conway JSON gained null keys from `PoolParams` / `ProtocolParamUpdate`: now `NON_NULL`, and tested.
+  - A malformed new field failed the whole block: each Dijkstra key is now read on its own; an unreadable one is
+    logged and left null, the same for `bls_key`.
+  - Sub-transaction bodies read keys 23 and 27, which the CDDL forbids: now skipped, so there is no recursion.
+  - The sub-transaction javadoc overstated the stack-overflow recovery: corrected.
+  - Key 47 is serialized only with both values.
+  - Usage guide: UTxO indexers must walk `subTransactions`.
+  - New tests: tagged sub-transactions with nil aux, forbidden keys ignored, malformed fields, and a ranking
+    block that carries the golden tx.
+
+### 7b. Full Musashi sync: relay incident (2026-10-20 04:10 +08)
+- The public relay pool behind `leios-node.play.dev.cardano.org` went partly down:
+  - 5 relays refused connections, 1 timed out, and 2 were at origin, re-syncing.
+  - DNS also listed a healthy relay (`144.76.1.222`) whose chain held our blocks.
+  - KleioScan (its own node) kept following the chain, so this was not a respin.
+- Yaci reconnected to a relay at origin, which answered BlockFetch `RequestRange` with **NoBlocks**. Range sync
+  then **stalled for good**: `BlockfetchAgent` has no retry after NoBlocks.
+- This is a general Yaci robustness gap, not Leios: with several relays behind one name, a reconnect can reach a
+  peer that lacks the range.
+- Proposed fix (for `main`/`next`): when a reconnect is answered with NoBlocks, retry with backoff and resolve DNS
+  again or move to the next candidate. Do not wait forever.
+- Data was safe: the cursor matched the stored blocks (105,253, no gaps). Yaci Store was stopped and resumed
+  against `144.76.1.222`.
+- Also seen: under heavy blocks, Yaci Store's batch writes (30-60 s) hold back-pressure long enough for the node to
+  drop the main connection (about 70 reconnects over 9 hours). Each one resumed from the last received block with
+  no loss.
+- **Stall at block 128,473 (06:48-07:21 +08), cause found in Yaci core, not Leios.**
+  `MiniProtoStreamingByteToMessageDecoder` decodes all buffered bytes of a mini-protocol at once
+  (`ArrayCborDecoder.decode`, all-or-nothing), so it emits a message only when a mux SDU ends exactly at a message
+  boundary. Under back-pressure the node's mux packs queued BlockFetch messages back to back across SDUs. The
+  buffer then only grows, each SDU re-decodes all of it, and nothing comes out. Observed: the Netty thread at
+  100% CPU in `ArrayCborDecoder`, a 9 GB heap, and no blocks for 33 minutes. This is probably also behind many of
+  the earlier reconnects.
+  - Fix: frame values one at a time (`CborSlice.valueEnd`), emit each complete message, keep only the incomplete
+    tail. Branch `fix/mux-decoder-split-messages` from `next`, with a regression test that fails on the old
+    decoder. `main` (0.4.x) has the same code and needs a back-port.
+  - Verified live: the patched Java 21 build resumed the sync at about 146 blocks/min, with 23% CPU and 3.5 GB RSS
+    (before: 100% CPU, 12 GB, stalled).
+- **First live sub-transaction on Musashi (block 153,727, tx `7faf3e35…f10d`), seen 2026-10-20 13:10 +08.**
+  - The sub-transaction registers a DRep (cert 16), delegates a vote (cert 9) and spends 1 input / creates 1 output.
+  - The top-level tx then updates (18) and unregisters (17) that DRep.
+  - The Yaci in this run (`2cad020`) does not read sub-transactions (that is PR #222). So Yaci Store logged
+    "Cannot find recent dRep registration" and missed the sub-transaction's UTxO and spend: its UTxO set and DRep
+    state differ from the chain for this tx.
+  - Needed: a Yaci Store change on `develop/leios` that processes `TransactionBody.subTransactions` (UTxOs, spends,
+    certificates, withdrawals, deposits) with the Yaci from PR #222. It depends on how Yaci Store gets a Leios Yaci
+    build: Java 25 for Yaci Store, or a Java 21 Yaci build.
+
+## Musashi respun to `rc-2026w42` (seen 2026-10-20 15:33 +08)
+- The operator page now says `rc-2026w42`. All public relays serve a new chain (tip block 9,788 at 15:35), with
+  no intersection with the w40a chain. The 04:10 relay outage was probably the start of the switch.
+- Yaci's Leios code is pinned to w40a, so it must be re-pinned to w42 next:
+  - Transport: the prepared w42 patch (applied in step 12).
+  - CDDL: check the w42 `dijkstra.cddl` and the w42 consensus/ledger pins against the w40a ones (see the re-pin
+    checklist above).
+  - Fixtures: the w40a live fixtures stay valid as w40a tests. New w42 fixtures are needed.
+
+### 12. Re-pin to `rc-2026w42` (2026-10-20)
+What changed in Yaci (branch `feat/leios_w42`, stacked on #222):
+- Transport: the prepared w42 patch applied, then the file removed (renumbered tags, `MsgQuit`/`MsgDone`/`MsgCanceled`,
+  `StQuit`, BlockTxs without point and bitmaps). The listener method is now
+  `onBlockTxs(requestedPoint, requestedBitmap, txList)`; the helper callers (`EndorserBlockResolver`,
+  `LeiosSyncCoordinator`, `LeiosNetworkClient`) were updated. `LeiosSyncCoordinator` now checks the transactions
+  against the EB references, since the reply no longer names the EB. Step 1 review items 3 and 7 are done: any
+  error after `MsgQuit` (invalid message or unreadable reply) ends the protocol without a second `MsgQuit`; a w42
+  server sends `MsgCanceled` only for requests outstanding after the client's `MsgQuit`, so a `MsgCanceled` without
+  one is reported and the agent stops requesting (no request loop).
+- EB transactions: `[* #6.24(bytes .cbor block_transaction)]` already parse (the tag-24 byte string is read like the
+  w40a plain one, and the block encoding was already accepted); hashes are checked against the EB map as before.
+- Ledger: `Witnesses.plutusV4Scripts` (witness key 8, null when absent; the old constructors are kept), and
+  `ProtocolParamUpdate` keys 49–56 (`peras*`, `refInputsCostPerMultiAssetPolicy`, `refInputsCostPerDatumByte`;
+  key 53 nil sets `perasBootstrapRoundNone`).
+- Tests and fixtures: `core/src/test/resources/leios/w42/` (live blocks #9091, #10026, #10027, #10428; EB `f951f865…`
+  LeiosFetch messages; db-sync tx ids of #10027) with `MusashiW42FixturesTest`; Haskell w42 vectors in
+  `core/src/test/resources/leios/haskell-w42/` with `DijkstraW42GoldenVectorsTest`; PPU keys 49–56 in
+  `DijkstraCddlTest`. Live tests re-pointed to w42 (`MusashiCompleteBlocksIT`, `MusashiBlockSyncE2EIT`).
+- `leios_fetch_probe.py` speaks w42 and can save the raw messages; the fixture capture tool now sends keep-alives
+  (the node closes a connection without one after 97 s, which explains the w40a capture "disconnects").
+Evidence (2026-10-20):
+- Live: `MusashiCompleteBlocksIT` range tests pass: #9,099–#9,102, certifying #9,100 and #9,101 arrive with all 1,035
+  EB txs each, last tx id equal to db-sync; a range starting at a certifying block finds its parent.
+  `MusashiBlockSyncE2EIT` from #9,099 for 240 s: 423 ranking blocks, 0 parse errors. `LeiosMusashiSmokeTest` passes.
+  The tip test is skipped while the network is idle (no certifying block in 4 minutes).
+- Probe: EB `8725f30a…` (1,035 txs) and EB `f951f865…` (237 txs) fetched without an offer; every tx hash equals its
+  EB reference.
+- Unit: core 1,109, helper 62, events-core 3 tests, 0 failures. API check: 0 incompatibilities against `next`
+  (core 793 types, helper 80). Against the unreleased Leios stack (874ffa0) 10 changes, all in the Leios transport
+  API and forced by the wire change (`MsgClientDone` removed, `onBlockTxs` signature, `MsgLeiosBlockTxs` without
+  point and bitmap).
+- Review (independent agent): no blockers. Fixed: error after `MsgQuit` (second Quit), `MsgCanceled` handling and
+  docs, hash check in `LeiosSyncCoordinator`, indefinite-list BlockTxs test, capture-tool keep-alive guard, comments.
+- Not done:
+  - Dijkstra local state queries (step 11) and w42 live votes (network idle; the codec is unchanged).
+  - Graceful notify shutdown: the agent waits in `StBusy` for the next event, so `MsgQuit` is only sent after a
+    reply; `LeiosNetworkClient` closes the connection after 2 s instead (as before). A pipelined `MsgQuit` (which
+    w42's `MsgCanceled` exists for) would need pipelining support in the agent.
+  - Parameter update keys 49–56 have no Haskell CBOR vector (the w42 golden tx carries no update); tested by
+    round trip only.
+

@@ -15,6 +15,7 @@ public class BlockRangeSync {
     private LeiosConfig leiosConfig;
 
     private BlockFetcher blockFetcher;
+    private CompleteBlockAssembler completeBlockAssembler;
 
     /**
      * Construct a {@link BlockRangeSync} instance
@@ -45,10 +46,33 @@ public class BlockRangeSync {
     public void start(BlockChainDataListener blockChainDataListener) {
         blockFetcher = new BlockFetcher(host, port, protocolMagic, leiosConfig);
 
-        BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(blockChainDataListener);
+        BlockChainDataListener listener = completeBlocksListener(blockChainDataListener);
+        BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(listener);
         blockFetcher.addBlockFetchListener(blockfetchAgentListener);
-        blockFetcher.addLeiosDataListener(blockChainDataListener);
+        blockFetcher.addLeiosDataListener(listener);
         blockFetcher.start();
+    }
+
+    /**
+     * Leios (ADR 0013): when endorser block transactions are inlined, wrap the listener so that certifying blocks
+     * arrive complete; their endorser blocks are fetched on a separate Leios connection. Otherwise the application's
+     * listener is used as is.
+     */
+    private BlockChainDataListener completeBlocksListener(BlockChainDataListener blockChainDataListener) {
+        closeCompleteBlockAssembler();
+        if (!leiosConfig.shouldInlineEndorserBlockTxs(protocolMagic)) {
+            return blockChainDataListener;
+        }
+        completeBlockAssembler = new CompleteBlockAssembler(blockChainDataListener, host, port, protocolMagic,
+                LeiosConfig.versionTableFor(protocolMagic, leiosConfig), leiosConfig.isSkipUnavailableEndorserBlocks());
+        return completeBlockAssembler;
+    }
+
+    private void closeCompleteBlockAssembler() {
+        if (completeBlockAssembler != null) {
+            completeBlockAssembler.close();
+            completeBlockAssembler = null;
+        }
     }
 
     /**
@@ -56,6 +80,8 @@ public class BlockRangeSync {
      * @param blockChainDataListener
      */
     public void restart(BlockChainDataListener blockChainDataListener) {
+        //Close the assembler first: it releases a network thread that waits for queue space, which shutdown needs
+        closeCompleteBlockAssembler();
         if (blockFetcher != null && blockFetcher.isRunning())
             blockFetcher.shutdown();
         start(blockChainDataListener);
@@ -101,6 +127,8 @@ public class BlockRangeSync {
      * Stop the fetcher
      */
     public void stop() {
+        //Close the assembler first: it releases a network thread that waits for queue space, which shutdown needs
+        closeCompleteBlockAssembler();
         blockFetcher.shutdown();
     }
 

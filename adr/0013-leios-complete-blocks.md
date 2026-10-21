@@ -88,9 +88,9 @@ For a ranking block that certifies an EB, Yaci delivers to `onBlock` a block who
 2. then the block's own transactions, if any.
 
 The `Block` object and the `transactions` list are filled consistently: transaction bodies, witnesses,
-auxiliary data (keyed by the merged index), invalid-transaction indexes, and full transaction CBOR. For an EB
-transaction, the full transaction CBOR is the bytes the peer sent for it (the bytes the EB's reference hash is
-computed over).
+auxiliary data (keyed by the merged index), invalid-transaction indexes, and full transaction CBOR. Full
+transaction CBOR of an EB transaction is built from its parts in the Dijkstra block encoding, exactly like the
+block's own transactions.
 
 Ranking blocks that certify nothing are delivered exactly as today.
 
@@ -98,11 +98,12 @@ Ranking blocks that certify nothing are delivered exactly as today.
 
 By default a certifying block is **not delivered until its EB transactions are resolved**.
 
-- Yaci fetches the EB and its transactions over LeiosFetch on the same connection. It does not wait for the peer
-  to offer the transactions: in our live run the relay sent no transactions offers, and offers never exist for
+- Yaci fetches the EB and its transactions over LeiosFetch on a separate connection to the same peer (section 5),
+  starting as soon as the certifying block arrives. It does not wait for the peer to offer the transactions:
+  in a 10-minute live run the relay sent transactions offers for only 5 of 16 EBs, and offers never exist for
   old EBs during range sync.
-- Yaci only asks for **certified** EBs. The one exception is an early fetch at the tip, and only for an EB this
-  peer has offered. Nodes discard uncertified EBs, and from w41 on a node disconnects a request it cannot answer.
+- Yaci only asks for **certified** EBs. Nodes discard uncertified EBs, and from w41 on a node disconnects a
+  request it cannot answer.
 - Every transaction is checked against the EB: blake2b-256 of the transaction bytes as received must equal the
   EB's reference hash (this is not the transaction id).
 - If an EB cannot be resolved, Yaci logs it, reports it through a new callback, and keeps retrying with a
@@ -124,7 +125,7 @@ YaciConfig.INSTANCE.setInlineEndorserBlockTxs(true);   // default
 | `inlineEndorserBlockTxs` | What `onBlock` receives for a certifying block | Where EB transactions come from |
 |---|---|---|
 | `true` (default) | the complete block: EB transactions first, then the block's own | inside the block; no other code needed |
-| `false` | the block exactly as on the wire: its own transactions (none in practice), the Leios certificate and the pointer to the certified EB (`Block.getLeiosEndorserBlock()`) | the optional `onEndorserBlock(EndorserBlockEvent)` callback, which then carries the EB with its transactions |
+| `false` | the block exactly as today: its own transactions (none in practice) and the Leios certificate. The certified EB is the one announced in the parent block's header | the optional `onEndorserBlock(EndorserBlockEvent)` callback |
 
 The default keeps downstream apps unchanged. An app that wants to handle EBs itself sets it to `false`.
 
@@ -148,7 +149,7 @@ JSON when null).
 New, optional surface:
 
 - `Block.getLeiosEndorserBlock()`: for a certifying block, the EB hash, the EB slot and how many of the block's
-  transactions came from the EB (always the first *n*; 0 when inlining is off). `null` for every other block. Apps that need to know
+  transactions came from the EB (always the first *n*). `null` for every other block, and when inlining is off. Apps that need to know
   where a transaction came from read this; others ignore it. `helper.model.Transaction` gets **no** new field
   (adding one would change its public constructor).
 - `BlockChainDataListener.onEndorserBlockUnavailable(...)`: a default (empty) method that reports an EB Yaci
@@ -161,17 +162,25 @@ New, optional surface:
 
 ### 5. Node-to-node first
 
-All of this works over node-to-node, because most downstream apps use it. LeiosFetch runs on the same
-connection as ChainSync and BlockFetch.
+All of this works over node-to-node, because most downstream apps use it, for tip sync and range sync alike.
 
-This includes range sync. Today `LeiosConfig` `AUTO` does not attach the Leios protocols for `BlockRangeSync`
-(they were only used for tip events). Under this ADR, `AUTO` attaches LeiosFetch for range sync on Musashi too,
-because range sync needs it for certified EBs. If the peer does not run the Leios protocols, Yaci fails at start
-with a clear message instead of failing later at the first certifying block.
+EBs are fetched on a **second, small node-to-node connection to the same peer** (LeiosFetch only). The main
+connection (ChainSync, BlockFetch) stays exactly as today, including its handshake. A separate connection has
+its own network thread, so an EB answer can never wait behind block data the main connection has not read
+yet; this is what makes back-pressure safe (see "How it works"). If the peer does not run the Leios
+protocols, every EB is reported through `onEndorserBlockUnavailable` with that reason (immediately, without
+waiting for a timeout).
 
-Node-to-client is secondary. The node inlines EB transactions into certifying blocks there, but it may send a
-certifying block without them when it cannot read the EB. Yaci treats a certifying block with no EB transactions
-over node-to-client as an unresolved EB (rule 2).
+Node-to-client is secondary, and needs no extra work in Yaci: for a certifying block the node itself splices the
+certified EB's transactions into the block body (ouroboros-consensus: the ChainSync server's `resolve` calls
+`inlineLeiosClosure` from `Shelley/Ledger/Leios.hs`; the transaction list is replaced, header and certificate
+kept), so the block reaches `LocalChainSync` already
+complete and Yaci parses it like any Dijkstra block (`N2CInlinedCertifyingBlockTest`: block #156613 with its 345
+EB transactions, ids equal to db-sync). If the node cannot read the EB it serves the certifying block without its
+transactions; Yaci cannot fetch EBs over node-to-client, so `N2CChainSyncFetcher` logs a warning and the
+application sees a block with `leiosCertified == true` and no transactions. Because the node keeps the header but
+replaces the body, the header's body hash and size do not match the body served over node-to-client, and
+`Block.getCbor()` is the node's re-encoded block, not the bytes on chain.
 
 ### 6. Production networks are untouched
 
@@ -183,25 +192,55 @@ Leios mini-protocols are only attached when Leios is active. The Shelley–Conwa
 A new helper component, the **complete-block assembler**, sits between the network and the application's
 listener. It has four small parts:
 
-1. **Announcement memory**: remembers the EB announced by each recent RB, keyed by the RB's hash (a few hundred
-   entries, enough to cover any rollback). A certifying block looks up its parent by `prevHash`. When sync starts
-   from a point, Yaci first fetches that block once so its announcement is known.
-2. **EB resolver**: fetches certified EBs and their transactions over LeiosFetch and checks every transaction.
-   It works through EBs one after another for now (the LeiosFetch agent has one request in flight); more
-   parallelism can come later if measurements need it.
-3. **Reorder buffer**: holds a block that waits for its EB, and every block after it, and releases them strictly
-   in chain order. To keep memory bounded in range sync, Yaci requests the block range in parts and asks for the
-   next part only when the buffer has room. It never stops reading the connection, because the EB answer it
-   waits for arrives on the same connection.
+1. **Announcement memory**: remembers the EB announced by each recent RB, keyed by the RB's hash (4,096 entries,
+   enough to cover any rollback). A certifying block looks up its parent by `prevHash`. If the parent was never
+   seen (the first block after a start), Yaci fetches it once on a short-lived connection: a header names its
+   parent's hash but not its slot, so Yaci asks ChainSync `FindIntersect` for that hash at each of the 1,000
+   slots before the child (only the real one exists on chain), then BlockFetches it. If the sync started from a
+   known point, that point is used directly.
+2. **EB resolver**: on its own connection, fetches the certified EB, checks its hash, fetches all its
+   transactions in one request and checks every one. EBs are fetched one after another; the fetch starts as soon
+   as the certifying block arrives.
+3. **Ordered queue**: every callback is queued in arrival order and delivered on one worker thread. A certifying
+   block waits in the queue until its EB transactions are there; blocks behind it wait too. The queue is bounded
+   (256 events): when it is full, the main connection's thread waits, so Yaci reads from the node more slowly —
+   the same back-pressure a busy listener gives today. This cannot deadlock, because EB answers arrive on the
+   other connection.
 4. **Merger**: builds the complete block (EB transactions first) and calls the application.
 
 All listener callbacks (`onBlock`, `onRollback`, `batchDone`, `noBlockFound`, …) go through the same ordered
 queue on one thread, so an app never sees `batchDone` before the last block of the batch.
 
+What applications may notice, on Leios networks only:
+
+- Callbacks run on a Yaci worker thread (`yaci-leios-complete-blocks`) instead of the network thread. They are
+  still called one at a time, in order.
+- An exception thrown by `onBlock` is passed to `onParsingError`, as today. Exceptions from other callbacks are
+  logged and the next event is delivered.
+- `stop()` (and `startSync`, `restart`) first closes the assembler, then the connection: events still queued are
+  dropped, as a closed connection drops undelivered data today. Application code running in a callback is never
+  interrupted.
+
 Rollbacks need nothing new in the application: EB transactions are part of the certifying block, so they roll
-back with it. The assembler drops buffered blocks after the rollback point.
+back with it. A certifying block that is still waiting when a rollback behind it arrives stops waiting and is
+delivered as on the wire (as today), followed by the rollback.
 
 Diagrams and step-by-step flows: `docs/leios/leios-complete-blocks-design.md`.
+
+## Implementation and live results (step 4)
+
+- Helper: `CompleteBlockAssembler` (wraps the application listener), `EndorserBlockResolver` (separate Leios
+  connection), `ParentBlockLookup`, `TransactionListBuilder` (the existing transaction-list code, moved unchanged
+  so complete blocks use the same rules). Core: `DijkstraBlockBodySerializer.mergeEndorserBlockTransactions`,
+  `LeiosEndorserBlockRef`, `YaciConfig.inlineEndorserBlockTxs`. Wired into `BlockSync` and `BlockRangeSync` only
+  when `LeiosConfig.shouldInlineEndorserBlockTxs(magic)` is true, so mainnet and preprod keep the application's
+  own listener object.
+- Live, unmodified listener (`MusashiCompleteBlocksIT`), checked against db-sync (KleioScan):
+  range #156612..#156615 gives 354, **345**, **5,255** (last tx `c82dae27…2327` at index 5254), 356;
+  a range starting at a certifying block finds its parent; tip sync over 4 minutes delivered 12 blocks, 5 of them
+  certifying, all complete (5,555 / 5,555 / 559 / 4,085 transactions = db-sync).
+- Found and fixed on the way: `LeiosFetchAgent` dropped the request a listener sent from inside `onBlock`
+  (the outstanding request was cleared after the callback), so the transactions answer was never matched.
 
 ## Consequences
 
@@ -223,10 +262,13 @@ Costs and things to watch:
 
 ## Prerequisites before this becomes the default
 
-1. A live test that fetches a **full** certified EB (thousands of transactions) on a connection that is also
-   running BlockFetch, with the transaction request split into parts if needed.
-2. An explanation of the 4 disconnects counted in the step 2b live run.
-3. A longer live run that confirms whether the relay ever sends transactions offers (one 4-minute run so far).
+1. **Done.** A full certified EB fetched in one request: 5,255 transactions (1.3 MB) in about 1 second, every
+   hash checked, both with a probe and through Yaci (`MusashiCompleteBlocksIT`).
+2. **Done.** The "4 disconnects" in the step 2b run were 2 events, each reported twice: both the chain-sync and
+   the block-fetch adapters forward `onDisconnect` (existing Yaci behaviour on every network). The events are
+   occasional relay-side closes; Yaci reconnects automatically. A 10-minute run with keep-alives saw one.
+3. **Done.** A 10-minute live run: 16 EB offers, 5 transactions offers. Offers are partial, so fetching on
+   request (without waiting for an offer) is required.
 
 ## Alternatives considered
 

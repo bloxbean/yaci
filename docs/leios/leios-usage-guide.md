@@ -1,78 +1,80 @@
-# Leios Usage Guide — Patterns for Application Developers
+# Leios Usage Guide: Patterns for Application Developers
 
-Last verified: 2026-07-07 (Musashi `prototype-2026w27`). Being updated for `prototype-2026w40a` and ADR 0013; see `adr/leios-todo.md`.
+Last verified: 2026-10-20 (Musashi `rc-2026w42`). Design: `adr/0013-leios-complete-blocks.md`.
 
-How to use Yaci's Linear Leios support in your application. Everything here
-targets the **Musashi** prototype testnet (network magic `164`, Dijkstra era)
-and works with the same jar, unchanged, on mainnet/preprod — Leios code paths
-never engage on non-Leios networks.
+How to use Yaci's Linear Leios support in your application. Everything here targets the **Musashi** test
+network (network magic `164`, Dijkstra era) and works with the same jar, unchanged, on mainnet and preprod:
+Leios code paths never engage on non-Leios networks.
 
-> **Status:** experimental, pinned to `prototype-2026w27`. Musashi respins on
-> breaking releases; APIs marked here are stable in shape but the wire formats
-> underneath follow the prototype. See
+> **Status:** experimental, pinned to the deployed Musashi build `rc-2026w42`. Musashi is respun on
+> breaking releases; the pin and how to re-check it are in `adr/leios-todo.md` and
 > [leios-musashi-source-tracking-guide.md](leios-musashi-source-tracking-guide.md).
 
 ## The mental model in 30 seconds
 
-Musashi has two transaction "lanes":
-
-1. **Ranking blocks (RBs)** — the normal Praos chain. Delivered through the
-   `BlockChainDataListener.onBlock(...)` callback you already use. An RB's
-   transaction list contains **only its own** transactions.
-2. **Endorser blocks (EBs)** — Leios' throughput lane. An RB header
-   *announces* an EB (`leios_announcement`); a committee votes; the next RB
-   *certifies* it (`leios_certified` + certificate in the body). Certified EB
-   transactions enter the ledger **without ever appearing in any RB's
-   transaction list**. Yaci fetches EB data automatically over the
-   `leios-fetch` mini-protocol and delivers it via `onEndorserBlock(...)`.
-
-Under load, most Musashi transactions flow through EBs — an app that only
-reads `onBlock` sees a quiet chain correctly but misses EB traffic. Consume
-both callbacks if you care about all transactions.
+1. **Ranking blocks (RBs)** are the normal chain. A ranking block may **announce** an endorser block (EB) in its
+   header.
+2. **Endorser blocks (EBs)** carry most of the transactions. They travel separately. If voters approve one, the
+   **next** ranking block **certifies** it, and the EB's transactions enter the ledger at that block's position,
+   before its own transactions (in practice a certifying block has none of its own).
+3. **Yaci puts them together for you.** By default a certifying block reaches `onBlock` **complete**: the EB's
+   transactions first, then the block's own. You use the same callback, `Block` and `Transaction` objects as on
+   any other network, and you see every ledger transaction.
 
 ---
 
-## Pattern 1 — Follow Musashi like any other network (zero Leios code)
-
-If you only need ranking blocks (headers, RB-direct transactions, rollbacks),
-nothing changes — the Dijkstra era is handled inside the existing API:
+## Pattern 1: Follow Musashi like any other network (no Leios code)
 
 ```java
-BlockSync blockSync = new BlockSync("leios-node.play.dev.cardano.org", 3001,
-        164L, wellKnownPoint);
+BlockSync blockSync = new BlockSync("leios-node.play.dev.cardano.org", 3001, 164L, wellKnownPoint);
 
 blockSync.startSync(point, new BlockChainDataListener() {
     @Override
     public void onBlock(Era era, Block block, List<Transaction> transactions) {
-        // era == Era.Dijkstra on Musashi; Conway/Babbage/... elsewhere.
-        // Same Block model, same Transaction list as every other era.
+        // era == Era.Dijkstra on Musashi. A certifying block already contains its EB's transactions:
+        // block #156614 arrives with 5,255 transactions although it is 169 bytes on chain.
     }
 
     @Override
-    public void onRollback(Point point) { /* unchanged */ }
+    public void onRollback(Point point) { /* unchanged: EB transactions roll back with their block */ }
 });
 ```
 
-`BlockSync`, `BlockRangeSync`, `BlockFetcher`, and `N2NChainSyncFetcher` all
-parse Dijkstra blocks (w27 restructured body) into the existing `Block`
-model: `transactionBodies`, `transactionWitness`, `auxiliaryDataMap`,
-`invalidTransactions` — with byte-exact transaction body slices, so tx hashes
-are correct.
+The same works for `BlockRangeSync` (history), including old certifying blocks: Yaci fetches certified EBs
+on request (verified on Musashi for EBs four weeks old).
+
+What happens underneath:
+
+- Yaci opens a second, small node-to-node connection to the same peer for EBs only. The main connection is
+  unchanged.
+- A certifying block waits until its EB transactions are fetched and checked (each one against the EB's
+  reference hash). Blocks behind it wait too, so `onBlock`, `onRollback`, `batchDone` and the other callbacks
+  keep their order. All callbacks are delivered on one thread.
+- If an EB cannot be fetched, Yaci retries and reports it through `onEndorserBlockUnavailable`; it never
+  delivers the block with transactions missing (see the settings below).
+- Callbacks run on a Yaci worker thread (`yaci-leios-complete-blocks`), one at a time, in order. An exception
+  from `onBlock` reaches `onParsingError`, as before. `stop()` drops events still queued and never interrupts
+  your callback.
+
+### Where a transaction came from (optional)
+
+```java
+LeiosEndorserBlockRef eb = block.getLeiosEndorserBlock();  // null unless the block certifies an EB
+if (eb != null) {
+    eb.getEbHash();   // the certified EB
+    eb.getEbSlot();   // its slot (= the announcing block's slot)
+    eb.getTxCount();  // the block's first txCount transactions came from the EB
+}
+```
 
 ### Leios fields available on every Dijkstra block
 
-Even in this pattern, the RB↔EB linkage is parsed for you:
-
 ```java
 HeaderBody hb = block.getHeader().getHeaderBody();
-LeiosAnnouncement ann = hb.getLeiosAnnouncement(); // nullable: announced EB
-if (ann != null) {
-    String announcedEbHash = ann.getEbHash();      // hex, 32 bytes
-    long announcedEbSize   = ann.getEbSize();      // bytes
-}
-Boolean certified = hb.getLeiosCertified();        // w27 headers: TRUE/FALSE; older: null
+LeiosAnnouncement ann = hb.getLeiosAnnouncement();  // nullable: the EB this block announces
+Boolean certified = hb.getLeiosCertified();         // TRUE when this block certifies its parent's EB
 
-LeiosCertificate cert = block.getLeiosCertificate(); // nullable: parsed cert
+LeiosCertificate cert = block.getLeiosCertificate(); // nullable: parsed certificate
 if (cert != null) {
     cert.getSigners();             // hex bitfield over the committee
     cert.getAggregatedSignature(); // hex, 48-byte BLS signature
@@ -80,16 +82,26 @@ if (cert != null) {
 }
 ```
 
-Chain rule: an RB with `leiosCertified == TRUE` certifies the EB announced by
-its **immediately preceding** RB's header (not its own announcement).
+`blockBodySize` and `blockBodyHash` in the header always describe the block as it is on chain.
 
 ---
 
-## Pattern 2 — Observe Endorser Blocks and votes (opt-in callbacks)
+## Pattern 2: Handle endorser blocks yourself (inlining off)
 
-Add a `LeiosConfig` and override the new default methods. Yaci's internal
-coordinator handles the whole notify → offer → fetch → assemble protocol
-dance; you just receive events:
+If your application wants the block exactly as on the wire and to process EBs on its own, switch inlining off
+(globally, like `returnFullTxCbor`):
+
+```java
+YaciConfig.INSTANCE.setInlineEndorserBlockTxs(false);
+```
+
+`onBlock` then receives certifying blocks as today (no EB transactions, `getLeiosEndorserBlock() == null`).
+The certified EB is the one announced in the parent block's header. EB data arrives through the optional
+callbacks below.
+
+## Pattern 3: Observe endorser blocks and votes as they appear (opt-in callbacks)
+
+These callbacks report what the node announces near the tip. They work with inlining on or off.
 
 ```java
 LeiosConfig leiosConfig = LeiosConfig.builder()
@@ -102,37 +114,21 @@ BlockSync blockSync = new BlockSync(host, port, 164L, wellKnownPoint, leiosConfi
 
 blockSync.startSync(point, new BlockChainDataListener() {
     @Override
-    public void onBlock(Era era, Block block, List<Transaction> txs) { /* RB lane */ }
-
-    @Override
     public void onEndorserBlock(EndorserBlockEvent event) {
         LeiosPoint point = event.getPoint();          // (slot, ebHash)
         EndorserBlock eb = event.getEndorserBlock();
-        eb.getTxRefs();                               // ordered tx-hash -> size refs
-        eb.txCount();                                 // number of referenced txs
-        eb.getComputedHash();                         // blake2b-256 over EB bytes
-        eb.getCbor();                                 // raw EB CBOR (hex)
-
-        for (EndorserBlockTx tx : event.getTransactions()) { // fetched tx bytes
-            tx.getTxHash();                           // matches an EB tx ref
-            tx.getTxCbor();                           // exact full-tx CBOR (hex)
-            tx.getEra();                              // tx-level era (ns8 mapping)
+        eb.getTxRefs();                               // ordered reference hash -> size
+        for (EndorserBlockTx tx : event.getTransactions()) {
+            tx.getTxHash();                           // EB reference hash (of the full tx bytes), not the tx id
+            tx.getTxCbor();                           // full tx CBOR (hex)
         }
-        boolean complete = event.isTxsComplete();     // false if capped/failed/refs-only
-        String announcement = event.getAnnouncementCbor(); // nullable, best-effort
+        boolean complete = event.isTxsComplete();     // false if capped, failed or refs only
     }
 
     @Override
     public void onLeiosVotes(LeiosVotesEvent event) {
         for (LeiosVote vote : event.getVotes()) {
-            switch (vote.getFormat()) {
-                case ANNOUNCING_RB_HASH ->            // current w27 shape
-                        vote.getAnnouncingRbHash();
-                case SLOT_EB_HASH -> {                // earlier prototype shape
-                    vote.getSlot(); vote.getEbHash();
-                }
-                case UNKNOWN -> vote.getCbor();       // raw only, shape drifted
-            }
+            vote.getAnnouncingRbHash();               // vote: [announcing_rb_hash, voter_id, signature]
         }
     }
 });
@@ -140,175 +136,102 @@ blockSync.startSync(point, new BlockChainDataListener() {
 
 Notes:
 
-- **Same connection.** The Leios agents ride the existing `TCPNodeClient`;
-  no second socket, no separate lifecycle.
-- **`AUTO` mode** (default) attaches Leios agents only when the configured
-  magic is Musashi's `164` and only for tip-following clients. On any other
-  network the agent list is identical to a non-Leios build.
-- **Failure isolation.** EB fetch problems degrade to missing/incomplete EB
-  events (`txsComplete == false`); they never stall `onBlock` or chain sync.
-- Vote parsing runs only when `deliverVotes(true)` **and** your listener
-  overrides `onLeiosVotes` — otherwise zero overhead.
+- An EB seen here is **not** part of the ledger until a later block certifies it; uncertified EBs are
+  discarded by the network. With inlining on you do not need these events for ledger data.
+- Events depend on what the peer offers; they are not guaranteed for every EB.
+- Vote parsing runs only when `deliverVotes(true)` **and** your listener overrides `onLeiosVotes`.
 
 ---
 
-## Pattern 3 — Index all ledger transactions (RB lane + EB lane)
+## Node-to-client (`N2CChainSyncFetcher`)
 
-For an indexer (yaci-store style), treat inclusion source as a first-class
-dimension and correlate the two lanes by EB hash:
+Over node-to-client the node completes certifying blocks itself: it splices the certified EB's transactions into
+the block body, and Yaci parses that block like any other. Nothing to configure. If the node cannot read the EB,
+it sends the certifying block without them; Yaci logs a warning, and you can detect it as
+`header.getLeiosCertified() == TRUE` with no transactions. `Block.getLeiosEndorserBlock()` is set only for
+node-to-node (Yaci does the merge there). The header is kept but the body is replaced, so the header's body hash
+and size do not match the node-to-client body, and `Block.getCbor()` is the node's re-encoded block.
 
-```java
-// RB lane: persist as usual, plus the Leios linkage columns
-public void onBlock(Era era, Block block, List<Transaction> txs) {
-    persistBlock(block);                       // block_kind, announced_eb_hash,
-                                               // announced_eb_size, certified_eb, ...
-    persistTransactions(txs, Source.RB_DIRECT);
+## Pattern 4: Raw protocol access (`LeiosNetworkClient`)
 
-    if (Boolean.TRUE.equals(block.getHeader().getHeaderBody().getLeiosCertified())) {
-        // This RB certifies the EB announced by the PREVIOUS RB.
-        // Mark that EB (by parent's announcement hash) as certified;
-        // its transactions became ledger-effective at THIS block's position.
-        markEndorserBlockCertified(parentAnnouncedEbHash(), block);
-    }
-}
-
-// EB lane: persist observations keyed by ebHash
-public void onEndorserBlock(EndorserBlockEvent event) {
-    persistEndorserBlock(event.getPoint(), event.getEndorserBlock()); // leios_endorser_block
-    persistEbTxs(event.getPoint(), event.getTransactions(),           // leios_eb_tx
-                 event.isTxsComplete());
-}
-```
-
-Rules that make this correct:
-
-- **Ledger-effective ordering:** a certified EB's transactions take the chain
-  position of the **certifying** RB (which carries no transactions of its
-  own). RB-direct transactions keep their RB's position.
-- **Do not apply EB transactions on observation.** An EB seen via
-  `onEndorserBlock` is not ledger-effective until a later RB certifies it;
-  uncertified/expired EBs contribute nothing.
-- **Rollbacks:** EB events carry their own slots; roll back Leios tables by
-  the certifying/announcing block slots exactly like other slot-keyed data.
-- **Order of arrival is not guaranteed** between an EB event and the
-  `onBlock` of its announcing RB — correlate by
-  `headerBody.getLeiosAnnouncement().getEbHash() == event point ebHash`,
-  tolerate either order.
-
-> Yaci does not yet produce a merged "ledger-effective transaction stream" —
-> that view is planned (support plan, Phase 3). Until then the correlation
-> above is the application's job.
-
----
-
-## Pattern 4 — Bounded range fetch (`BlockRangeSync` / `BlockFetcher`)
-
-```java
-BlockRangeSync rangeSync = new BlockRangeSync(host, port, 164L, LeiosConfig.disabled());
-rangeSync.start(listener);
-rangeSync.fetch(fromPoint, toPoint);   // Dijkstra blocks parse fine
-```
-
-- Historical Dijkstra ranking blocks (headers + RB-direct txs + announcements
-  + certificates) work over any range.
-- **EB bodies are not available historically** — the prototype has no EB
-  range fetch. Under `AUTO`, range clients don't attach Leios agents at all.
-  `LeiosConfig.Mode.ENABLED` opts in, but the notify stream then emits
-  *near-tip* EB events unrelated to your requested range — usually not what
-  a batch job wants.
-- Practical consequence: complete EB coverage requires a continuously running
-  tip-follower (Pattern 2/3). If your indexer was down, the missed EB bodies
-  cannot currently be backfilled from the network.
-
-### Planned: batch EB resolution for initial sync (placeholder API)
-
-For bulk pipelines that process blocks in batches (yaci-store's parallel
-initial sync being the reference case), the intended mechanism is **one bulk
-EB-closure fetch per block batch**, made at batch-assembly time before
-parallel processing. The API for this already exists as a **placeholder**:
-
-```java
-LeiosEndorserBlockFetcher fetcher = LeiosEndorserBlockFetcher.unsupported();
-Map<String, EndorserBlockClosure> closures = fetcher.fetchClosures(points);
-// throws UnsupportedOperationException today — see below
-```
-
-Contract (stable, code against it now): input = points of **certified** EBs;
-returns a map keyed by EB hash (hex); an **absent key means unresolved** —
-strict pipelines fail the batch, observational pipelines record the gap.
-
-**Why it's unimplemented (TODO):** resolving arbitrary historical EBs needs
-CIP-0164's `MsgLeiosMultiBlockRequest` (bulk "EBs + all referenced
-transactions", designed for catch-up). The Musashi prototype has only
-offer-gated single-point requests, its batch/range messages are commented
-out of the pinned CDDL, and the protocol has **no error/not-found response**
-— requesting an unoffered EB risks a stalled agent or connection reset. The
-placeholder deliberately throws instead of silently returning empty results,
-so a pipeline wired for strict completeness fails loudly rather than
-committing batches with missing transactions. Implementation lands when a
-target network ships the multi/range fetch messages — see ADR 0012.
-
----
-
-## Pattern 5 — Raw protocol access (`LeiosNetworkClient`)
-
-For tooling, diagnostics, or experimenting with the mini-protocols directly —
-opaque CBOR in, no coordinator policy:
+For tooling and diagnostics: opaque CBOR in, no policy.
 
 ```java
 try (LeiosNetworkClient client = new LeiosNetworkClient(host, 3001)) { // magic 164 default
     client.addDataListener(new LeiosDataListener() {
-        @Override public void onBlockOffer(LeiosPoint point, long ebSize) {
-            client.requestBlock(point);                  // manual fetch decisions
-        }
         @Override public void onBlock(LeiosPoint requested, LeiosRawCbor endorserBlock) {
-            byte[] raw = endorserBlock.getCbor();        // opaque bytes
+            byte[] raw = endorserBlock.getCbor();
         }
     });
     client.start();
-    // ...
+    client.requestBlock(point);   // after onLeiosActivated
 }
 ```
 
-Most applications should prefer Patterns 2/3; this client exists below the
-serialization layer and gives you the raw prototype wire values.
+---
+
+## Dijkstra transaction fields
+
+All Dijkstra-era structures of the deployed CDDL are parsed. New fields are null for earlier eras, so Conway
+objects and their JSON are unchanged.
+
+| CDDL | Yaci |
+| :--- | :--- |
+| tx body 14 `guards` | `TransactionBody.guards` (credentials, in order). Key-hash guards are also in `requiredSigners`, as before. |
+| tx body 23 `sub_transactions` | `TransactionBody.subTransactions`: each `SubTransaction` has its own `body` (with `txHash`), `witnesses` and `auxData`. |
+| tx body 24 `required_top_level_guards` | `TransactionBody.requiredTopLevelGuards` (credential, datum CBOR or null) |
+| tx body 25 `direct_deposits` | `TransactionBody.directDeposits` (reward account hex → coin, like `withdrawals`) |
+| tx body 26, 27 balance intervals | `accountBalanceIntervals`, `startingAccountBalanceIntervals` (`AccountBalanceInterval`; the plain `coin` form is an exact balance) |
+| native script 6 `require_guard` | `NativeScript` type 6, JSON `{"type":"requireGuard","keyHash"\|"scriptHash":…}` |
+| redeemer tag 6 | `RedeemerTag.Guarding` |
+| pool `bls_key` | `PoolParams.blsPublicKey`, `blsPossessionProof` |
+| protocol parameter update keys 34–48 | `ProtocolParamUpdate` (reference script limits, `maxPledgeLeverage`, `minPoolMargin`, Leios parameters) |
+| protocol parameter update keys 49–56 (w42) | `ProtocolParamUpdate` (`peras*` parameters, `refInputsCostPerMultiAssetPolicy`, `refInputsCostPerDatumByte`). Key 53 `nil` sets `perasBootstrapRoundNone = true`. |
+| Plutus V4 | `PlutusScriptType.PlutusScriptV4`; witness set key 8 (w42) `Witnesses.plutusV4Scripts`; aux data key 5 `AuxData.plutusV4Scripts`. Both are null when absent. |
+| hard-fork era index 7 | `localstate.api.Era.Dijkstra`, `TxBodyType.DIJKSTRA` (local state queries, transaction submission) |
+
+Notes:
+
+- **UTxO indexers:** a sub-transaction's inputs and outputs are only in `TransactionBody.subTransactions`, not in
+  the block's transaction list. To keep a complete UTxO set, walk the sub-transactions of each transaction.
+- A Dijkstra field Yaci cannot read is logged and left null; the transaction and block are still delivered.
+- `requireGuard` is Yaci's JSON name; cardano-api has no JSON form for guard scripts yet.
+
+The Haskell golden vectors used to test this are in `core/src/test/resources/leios/haskell-w42/` (and the w40a
+ones in `core/src/test/resources/leios/haskell/`).
 
 ---
 
-## `LeiosConfig` reference
+## Settings
 
 | Setting | Default | Meaning |
 | :--- | :--- | :--- |
-| `mode` | `AUTO` | `AUTO`: attach Leios agents only for magic 164 on tip-following clients. `ENABLED`: always attach (activation still requires a Leios-capable handshake against the configured magic). `DISABLED`: never attach. |
-| `fetchTxs` | `true` | Fetch EB transaction bytes after both the EB and a matching tx offer are seen. `false` → refs-only events. |
-| `maxTxsPerEndorserBlock` | `64` | Per-EB fetch cap. Events over the cap arrive with `txsComplete == false`. |
-| `txsOfferWaitMillis` | `2000` | How long to wait for a tx offer before emitting a refs-only event. |
-| `deliverVotes` | `false` | Parse + deliver votes (only when `onLeiosVotes` is overridden). |
+| `YaciConfig.inlineEndorserBlockTxs` | `true` | Deliver certifying blocks with their EB transactions. `false`: blocks as on the wire (Pattern 2). |
+| `LeiosConfig.skipUnavailableEndorserBlocks` | `false` | `false`: never deliver a certifying block without its EB transactions; wait and retry. `true`: after 3 failed attempts deliver it without them (reported through `onEndorserBlockUnavailable`). |
+| `LeiosConfig.mode` | `AUTO` | `AUTO`: Leios only on Musashi (magic 164). `ENABLED`: always. `DISABLED`: never. |
+| `LeiosConfig.fetchTxs` | `true` | Pattern 3 events: fetch EB transaction bytes. |
+| `LeiosConfig.maxTxsPerEndorserBlock` | `64` | Pattern 3 events: per-EB fetch cap. |
+| `LeiosConfig.txsOfferWaitMillis` | `2000` | Pattern 3 events: wait for a transactions offer before a refs-only event. |
+| `LeiosConfig.deliverVotes` | `false` | Parse and deliver votes. |
 
 ## Behavior on mainnet / preprod
 
-With `AUTO` (the default everywhere), a build of your app containing all of
-the above runs on mainnet with a byte-identical network profile to a
-non-Leios Yaci: no Leios agents attach, no Leios callbacks fire, all parsing
-paths for Shelley–Conway are unchanged. You do not need separate builds or
-feature flags of your own.
+With `AUTO` (the default everywhere), your app runs on mainnet exactly as with a non-Leios Yaci: no second
+connection, no wrapping of your listener, no Leios callbacks, and the Shelley–Conway parsing path is unchanged.
+You do not need separate builds or feature flags.
 
-## Current limitations (read before relying on this)
+## Current limitations
 
-- `onBlock` is the only ledger-authoritative stream; `onEndorserBlock` /
-  `onLeiosVotes` are observational until the merged ledger-effective view
-  lands.
-- EB data is near-tip only; no historical EB backfill (prototype limitation).
-  `LeiosEndorserBlockFetcher` (batch closure resolution for initial sync) is
-  a placeholder that throws `UnsupportedOperationException` until the final
-  protocol's multi/range fetch exists.
-- Dijkstra transaction bodies: key 14 is `guards` — keyhash-variant guards
-  surface under `TransactionBody.requiredSigners`; credential-variant guards
-  fail loudly via `onParsingError`. `sub_transactions` (key 23) and keys
-  25/26 are not yet modeled.
-- Certificates are parsed and raw-preserved, **not** BLS-verified.
-- Vote shapes have already changed twice upstream; `LeiosVoteFormat.UNKNOWN`
-  + raw CBOR is the escape hatch when they change again.
-- Musashi respins on breaking node releases; this guide and the code are
-  pinned to `prototype-2026w27`. Check the
-  [pin matrix](leios-spec-tracking.md) before assuming compatibility.
+- Certificates are parsed and kept raw, **not** BLS-verified. Yaci trusts the node's chain selection.
+- Plutus V4 scripts are read everywhere the deployed CDDL allows them: the witness set (`Witnesses.plutusV4Scripts`),
+  reference scripts (raw `scriptRef`, as for other versions) and auxiliary data (`AuxData.plutusV4Scripts`).
+- Local state query results for the Dijkstra era (for example current protocol parameters, 55 fields in w42) are
+  not verified yet: no local Musashi node was available. The w42 queries `GetStakePoolState` (40) and
+  `GetLeiosCommittee` (41) are not implemented.
+- How long nodes keep old certified EBs is not specified yet; four weeks is verified on Musashi.
+- If the first block after a start certifies an EB and its parent is more than 1,000 slots older (a long block
+  gap), the parent search fails and the block waits; tip sync uses the intersection point and does not search.
+- With inlining on, the Leios connection also receives LeiosNotify traffic, and Pattern 3 (if enabled on the main
+  connection) fetches some EB transactions a second time. This costs bandwidth only.
+- Musashi is respun on breaking node releases; this guide and the code are pinned to `rc-2026w42`.
+  Check `adr/leios-todo.md` before assuming compatibility.

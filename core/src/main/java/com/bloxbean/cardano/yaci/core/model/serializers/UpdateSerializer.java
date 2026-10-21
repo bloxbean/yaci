@@ -213,6 +213,102 @@ public enum UpdateSerializer implements Serializer<Update> {
         itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(33));
         NonNegativeInterval minFeeRefScriptCostPerByte = itemDI != null ? toNonNegativeInterval(itemDI) : null;
 
+        //Dijkstra era
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(34));
+        Long maxRefScriptSizePerBlock = itemDI != null ? toLong(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(35));
+        Long maxRefScriptSizePerTx = itemDI != null ? toLong(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(36));
+        Long refScriptCostStride = itemDI != null ? toLong(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(37)); //positive_interval
+        NonNegativeInterval refScriptCostMultiplier = itemDI != null ? toNonNegativeInterval(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(38)); //nonnegative_interval / nil
+        NonNegativeInterval maxPledgeLeverage = null;
+        Boolean maxPledgeLeverageNoLimit = null;
+        if (itemDI != null) {
+            if (SimpleValue.NULL.equals(itemDI)) {
+                maxPledgeLeverageNoLimit = true;
+            } else {
+                maxPledgeLeverage = toNonNegativeInterval(itemDI);
+                maxPledgeLeverageNoLimit = false;
+            }
+        }
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(39));
+        UnitInterval minPoolMargin = itemDI != null ? toUnitInterval(itemDI) : null;
+
+        //Leios
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(40));
+        Long leiosAnnouncementPeriodMs = itemDI != null ? toLong(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(41));
+        Long leiosVotePeriodMs = itemDI != null ? toLong(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(42));
+        Long leiosDiffusionPeriodMs = itemDI != null ? toLong(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(43));
+        Integer leiosCommitteeSize = itemDI != null ? toInt(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(44));
+        UnitInterval leiosQuorumStakeThreshold = itemDI != null ? toUnitInterval(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(45));
+        Long maxEndorserBlockRefsSize = itemDI != null ? toLong(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(46));
+        Long maxEndorserBlockTxsSize = itemDI != null ? toLong(itemDI) : null;
+
+        BigInteger maxEndorserBlockExMem = null;
+        BigInteger maxEndorserBlockExSteps = null;
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(47));
+        if (itemDI != null) {
+            Tuple<BigInteger, BigInteger> exUnits = getExUnits(((Array) itemDI).getDataItems());
+            maxEndorserBlockExMem = exUnits._1;
+            maxEndorserBlockExSteps = exUnits._2;
+        }
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(48));
+        Long maxRefScriptSizePerEndorserBlock = itemDI != null ? toLong(itemDI) : null;
+
+        //Peras and reference input fees
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(49));
+        Long perasMinCandidateBlockAge = itemDI != null ? toLong(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(50)); //positive_interval
+        NonNegativeInterval perasHealingFactor = itemDI != null ? toNonNegativeInterval(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(51));
+        Integer perasCertBoost = itemDI != null ? toInt(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(52));
+        Integer perasTargetCommitteeSize = itemDI != null ? toInt(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(53)); //uint / nil
+        Long perasBootstrapRound = null;
+        Boolean perasBootstrapRoundNone = null;
+        if (itemDI != null) {
+            if (SimpleValue.NULL.equals(itemDI)) {
+                perasBootstrapRoundNone = true;
+            } else {
+                perasBootstrapRound = toLong(itemDI);
+                perasBootstrapRoundNone = false;
+            }
+        }
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(54));
+        UnitInterval perasQuorumThresholdSafetyMargin = itemDI != null ? toUnitInterval(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(55));
+        BigInteger refInputsCostPerMultiAssetPolicy = itemDI != null ? toBigInteger(itemDI) : null;
+
+        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(56));
+        BigInteger refInputsCostPerDatumByte = itemDI != null ? toBigInteger(itemDI) : null;
+
         ProtocolParamUpdate protocolParamUpdate = ProtocolParamUpdate.builder()
                 .minFeeA(minFeeA)
                 .minFeeB(minFeeB)
@@ -253,6 +349,32 @@ public enum UpdateSerializer implements Serializer<Update> {
                 .drepDeposit(drepDeposit)
                 .drepActivity(drepInactivityPeriod)
                 .minFeeRefScriptCostPerByte(minFeeRefScriptCostPerByte)
+                .maxRefScriptSizePerBlock(maxRefScriptSizePerBlock)
+                .maxRefScriptSizePerTx(maxRefScriptSizePerTx)
+                .refScriptCostStride(refScriptCostStride)
+                .refScriptCostMultiplier(refScriptCostMultiplier)
+                .maxPledgeLeverage(maxPledgeLeverage)
+                .maxPledgeLeverageNoLimit(maxPledgeLeverageNoLimit)
+                .minPoolMargin(minPoolMargin)
+                .leiosAnnouncementPeriodMs(leiosAnnouncementPeriodMs)
+                .leiosVotePeriodMs(leiosVotePeriodMs)
+                .leiosDiffusionPeriodMs(leiosDiffusionPeriodMs)
+                .leiosCommitteeSize(leiosCommitteeSize)
+                .leiosQuorumStakeThreshold(leiosQuorumStakeThreshold)
+                .maxEndorserBlockRefsSize(maxEndorserBlockRefsSize)
+                .maxEndorserBlockTxsSize(maxEndorserBlockTxsSize)
+                .maxEndorserBlockExMem(maxEndorserBlockExMem)
+                .maxEndorserBlockExSteps(maxEndorserBlockExSteps)
+                .maxRefScriptSizePerEndorserBlock(maxRefScriptSizePerEndorserBlock)
+                .perasMinCandidateBlockAge(perasMinCandidateBlockAge)
+                .perasHealingFactor(perasHealingFactor)
+                .perasCertBoost(perasCertBoost)
+                .perasTargetCommitteeSize(perasTargetCommitteeSize)
+                .perasBootstrapRound(perasBootstrapRound)
+                .perasBootstrapRoundNone(perasBootstrapRoundNone)
+                .perasQuorumThresholdSafetyMargin(perasQuorumThresholdSafetyMargin)
+                .refInputsCostPerMultiAssetPolicy(refInputsCostPerMultiAssetPolicy)
+                .refInputsCostPerDatumByte(refInputsCostPerDatumByte)
                 .build();
         return protocolParamUpdate;
     }
@@ -467,6 +589,42 @@ public enum UpdateSerializer implements Serializer<Update> {
 
         // 33: minFeeRefScriptCostPerByte
         if (ppu.getMinFeeRefScriptCostPerByte() != null) map.put(cborUInt(33), serializeRational(ppu.getMinFeeRefScriptCostPerByte()));
+
+        // 34-39: Dijkstra era
+        if (ppu.getMaxRefScriptSizePerBlock() != null) map.put(cborUInt(34), cborUInt(ppu.getMaxRefScriptSizePerBlock()));
+        if (ppu.getMaxRefScriptSizePerTx() != null) map.put(cborUInt(35), cborUInt(ppu.getMaxRefScriptSizePerTx()));
+        if (ppu.getRefScriptCostStride() != null) map.put(cborUInt(36), cborUInt(ppu.getRefScriptCostStride()));
+        if (ppu.getRefScriptCostMultiplier() != null) map.put(cborUInt(37), serializeRational(ppu.getRefScriptCostMultiplier()));
+        if (Boolean.TRUE.equals(ppu.getMaxPledgeLeverageNoLimit())) map.put(cborUInt(38), SimpleValue.NULL);
+        else if (ppu.getMaxPledgeLeverage() != null) map.put(cborUInt(38), serializeRational(ppu.getMaxPledgeLeverage()));
+        if (ppu.getMinPoolMargin() != null) map.put(cborUInt(39), serializeRational(ppu.getMinPoolMargin()));
+
+        // 40-48: Leios
+        if (ppu.getLeiosAnnouncementPeriodMs() != null) map.put(cborUInt(40), cborUInt(ppu.getLeiosAnnouncementPeriodMs()));
+        if (ppu.getLeiosVotePeriodMs() != null) map.put(cborUInt(41), cborUInt(ppu.getLeiosVotePeriodMs()));
+        if (ppu.getLeiosDiffusionPeriodMs() != null) map.put(cborUInt(42), cborUInt(ppu.getLeiosDiffusionPeriodMs()));
+        if (ppu.getLeiosCommitteeSize() != null) cborMapPutUInt(map, 43, ppu.getLeiosCommitteeSize());
+        if (ppu.getLeiosQuorumStakeThreshold() != null) map.put(cborUInt(44), serializeRational(ppu.getLeiosQuorumStakeThreshold()));
+        if (ppu.getMaxEndorserBlockRefsSize() != null) map.put(cborUInt(45), cborUInt(ppu.getMaxEndorserBlockRefsSize()));
+        if (ppu.getMaxEndorserBlockTxsSize() != null) map.put(cborUInt(46), cborUInt(ppu.getMaxEndorserBlockTxsSize()));
+        if (ppu.getMaxEndorserBlockExMem() != null && ppu.getMaxEndorserBlockExSteps() != null) {
+            Array exUnits = new Array();
+            exUnits.add(cborUInt(ppu.getMaxEndorserBlockExMem()));
+            exUnits.add(cborUInt(ppu.getMaxEndorserBlockExSteps()));
+            map.put(cborUInt(47), exUnits);
+        }
+        if (ppu.getMaxRefScriptSizePerEndorserBlock() != null) map.put(cborUInt(48), cborUInt(ppu.getMaxRefScriptSizePerEndorserBlock()));
+
+        // 49-56: Peras and reference input fees
+        if (ppu.getPerasMinCandidateBlockAge() != null) map.put(cborUInt(49), cborUInt(ppu.getPerasMinCandidateBlockAge()));
+        if (ppu.getPerasHealingFactor() != null) map.put(cborUInt(50), serializeRational(ppu.getPerasHealingFactor()));
+        if (ppu.getPerasCertBoost() != null) cborMapPutUInt(map, 51, ppu.getPerasCertBoost());
+        if (ppu.getPerasTargetCommitteeSize() != null) cborMapPutUInt(map, 52, ppu.getPerasTargetCommitteeSize());
+        if (Boolean.TRUE.equals(ppu.getPerasBootstrapRoundNone())) map.put(cborUInt(53), SimpleValue.NULL);
+        else if (ppu.getPerasBootstrapRound() != null) map.put(cborUInt(53), cborUInt(ppu.getPerasBootstrapRound()));
+        if (ppu.getPerasQuorumThresholdSafetyMargin() != null) map.put(cborUInt(54), serializeRational(ppu.getPerasQuorumThresholdSafetyMargin()));
+        if (ppu.getRefInputsCostPerMultiAssetPolicy() != null) map.put(cborUInt(55), cborUInt(ppu.getRefInputsCostPerMultiAssetPolicy()));
+        if (ppu.getRefInputsCostPerDatumByte() != null) map.put(cborUInt(56), cborUInt(ppu.getRefInputsCostPerDatumByte()));
 
         return map;
     }

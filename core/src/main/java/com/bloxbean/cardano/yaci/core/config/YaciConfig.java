@@ -12,6 +12,8 @@ public enum YaciConfig {
 
     private boolean blockFetchCheckRangeExists = false;
 
+    private boolean inlineEndorserBlockTxs = true;
+
     YaciConfig() {
         returnBlockCbor = false;
         returnTxBodyCbor = false;
@@ -72,5 +74,24 @@ public enum YaciConfig {
      */
     public void setReturnFullTxCbor(boolean returnFullTxCbor) {
         this.returnFullTxCbor = returnFullTxCbor;
+    }
+
+    /**
+     * Leios: true (default) to deliver a block that certifies an endorser block (EB) together with the EB's
+     * transactions, so applications see every ledger transaction in {@code onBlock} without extra code.
+     * Has no effect on networks without Leios.
+     * @return true if endorser block transactions are inlined into the certifying block
+     */
+    public boolean isInlineEndorserBlockTxs() {
+        return inlineEndorserBlockTxs;
+    }
+
+    /**
+     * Set to false to receive certifying blocks exactly as on the wire (no endorser block transactions);
+     * applications then get endorser blocks through {@code BlockChainDataListener.onEndorserBlock}.
+     * @param inlineEndorserBlockTxs
+     */
+    public void setInlineEndorserBlockTxs(boolean inlineEndorserBlockTxs) {
+        this.inlineEndorserBlockTxs = inlineEndorserBlockTxs;
     }
 }

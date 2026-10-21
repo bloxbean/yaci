@@ -9,8 +9,11 @@ public interface LeiosFetchAgentListener extends AgentListener {
     default void onBlock(LeiosPoint requestedPoint, LeiosRawCbor endorserBlock) {
     }
 
-    default void onBlockTxs(LeiosPoint requestedPoint, LeiosPoint responsePoint,
-                            LeiosTxBitmap responseBitmap, LeiosRawCbor txList) {
+    /**
+     * Transactions for an outstanding {@code MsgLeiosBlockTxsRequest}. The reply carries only the transactions,
+     * so the requested point and bitmap identify which EB and which transactions they are.
+     */
+    default void onBlockTxs(LeiosPoint requestedPoint, LeiosTxBitmap requestedBitmap, LeiosRawCbor txList) {
     }
 
     default void onFetchError(Throwable error) {

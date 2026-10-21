@@ -8,13 +8,15 @@ import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosPoint;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosRawCbor;
 import com.bloxbean.cardano.yaci.core.protocol.leios.serializers.LeiosCborUtil;
-import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgClientDone;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgCanceled;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgDone;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosBlockAnnouncement;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosBlockOffer;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosBlockTxsOffer;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosNotificationRequestNext;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosNotifyError;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosVotes;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgQuit;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.serializers.LeiosNotifySerializers;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -30,32 +32,61 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class LeiosNotifySerializersTest {
 
     @Test
-    void serializesRequestNextAndDoneTags() {
-        assertEquals("8100", HexUtil.encodeHexString(new MsgLeiosNotificationRequestNext().serialize()));
-        assertEquals("8105", HexUtil.encodeHexString(new MsgClientDone().serialize()));
+    void serializesW42SimpleMessageTags() {
+        // cardano-blueprint main @ 0460c5a6: Done=0, Quit=1, Canceled=2, RequestNext=3
+        assertEquals("8100", HexUtil.encodeHexString(new MsgDone().serialize()));
+        assertEquals("8101", HexUtil.encodeHexString(new MsgQuit().serialize()));
+        assertEquals("8102", HexUtil.encodeHexString(new MsgCanceled().serialize()));
+        assertEquals("8103", HexUtil.encodeHexString(new MsgLeiosNotificationRequestNext().serialize()));
+    }
+
+    @Test
+    void dispatchesEveryW42TagToItsMessage() {
+        assertInstanceOf(MsgDone.class, LeiosNotifyStateBase.deserialize(new MsgDone().serialize()));
+        assertInstanceOf(MsgQuit.class, LeiosNotifyStateBase.deserialize(new MsgQuit().serialize()));
+        assertInstanceOf(MsgCanceled.class, LeiosNotifyStateBase.deserialize(new MsgCanceled().serialize()));
+        assertInstanceOf(MsgLeiosNotificationRequestNext.class,
+                LeiosNotifyStateBase.deserialize(new MsgLeiosNotificationRequestNext().serialize()));
+        assertInstanceOf(MsgLeiosBlockAnnouncement.class, LeiosNotifyStateBase.deserialize(
+                new MsgLeiosBlockAnnouncement(LeiosCborUtil.toRawCbor(rawArray(7, 8))).serialize()));
+        assertInstanceOf(MsgLeiosBlockOffer.class,
+                LeiosNotifyStateBase.deserialize(new MsgLeiosBlockOffer(point(1), 10).serialize()));
+        assertInstanceOf(MsgLeiosBlockTxsOffer.class,
+                LeiosNotifyStateBase.deserialize(new MsgLeiosBlockTxsOffer(point(2)).serialize()));
+        assertInstanceOf(MsgLeiosVotes.class, LeiosNotifyStateBase.deserialize(new MsgLeiosVotes(
+                List.of(LeiosCborUtil.toRawCbor(voteArray(point(3).getEbHash(), 1)))).serialize()));
+        assertInstanceOf(MsgLeiosNotifyError.class, LeiosNotifyStateBase.deserialize(HexUtil.decodeHexString("8108")));
+    }
+
+    @Test
+    void encodesOfferAndVotesWithW42Tags() {
+        assertEquals(0x05, new MsgLeiosBlockOffer(point(1), 10).serialize()[1] & 0xff);
+        assertEquals(0x06, new MsgLeiosBlockTxsOffer(point(2)).serialize()[1] & 0xff);
+        assertEquals(0x07, new MsgLeiosVotes(
+                List.of(LeiosCborUtil.toRawCbor(voteArray(point(3).getEbHash(), 1)))).serialize()[1] & 0xff);
     }
 
     @Test
     void rejectsRequestNextAndDoneWithExtraFields() {
         Array requestNext = new Array();
-        requestNext.add(new UnsignedInteger(0));
+        requestNext.add(new UnsignedInteger(3));
         requestNext.add(new UnsignedInteger(1));
 
         Array done = new Array();
-        done.add(new UnsignedInteger(5));
+        done.add(new UnsignedInteger(0));
         done.add(new UnsignedInteger(1));
 
         assertThrows(IllegalArgumentException.class,
                 () -> LeiosNotifySerializers.MsgLeiosNotificationRequestNextSerializer.INSTANCE
                         .deserializeDI(requestNext));
         assertThrows(IllegalArgumentException.class,
-                () -> LeiosNotifySerializers.MsgClientDoneSerializer.INSTANCE.deserializeDI(done));
+                () -> LeiosNotifySerializers.MsgDoneSerializer.INSTANCE.deserializeDI(done));
     }
 
     @Test
     void deserializesChunkedArraysWithBreakItems() {
         Array requestNext = new Array();
-        requestNext.add(new UnsignedInteger(0));
+        requestNext.add(new UnsignedInteger(3));
         requestNext.add(SimpleValue.BREAK);
 
         assertInstanceOf(MsgLeiosNotificationRequestNext.class,
@@ -100,7 +131,7 @@ class LeiosNotifySerializersTest {
 
     @Test
     void serializesAndDeserializesPrototypeVotesAsOpaqueItems() {
-        LeiosRawCbor vote = LeiosCborUtil.toRawCbor(voteArray(15, point(15).getEbHash(), 1));
+        LeiosRawCbor vote = LeiosCborUtil.toRawCbor(voteArray(point(15).getEbHash(), 1));
         MsgLeiosVotes votes = new MsgLeiosVotes(List.of(vote));
 
         MsgLeiosVotes decoded = LeiosNotifySerializers.MsgLeiosVotesSerializer.INSTANCE
@@ -112,7 +143,7 @@ class LeiosNotifySerializersTest {
     @Test
     void rejectsPrototypeBlockOfferWithoutEbSize() {
         Array array = new Array();
-        array.add(new UnsignedInteger(2));
+        array.add(new UnsignedInteger(5));
         array.add(LeiosCborUtil.serializePointArray(point(1)));
 
         assertThrows(IllegalArgumentException.class, () -> {
@@ -135,7 +166,7 @@ class LeiosNotifySerializersTest {
     @Test
     void protectsMessagePayloadsFromMutation() {
         byte[] hash = point(5).getEbHash();
-        LeiosRawCbor vote = LeiosCborUtil.toRawCbor(voteArray(5, hash, 1));
+        LeiosRawCbor vote = LeiosCborUtil.toRawCbor(voteArray(hash, 1));
         MsgLeiosVotes votes = new MsgLeiosVotes(List.of(vote));
 
         assertThrows(UnsupportedOperationException.class, () -> votes.getVotes().add(vote));
@@ -149,10 +180,10 @@ class LeiosNotifySerializersTest {
         return array;
     }
 
-    private Array voteArray(long slot, byte[] hash, int voterId) {
+    // w42 vote: [announcing_rb_hash, voter_id, vote_signature(48 bytes)]
+    private Array voteArray(byte[] announcingRbHash, int voterId) {
         Array array = new Array();
-        array.add(new UnsignedInteger(slot));
-        array.add(new ByteString(hash));
+        array.add(new ByteString(announcingRbHash));
         array.add(new UnsignedInteger(voterId));
         array.add(new ByteString(new byte[48]));
         return array;

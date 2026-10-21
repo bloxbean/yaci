@@ -45,8 +45,14 @@ class PoolRegistrationSerializerTest {
 
             PoolRegistration parsed = decode(dijkstra);
 
-            assertThat(parsed.getPoolParams()).usingRecursiveComparison().isEqualTo(expected.getPoolParams());
+            assertThat(parsed.getPoolParams()).usingRecursiveComparison()
+                    .ignoringFields("blsPublicKey", "blsPossessionProof")
+                    .isEqualTo(expected.getPoolParams());
+            boolean nil = inserted.equals("f6");
+            assertThat(parsed.getPoolParams().getBlsPublicKey()).isEqualTo(nil ? null : "11".repeat(96));
+            assertThat(parsed.getPoolParams().getBlsPossessionProof()).isEqualTo(nil ? null : "22".repeat(48));
         }
+        assertThat(expected.getPoolParams().getBlsPublicKey()).isNull();
     }
 
     private static PoolRegistration decode(String hex) {

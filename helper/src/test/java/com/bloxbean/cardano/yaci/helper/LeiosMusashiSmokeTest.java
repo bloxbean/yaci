@@ -120,8 +120,8 @@ class LeiosMusashiSmokeTest {
                     log.info("Leios vote decoded: announcingRbHash={}, voterId={}, signatureBytes={}",
                             HexUtil.encodeHexString(vote.announcingRbHash()), vote.voterId(), vote.signatureBytes());
                     if (fetchFromVote && voteFetchRequested.compareAndSet(false, true)) {
-                        //A w40a vote names the announcing RB, not an EB point, so it cannot drive an EB fetch
-                        log.info("Skipping fetch-from-vote: w40a votes carry the announcing RB hash, not an EB point");
+                        //A vote (w40a and later) names the announcing RB, not an EB point, so it cannot drive an EB fetch
+                        log.info("Skipping fetch-from-vote: votes carry the announcing RB hash, not an EB point");
                     }
                 }
             }
@@ -259,7 +259,7 @@ class LeiosMusashiSmokeTest {
             throw new IllegalArgumentException("Leios vote must be a CBOR array");
         }
 
-        //w40a vote: [announcing_rb_hash, voter_id, vote_signature(48 bytes)]
+        //vote (w40a and w42): [announcing_rb_hash, voter_id, vote_signature(48 bytes)]
         List<DataItem> items = array.getDataItems();
         if (items.size() != 3) {
             throw new IllegalArgumentException("Leios vote must have 3 fields");

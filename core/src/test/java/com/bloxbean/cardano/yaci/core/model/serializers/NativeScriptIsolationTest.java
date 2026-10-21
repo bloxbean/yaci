@@ -159,7 +159,8 @@ class NativeScriptIsolationTest {
     @Test
     void indefiniteAuxiliaryNativeScriptsSkipBreakAndUnknownTypes() {
         Map metadata = new Map().put(new UnsignedInteger(1), new UnsignedInteger(42));
-        Array scripts = new Array().add(pubkeyScript()).add(new Array().add(new UnsignedInteger(6)))
+        //7 is not a native script type; 6 is the Dijkstra require_guard
+        Array scripts = new Array().add(pubkeyScript()).add(new Array().add(new UnsignedInteger(7)))
                 .add(Special.BREAK);
         scripts.setChunked(true);
         Map alonzo = new Map().put(new UnsignedInteger(0), metadata).put(new UnsignedInteger(1), scripts);

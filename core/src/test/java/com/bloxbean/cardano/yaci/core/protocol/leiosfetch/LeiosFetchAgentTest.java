@@ -83,20 +83,16 @@ class LeiosFetchAgentTest {
     void requestBlockTxsMovesToBusyAndDispatchesBlockTxsCallback() {
         LeiosFetchAgent agent = new LeiosFetchAgent();
         LeiosPoint requested = point(2);
-        LeiosPoint response = point(3);
         LeiosTxBitmap bitmap = LeiosTxBitmap.fromIndices(0, 64, 65);
         LeiosRawCbor txList = LeiosCborUtil.toRawCbor(rawArray(3, 4));
         AtomicReference<LeiosPoint> requestedPoint = new AtomicReference<>();
-        AtomicReference<LeiosPoint> responsePoint = new AtomicReference<>();
         AtomicReference<LeiosTxBitmap> observedBitmap = new AtomicReference<>();
         AtomicReference<LeiosRawCbor> observedTxList = new AtomicReference<>();
         agent.addListener(new LeiosFetchAgentListener() {
             @Override
-            public void onBlockTxs(LeiosPoint requested, LeiosPoint response,
-                                   LeiosTxBitmap responseBitmap, LeiosRawCbor txList) {
+            public void onBlockTxs(LeiosPoint requested, LeiosTxBitmap requestedBitmap, LeiosRawCbor txList) {
                 requestedPoint.set(requested);
-                responsePoint.set(response);
-                observedBitmap.set(responseBitmap);
+                observedBitmap.set(requestedBitmap);
                 observedTxList.set(txList);
             }
         });
@@ -108,11 +104,11 @@ class LeiosFetchAgentTest {
         assertInstanceOf(MsgLeiosBlockTxsRequest.class, request);
         assertEquals(LeiosFetchState.StBlockTxs, agent.getCurrentState());
 
-        agent.receiveResponse(new MsgLeiosBlockTxs(response, bitmap, txList));
+        // w42 reply carries no point or bitmap: the agent reports the outstanding request's point and bitmap
+        agent.receiveResponse(new MsgLeiosBlockTxs(txList));
 
         assertEquals(LeiosFetchState.StIdle, agent.getCurrentState());
         assertEquals(requested, requestedPoint.get());
-        assertEquals(response, responsePoint.get());
         assertEquals(bitmap, observedBitmap.get());
         assertEquals(txList, observedTxList.get());
         assertNull(agent.getOutstandingRequest());
@@ -145,6 +141,46 @@ class LeiosFetchAgentTest {
         assertEquals(bitmap, secondRequest.getBitmap());
         assertEquals(LeiosFetchState.StBlockTxs, agent.getCurrentState());
         assertEquals(0, agent.getQueueSize());
+    }
+
+    @Test
+    void requestSentFromInsideOnBlockGetsItsAnswer() {
+        //A client that fetches an EB and then its transactions sends the second request from the onBlock callback.
+        //EmbeddedChannel completes writes inline, as the event loop can: the new request must stay outstanding.
+        LeiosFetchAgent agent = new LeiosFetchAgent();
+        EmbeddedChannel channel = new EmbeddedChannel();
+        agent.setChannel(channel);
+        LeiosPoint eb = point(7);
+        LeiosTxBitmap bitmap = LeiosTxBitmap.firstN(3);
+        AtomicReference<LeiosPoint> txsFor = new AtomicReference<>();
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        agent.addListener(new LeiosFetchAgentListener() {
+            @Override
+            public void onBlock(LeiosPoint requestedPoint, LeiosRawCbor endorserBlock) {
+                agent.requestBlockTxs(requestedPoint, bitmap);
+            }
+
+            @Override
+            public void onBlockTxs(LeiosPoint requested, LeiosTxBitmap requestedBitmap, LeiosRawCbor txList) {
+                txsFor.set(requested);
+            }
+
+            @Override
+            public void onFetchError(Throwable observed) {
+                error.set(observed);
+            }
+        });
+
+        agent.requestBlock(eb);
+        channel.readOutbound();
+        agent.receiveResponse(new MsgLeiosBlock(LeiosCborUtil.toRawCbor(rawArray(1, 2))));
+        assertInstanceOf(MsgLeiosBlockTxsRequest.class,
+                LeiosFetchStateBase.deserialize(((Segment) channel.readOutbound()).getPayload()));
+        agent.receiveResponse(new MsgLeiosBlockTxs(LeiosCborUtil.toRawCbor(rawArray(3, 4))));
+
+        assertNull(error.get());
+        assertEquals(eb, txsFor.get());
+        assertEquals(LeiosFetchState.StIdle, agent.getCurrentState());
     }
 
     @Test
@@ -309,8 +345,7 @@ class LeiosFetchAgentTest {
         agent.requestBlock(point(6));
         agent.sendRequest(agent.buildNextMessage());
         agent.requestBlockTxs(point(16), LeiosTxBitmap.firstN(1));
-        agent.receiveResponse(new MsgLeiosBlockTxs(
-                point(7), LeiosTxBitmap.firstN(1), LeiosCborUtil.toRawCbor(rawArray(8, 9))));
+        agent.receiveResponse(new MsgLeiosBlockTxs(LeiosCborUtil.toRawCbor(rawArray(8, 9))));
 
         assertEquals(LeiosFetchState.StIdle, agent.getCurrentState());
         assertNull(agent.getOutstandingRequest());
