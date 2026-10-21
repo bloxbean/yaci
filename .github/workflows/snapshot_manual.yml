@@ -10,7 +10,8 @@ jobs:
   commit-build:
     # The job runs the selected branch's Gradle build with the Central Portal token, so only the release
     # branches (main, next, release/**) and the next-* lines (e.g. next-leios) may publish snapshots; a run
-    # started on any other branch is skipped. next-* branches are protected and only org admins can create them.
+    # started on any other branch is skipped. Like release/**, next-* must be in the protected-branches and
+    # release-branch-creation rulesets and in this environment's deployment branches.
     if: >-
       github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next' ||
       startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/next-')

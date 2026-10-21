@@ -109,7 +109,8 @@ jobs:
     needs: [resolve, authorize]
     runs-on: ubuntu-24.04
     # The App id and private key are secrets of this environment, which only accepts main, next,
-    # release/** (creation restricted by ruleset) and v* tags.
+    # release/** and next-* (creation restricted by ruleset) and v* tags. next-* lines never tag: they are
+    # not in the `release` environment, so the authorize job can't run for them.
     environment: release-staging
     permissions:
       contents: read
