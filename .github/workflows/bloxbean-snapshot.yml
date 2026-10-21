@@ -1,9 +1,10 @@
 name: Publish snapshot to the BloxBean Maven repository
 
 # STUB on main. workflow_dispatch only offers workflows whose file exists on the default branch (main), but the run
-# uses the file from the ref selected in "Run workflow". This file exists so that next's real bloxbean-snapshot.yml
-# (release-ops docs/12-bloxbean-maven-repository.md) can be started with ref `next`:
+# uses the file from the ref selected in "Run workflow". This file exists so that the real bloxbean-snapshot.yml on next
+# or a next-* line (release-ops docs/12-bloxbean-maven-repository.md) can be started with that ref:
 #   gh workflow run bloxbean-snapshot.yml --repo bloxbean/yaci --ref next
+#   gh workflow run bloxbean-snapshot.yml --repo bloxbean/yaci --ref next-leios
 #
 # main builds the 0.4.x line with Gradle 7.5.1 / JDK 11 and publishes no snapshots to the BloxBean Maven repository,
 # so there is nothing to run here.
@@ -25,5 +26,5 @@ jobs:
         shell: bash
         run: |
           echo "::error::main (0.4.x) publishes no snapshots to the BloxBean Maven repository." >&2
-          echo "::error::Snapshots are published from next: run this workflow with ref 'next'." >&2
+          echo "::error::Snapshots are published from next or a next-* line: run this workflow with that ref." >&2
           exit 1

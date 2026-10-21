@@ -29,7 +29,7 @@ jobs:
   publish:
     runs-on: ubuntu-24.04
     # The signing subkey and Central Portal token are secrets of this environment, which only accepts
-    # v* tags (plus main, next and release/** for the other release workflows). Only the release App
+    # v* tags (plus main, next, release/** and next-* for the other release workflows). Only the release App
     # and org admins can create v* tags.
     environment: release-staging
     permissions:

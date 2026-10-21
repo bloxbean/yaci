@@ -1,5 +1,5 @@
 # Release owners. Combined with the `protected-branches` ruleset's "Require review from Code Owners"
-# (main, next and release/**), a PR that touches any of these paths needs an approving review from one of
+# (main, next, next-* and release/**), a PR that touches any of these paths needs an approving review from one of
 # them. Changing `version` in gradle.properties drives the automatic tag and release, and the other
 # paths decide what runs, with the release credentials, when it does.
 #

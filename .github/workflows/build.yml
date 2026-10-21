@@ -1,5 +1,6 @@
 name: Clean, Build
 
+# next-* are long-lived lines branched off next (e.g. next-leios). next/* can never exist while next does.
 on:
   push:
     branches:
@@ -8,7 +9,7 @@ on:
       - develop*
       - release*
       - next
-      - next/*
+      - next-*
   pull_request:
     branches:
       - main
@@ -16,7 +17,7 @@ on:
       - develop*
       - release*
       - next
-      - next/*
+      - next-*
 
 # PR builds run the pull request's own code: give it a read-only token.
 permissions:
