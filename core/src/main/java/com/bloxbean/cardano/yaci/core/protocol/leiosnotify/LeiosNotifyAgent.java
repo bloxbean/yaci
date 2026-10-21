@@ -6,12 +6,14 @@ import com.bloxbean.cardano.yaci.core.protocol.State;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosProtocolConstants;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosRawCbor;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosNotifyError;
-import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgClientDone;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgCanceled;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgDone;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosBlockAnnouncement;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosBlockOffer;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosBlockTxsOffer;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosNotificationRequestNext;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosVotes;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgQuit;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -53,7 +55,7 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
             return null;
         }
         if (shutDown) {
-            return new MsgClientDone();
+            return new MsgQuit();
         }
         return new MsgLeiosNotificationRequestNext();
     }
@@ -68,7 +70,12 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
     public synchronized void receiveResponse(Message message) {
         if (message instanceof MsgLeiosNotifyError error) {
             notifyError(error.getCause());
-            this.currentState = LeiosNotifyState.StIdle;
+            //An unreadable reply ends the exchange it answers: after MsgQuit the protocol is over
+            if (currentState == LeiosNotifyState.StBusy) {
+                this.currentState = LeiosNotifyState.StIdle;
+            } else if (currentState == LeiosNotifyState.StQuit) {
+                this.currentState = LeiosNotifyState.StDone;
+            }
             writeNextMessageIfReady();
             return;
         }
@@ -79,6 +86,8 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
                     messageName(message) + " in state " + state));
             if (state == LeiosNotifyState.StBusy) {
                 this.currentState = LeiosNotifyState.StIdle;
+            } else if (state == LeiosNotifyState.StQuit) {
+                this.currentState = LeiosNotifyState.StDone;
             }
             writeNextMessageIfReady();
             return;
@@ -105,7 +114,15 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
         } else if (message instanceof MsgLeiosVotes votes) {
             List<LeiosRawCbor> rawVotes = votes.getVotes();
             dispatchListener(listener -> listener.onVotes(rawVotes), "onVotes", true);
-        } else if (!(message instanceof MsgClientDone) && !(message instanceof MsgLeiosNotificationRequestNext)) {
+        } else if (message instanceof MsgCanceled) {
+            //w42 servers cancel outstanding requests only after the client's MsgQuit. Without one, asking again
+            //could loop, so stop requesting and report it.
+            if (!shutDown) {
+                autoRequestNext = false;
+                notifyError(new IllegalStateException("LeiosNotify server canceled a request without MsgQuit; "
+                        + "no further notifications are requested on this connection"));
+            }
+        } else if (!(message instanceof MsgDone) && !(message instanceof MsgLeiosNotificationRequestNext)) {
             log.warn("Unexpected LeiosNotify message: {}", message.getClass().getSimpleName());
         }
     }
@@ -222,13 +239,17 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
         if (message == null) {
             return false;
         }
+        if (state == LeiosNotifyState.StQuit) {
+            return message instanceof MsgDone;
+        }
         if (state != LeiosNotifyState.StBusy) {
             return false;
         }
         return message instanceof MsgLeiosBlockAnnouncement ||
                 message instanceof MsgLeiosBlockOffer ||
                 message instanceof MsgLeiosBlockTxsOffer ||
-                message instanceof MsgLeiosVotes;
+                message instanceof MsgLeiosVotes ||
+                message instanceof MsgCanceled;
     }
 
     private String messageName(Message message) {

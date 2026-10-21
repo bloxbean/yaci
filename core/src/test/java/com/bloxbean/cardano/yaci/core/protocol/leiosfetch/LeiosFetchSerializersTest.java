@@ -19,6 +19,7 @@ import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -27,8 +28,37 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LeiosFetchSerializersTest {
 
     @Test
-    void serializesDoneTag() {
-        assertEquals("8109", HexUtil.encodeHexString(new MsgClientDone().serialize()));
+    void serializesW42Tags() {
+        // cardano-blueprint main @ 0460c5a6: Done=0, BlockRequest=1, Block=2, BlockTxsRequest=3, BlockTxs=4
+        assertEquals("8100", HexUtil.encodeHexString(new MsgClientDone().serialize()));
+        assertEquals(0x01, new MsgLeiosBlockRequest(point(1)).serialize()[1] & 0xff);
+        assertEquals(0x02, new MsgLeiosBlock(LeiosCborUtil.toRawCbor(rawArray(1, 2))).serialize()[1] & 0xff);
+        assertEquals(0x03, new MsgLeiosBlockTxsRequest(point(1), LeiosTxBitmap.firstN(1)).serialize()[1] & 0xff);
+        assertEquals("82048102", HexUtil.encodeHexString(
+                new MsgLeiosBlockTxs(LeiosCborUtil.toRawCbor(singletonArray(2))).serialize()));
+    }
+
+    @Test
+    void decodesW42BlockTxsWithTag24Transactions() {
+        // [4, [24(h'80'), 24(h'8101')]]: two CBOR-in-CBOR transactions, no echoed point or bitmap
+        byte[] wire = HexUtil.decodeHexString("820482d8184180d818428101");
+
+        MsgLeiosBlockTxs decoded = assertInstanceOf(MsgLeiosBlockTxs.class, LeiosFetchStateBase.deserialize(wire));
+
+        assertEquals("82d8184180d818428101", HexUtil.encodeHexString(decoded.getTxList().getCbor()));
+        assertArrayEquals(wire, decoded.serialize());
+    }
+
+    @Test
+    void decodesW42BlockTxsWithIndefiniteList() {
+        //The Haskell decoder accepts a definite or an indefinite list (decodeListLenOrIndef)
+        byte[] wire = HexUtil.decodeHexString("82049fd8184180d818428101ff");
+
+        MsgLeiosBlockTxs decoded = assertInstanceOf(MsgLeiosBlockTxs.class, LeiosFetchStateBase.deserialize(wire));
+
+        assertArrayEquals(wire, decoded.serialize());
+        assertEquals(2, com.bloxbean.cardano.yaci.core.model.serializers.leios.EndorserBlockTxListSerializer.INSTANCE
+                .deserialize(decoded.getTxList().getCbor()).size());
     }
 
     @Test
@@ -71,11 +101,8 @@ class LeiosFetchSerializersTest {
     void serializesEmptyBitmapFieldsAsIndefiniteMaps() {
         MsgLeiosBlockTxsRequest request =
                 new MsgLeiosBlockTxsRequest(point(6), LeiosTxBitmap.empty());
-        MsgLeiosBlockTxs response = new MsgLeiosBlockTxs(
-                point(7), LeiosTxBitmap.empty(), LeiosCborUtil.toRawCbor(rawArray(30, 31)));
 
         assertTrue(HexUtil.encodeHexString(request.serialize()).contains("bfff"));
-        assertTrue(HexUtil.encodeHexString(response.serialize()).contains("bfff"));
 
         Message decoded = LeiosFetchStateBase.deserialize(request.serialize());
         MsgLeiosBlockTxsRequest decodedRequest = assertInstanceOf(MsgLeiosBlockTxsRequest.class, decoded);
@@ -83,27 +110,23 @@ class LeiosFetchSerializersTest {
     }
 
     @Test
-    void serializesAndDeserializesPrototypeBlockTxsAsOpaqueCbor() {
-        LeiosPoint point = point(3);
-        LeiosTxBitmap bitmap = LeiosTxBitmap.firstN(65);
+    void serializesAndDeserializesBlockTxsAsOpaqueCbor() {
         LeiosRawCbor txList = LeiosCborUtil.toRawCbor(rawArray(20, 21));
-        MsgLeiosBlockTxs blockTxs = new MsgLeiosBlockTxs(point, bitmap, txList);
+        MsgLeiosBlockTxs blockTxs = new MsgLeiosBlockTxs(txList);
 
         MsgLeiosBlockTxs decoded = LeiosFetchSerializers.MsgLeiosBlockTxsSerializer.INSTANCE
                 .deserializeDI(CborSerializationUtil.deserializeOne(blockTxs.serialize()));
 
-        assertEquals(point, decoded.getPoint());
-        assertEquals(bitmap, decoded.getBitmap());
         assertEquals(txList, decoded.getTxList());
     }
 
     @Test
     void rejectsMessagesWithWrongArity() {
         Array blockRequest = new Array();
-        blockRequest.add(new UnsignedInteger(0));
+        blockRequest.add(new UnsignedInteger(1));
 
         Array done = new Array();
-        done.add(new UnsignedInteger(9));
+        done.add(new UnsignedInteger(0));
         done.add(new UnsignedInteger(1));
 
         assertThrows(IllegalArgumentException.class,
@@ -115,7 +138,7 @@ class LeiosFetchSerializersTest {
     @Test
     void deserializesChunkedArraysWithBreakItems() {
         Array done = new Array();
-        done.add(new UnsignedInteger(9));
+        done.add(new UnsignedInteger(0));
         done.add(SimpleValue.BREAK);
 
         assertInstanceOf(MsgClientDone.class,
@@ -133,14 +156,20 @@ class LeiosFetchSerializersTest {
     }
 
     @Test
-    void unsupportedRangeTagsReturnErrorMessage() {
+    void unsupportedTagsReturnErrorMessage() {
         Array array = new Array();
-        array.add(new UnsignedInteger(4));
+        array.add(new UnsignedInteger(5));
 
         Message decoded = LeiosFetchStateBase.deserialize(CborSerializationUtil.serialize(array, false));
 
         MsgLeiosFetchError error = assertInstanceOf(MsgLeiosFetchError.class, decoded);
         assertInstanceOf(UnsupportedOperationException.class, error.getCause());
+    }
+
+    private Array singletonArray(long value) {
+        Array array = new Array();
+        array.add(new UnsignedInteger(value));
+        return array;
     }
 
     private Array rawArray(long first, long second) {

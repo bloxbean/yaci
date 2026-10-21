@@ -111,12 +111,13 @@ blocks from an abandoned fork never match. Nothing new is needed in the applicat
 
 ## 8. What is pinned to which network version
 
-| Piece | Deployed Musashi (`prototype-2026w40a`) | Next respin (`rc-2026w42`) |
+| Piece | Musashi `prototype-2026w40a` (until 2026-10-20) | Deployed Musashi (`rc-2026w42`) |
 |---|---|---|
-| RB body | `[txs, leios_cert, peras_cert]`, tx = `[body, wits, aux, is_valid]` | same |
+| RB body | `[txs, leios_cert, peras_cert]`, tx = `[body, wits, aux, is_valid]` | same; `peras_cert` must be nil |
 | LeiosFetch tags | BlockRequest 0, Block 1, TxsRequest 2, BlockTxs 3 | renumbered: 1, 2, 3, 4 |
 | EB transactions | `[point, bitmaps, [* bytes]]`, mempool encoding | `[* #6.24(block_transaction)]` |
-| Old certified EBs served | yes (tested 4 weeks back, first 8 txs) | untested |
+| EB entry | hash and size of the mempool encoding | hash and size of the block encoding (bytes inside `#6.24`) |
+| Old certified EBs served | yes (tested 4 weeks back, first 8 txs) | yes (range sync of blocks #9,099–#9,102, all txs) |
 | Request the node cannot answer | empty answer | connection is closed |
 
 The application-facing behaviour is the same for both. Only the codecs change; they are tracked in

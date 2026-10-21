@@ -14,7 +14,9 @@ public enum RedeemerTag {
     @JsonProperty("voting")
     Voting(4),
     @JsonProperty("proposing")
-    Proposing(5);
+    Proposing(5),
+    @JsonProperty("guarding")
+    Guarding(6); //Dijkstra era
 
     public final int value;
 

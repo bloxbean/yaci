@@ -8,12 +8,15 @@ import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosPoint;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosProtocolConstants;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosRawCbor;
 import com.bloxbean.cardano.yaci.core.protocol.leios.serializers.LeiosCborUtil;
-import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgClientDone;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgCanceled;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgDone;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosBlockOffer;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosBlockTxsOffer;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosNotificationRequestNext;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosNotifyError;
 import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosVotes;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgQuit;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
@@ -106,16 +109,87 @@ class LeiosNotifyAgentTest {
     }
 
     @Test
-    void shutdownBuildsDoneAndTransitionsTerminal() {
+    void shutdownSendsQuitAndServerDoneEndsProtocol() {
         LeiosNotifyAgent agent = new LeiosNotifyAgent();
 
         agent.shutdown();
-        Message done = agent.buildNextMessage();
-        assertInstanceOf(MsgClientDone.class, done);
-        agent.sendRequest(done);
+        Message quit = agent.buildNextMessage();
+        assertInstanceOf(MsgQuit.class, quit);
+        agent.sendRequest(quit);
+
+        assertEquals(LeiosNotifyState.StQuit, agent.getCurrentState());
+        assertFalse(agent.isDone());
+        assertFalse(agent.hasAgency());
+
+        agent.receiveResponse(new MsgDone());
 
         assertTrue(agent.isDone());
         assertFalse(agent.hasAgency());
+    }
+
+    @Test
+    void canceledWithoutQuitReportsErrorAndStopsRequesting() {
+        LeiosNotifyAgent agent = new LeiosNotifyAgent();
+        EmbeddedChannel channel = new EmbeddedChannel();
+        agent.setChannel(channel);
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        agent.addListener(new LeiosNotifyAgentListener() {
+            @Override
+            public void onNotifyError(Throwable observed) {
+                error.set(observed);
+            }
+        });
+
+        agent.start();
+        channel.readOutbound();
+        agent.receiveResponse(new MsgCanceled());
+
+        assertInstanceOf(IllegalStateException.class, error.get());
+        assertEquals(LeiosNotifyState.StIdle, agent.getCurrentState());
+        assertFalse(agent.isAutoRequestNext());
+        assertNull(channel.readOutbound(), "no RequestNext loop after an unexpected MsgCanceled");
+    }
+
+    @Test
+    void canceledAfterShutdownIsFollowedByQuitAndDone() {
+        LeiosNotifyAgent agent = new LeiosNotifyAgent();
+        EmbeddedChannel channel = new EmbeddedChannel();
+        agent.setChannel(channel);
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        agent.addListener(new LeiosNotifyAgentListener() {
+            @Override
+            public void onNotifyError(Throwable observed) {
+                error.set(observed);
+            }
+        });
+
+        agent.start();
+        channel.readOutbound();
+        agent.shutdown();                                   //RequestNext outstanding: Quit must wait for agency
+        assertNull(channel.readOutbound());
+        agent.receiveResponse(new MsgCanceled());
+
+        Segment quit = channel.readOutbound();
+        assertInstanceOf(MsgQuit.class, LeiosNotifyStateBase.deserialize(quit.getPayload()));
+        assertEquals(LeiosNotifyState.StQuit, agent.getCurrentState());
+        agent.receiveResponse(new MsgDone());
+        assertTrue(agent.isDone());
+        assertNull(error.get());
+    }
+
+    @Test
+    void parseErrorAfterQuitEndsTheProtocolWithoutASecondQuit() {
+        LeiosNotifyAgent agent = new LeiosNotifyAgent();
+        EmbeddedChannel channel = new EmbeddedChannel();
+        agent.setChannel(channel);
+
+        agent.shutdown();
+        Segment quit = channel.readOutbound();
+        assertInstanceOf(MsgQuit.class, LeiosNotifyStateBase.deserialize(quit.getPayload()));
+        agent.receiveResponse(LeiosNotifyStateBase.deserialize(HexUtil.decodeHexString("8109")));
+
+        assertTrue(agent.isDone());
+        assertNull(channel.readOutbound(), "a second MsgQuit would be sent without agency");
     }
 
     @Test
@@ -154,7 +228,7 @@ class LeiosNotifyAgentTest {
         });
 
         agent.sendRequest(new MsgLeiosNotificationRequestNext());
-        agent.receiveResponse(new MsgClientDone());
+        agent.receiveResponse(new MsgDone());
 
         assertEquals(LeiosNotifyState.StIdle, agent.getCurrentState());
         assertInstanceOf(IllegalStateException.class, error.get());
@@ -236,7 +310,7 @@ class LeiosNotifyAgentTest {
     }
 
     @Test
-    void shutdownWaitsForRequestNextWriteBeforeClientDone() {
+    void shutdownWaitsForRequestNextWriteBeforeQuit() {
         LeiosNotifyAgent agent = new LeiosNotifyAgent();
         PendingWriteHandler pendingWrites = new PendingWriteHandler();
         EmbeddedChannel channel = new EmbeddedChannel(pendingWrites);
@@ -257,6 +331,8 @@ class LeiosNotifyAgentTest {
         assertEquals(2, pendingWrites.writes.size());
         pendingWrites.succeed(1);
 
+        assertEquals(LeiosNotifyState.StQuit, agent.getCurrentState());
+        agent.receiveResponse(new MsgDone());
         assertTrue(agent.isDone());
     }
 
@@ -287,7 +363,7 @@ class LeiosNotifyAgentTest {
     void resetReturnsToIdle() {
         LeiosNotifyAgent agent = new LeiosNotifyAgent();
         agent.shutdown();
-        agent.sendRequest(new MsgClientDone());
+        agent.sendRequest(new MsgQuit());
 
         agent.reset();
 
