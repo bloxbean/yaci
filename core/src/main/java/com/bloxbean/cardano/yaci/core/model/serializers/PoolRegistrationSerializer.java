@@ -30,7 +30,8 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
         Array poolRegistrationArr = (Array) di;
 
         List<DataItem> dataItemList = poolRegistrationArr.getDataItems();
-        if (dataItemList == null || dataItemList.size() != 10) {
+        //Dijkstra adds an optional bls_key after vrf_keyhash (11 items); earlier eras always have 10
+        if (dataItemList == null || (dataItemList.size() != 10 && dataItemList.size() != 11)) {
             throw new CborRuntimeException("PoolRegistration deserialization failed. Invalid number of DataItem(s) : "
                     + (dataItemList != null ? String.valueOf(dataItemList.size()) : null));
         }
@@ -43,15 +44,29 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
         //List<DataItem> paramDataItems = ((Array)dataItemList.get(1)).getDataItems();
         String operator = toHex(dataItemList.get(1));
         String vrfKeyHash = toHex(dataItemList.get(2));
-        BigInteger pledge = toBigInteger(dataItemList.get(3));
-        BigInteger cost = toBigInteger(dataItemList.get(4));
+        int o = dataItemList.size() - 10; //1 when a Dijkstra bls_key (or nil) sits at index 3, else 0
+        String blsPublicKey = null;
+        String blsPossessionProof = null;
+        if (o == 1 && !SimpleValue.NULL.equals(dataItemList.get(3))) {
+            try { //bls_key = [bls_pubkey, bls_possession_proof]; an unreadable key is left null, as before Dijkstra support
+                List<DataItem> blsKey = ((Array) dataItemList.get(3)).getDataItems();
+                blsPublicKey = toHex(blsKey.get(0));
+                blsPossessionProof = toHex(blsKey.get(1));
+            } catch (RuntimeException e) {
+                blsPublicKey = null;
+                blsPossessionProof = null;
+                log.warn("Pool registration bls_key could not be read and is left null: {}", e.toString());
+            }
+        }
+        BigInteger pledge = toBigInteger(dataItemList.get(3 + o));
+        BigInteger cost = toBigInteger(dataItemList.get(4 + o));
 
-        UnitInterval margin = toUnitInterval(dataItemList.get(5));
-        String rewardAccount = toHex(dataItemList.get(6));
+        UnitInterval margin = toUnitInterval(dataItemList.get(5 + o));
+        String rewardAccount = toHex(dataItemList.get(6 + o));
 
         //Pool Owners0
         Set<String> poolOwners = new HashSet<>();
-        List<DataItem> poolOwnersDataItems = ((Array) dataItemList.get(7)).getDataItems();
+        List<DataItem> poolOwnersDataItems = ((Array) dataItemList.get(7 + o)).getDataItems();
         for (DataItem poolOwnerDI : poolOwnersDataItems) {
             if (poolOwnerDI == SimpleValue.BREAK)
                 continue;
@@ -59,7 +74,7 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
         }
 
         //Relays
-        List<DataItem> relaysDataItems = ((Array) dataItemList.get(8)).getDataItems();
+        List<DataItem> relaysDataItems = ((Array) dataItemList.get(8 + o)).getDataItems();
         List<Relay> relays = new ArrayList<>();
         for (DataItem relayDI : relaysDataItems) {
             if (relayDI == SimpleValue.BREAK)
@@ -68,7 +83,7 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
         }
 
         //pool metadata
-        DataItem poolMetaDataDI = dataItemList.get(9);
+        DataItem poolMetaDataDI = dataItemList.get(9 + o);
         String metadataUrl = null;
         String metadataHash = null;
         if (poolMetaDataDI != SimpleValue.NULL) {
@@ -88,6 +103,8 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
                 .relays(relays)
                 .poolMetadataUrl(metadataUrl)
                 .poolMetadataHash(metadataHash)
+                .blsPublicKey(blsPublicKey)
+                .blsPossessionProof(blsPossessionProof)
                 .build();
 
         return new PoolRegistration(poolParams);

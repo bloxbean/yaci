@@ -3,7 +3,7 @@ package com.bloxbean.cardano.yaci.core.common;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 
 public enum TxBodyType {
-    ALONZO(4), BABBAGE(5), CONWAY(6);
+    ALONZO(4), BABBAGE(5), CONWAY(6), DIJKSTRA(7);
 
     public final int value;
     TxBodyType(int value) {
@@ -22,6 +22,8 @@ public enum TxBodyType {
                 return Era.Babbage;
             case CONWAY:
                 return Era.Conway;
+            case DIJKSTRA:
+                return Era.Dijkstra;
             default:
                 throw new IllegalArgumentException("Unknown TxBodyType: " + this);
         }

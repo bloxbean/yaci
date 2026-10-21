@@ -45,6 +45,7 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
             List<PlutusScript> plutusV1scripts = null;
             List<PlutusScript> plutusV2scripts = null;
             List<PlutusScript> plutusV3scripts = null;
+            List<PlutusScript> plutusV4scripts = null;
 
             if (di.getMajorType() == MajorType.MAP) {
                 Tag mapTag = di.getTag();
@@ -56,6 +57,7 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
                     DataItem plutusV1ScriptsValueDI = map.get(new UnsignedInteger(2));
                     DataItem plutusV2ScriptsValueDI = map.get(new UnsignedInteger(3));
                     DataItem plutusV3ScriptsValueDI = map.get(new UnsignedInteger(4));
+                    DataItem plutusV4ScriptsValueDI = map.get(new UnsignedInteger(5)); //Dijkstra era
 
                     if (metadataValueDI != null) {
                         metadata = CBORMetadata.deserialize((Map) metadataValueDI);
@@ -96,6 +98,16 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
                         plutusV3scripts = plutusV3ScriptsArray.getDataItems()
                                 .stream()
                                 .map(plutusV3ScriptDI -> new PlutusScript(PlutusScriptType.PlutusScriptV3, toHex(plutusV3ScriptDI)))
+                                .collect(Collectors.toList());
+                    }
+
+                    //plutus_v4_script
+                    if (plutusV4ScriptsValueDI != null) {
+                        Array plutusV4ScriptsArray = (Array) plutusV4ScriptsValueDI;
+                        plutusV4scripts = plutusV4ScriptsArray.getDataItems()
+                                .stream()
+                                .filter(plutusV4ScriptDI -> !Special.BREAK.equals(plutusV4ScriptDI))
+                                .map(plutusV4ScriptDI -> new PlutusScript(PlutusScriptType.PlutusScriptV4, toHex(plutusV4ScriptDI)))
                                 .collect(Collectors.toList());
                     }
 
@@ -158,6 +170,7 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
                     .plutusV1Scripts(plutusV1scripts)
                     .plutusV2Scripts(plutusV2scripts)
                     .plutusV3Scripts(plutusV3scripts)
+                    .plutusV4Scripts(plutusV4scripts)
                     .build();
 
         } catch (CborDeserializationException e) {

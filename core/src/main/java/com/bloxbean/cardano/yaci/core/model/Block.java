@@ -1,5 +1,8 @@
 package com.bloxbean.cardano.yaci.core.model;
 
+import com.bloxbean.cardano.yaci.core.model.leios.LeiosCertificate;
+import com.bloxbean.cardano.yaci.core.model.leios.LeiosEndorserBlockRef;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
 
 import java.util.*;
@@ -21,5 +24,25 @@ public class Block {
     private Map<Integer, AuxData> auxiliaryDataMap = new LinkedHashMap();
     private List<Integer> invalidTransactions = new ArrayList<>();
 
+    @JsonInclude(JsonInclude.Include.NON_NULL) //absent from JSON for pre-Leios blocks, as before
+    private LeiosCertificate leiosCertificate;
+    @JsonInclude(JsonInclude.Include.NON_NULL) //absent from JSON for pre-Leios blocks, as before
+    private String perasCertCbor;
+    /**
+     * Certifying blocks with inlined endorser block transactions only: which EB they certify and how many of
+     * the transactions came from it. Null for every other block.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private LeiosEndorserBlockRef leiosEndorserBlock;
     private String cbor;
+
+    /**
+     * Pre-Leios constructor, kept so existing callers compile and behave unchanged.
+     */
+    public Block(Era era, BlockHeader header, List<TransactionBody> transactionBodies,
+                 List<Witnesses> transactionWitness, Map<Integer, AuxData> auxiliaryDataMap,
+                 List<Integer> invalidTransactions, String cbor) {
+        this(era, header, transactionBodies, transactionWitness, auxiliaryDataMap, invalidTransactions,
+                null, null, null, cbor);
+    }
 }

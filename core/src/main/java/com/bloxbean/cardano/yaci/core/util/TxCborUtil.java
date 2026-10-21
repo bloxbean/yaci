@@ -55,6 +55,14 @@ public class TxCborUtil {
                 baos.write(body);
                 baos.write(witnessSet);
                 baos.write(auxData != null ? auxData : new byte[]{NULL});
+            } else if (era == Era.Dijkstra) {
+                //Dijkstra block_transaction = [body, witness_set, auxiliary_data / nil, is_valid]:
+                //the same bytes the transaction has inside the block
+                baos.write(ARRAY_4);
+                baos.write(body);
+                baos.write(witnessSet);
+                baos.write(auxData != null ? auxData : new byte[]{NULL});
+                baos.write(isValid ? TRUE : FALSE);
             } else if (era.getValue() >= Era.Alonzo.getValue()) {
                 baos.write(ARRAY_4);
                 baos.write(body);

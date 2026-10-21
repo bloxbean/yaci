@@ -133,6 +133,10 @@ public final class LeiosCborUtil {
         return items;
     }
 
+    public static boolean hasTag(ByteString byteString, long tagValue) {
+        return byteString.getTag() != null && byteString.getTag().getValue() == tagValue;
+    }
+
     private static UnsignedInteger unsignedLong(long value) {
         if (value >= 0) {
             return new UnsignedInteger(value);
@@ -156,7 +160,7 @@ public final class LeiosCborUtil {
         return bigint.longValue();
     }
 
-    private static long toLong(UnsignedInteger value, String name) {
+    public static long toLong(UnsignedInteger value, String name) {
         BigInteger bigint = value.getValue();
         if (bigint.signum() < 0 || bigint.compareTo(LONG_MAX) > 0) {
             throw new IllegalArgumentException(name + " must fit in signed long");
@@ -164,7 +168,7 @@ public final class LeiosCborUtil {
         return bigint.longValue();
     }
 
-    private static int toInt(UnsignedInteger value, String name) {
+    public static int toInt(UnsignedInteger value, String name) {
         BigInteger bigint = value.getValue();
         if (bigint.signum() < 0 || bigint.compareTo(INT_MAX) > 0) {
             throw new IllegalArgumentException(name + " must fit in int");
