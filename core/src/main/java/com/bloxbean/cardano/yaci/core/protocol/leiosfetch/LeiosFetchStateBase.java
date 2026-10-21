@@ -30,15 +30,15 @@ public interface LeiosFetchStateBase extends State {
             int tag = LeiosCborUtil.readTag(dataItem);
             switch (tag) {
                 case 0:
-                    return MsgLeiosBlockRequestSerializer.INSTANCE.deserializeDI(dataItem);
-                case 1:
-                    return MsgLeiosBlockSerializer.INSTANCE.deserializeDI(dataItem);
-                case 2:
-                    return MsgLeiosBlockTxsRequestSerializer.INSTANCE.deserializeDI(dataItem);
-                case 3:
-                    return MsgLeiosBlockTxsSerializer.INSTANCE.deserializeDI(dataItem);
-                case 9:
                     return MsgClientDoneSerializer.INSTANCE.deserializeDI(dataItem);
+                case 1:
+                    return MsgLeiosBlockRequestSerializer.INSTANCE.deserializeDI(dataItem);
+                case 2:
+                    return MsgLeiosBlockSerializer.INSTANCE.deserializeDI(dataItem);
+                case 3:
+                    return MsgLeiosBlockTxsRequestSerializer.INSTANCE.deserializeDI(dataItem);
+                case 4:
+                    return MsgLeiosBlockTxsSerializer.INSTANCE.deserializeDI(dataItem);
                 default:
                     throw new UnsupportedOperationException("LeiosFetch tag " + tag + " is not implemented");
             }

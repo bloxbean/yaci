@@ -4,6 +4,7 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.SimpleValue;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.yaci.core.common.Constants;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosPoint;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosRawCbor;
@@ -140,7 +141,7 @@ class LeiosSyncCoordinatorTest {
         }, new LeiosFetchAgent(), LeiosConfig.defaultConfig());
 
         LeiosPoint point = point(22);
-        coordinator.onBlockTxs(point, point, LeiosTxBitmap.firstN(1), emptyTxListRaw());
+        coordinator.onBlockTxs(point, LeiosTxBitmap.firstN(1), emptyTxListRaw());
 
         assertEquals(0, events.get());
         coordinator.close();
@@ -160,8 +161,8 @@ class LeiosSyncCoordinatorTest {
         coordinator.onBlockOffer(point, 10);
         coordinator.onBlock(point, endorserBlockRaw(23));
         coordinator.onBlockTxsOffer(point);
-        coordinator.onBlockTxs(point, point, LeiosTxBitmap.firstN(1), emptyTxListRaw());
-        coordinator.onBlockTxs(point, point, LeiosTxBitmap.firstN(1), emptyTxListRaw());
+        coordinator.onBlockTxs(point, LeiosTxBitmap.firstN(1), emptyTxListRaw());
+        coordinator.onBlockTxs(point, LeiosTxBitmap.firstN(1), emptyTxListRaw());
 
         assertEquals(1, events.get());
         coordinator.close();
@@ -213,6 +214,40 @@ class LeiosSyncCoordinatorTest {
         assertTrue(auto.shouldAttach(Constants.MUSASHI_PROTOCOL_MAGIC));
         assertFalse(auto.shouldAttachForRange(Constants.MUSASHI_PROTOCOL_MAGIC));
         assertTrue(enabled.shouldAttachForRange(Constants.MUSASHI_PROTOCOL_MAGIC));
+    }
+
+    @Test
+    void txsAreCompleteOnlyWhenTheyMatchTheEndorserBlockReferences() {
+        //The w42 reply has no point or bitmap, so the transactions are checked against the EB map
+        byte[] tx = HexUtil.decodeHexString("84a0a0f6f5"); //[{}, {}, nil, true]
+        assertTrue(txsComplete(tx, tx));
+        assertFalse(txsComplete(tx, HexUtil.decodeHexString("84a0a0f6f4")));
+    }
+
+    private boolean txsComplete(byte[] referenced, byte[] served) {
+        AtomicReference<EndorserBlockEvent> event = new AtomicReference<>();
+        LeiosSyncCoordinator coordinator = new LeiosSyncCoordinator(new BlockChainDataListener() {
+            @Override
+            public void onEndorserBlock(EndorserBlockEvent endorserBlockEvent) {
+                event.set(endorserBlockEvent);
+            }
+        }, new LeiosFetchAgent(), LeiosConfig.builder().txsOfferWaitMillis(10_000).build());
+        co.nstant.in.cbor.model.Map eb = new co.nstant.in.cbor.model.Map();
+        eb.put(new ByteString(Blake2bUtil.blake2bHash256(referenced)), new UnsignedInteger(referenced.length));
+        ByteString wrapped = new ByteString(served);
+        wrapped.setTag(24);
+        Array txList = new Array();
+        txList.add(wrapped);
+
+        LeiosPoint point = point(30);
+        coordinator.onBlockOffer(point, 10);
+        coordinator.onBlock(point, LeiosRawCbor.of(CborSerializationUtil.serialize(eb, false)));
+        coordinator.onBlockTxsOffer(point);
+        coordinator.onBlockTxs(point, LeiosTxBitmap.firstN(1),
+                LeiosRawCbor.of(CborSerializationUtil.serialize(txList, false)));
+        coordinator.close();
+        assertNotNull(event.get());
+        return event.get().isTxsComplete();
     }
 
     private LeiosRawCbor endorserBlockRaw(int seed) {

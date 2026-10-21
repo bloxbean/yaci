@@ -256,10 +256,9 @@ public class LeiosNetworkClient implements AutoCloseable {
             }
 
             @Override
-            public void onBlockTxs(LeiosPoint requestedPoint, LeiosPoint responsePoint,
-                                   LeiosTxBitmap responseBitmap, LeiosRawCbor txList) {
+            public void onBlockTxs(LeiosPoint requestedPoint, LeiosTxBitmap requestedBitmap, LeiosRawCbor txList) {
                 dispatchDataListener(listener ->
-                        listener.onBlockTxs(requestedPoint, responsePoint, responseBitmap, txList), "onBlockTxs");
+                        listener.onBlockTxs(requestedPoint, requestedBitmap, txList), "onBlockTxs");
             }
 
             @Override

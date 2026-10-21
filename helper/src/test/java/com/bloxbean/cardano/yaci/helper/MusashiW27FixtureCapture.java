@@ -12,6 +12,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -118,7 +120,20 @@ public class MusashiW27FixtureCapture {
             }
         });
 
-        TimeUnit.SECONDS.sleep(durationSeconds);
+        //The node closes a connection that sends no keep-alive for 97 seconds
+        ScheduledExecutorService keepAlive = Executors.newSingleThreadScheduledExecutor();
+        keepAlive.scheduleAtFixedRate(() -> {
+            try {
+                blockSync.sendKeepAliveMessage((int) (System.nanoTime() & 0x7fff));
+            } catch (Exception e) {
+                System.err.println("keep-alive failed: " + e); //an exception would cancel the schedule
+            }
+        }, 30, 30, TimeUnit.SECONDS);
+        try {
+            TimeUnit.SECONDS.sleep(durationSeconds);
+        } finally {
+            keepAlive.shutdownNow();
+        }
         blockSync.stop();
         System.out.println("done: blocks=" + blocks.get() + " announced=" + announcedBlocks.get()
                 + " certified=" + certifiedBlocks.get() + " endorserBlocks=" + endorserBlocks.get()

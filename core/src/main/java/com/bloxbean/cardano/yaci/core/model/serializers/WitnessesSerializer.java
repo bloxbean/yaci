@@ -42,6 +42,7 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
         DataItem redeemersDI = witnessMap.get(new UnsignedInteger(5));
         DataItem plutusV2ScriptArray = witnessMap.get(new UnsignedInteger(6));
         DataItem plutusV3ScriptArray = witnessMap.get(new UnsignedInteger(7));
+        DataItem plutusV4ScriptArray = witnessMap.get(new UnsignedInteger(8));
 
         //vk witnesses
         List<VkeyWitness> vkeyWitnessList = new ArrayList<>();
@@ -173,7 +174,24 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
             }
         }
 
-        return new Witnesses(vkeyWitnessList, nativeScripts, bootstrapWitnesses, plutusV1Scripts, datumList, redeemerList, plutusV2Scripts, plutusV3Scripts);
+        //plutus_v4 script (Dijkstra era); stays null when absent so pre-Dijkstra witnesses are unchanged
+        List<PlutusScript> plutusV4Scripts = null;
+        if (plutusV4ScriptArray != null) {
+            plutusV4Scripts = new ArrayList<>();
+            try {
+                for (DataItem plutusV4ScriptDI : ((Array) plutusV4ScriptArray).getDataItems()) {
+                    if (plutusV4ScriptDI == Special.BREAK) continue;
+
+                    String scriptCborHex = encodeHexString(CborSerializationUtil.serialize(plutusV4ScriptDI, false));
+                    plutusV4Scripts.add(new PlutusScript(PlutusScriptType.PlutusScriptV4, scriptCborHex));
+                }
+            } catch (Exception e) {
+                throw new CborRuntimeException("Plutus V4 script deserialization failed", e);
+            }
+        }
+
+        return new Witnesses(null, vkeyWitnessList, nativeScripts, bootstrapWitnesses, plutusV1Scripts, datumList,
+                redeemerList, plutusV2Scripts, plutusV3Scripts, plutusV4Scripts);
     }
 
     private BootstrapWitness deserializeBootstrapWitness(Array bootstrapWitnessDI) {

@@ -96,7 +96,7 @@ class DijkstraCddlTest {
         conway.put(new UnsignedInteger(0), new UnsignedInteger(44));
         String updateJson = new ObjectMapper().writeValueAsString(UpdateSerializer.INSTANCE.getProtocolParams(conway));
         assertThat(updateJson).doesNotContain("maxRefScriptSize", "refScriptCost", "maxPledgeLeverage", "minPoolMargin",
-                "leios", "EndorserBlock");
+                "leios", "EndorserBlock", "peras", "refInputs");
     }
 
     @Test
@@ -216,6 +216,48 @@ class DijkstraCddlTest {
         ProtocolParamUpdate old = UpdateSerializer.INSTANCE.getProtocolParams(conway);
         assertThat(old.getMaxPledgeLeverageNoLimit()).isNull();
         assertThat(old.getLeiosCommitteeSize()).isNull();
+        assertThat(old.getPerasBootstrapRoundNone()).isNull();
+        assertThat(old.getRefInputsCostPerDatumByte()).isNull();
+    }
+
+    @Test
+    void protocolParamUpdatePerasAndReferenceInputFeeKeys() {
+        //Keys 49-56, added by Musashi rc-2026w42 (cardano-ledger 9df9f98c)
+        ProtocolParamUpdate update = ProtocolParamUpdate.builder()
+                .perasMinCandidateBlockAge(30L)
+                .perasHealingFactor(new NonNegativeInterval(BigInteger.valueOf(3), BigInteger.valueOf(2)))
+                .perasCertBoost(15)
+                .perasTargetCommitteeSize(500)
+                .perasBootstrapRound(4000000000L)
+                .perasBootstrapRoundNone(false)
+                .perasQuorumThresholdSafetyMargin(new UnitInterval(BigInteger.ONE, BigInteger.valueOf(10)))
+                .refInputsCostPerMultiAssetPolicy(BigInteger.valueOf(1000))
+                .refInputsCostPerDatumByte(BigInteger.valueOf(44))
+                .build();
+
+        Map map = (Map) UpdateSerializer.serializePPUpdate(update);
+        assertThat(map.getKeys()).extracting(key -> ((UnsignedInteger) key).getValue().intValue())
+                .containsExactly(49, 50, 51, 52, 53, 54, 55, 56);
+        ProtocolParamUpdate parsed = UpdateSerializer.INSTANCE.getProtocolParams(viaBytes(map));
+
+        assertThat(parsed.getPerasMinCandidateBlockAge()).isEqualTo(30L);
+        assertThat(ratio(parsed.getPerasHealingFactor())).isEqualTo("3/2");
+        assertThat(parsed.getPerasCertBoost()).isEqualTo(15);
+        assertThat(parsed.getPerasTargetCommitteeSize()).isEqualTo(500);
+        assertThat(parsed.getPerasBootstrapRound()).isEqualTo(4000000000L);
+        assertThat(parsed.getPerasBootstrapRoundNone()).isFalse();
+        assertThat(ratio(parsed.getPerasQuorumThresholdSafetyMargin())).isEqualTo("1/10");
+        assertThat(parsed.getRefInputsCostPerMultiAssetPolicy()).isEqualTo(1000);
+        assertThat(parsed.getRefInputsCostPerDatumByte()).isEqualTo(44);
+
+        //peras_bootstrap_round = uint / nil: nil means no bootstrap round
+        Map none = new Map();
+        none.put(new UnsignedInteger(53), SimpleValue.NULL);
+        ProtocolParamUpdate noBootstrap = UpdateSerializer.INSTANCE.getProtocolParams(none);
+        assertThat(noBootstrap.getPerasBootstrapRoundNone()).isTrue();
+        assertThat(noBootstrap.getPerasBootstrapRound()).isNull();
+        assertThat(CborSerializationUtil.serialize(UpdateSerializer.serializePPUpdate(noBootstrap)))
+                .isEqualTo(CborSerializationUtil.serialize(none));
     }
 
     @Test

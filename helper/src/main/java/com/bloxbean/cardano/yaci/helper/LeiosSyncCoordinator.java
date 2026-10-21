@@ -7,6 +7,7 @@ import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.leios.EndorserBlock;
 import com.bloxbean.cardano.yaci.core.model.leios.EndorserBlockTx;
+import com.bloxbean.cardano.yaci.core.model.leios.EndorserBlockTxRef;
 import com.bloxbean.cardano.yaci.core.model.leios.LeiosVote;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockHeaderSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.leios.EndorserBlockSerializer;
@@ -174,8 +175,7 @@ class LeiosSyncCoordinator implements LeiosNotifyAgentListener, LeiosFetchAgentL
     }
 
     @Override
-    public void onBlockTxs(LeiosPoint requestedPoint, LeiosPoint responsePoint,
-                           LeiosTxBitmap responseBitmap, LeiosRawCbor txList) {
+    public void onBlockTxs(LeiosPoint requestedPoint, LeiosTxBitmap requestedBitmap, LeiosRawCbor txList) {
         List<EndorserBlockTx> transactions;
         try {
             transactions = EndorserBlockTxListSerializer.INSTANCE.deserialize(txList.getCbor());
@@ -193,13 +193,27 @@ class LeiosSyncCoordinator implements LeiosNotifyAgentListener, LeiosFetchAgentL
             }
 
             pending.transactions = transactions;
+            //The w42 reply carries no point or bitmap: check the transactions against the EB references instead
             boolean complete = pending.endorserBlock != null
                     && transactions.size() == pending.endorserBlock.txCount()
-                    && pending.requestedTxCount >= pending.endorserBlock.txCount();
+                    && pending.requestedTxCount >= pending.endorserBlock.txCount()
+                    && matchesReferences(transactions, pending.endorserBlock);
             event = buildEvent(pending, complete);
             markEmitted(pending);
         }
         dispatchEndorserBlock(event);
+    }
+
+    private static boolean matchesReferences(List<EndorserBlockTx> transactions, EndorserBlock endorserBlock) {
+        List<EndorserBlockTxRef> refs = endorserBlock.getTxRefs();
+        for (int i = 0; i < transactions.size(); i++) {
+            EndorserBlockTx tx = transactions.get(i);
+            if (i >= refs.size() || !tx.isParsed() || !refs.get(i).getTxHash().equals(tx.getTxHash())) {
+                log.debug("Leios transaction {} does not match the endorser block reference", i);
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override

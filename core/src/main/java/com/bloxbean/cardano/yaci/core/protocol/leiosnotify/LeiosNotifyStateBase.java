@@ -30,17 +30,21 @@ public interface LeiosNotifyStateBase extends State {
             int tag = LeiosCborUtil.readTag(dataItem);
             switch (tag) {
                 case 0:
-                    return MsgLeiosNotificationRequestNextSerializer.INSTANCE.deserializeDI(dataItem);
+                    return MsgDoneSerializer.INSTANCE.deserializeDI(dataItem);
                 case 1:
-                    return MsgLeiosBlockAnnouncementSerializer.INSTANCE.deserializeDI(dataItem);
+                    return MsgQuitSerializer.INSTANCE.deserializeDI(dataItem);
                 case 2:
-                    return MsgLeiosBlockOfferSerializer.INSTANCE.deserializeDI(dataItem);
+                    return MsgCanceledSerializer.INSTANCE.deserializeDI(dataItem);
                 case 3:
-                    return MsgLeiosBlockTxsOfferSerializer.INSTANCE.deserializeDI(dataItem);
+                    return MsgLeiosNotificationRequestNextSerializer.INSTANCE.deserializeDI(dataItem);
                 case 4:
-                    return MsgLeiosVotesSerializer.INSTANCE.deserializeDI(dataItem);
+                    return MsgLeiosBlockAnnouncementSerializer.INSTANCE.deserializeDI(dataItem);
                 case 5:
-                    return MsgClientDoneSerializer.INSTANCE.deserializeDI(dataItem);
+                    return MsgLeiosBlockOfferSerializer.INSTANCE.deserializeDI(dataItem);
+                case 6:
+                    return MsgLeiosBlockTxsOfferSerializer.INSTANCE.deserializeDI(dataItem);
+                case 7:
+                    return MsgLeiosVotesSerializer.INSTANCE.deserializeDI(dataItem);
                 default:
                     throw new IllegalArgumentException("Invalid LeiosNotify message tag: " + tag);
             }

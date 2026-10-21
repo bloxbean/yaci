@@ -13,7 +13,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Decodes the LeiosFetch {@code MsgLeiosBlockTxs} tx list (Musashi w40a: {@code [* bytes]}), keeping each item's bytes.
+ * Decodes the LeiosFetch {@code MsgLeiosBlockTxs} tx list, keeping each item's bytes: Musashi rc-2026w42
+ * {@code [* #6.24(bytes .cbor block_transaction)]}, w40a {@code [* bytes]} (mempool encoding).
  */
 public enum EndorserBlockTxListSerializer implements Serializer<List<EndorserBlockTx>> {
     INSTANCE;
@@ -44,8 +45,9 @@ public enum EndorserBlockTxListSerializer implements Serializer<List<EndorserBlo
     }
 
     /**
-     * Musashi w40a: each transaction is a plain byte string holding the transaction CBOR (mempool encoding).
-     * The endorser block references it by blake2b-256 of those inner bytes (the Haskell {@code hashLeiosTx}).
+     * Each transaction is a byte string holding the transaction CBOR: tagged 24 and in block encoding
+     * {@code [body, witnesses, aux / nil, is_valid]} from w42, plain and in mempool encoding in w40a. The endorser
+     * block references it by blake2b-256 of those inner bytes (the Haskell {@code hashLeiosTx}) and their length.
      */
     private EndorserBlockTx readTx(int index, LeiosCborReader.DecodedItem item) {
         String itemCbor = HexUtil.encodeHexString(item.rawBytes());
