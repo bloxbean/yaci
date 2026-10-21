@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.model;
 import com.bloxbean.cardano.yaci.core.types.NonNegativeInterval;
 import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
 
@@ -77,4 +78,109 @@ public class ProtocolParamUpdate {
     private BigInteger drepDeposit; //31
     private Integer drepActivity; //32
     private NonNegativeInterval minFeeRefScriptCostPerByte; //33
+
+    //Dijkstra era fields
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long maxRefScriptSizePerBlock; //34
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long maxRefScriptSizePerTx; //35
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long refScriptCostStride; //36
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private NonNegativeInterval refScriptCostMultiplier; //37
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private NonNegativeInterval maxPledgeLeverage; //38, null when absent or nil
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean maxPledgeLeverageNoLimit; //38, true when the update sets nil (no limit)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private UnitInterval minPoolMargin; //39
+
+    //Leios fields (Dijkstra era)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long leiosAnnouncementPeriodMs; //40
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long leiosVotePeriodMs; //41
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long leiosDiffusionPeriodMs; //42
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer leiosCommitteeSize; //43
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private UnitInterval leiosQuorumStakeThreshold; //44
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long maxEndorserBlockRefsSize; //45
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long maxEndorserBlockTxsSize; //46
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigInteger maxEndorserBlockExMem; //47
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigInteger maxEndorserBlockExSteps; //47
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long maxRefScriptSizePerEndorserBlock; //48
+
+    //Peras and reference input fees (Dijkstra era, Musashi rc-2026w42 onwards)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long perasMinCandidateBlockAge; //49, slots
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private NonNegativeInterval perasHealingFactor; //50, positive_interval
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer perasCertBoost; //51
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer perasTargetCommitteeSize; //52
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Long perasBootstrapRound; //53, null when absent or nil
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean perasBootstrapRoundNone; //53, true when the update sets nil (no bootstrap round)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private UnitInterval perasQuorumThresholdSafetyMargin; //54
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigInteger refInputsCostPerMultiAssetPolicy; //55
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigInteger refInputsCostPerDatumByte; //56
+
+    /**
+     * Pre-Dijkstra constructor, kept so existing callers compile and behave unchanged.
+     */
+    public ProtocolParamUpdate(Integer minFeeA,
+                               Integer minFeeB,
+                               Integer maxBlockSize,
+                               Integer maxTxSize,
+                               Integer maxBlockHeaderSize,
+                               BigInteger keyDeposit,
+                               BigInteger poolDeposit,
+                               Integer maxEpoch,
+                               Integer nOpt,
+                               NonNegativeInterval poolPledgeInfluence,
+                               UnitInterval expansionRate,
+                               UnitInterval treasuryGrowthRate,
+                               UnitInterval decentralisationParam,
+                               Tuple<Integer, String> extraEntropy,
+                               Integer protocolMajorVer,
+                               Integer protocolMinorVer,
+                               BigInteger minUtxo,
+                               BigInteger minPoolCost,
+                               BigInteger adaPerUtxoByte,
+                               Map<Integer, String> costModels,
+                               String costModelsHash,
+                               NonNegativeInterval priceMem,
+                               NonNegativeInterval priceStep,
+                               BigInteger maxTxExMem,
+                               BigInteger maxTxExSteps,
+                               BigInteger maxBlockExMem,
+                               BigInteger maxBlockExSteps,
+                               Long maxValSize,
+                               Integer collateralPercent,
+                               Integer maxCollateralInputs,
+                               PoolVotingThresholds poolVotingThresholds,
+                               DrepVoteThresholds drepVotingThresholds,
+                               Integer committeeMinSize,
+                               Integer committeeMaxTermLength,
+                               Integer govActionLifetime,
+                               BigInteger govActionDeposit,
+                               BigInteger drepDeposit,
+                               Integer drepActivity,
+                               NonNegativeInterval minFeeRefScriptCostPerByte) {
+        this(minFeeA, minFeeB, maxBlockSize, maxTxSize, maxBlockHeaderSize, keyDeposit, poolDeposit, maxEpoch, nOpt, poolPledgeInfluence, expansionRate, treasuryGrowthRate, decentralisationParam, extraEntropy, protocolMajorVer, protocolMinorVer, minUtxo, minPoolCost, adaPerUtxoByte, costModels, costModelsHash, priceMem, priceStep, maxTxExMem, maxTxExSteps, maxBlockExMem, maxBlockExSteps, maxValSize, collateralPercent, maxCollateralInputs, poolVotingThresholds, drepVotingThresholds, committeeMinSize, committeeMaxTermLength, govActionLifetime, govActionDeposit, drepDeposit, drepActivity, minFeeRefScriptCostPerByte,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null);
+    }
 }

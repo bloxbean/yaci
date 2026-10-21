@@ -1,0 +1,26 @@
+@startuml 3-c4-component
+!pragma layout smetana
+!include <C4/C4_Component>
+LAYOUT_TOP_DOWN()
+title Components (C4 level 3): inside the complete-block assembler
+
+Container(sync, "BlockSync / BlockRangeSync", "yaci-helper", "parsed blocks, chain order, on the main connection's thread")
+Container(leios, "Leios connection", "LeiosFetch", "separate connection to the same peer")
+Container(lookup, "Parent lookup", "short-lived connection", "ChainSync FindIntersect over candidate slots, then BlockFetch")
+System_Ext(app, "Application listener", "onBlock, onRollback, batchDone, ...")
+
+Container_Boundary(asm, "Complete-block assembler") {
+  Component(mem, "1. Announcement memory", "RB hash -> announced EB", "Last 4,096 announcements. A certifying block finds its parent by prevHash.")
+  Component(res, "2. EB resolver", "EndorserBlockResolver", "Fetches the EB, checks its hash, fetches all its transactions in one request, checks every one.")
+  Component(q, "3. Ordered queue", "bounded: 256 events", "All callbacks in arrival order. A certifying block waits for its EB; blocks behind it wait. Full queue = network thread waits (back-pressure).")
+  Component(mrg, "4. Merger", "mergeEndorserBlockTransactions", "EB transactions first, then the block's own")
+}
+
+Rel(sync, mem, "every block")
+Rel(mem, q, "block (+ EB it certifies)")
+Rel(mem, res, "certifying block arrived: start fetching its EB")
+Rel(mem, lookup, "parent never seen: fetch it once")
+Rel(res, leios, "BlockRequest, BlockTxsRequest")
+Rel(q, mrg, "first block ready")
+Rel(mrg, app, "onBlock(complete block), other callbacks", "one worker thread")
+@enduml

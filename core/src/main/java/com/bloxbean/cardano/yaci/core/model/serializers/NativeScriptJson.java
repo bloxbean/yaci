@@ -23,6 +23,9 @@ import java.util.Deque;
 import java.util.Iterator;
 import java.util.List;
 
+import com.bloxbean.cardano.yaci.core.model.Credential;
+import com.bloxbean.cardano.yaci.core.model.certs.StakeCredType;
+
 import static com.bloxbean.cardano.yaci.core.model.NativeScriptType.*;
 
 /**
@@ -68,7 +71,7 @@ final class NativeScriptJson {
     /** Allows tests to exercise JSON failure handling with a constrained, local factory. */
     static NativeScript parse(Array script, JsonFactory factory) {
         int type = type(script);
-        if (type > REQUIRE_TIME_BEFORE) {
+        if (type > REQUIRE_GUARD) {
             return null; // Preserve the existing behavior for unknown native-script types.
         }
         StringWriter output = new StringWriter();
@@ -125,7 +128,7 @@ final class NativeScriptJson {
         try {
             while (true) {
                 int type = type(next);
-                if (type <= REQUIRE_TIME_BEFORE) {
+                if (type <= REQUIRE_GUARD) {
                     List<DataItem> items = next.getDataItems();
                     int depth = parents.size();
                     // Two spaces per indentation level on each of the object's lines.
@@ -176,11 +179,21 @@ final class NativeScriptJson {
     private static void writeScript(Array script, JsonGenerator json, Deque<Iterator<DataItem>> parents)
             throws IOException {
         int type = type(script);
-        if (type > REQUIRE_TIME_BEFORE) {
+        if (type > REQUIRE_GUARD) {
             return;
         }
         List<DataItem> items = script.getDataItems();
         try {
+            if (type == REQUIRE_GUARD) {
+                // Dijkstra script_require_guard = (6, credential); credential = [0, addr_keyhash] / [1, script_hash]
+                Credential guard = Credential.deserialize((Array) items.get(1));
+                json.writeStartObject();
+                json.writeStringField("type", "requireGuard");
+                json.writeStringField(guard.getType() == StakeCredType.ADDR_KEYHASH ? "keyHash" : "scriptHash",
+                        guard.getHash());
+                json.writeEndObject();
+                return;
+            }
             if (type == REQUIRE_SIGNATURE || type == REQUIRE_TIME_AFTER || type == REQUIRE_TIME_BEFORE) {
                 // Leaf parsers retain the client library's existing field and numeric semantics.
                 Object leaf = type == REQUIRE_SIGNATURE ? ScriptPubkey.deserialize(script)

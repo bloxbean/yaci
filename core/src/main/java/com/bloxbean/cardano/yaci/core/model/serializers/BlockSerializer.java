@@ -32,6 +32,10 @@ public enum BlockSerializer implements Serializer<Block> {
 
     @Override
     public Block deserialize(byte[] bytes) {
+        //Dijkstra (Leios) blocks have their own layout; every earlier era takes the unchanged path below
+        if (DijkstraBlockBodySerializer.isDijkstraBlock(bytes)) {
+            return DijkstraBlockBodySerializer.INSTANCE.deserialize(bytes);
+        }
         try {
             DataItem dataItem = CborSerializationUtil.deserializeOne(bytes);
             Block result = deserializeBlock(dataItem, bytes);
@@ -233,7 +237,7 @@ public enum BlockSerializer implements Serializer<Block> {
     }
 
     /** Correct optional datum/redeemer bytes per witness; extraction failures never reject the parsed block. */
-    private void handleWitnessDatumRedeemer(long block, List<Witnesses> witnesses, List<byte[]> transactionWitness) {
+    void handleWitnessDatumRedeemer(long block, List<Witnesses> witnesses, List<byte[]> transactionWitness) {
         if (witnesses == null || witnesses.isEmpty()) return;
         if (transactionWitness == null || transactionWitness.size() != witnesses.size()) {
             log.error("block: {} witness set count mismatch. parsed: {}, raw: {}",
@@ -355,7 +359,7 @@ public enum BlockSerializer implements Serializer<Block> {
         return datum.toBuilder().cbor(HexUtil.encodeHexString(bytes)).hash(Datum.cborToHash(bytes)).build();
     }
 
-    private void setWitnessCbor(long block, List<Witnesses> witnesses, List<byte[]> transactionWitness) {
+    void setWitnessCbor(long block, List<Witnesses> witnesses, List<byte[]> transactionWitness) {
         if (witnesses == null || transactionWitness == null || witnesses.size() != transactionWitness.size()) {
             log.error("block: {} witness set count mismatch. full transaction cbor will not be available. parsed: {}, raw: {}",
                     block, witnesses == null ? null : witnesses.size(),
@@ -370,7 +374,7 @@ public enum BlockSerializer implements Serializer<Block> {
         }
     }
 
-    private boolean isAuxDataHashValid(long block, int txIndex, List<TransactionBody> txnBodies, byte[] auxBytes) {
+    boolean isAuxDataHashValid(long block, int txIndex, List<TransactionBody> txnBodies, byte[] auxBytes) {
         if (txIndex >= txnBodies.size()) {
             log.debug("Auxiliary data index outside transaction body list. block: {}, tx index: {}", block, txIndex);
             return false;

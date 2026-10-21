@@ -17,6 +17,8 @@ public final class NativeScriptType {
     public static final int REQUIRE_TIME_AFTER = 4;
     /** The validity interval must end at or before the specified slot (JSON type {@code before}). */
     public static final int REQUIRE_TIME_BEFORE = 5;
+    /** Dijkstra era: the given credential must be a guard of the transaction (JSON type {@code requireGuard}). */
+    public static final int REQUIRE_GUARD = 6;
 
     private NativeScriptType() {}
 }

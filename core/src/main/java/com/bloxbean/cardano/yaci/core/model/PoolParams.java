@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model;
 
 import com.bloxbean.cardano.yaci.core.types.UnitInterval;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.*;
 
 import java.math.BigInteger;
@@ -25,4 +26,20 @@ public class PoolParams {
     //pool_metadata
     private String poolMetadataUrl;
     private String poolMetadataHash;
+
+    //Dijkstra era bls_key = [bls_pubkey, bls_possession_proof] (hex); null when absent or nil
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String blsPublicKey;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String blsPossessionProof;
+
+    /**
+     * Pre-Dijkstra constructor, kept so existing callers compile and behave unchanged.
+     */
+    public PoolParams(String operator, String vrfKeyHash, BigInteger pledge, BigInteger cost, UnitInterval margin,
+                      String rewardAccount, Set<String> poolOwners, List<Relay> relays, String poolMetadataUrl,
+                      String poolMetadataHash) {
+        this(operator, vrfKeyHash, pledge, cost, margin, rewardAccount, poolOwners, relays, poolMetadataUrl,
+                poolMetadataHash, null, null);
+    }
 }

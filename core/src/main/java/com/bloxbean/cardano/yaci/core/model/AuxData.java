@@ -25,6 +25,19 @@ public class AuxData {
     private List<PlutusScript> plutusV1Scripts;
     private List<PlutusScript> plutusV2Scripts;
     private List<PlutusScript> plutusV3Scripts;
+    //Dijkstra era
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private List<PlutusScript> plutusV4Scripts;
+
+    /**
+     * Pre-Dijkstra constructor, kept so existing callers compile and behave unchanged.
+     */
+    public AuxData(String cbor, String metadataCbor, String metadataJson, String metadataParseError,
+                   List<NativeScript> nativeScripts, List<PlutusScript> plutusV1Scripts,
+                   List<PlutusScript> plutusV2Scripts, List<PlutusScript> plutusV3Scripts) {
+        this(cbor, metadataCbor, metadataJson, metadataParseError, nativeScripts, plutusV1Scripts, plutusV2Scripts,
+                plutusV3Scripts, null);
+    }
 
     public AuxData(String cbor, String metadataCbor, String metadataJson,
                    List<NativeScript> nativeScripts, List<PlutusScript> plutusV1Scripts,

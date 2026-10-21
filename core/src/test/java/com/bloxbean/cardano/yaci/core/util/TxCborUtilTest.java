@@ -30,6 +30,18 @@ class TxCborUtilTest {
     }
 
     @Test
+    void assembleTxCbor_dijkstraUsesBlockTransactionOrder() {
+        //Dijkstra block_transaction = [body, witness_set, auxiliary_data / nil, is_valid]
+        byte[] valid = TxCborUtil.assembleTxCbor(Era.Dijkstra, HexUtil.decodeHexString("a0"),
+                HexUtil.decodeHexString("a0"), null, true);
+        byte[] invalid = TxCborUtil.assembleTxCbor(Era.Dijkstra, HexUtil.decodeHexString("a0"),
+                HexUtil.decodeHexString("a0"), HexUtil.decodeHexString("a0"), false);
+
+        assertThat(HexUtil.encodeHexString(valid)).isEqualTo("84a0a0f6f5");
+        assertThat(HexUtil.encodeHexString(invalid)).isEqualTo("84a0a0a0f4");
+    }
+
+    @Test
     void assembleTxCbor_returnsNullForMissingRequiredSegments() {
         assertThat(TxCborUtil.assembleTxCbor(Era.Conway, null, HexUtil.decodeHexString("a0"), null, true))
                 .isNull();
