@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.core.protocol;
 
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
@@ -122,16 +123,21 @@ public abstract class Agent<T extends AgentListener> {
                 .payload(payload)
                 .build();
 
-        // Synchronize on channel to prevent concurrent writes from different agents
+        // Synchronize on channel to prevent concurrent writes from different agents. The listener is attached
+        // after the lock is released: a write that has already completed runs it on this thread, and onSuccess
+        // takes the agent lock. Running it under the channel lock inverts the agent -> channel order of writers
+        // that hold the agent lock (e.g. ChainSyncServerAgent.onNewDataAvailable) and deadlocks both threads.
+        ChannelFuture write;
         synchronized (ch) {
-            ch.writeAndFlush(segment).addListener(future -> {
-                if (future.isSuccess()) {
-                    if (onSuccess != null) onSuccess.run();
-                } else {
-                    log.error("Failed to send message for protocol {}", getProtocolId(), future.cause());
-                }
-            });
+            write = ch.writeAndFlush(segment);
         }
+        write.addListener(future -> {
+            if (future.isSuccess()) {
+                if (onSuccess != null) onSuccess.run();
+            } else {
+                log.error("Failed to send message for protocol {}", getProtocolId(), future.cause());
+            }
+        });
     }
 
     private void writeSegmentedMessage(Channel ch, int protocolWithFlag, byte[] payload, Runnable onSuccess) {
@@ -140,6 +146,9 @@ public abstract class Agent<T extends AgentListener> {
 
         log.info("Segmenting large message: {} bytes into {} segments", payload.length, totalSegments);
 
+        // Writes stay under the channel lock so segments of different agents do not interleave; listeners are
+        // attached after it is released, for the same reason as in writeSingleSegment.
+        List<ChannelFuture> writes = new ArrayList<>(totalSegments);
         synchronized (ch) {
             for (int i = 0; i < totalSegments; i++) {
                 int offset = i * MAX_SEGMENT_SIZE;
@@ -156,23 +165,25 @@ public abstract class Agent<T extends AgentListener> {
                         .payload(segmentPayload)
                         .build();
 
-                final boolean isLastSegment = (i == totalSegments - 1);
-                final int segmentIndex = i;
+                log.debug("Sending segment {}/{} - {} bytes", i + 1, totalSegments, segmentSize);
 
-                log.debug("Sending segment {}/{} - {} bytes", segmentIndex + 1, totalSegments, segmentSize);
-
-                ch.writeAndFlush(segment).addListener(future -> {
-                    if (future.isSuccess()) {
-                        if (isLastSegment && onSuccess != null) {
-                            onSuccess.run();
-                        }
-                        log.debug("Segment {}/{} sent successfully", segmentIndex + 1, totalSegments);
-                    } else {
-                        log.error("Failed to send segment {}/{} for protocol {}",
-                                 segmentIndex + 1, totalSegments, getProtocolId(), future.cause());
-                    }
-                });
+                writes.add(ch.writeAndFlush(segment));
             }
+        }
+        for (int i = 0; i < totalSegments; i++) {
+            final boolean isLastSegment = (i == totalSegments - 1);
+            final int segmentIndex = i;
+            writes.get(i).addListener(future -> {
+                if (future.isSuccess()) {
+                    if (isLastSegment && onSuccess != null) {
+                        onSuccess.run();
+                    }
+                    log.debug("Segment {}/{} sent successfully", segmentIndex + 1, totalSegments);
+                } else {
+                    log.error("Failed to send segment {}/{} for protocol {}",
+                             segmentIndex + 1, totalSegments, getProtocolId(), future.cause());
+                }
+            });
         }
     }
 
