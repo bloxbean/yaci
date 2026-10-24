@@ -53,7 +53,9 @@ public interface ChainState {
     Point findLastPointAfterNBlocks(Point from, long batchSize);
 
     /**
-     * Check if a point exists in the chain
+     * Check if a point exists in the chain. A point counts only while it is on the current chain (a point removed by
+     * a rollback does not), and {@code Point.ORIGIN} counts whenever the chain has a tip. The chain-sync server relies
+     * on both when it picks a client's rollback point.
      */
     boolean hasPoint(Point point);
 

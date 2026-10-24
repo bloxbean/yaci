@@ -246,27 +246,22 @@ class ChainSyncServerAgentConcurrencyTest {
 
     /**
      * Chain switches to a fork after block 112 while one request is parked at tip 115. The parked request gets the
-     * Rollbackward, and the client then follows the new fork. The rollback lands on 105, not 112, because
-     * findRollbackPoint steps back 10 slots at a time once the last sent point is gone.
+     * Rollbackward to the fork point, and the client then follows the new fork.
      */
     @Test
-    void forkSwitch_onParkedRequest_rollsBackThenFollowsNewFork() {
+    void forkSwitch_onParkedRequest_rollsBackToForkPointThenFollowsNewFork() {
         populateChain(100, 115);
-        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(115)}));
-        deliverInbound(new RequestNext());
-        deliverInbound(new RequestNext());
+        followToTipFrom(110, 115);
 
         chainState.switchForkAfter(112);
         populateChain(113, 116);
         agent.onNewDataAvailable();
-        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 115", "AW", "RB 105");
+        assertThat(channel.writtenReplies()).containsExactly("RB 112");
 
         channel.written.clear();
-        for (int i = 106; i <= 117; i++)
+        for (int i = 113; i <= 117; i++)
             deliverInbound(new RequestNext());
-        assertThat(channel.writtenReplies()).containsExactly(
-                "RF 106/0", "RF 107/0", "RF 108/0", "RF 109/0", "RF 110/0", "RF 111/0", "RF 112/0",
-                "RF 113/1", "RF 114/1", "RF 115/1", "RF 116/1", "AW");
+        assertThat(channel.writtenReplies()).containsExactly("RF 113/1", "RF 114/1", "RF 115/1", "RF 116/1", "AW");
         assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(116));
     }
 
@@ -277,9 +272,7 @@ class ChainSyncServerAgentConcurrencyTest {
     @Test
     void forkSwitch_onPipelinedParkedRequests_answersEachInOrder() {
         populateChain(100, 115);
-        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(115)}));
-        deliverInbound(new RequestNext());
-        deliverInbound(new RequestNext());
+        followToTipFrom(110, 115);
         deliverInbound(new RequestNext());
         deliverInbound(new RequestNext());
 
@@ -287,8 +280,7 @@ class ChainSyncServerAgentConcurrencyTest {
         populateChain(113, 116);
         agent.onNewDataAvailable();
 
-        assertThat(channel.writtenReplies())
-                .containsExactly("IF", "RB 115", "AW", "RB 105", "RF 106/0", "RF 107/0");
+        assertThat(channel.writtenReplies()).containsExactly("RB 112", "RF 113/1", "RF 114/1");
         assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Idle);
     }
 
@@ -298,16 +290,124 @@ class ChainSyncServerAgentConcurrencyTest {
     @Test
     void rollbackWithoutNewBlocks_answersParkedRequests() {
         populateChain(100, 115);
-        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(115)}));
-        deliverInbound(new RequestNext());
-        deliverInbound(new RequestNext());
+        followToTipFrom(110, 115);
         deliverInbound(new RequestNext());
 
         chainState.rollbackTo(112L);
         agent.onNewDataAvailable();
 
-        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 115", "AW", "RB 105", "RF 106/0");
-        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Idle);
+        assertThat(channel.writtenReplies()).containsExactly("RB 112", "AW");
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.MustReply);
+    }
+
+    /**
+     * Issue #209: on a real network most slots are empty (about one block per 20 slots on preprod; 23 here). A one-block
+     * rollback at the tip must still be answered with a Rollbackward to the previous block, after which the client
+     * follows the new fork.
+     */
+    @Test
+    void sparseSlots_oneBlockRollbackAtTip_rollsBackToPreviousBlock() {
+        chainState = new FakeChainState(23);
+        agent = new ChainSyncServerAgent(chainState);
+        agent.setChannel(channel);
+        populateChain(1000, 1015);
+        followToTipFrom(1010, 1015);
+
+        chainState.switchForkAfter(chainState.pointAt(1014).getSlot());
+        populateChain(1015, 1015);
+        agent.onNewDataAvailable();
+        deliverInbound(new RequestNext());
+
+        assertThat(channel.writtenReplies()).containsExactly("RB " + 1014 * 23, "RF 1015/1");
+        assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(1015));
+    }
+
+    /**
+     * A client that connected at the tip has been sent no block yet. The older points it offered in FindIntersect
+     * are on its chain, so the newest of them still on ours is a valid rollback point.
+     */
+    @Test
+    void forkSwitch_beforeAnyRollForward_rollsBackToOfferedPoint() {
+        populateChain(100, 115);
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(115), chainState.pointAt(114),
+                chainState.pointAt(113), chainState.pointAt(111), chainState.pointAt(107)}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+
+        chainState.switchForkAfter(112);
+        populateChain(113, 116);
+        agent.onNewDataAvailable();
+
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 115", "AW", "RB 111");
+    }
+
+    /**
+     * When none of the points the client is known to have is on the chain, the server cannot name a point to roll
+     * back to. It closes the connection so the client re-intersects, instead of leaving the request unanswered.
+     */
+    @Test
+    void forkSwitch_pastEveryKnownPoint_closesConnection() {
+        populateChain(100, 115);
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(115)}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+
+        chainState.switchForkAfter(112);
+        populateChain(113, 116);
+        agent.onNewDataAvailable();
+
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 115", "AW");
+        assertThat(channel.closed).isTrue();
+        assertThat(agent.isDone()).isTrue();
+
+        // Nothing more is written to the closing connection
+        chainState.addBlock(117);
+        agent.onNewDataAvailable();
+        deliverInbound(new RequestNext());
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 115", "AW");
+    }
+
+    /** A client that offered ORIGIN can always be rolled back to it, so the connection stays open. */
+    @Test
+    void forkSwitch_pastEveryOfferedBlock_rollsBackToOfferedOrigin() {
+        populateChain(100, 115);
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(115), Point.ORIGIN}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+
+        chainState.switchForkAfter(112);
+        populateChain(113, 116);
+        agent.onNewDataAvailable();
+
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 115", "AW", "RB origin");
+        assertThat(channel.closed).isFalse();
+    }
+
+    /** The intersection is rolled back before the first RequestNext: the reply is a Rollbackward to an older point. */
+    @Test
+    void rollbackBeforeFirstRequestNext_rollsBackToOlderOfferedPoint() {
+        populateChain(100, 115);
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(115), chainState.pointAt(111)}));
+
+        chainState.switchForkAfter(112);
+        populateChain(113, 116);
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 111", "RF 112/0");
+    }
+
+    /** A second FindIntersect on the same connection moves the client's read pointer to the new intersection. */
+    @Test
+    void secondFindIntersect_firstReplyIsRollbackwardToNewIntersection() {
+        populateChain(100, 115);
+        followToTipFrom(110, 115);
+
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(105)}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 105", "RF 106/0");
     }
 
     /**
@@ -545,6 +645,45 @@ class ChainSyncServerAgentConcurrencyTest {
         assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(106));
     }
 
+    /** However many points a client offers, the agent keeps at most 2161 of them. */
+    @Test
+    void offeredPointsAreCappedLikeSentOnes() throws Exception {
+        populateChain(3001, 3002);
+        Point[] offered = new Point[3001];
+        offered[0] = chainState.pointAt(3001);
+        for (int i = 1; i < offered.length; i++)
+            offered[i] = new Point(3001 - i, String.format("%064x", i));
+
+        deliverInbound(new FindIntersect(offered));
+        assertThat(clientChainSize()).isEqualTo(2161);
+
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        assertThat(channel.writtenReplies()).endsWith("RB 3001", "RF 3002/0");
+        assertThat(clientChainSize()).isEqualTo(2161);
+    }
+
+    /** A rollback of exactly 2160 blocks still finds the fork point instead of closing the connection. */
+    @Test
+    void rollbackOf2160Blocks_findsTheForkPoint() {
+        populateChain(100, 2260);
+        followToTipFrom(100, 2260);
+        channel.written.clear();
+
+        chainState.switchForkAfter(100L);
+        chainState.addBlock(101);
+        agent.onNewDataAvailable();
+
+        assertThat(channel.writtenReplies()).containsExactly("RB 100");
+        assertThat(channel.closed).isFalse();
+    }
+
+    private int clientChainSize() throws Exception {
+        var field = ChainSyncServerAgent.class.getDeclaredField("clientChain");
+        field.setAccessible(true);
+        return ((Collection<?>) field.get(agent)).size();
+    }
+
     @Test
     void agentStateUpdatesAreVisibleAcrossNettyAndProducerThreads() throws Exception {
         var currentState = Agent.class.getDeclaredField("currentState");
@@ -636,6 +775,16 @@ class ChainSyncServerAgentConcurrencyTest {
         }
     }
 
+    /** Intersect at {@code fromBlock}, roll forward to {@code tipBlock} and park one request at the tip. */
+    private void followToTipFrom(int fromBlock, int tipBlock) {
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(fromBlock)}));
+        for (int i = fromBlock; i <= tipBlock + 1; i++)
+            deliverInbound(new RequestNext());
+        assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(tipBlock));
+        assertThat(agent.isClientAtTip()).isTrue();
+        channel.written.clear();
+    }
+
     private void driveClientToTip(int tipBlock) {
         Point tipPoint = chainState.pointAt(tipBlock);
         performFindIntersect(tipPoint);
@@ -687,6 +836,7 @@ class ChainSyncServerAgentConcurrencyTest {
         private final List<Thread> writerThreads = new CopyOnWriteArrayList<>();
         private volatile boolean holdWrites;
         private volatile EventLoop eventLoop = EVENT_LOOP;
+        private volatile boolean closed;
 
         void useEventLoop(EventLoop eventLoop) {
             this.eventLoop = eventLoop;
@@ -740,7 +890,7 @@ class ChainSyncServerAgentConcurrencyTest {
         }
 
         @Override public ChannelFuture writeAndFlush(Object msg) { return successFuture; }
-        @Override public boolean isActive() { return true; }
+        @Override public boolean isActive() { return !closed; }
         @Override public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) { return record(msg, promise); }
 
         // -- Remaining Channel methods (unused, minimal stubs) --
@@ -766,7 +916,7 @@ class ChainSyncServerAgentConcurrencyTest {
         @Override public ChannelFuture connect(SocketAddress remoteAddress) { return null; }
         @Override public ChannelFuture connect(SocketAddress remoteAddress, SocketAddress localAddress) { return null; }
         @Override public ChannelFuture disconnect() { return null; }
-        @Override public ChannelFuture close() { return null; }
+        @Override public ChannelFuture close() { closed = true; return successFuture; }
         @Override public ChannelFuture deregister() { return null; }
         @Override public ChannelFuture bind(SocketAddress localAddress, ChannelPromise promise) { return null; }
         @Override public ChannelFuture connect(SocketAddress remoteAddress, ChannelPromise promise) { return null; }
@@ -827,15 +977,24 @@ class ChainSyncServerAgentConcurrencyTest {
         private final ConcurrentHashMap<String, BlockEntry> blocksByHash = new ConcurrentHashMap<>();
         private volatile ChainTip tip;
         private volatile int fork;
+        private final int slotsPerBlock;
+
+        FakeChainState() {
+            this(1);
+        }
+
+        FakeChainState(int slotsPerBlock) {
+            this.slotsPerBlock = slotsPerBlock;
+        }
 
         Point pointAt(int blockNumber) {
-            BlockEntry entry = blocksBySlot.get((long) blockNumber);
+            BlockEntry entry = blocksBySlot.get((long) blockNumber * slotsPerBlock);
             if (entry == null) return null;
             return new Point(entry.slot, entry.hashHex);
         }
 
         void addBlock(int blockNumber) {
-            long slot = blockNumber;
+            long slot = (long) blockNumber * slotsPerBlock;
             byte[] block = blockBody(blockNumber, fork);
             byte[] hash = BlockSerializer.INSTANCE.deserialize(block).getHeader().getHeaderBody().getBlockHash()
                     .transform(HexUtil::decodeHexString);
@@ -938,7 +1097,7 @@ class ChainSyncServerAgentConcurrencyTest {
 
         /**
          * A real preprod block with its block number, slot and previous hash replaced, so every block and fork
-         * has its own hash. The server's rollback search parses stored blocks to recover their hashes.
+         * has its own hash.
          */
         private static byte[] blockBody(int blockNumber, int fork) {
             Array block = (Array) CborSerializationUtil.deserializeOne(BLOCK_TEMPLATE);
