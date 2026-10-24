@@ -11,6 +11,7 @@ public enum YaciConfig {
     private boolean returnFullTxCbor;
 
     private boolean blockFetchCheckRangeExists = false;
+    private boolean serverVirtualThreads = false;
 
     YaciConfig() {
         returnBlockCbor = false;
@@ -56,6 +57,23 @@ public enum YaciConfig {
 
     public boolean isBlockFetchCheckRangeExists() {
         return blockFetchCheckRangeExists;
+    }
+
+    /**
+     * Returns true if per-connection server worker threads are virtual threads
+     * @return
+     */
+    public boolean isServerVirtualThreads() {
+        return serverVirtualThreads;
+    }
+
+    /**
+     * Set to true to run per-connection server worker threads (the block-fetch server's batch thread) as virtual
+     * threads instead of platform threads. Applies to connections opened after it is set.
+     * @param serverVirtualThreads
+     */
+    public void setServerVirtualThreads(boolean serverVirtualThreads) {
+        this.serverVirtualThreads = serverVirtualThreads;
     }
 
     /**

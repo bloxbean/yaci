@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
 
+import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.network.handlers.MiniProtoRequestDataEncoder;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.BatchDone;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.MsgBlock;
@@ -192,6 +193,49 @@ class BlockFetchServerAgentConcurrencyTest {
         Thread.sleep(200);
 
         verify(channel, never()).isActive();
+    }
+
+    @Test
+    void pipelinedBatchesStayInOrderOnVirtualThreads() throws Exception {
+        YaciConfig.INSTANCE.setServerVirtualThreads(true);
+        try {
+            pipelinedBatchesStayInOrderAndUninterleavedUnderBackpressure();
+        } finally {
+            YaciConfig.INSTANCE.setServerVirtualThreads(false);
+        }
+    }
+
+    @Test
+    void workerThreadIsNamedAndVirtualOnlyWhenConfigured() throws Exception {
+        assertThat(workerThread().isVirtual()).isFalse();
+
+        YaciConfig.INSTANCE.setServerVirtualThreads(true);
+        try {
+            Thread worker = workerThread();
+            assertThat(worker.isVirtual()).isTrue();
+            assertThat(worker.getName()).startsWith("yaci-blockfetch-server-");
+        } finally {
+            YaciConfig.INSTANCE.setServerVirtualThreads(false);
+        }
+    }
+
+    /** Starts an agent, answers one request and returns the thread that ran it. */
+    private Thread workerThread() {
+        ChainState chainState = mock(ChainState.class);
+        AtomicReference<Thread> worker = new AtomicReference<>();
+        when(chainState.findBlocksInRange(any(), any())).thenAnswer(invocation -> {
+            worker.set(Thread.currentThread());
+            return List.of();
+        });
+        BlockFetchServerAgent serverAgent = new BlockFetchServerAgent(chainState);
+        try {
+            serverAgent.setChannel(new EmbeddedChannel());
+            serverAgent.receiveResponse(new RequestRange(new Point(1, "00"), new Point(1, "00")));
+            verify(chainState, timeout(5_000)).findBlocksInRange(any(), any());
+            return worker.get();
+        } finally {
+            serverAgent.shutdown();
+        }
     }
 
     @Test
