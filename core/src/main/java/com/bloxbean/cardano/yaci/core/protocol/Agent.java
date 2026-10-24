@@ -2,7 +2,7 @@ package com.bloxbean.cardano.yaci.core.protocol;
 
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelPromise;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
@@ -104,22 +104,18 @@ public abstract class Agent<T extends AgentListener> {
         byte[] payload = message.serialize();
         List<Segment> segments = toSegments(protocolWithFlag, payload);
 
-        // Completing a write can run the listeners of earlier writes on the thread whose flush completes them, and
-        // onSuccess takes the agent lock. No lock may be held there: a writer holding the channel lock would invert
-        // the agent -> channel order of writers that hold the agent lock (e.g. ChainSyncServerAgent
-        // .onNewDataAvailable) and deadlock both threads. That happens only on the event loop, where the pipeline
-        // runs inline, so it writes without the lock. Elsewhere Netty only queues the writes (counted against the
-        // channel's writability) and runs them and their listeners on the event loop; the channel lock there keeps
-        // the segments of a message together.
-        List<ChannelFuture> writes;
+        // Completing a write runs the listeners of earlier writes on the flushing thread, and onSuccess takes the agent
+        // lock, so the event loop must not hold the channel lock here: writers holding the agent lock (e.g.
+        // ChainSyncServerAgent.onNewDataAvailable) take the locks in the opposite order. Off the event loop Netty only
+        // queues the writes, still counted against writability; the lock keeps a message's segments together there.
+        List<ChannelPromise> promises = newPromises(ch, segments.size(), onSuccess);
         if (ch.eventLoop().inEventLoop()) {
-            writes = writeSegments(ch, segments);
+            writeSegments(ch, segments, promises);
         } else {
             synchronized (ch) {
-                writes = writeSegments(ch, segments);
+                writeSegments(ch, segments, promises);
             }
         }
-        addListeners(writes, onSuccess);
     }
 
     private List<Segment> toSegments(int protocolWithFlag, byte[] payload) {
@@ -152,21 +148,21 @@ public abstract class Agent<T extends AgentListener> {
                 .build();
     }
 
-    private static List<ChannelFuture> writeSegments(Channel ch, List<Segment> segments) {
-        List<ChannelFuture> writes = new ArrayList<>(segments.size());
-        for (Segment segment : segments)
-            writes.add(ch.write(segment));
-        ch.flush();
-        return writes;
+    private static void writeSegments(Channel ch, List<Segment> segments, List<ChannelPromise> promises) {
+        int last = segments.size() - 1;
+        for (int i = 0; i < last; i++)
+            ch.write(segments.get(i), promises.get(i));
+        ch.writeAndFlush(segments.get(last), promises.get(last));
     }
 
-    // onSuccess runs once, after the last segment is written
-    private void addListeners(List<ChannelFuture> writes, Runnable onSuccess) {
-        int totalSegments = writes.size();
+    // Listeners are attached before the writes, so they run in write order; onSuccess runs once, after the last segment
+    private List<ChannelPromise> newPromises(Channel ch, int totalSegments, Runnable onSuccess) {
+        List<ChannelPromise> promises = new ArrayList<>(totalSegments);
         for (int i = 0; i < totalSegments; i++) {
             final boolean isLastSegment = (i == totalSegments - 1);
             final int segmentIndex = i;
-            writes.get(i).addListener(future -> {
+            ChannelPromise promise = ch.newPromise();
+            promise.addListener(future -> {
                 if (future.isSuccess()) {
                     if (isLastSegment && onSuccess != null) {
                         onSuccess.run();
@@ -177,7 +173,9 @@ public abstract class Agent<T extends AgentListener> {
                             segmentIndex + 1, totalSegments, getProtocolId(), future.cause());
                 }
             });
+            promises.add(promise);
         }
+        return promises;
     }
 
     private int calculateElapsedTime() {

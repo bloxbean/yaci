@@ -16,6 +16,7 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.channel.local.LocalAddress;
 import io.netty.channel.local.LocalChannel;
 import io.netty.channel.local.LocalServerChannel;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -49,7 +50,7 @@ class AgentWriteLockTest {
                 super.sendRequest(message);
             }
         };
-        agent.setChannel((Channel) channel);
+        agent.setChannel(channel);
 
         agent.sendNextMessage();
 
@@ -122,7 +123,7 @@ class AgentWriteLockTest {
      */
     @Test
     void writerHoldingAgentLockDoesNotDeadlockWithCallbackOnEventLoop() throws Exception {
-        EventLoopGroup group = new DefaultEventLoopGroup(1);
+        EventLoopGroup group = eventLoopGroup();
         try {
             HoldingHandler holding = new HoldingHandler();
             Channel channel = connect(group, holding);
@@ -164,10 +165,12 @@ class AgentWriteLockTest {
     /**
      * Writes queued from another thread count against the channel's writability before the event loop runs them, so
      * a producer that checks {@code isWritable()} (BlockFetchServerAgent) slows down when the event loop falls behind.
+     * Netty counts each queued write as 40 bytes (8 for a message of unknown size plus 32 task overhead): 2,000 writes
+     * pass the default 64 KiB high water mark.
      */
     @Test
     void writesQueuedOffTheEventLoopCountAgainstWritability() throws Exception {
-        EventLoopGroup group = new DefaultEventLoopGroup(1);
+        EventLoopGroup group = eventLoopGroup();
         CountDownLatch resume = new CountDownLatch(1);
         try {
             Channel channel = connect(group, new ChannelOutboundHandlerAdapter());
@@ -176,7 +179,7 @@ class AgentWriteLockTest {
             channel.eventLoop().execute(() -> {
                 paused.countDown();
                 try {
-                    resume.await(5, TimeUnit.SECONDS);
+                    resume.await();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -191,6 +194,11 @@ class AgentWriteLockTest {
             resume.countDown();
             group.shutdownGracefully(0, 1, TimeUnit.SECONDS);
         }
+    }
+
+    private static EventLoopGroup eventLoopGroup() {
+        // daemon threads: a deadlocked event loop must not keep the test JVM alive
+        return new DefaultEventLoopGroup(1, new DefaultThreadFactory("agent-write-test", true));
     }
 
     private static Channel connect(EventLoopGroup group, ChannelHandler handler) throws InterruptedException {
@@ -256,7 +264,10 @@ class AgentWriteLockTest {
         }
     }
 
-    /** Holds writes until {@code release} is set; the next flush then passes them on and completes them. */
+    /**
+     * Holds writes until {@code release} is set; the next flush then passes them on and completes them. {@code held}
+     * counts the first flush that held writes.
+     */
     private static final class HoldingHandler extends ChannelOutboundHandlerAdapter {
         final CountDownLatch held = new CountDownLatch(1);
         final CountDownLatch flushing = new CountDownLatch(1);
@@ -266,13 +277,14 @@ class AgentWriteLockTest {
         @Override
         public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
             pending.add(new Object[]{msg, promise});
-            held.countDown();
         }
 
         @Override
         public void flush(ChannelHandlerContext ctx) {
-            if (!release)
+            if (!release) {
+                held.countDown();
                 return;
+            }
             flushing.countDown();
             for (Object[] write : pending)
                 ctx.write(write[0], (ChannelPromise) write[1]);

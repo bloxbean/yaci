@@ -380,7 +380,7 @@ class ChainSyncServerAgentConcurrencyTest {
             return successFuture;
         }
         @Override public boolean isActive() { return true; }
-        @Override public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) { return successFuture; }
+        @Override public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) { return promise.setSuccess(); }
 
         // -- Remaining Channel methods (unused, minimal stubs) --
         @Override public ChannelId id() { return null; }
@@ -415,9 +415,9 @@ class ChainSyncServerAgentConcurrencyTest {
         @Override public ChannelFuture deregister(ChannelPromise promise) { return null; }
         @Override public Channel read() { return this; }
         @Override public ChannelFuture write(Object msg) { return successFuture; }
-        @Override public ChannelFuture write(Object msg, ChannelPromise promise) { return successFuture; }
+        @Override public ChannelFuture write(Object msg, ChannelPromise promise) { return promise.setSuccess(); }
         @Override public Channel flush() { return this; }
-        @Override public ChannelPromise newPromise() { return null; }
+        @Override public ChannelPromise newPromise() { return new DefaultChannelPromise(this, EVENT_LOOP); }
         @Override public ChannelProgressivePromise newProgressivePromise() { return null; }
         @Override public ChannelFuture newSucceededFuture() { return successFuture; }
         @Override public ChannelFuture newFailedFuture(Throwable cause) { return null; }
