@@ -2,7 +2,7 @@
 
 Date: 2026-10-11
 
-Status: Proposed
+Status: Accepted
 
 Related: [issue #209](https://github.com/bloxbean/yaci/issues/209). Builds on
 [PR #206](https://github.com/bloxbean/yaci/pull/206) (ADR 0013), which reworks how
@@ -55,8 +55,11 @@ first:
   points 1, 2, 4, 8 … blocks back. A new intersection also clears `lastSentPoint`, so the next
   `RequestNext` is answered with `MsgRollBackward` to it. `IntersectNotFound` leaves both
   unchanged, because the client's read pointer does not move.
-- Each RollForward appends its point. The list keeps the newest 2160 points (the security
-  parameter `k` of the public networks); no valid rollback goes deeper than `k`.
+- Each RollForward appends its point. The list keeps the newest 2161 points, however many the
+  client offered: a fork point plus 2160 blocks after it, so a rollback of up to `k` = 2160
+  (mainnet, preprod; preview's `k` is 432) finds its target. This is a fixed retention policy,
+  not each network's `k`: on a network with a larger `k`, a deeper rollback finds no kept point
+  and the connection is closed, as below.
 - A RollBackward drops the points after its target.
 
 `lastSentPoint` keeps its meaning and its public getter.
@@ -109,7 +112,7 @@ request through `enqueueReply()`.
 - After a rollback at the tip, a downstream peer rolls back to the fork point and follows the
   new fork, instead of waiting until the connection is restarted.
 - A rollback never sends the client further back than the fork point.
-- Each connection holds up to 2160 points, about 300 KB.
+- Each connection holds up to 2161 points, about 300 KB, whatever the client offers.
 - In the rare case that no sent point is on the chain, the client reconnects instead of waiting.
 
 ## Validation

@@ -645,6 +645,45 @@ class ChainSyncServerAgentConcurrencyTest {
         assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(106));
     }
 
+    /** However many points a client offers, the agent keeps at most 2161 of them. */
+    @Test
+    void offeredPointsAreCappedLikeSentOnes() throws Exception {
+        populateChain(3001, 3002);
+        Point[] offered = new Point[3001];
+        offered[0] = chainState.pointAt(3001);
+        for (int i = 1; i < offered.length; i++)
+            offered[i] = new Point(3001 - i, String.format("%064x", i));
+
+        deliverInbound(new FindIntersect(offered));
+        assertThat(clientChainSize()).isEqualTo(2161);
+
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        assertThat(channel.writtenReplies()).endsWith("RB 3001", "RF 3002/0");
+        assertThat(clientChainSize()).isEqualTo(2161);
+    }
+
+    /** A rollback of exactly 2160 blocks still finds the fork point instead of closing the connection. */
+    @Test
+    void rollbackOf2160Blocks_findsTheForkPoint() {
+        populateChain(100, 2260);
+        followToTipFrom(100, 2260);
+        channel.written.clear();
+
+        chainState.switchForkAfter(100L);
+        chainState.addBlock(101);
+        agent.onNewDataAvailable();
+
+        assertThat(channel.writtenReplies()).containsExactly("RB 100");
+        assertThat(channel.closed).isFalse();
+    }
+
+    private int clientChainSize() throws Exception {
+        var field = ChainSyncServerAgent.class.getDeclaredField("clientChain");
+        field.setAccessible(true);
+        return ((Collection<?>) field.get(agent)).size();
+    }
+
     @Test
     void agentStateUpdatesAreVisibleAcrossNettyAndProducerThreads() throws Exception {
         var currentState = Agent.class.getDeclaredField("currentState");

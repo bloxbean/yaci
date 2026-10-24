@@ -28,8 +28,9 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 @Slf4j
 public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
 
-    // A rollback is never deeper than the security parameter k of the public networks
-    private static final int MAX_CLIENT_CHAIN_POINTS = 2160;
+    // Points kept per connection: a fork point plus 2160 blocks after it, so a rollback of up to k = 2160 (mainnet,
+    // preprod; smaller elsewhere) finds its target. A deeper rollback finds none and closes the connection.
+    private static final int MAX_CLIENT_CHAIN_POINTS = 2161;
 
     private final ChainState chainState;
     // Points on the client's chain, oldest first: those from FindIntersect, then each block sent. Guarded by this.
@@ -206,6 +207,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                         .sorted(Comparator.comparingLong(Point::getSlot))
                         .forEach(clientChain::addLast);
                 clientChain.addLast(intersectionPoint);
+                trimClientChain();
                 // The next RequestNext is answered with a Rollbackward to the intersection, even on a re-intersection
                 lastSentPoint = null;
 
@@ -371,8 +373,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                         // Update tracking variables
                         this.lastSentPoint = nextPoint;
                         clientChain.addLast(nextPoint);
-                        if (clientChain.size() > MAX_CLIENT_CHAIN_POINTS)
-                            clientChain.removeFirst();
+                        trimClientChain();
 
                         // Notify listeners with proper block header information
                         notifyListenersRollForward(rollForward, tip);
@@ -558,6 +559,11 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
      *
      * @return the rollback point, or null if none of the tracked points is on our chain
      */
+    private void trimClientChain() {
+        while (clientChain.size() > MAX_CLIENT_CHAIN_POINTS)
+            clientChain.removeFirst();
+    }
+
     private Point findRollbackPoint() {
         while (!clientChain.isEmpty() && !chainState.hasPoint(clientChain.peekLast()))
             clientChain.removeLast();
