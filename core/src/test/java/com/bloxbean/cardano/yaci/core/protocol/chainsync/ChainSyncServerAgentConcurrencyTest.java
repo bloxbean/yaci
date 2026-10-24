@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import io.netty.channel.*;
+import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
 import io.netty.util.concurrent.Future;
@@ -371,17 +372,19 @@ class ChainSyncServerAgentConcurrencyTest {
     // ---- Stub Channel that simulates immediate successful writes ----
 
     static class StubChannel implements Channel {
+        // Agent writes on the channel's event loop; an embedded loop counts every thread as the loop
+        private static final EventLoop EVENT_LOOP = new EmbeddedChannel().eventLoop();
         private final StubChannelFuture successFuture = new StubChannelFuture();
 
         @Override public ChannelFuture writeAndFlush(Object msg) {
             return successFuture;
         }
         @Override public boolean isActive() { return true; }
-        @Override public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) { return successFuture; }
+        @Override public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) { return promise.setSuccess(); }
 
         // -- Remaining Channel methods (unused, minimal stubs) --
         @Override public ChannelId id() { return null; }
-        @Override public EventLoop eventLoop() { return null; }
+        @Override public EventLoop eventLoop() { return EVENT_LOOP; }
         @Override public Channel parent() { return null; }
         @Override public ChannelConfig config() { return null; }
         @Override public boolean isOpen() { return true; }
@@ -412,9 +415,9 @@ class ChainSyncServerAgentConcurrencyTest {
         @Override public ChannelFuture deregister(ChannelPromise promise) { return null; }
         @Override public Channel read() { return this; }
         @Override public ChannelFuture write(Object msg) { return successFuture; }
-        @Override public ChannelFuture write(Object msg, ChannelPromise promise) { return successFuture; }
+        @Override public ChannelFuture write(Object msg, ChannelPromise promise) { return promise.setSuccess(); }
         @Override public Channel flush() { return this; }
-        @Override public ChannelPromise newPromise() { return null; }
+        @Override public ChannelPromise newPromise() { return new DefaultChannelPromise(this, EVENT_LOOP); }
         @Override public ChannelProgressivePromise newProgressivePromise() { return null; }
         @Override public ChannelFuture newSucceededFuture() { return successFuture; }
         @Override public ChannelFuture newFailedFuture(Throwable cause) { return null; }
