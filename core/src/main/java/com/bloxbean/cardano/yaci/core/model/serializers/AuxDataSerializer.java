@@ -19,8 +19,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
-
 public enum AuxDataSerializer implements Serializer<AuxData> {
     INSTANCE;
 
@@ -30,10 +28,11 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
             AuxData result = Serializer.super.deserialize(bytes);
             if (result == null) return null; // Preserve the default serializer's empty-input behavior.
             // Recovery needs the original buffer, which deserializeDI alone does not have.
-            return result.getMetadataParseError() == null ? result : DataItemIsolation.auxiliary(bytes);
+            return ScriptHashes.auxiliary(
+                    result.getMetadataParseError() == null ? result : DataItemIsolation.auxiliary(bytes), bytes);
         } catch (StackOverflowError e) {
             // Restart at a known boundary; the decoder's partially consumed state is discarded.
-            return DataItemIsolation.auxiliary(bytes);
+            return ScriptHashes.auxiliary(DataItemIsolation.auxiliary(bytes), bytes);
         }
     }
 
@@ -77,7 +76,8 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
                         Array plutusV1ScriptsArray = (Array) plutusV1ScriptsValueDI;
                         plutusV1scripts = plutusV1ScriptsArray.getDataItems()
                                 .stream()
-                                .map(plutusV1ScriptDI -> new PlutusScript(PlutusScriptType.PlutusScriptV1, toHex(plutusV1ScriptDI)))
+                                .filter(script -> script != Special.BREAK)
+                                .map(script -> ScriptHashes.plutus(PlutusScriptType.PlutusScriptV1, script, false))
                                 .collect(Collectors.toList());
                     }
 
@@ -86,7 +86,8 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
                         Array plutusV2ScriptsArray = (Array) plutusV2ScriptsValueDI;
                         plutusV2scripts = plutusV2ScriptsArray.getDataItems()
                                 .stream()
-                                .map(plutusV2ScriptDI -> new PlutusScript(PlutusScriptType.PlutusScriptV2, toHex(plutusV2ScriptDI)))
+                                .filter(script -> script != Special.BREAK)
+                                .map(script -> ScriptHashes.plutus(PlutusScriptType.PlutusScriptV2, script, false))
                                 .collect(Collectors.toList());
                     }
 
@@ -95,7 +96,8 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
                         Array plutusV3ScriptsArray = (Array) plutusV3ScriptsValueDI;
                         plutusV3scripts = plutusV3ScriptsArray.getDataItems()
                                 .stream()
-                                .map(plutusV3ScriptDI -> new PlutusScript(PlutusScriptType.PlutusScriptV3, toHex(plutusV3ScriptDI)))
+                                .filter(script -> script != Special.BREAK)
+                                .map(script -> ScriptHashes.plutus(PlutusScriptType.PlutusScriptV3, script, false))
                                 .collect(Collectors.toList());
                     }
 
