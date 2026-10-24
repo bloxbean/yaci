@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelOutboundBuffer;
@@ -160,11 +161,43 @@ class AgentWriteLockTest {
         }
     }
 
-    private static Channel connect(EventLoopGroup group, HoldingHandler holding) throws InterruptedException {
+    /**
+     * Writes queued from another thread count against the channel's writability before the event loop runs them, so
+     * a producer that checks {@code isWritable()} (BlockFetchServerAgent) slows down when the event loop falls behind.
+     */
+    @Test
+    void writesQueuedOffTheEventLoopCountAgainstWritability() throws Exception {
+        EventLoopGroup group = new DefaultEventLoopGroup(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        try {
+            Channel channel = connect(group, new ChannelOutboundHandlerAdapter());
+            TestAgent agent = new TestAgent(channel);
+            CountDownLatch paused = new CountDownLatch(1);
+            channel.eventLoop().execute(() -> {
+                paused.countDown();
+                try {
+                    resume.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertThat(paused.await(5, TimeUnit.SECONDS)).as("event loop paused").isTrue();
+
+            for (int i = 0; i < 2000; i++)
+                agent.write(payload(10), null);
+
+            assertThat(channel.isWritable()).isFalse();
+        } finally {
+            resume.countDown();
+            group.shutdownGracefully(0, 1, TimeUnit.SECONDS);
+        }
+    }
+
+    private static Channel connect(EventLoopGroup group, ChannelHandler handler) throws InterruptedException {
         LocalAddress address = new LocalAddress("agent-write-" + UUID.randomUUID());
         new ServerBootstrap().group(group).channel(LocalServerChannel.class)
                 .childHandler(new ChannelInboundHandlerAdapter()).bind(address).sync();
-        return new Bootstrap().group(group).channel(LocalChannel.class).handler(holding).connect(address).sync()
+        return new Bootstrap().group(group).channel(LocalChannel.class).handler(handler).connect(address).sync()
                 .channel();
     }
 

@@ -2,14 +2,13 @@ package com.bloxbean.cardano.yaci.core.protocol;
 
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import io.netty.channel.Channel;
-import io.netty.channel.EventLoop;
+import io.netty.channel.ChannelFuture;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.RejectedExecutionException;
 
 @Slf4j
 public abstract class Agent<T extends AgentListener> {
@@ -105,21 +104,22 @@ public abstract class Agent<T extends AgentListener> {
         byte[] payload = message.serialize();
         List<Segment> segments = toSegments(protocolWithFlag, payload);
 
-        // The segments are written on the channel's event loop, without holding a lock: completing a write can run
-        // the listeners of earlier writes on the writing thread, and onSuccess takes the agent lock. A writer that
-        // held the channel lock there would invert the agent -> channel order of writers that hold the agent lock
-        // (e.g. ChainSyncServerAgent.onNewDataAvailable) and deadlock both threads. Netty runs event-loop tasks in
-        // order, so the segments of one message reach the channel together and messages keep their order.
-        EventLoop eventLoop = ch.eventLoop();
-        if (eventLoop.inEventLoop()) {
-            writeSegments(ch, segments, onSuccess);
+        // Completing a write can run the listeners of earlier writes on the thread whose flush completes them, and
+        // onSuccess takes the agent lock. No lock may be held there: a writer holding the channel lock would invert
+        // the agent -> channel order of writers that hold the agent lock (e.g. ChainSyncServerAgent
+        // .onNewDataAvailable) and deadlock both threads. That happens only on the event loop, where the pipeline
+        // runs inline, so it writes without the lock. Elsewhere Netty only queues the writes (counted against the
+        // channel's writability) and runs them and their listeners on the event loop; the channel lock there keeps
+        // the segments of a message together.
+        List<ChannelFuture> writes;
+        if (ch.eventLoop().inEventLoop()) {
+            writes = writeSegments(ch, segments);
         } else {
-            try {
-                eventLoop.execute(() -> writeSegments(ch, segments, onSuccess));
-            } catch (RejectedExecutionException e) {
-                log.warn("Cannot write message for protocol {}: event loop is shut down", getProtocolId());
+            synchronized (ch) {
+                writes = writeSegments(ch, segments);
             }
         }
+        addListeners(writes, onSuccess);
     }
 
     private List<Segment> toSegments(int protocolWithFlag, byte[] payload) {
@@ -152,13 +152,21 @@ public abstract class Agent<T extends AgentListener> {
                 .build();
     }
 
-    // Called on the event loop only. onSuccess runs once, after the last segment is written.
-    private void writeSegments(Channel ch, List<Segment> segments, Runnable onSuccess) {
-        int totalSegments = segments.size();
+    private static List<ChannelFuture> writeSegments(Channel ch, List<Segment> segments) {
+        List<ChannelFuture> writes = new ArrayList<>(segments.size());
+        for (Segment segment : segments)
+            writes.add(ch.write(segment));
+        ch.flush();
+        return writes;
+    }
+
+    // onSuccess runs once, after the last segment is written
+    private void addListeners(List<ChannelFuture> writes, Runnable onSuccess) {
+        int totalSegments = writes.size();
         for (int i = 0; i < totalSegments; i++) {
             final boolean isLastSegment = (i == totalSegments - 1);
             final int segmentIndex = i;
-            ch.write(segments.get(i)).addListener(future -> {
+            writes.get(i).addListener(future -> {
                 if (future.isSuccess()) {
                     if (isLastSegment && onSuccess != null) {
                         onSuccess.run();
@@ -170,7 +178,6 @@ public abstract class Agent<T extends AgentListener> {
                 }
             });
         }
-        ch.flush();
     }
 
     private int calculateElapsedTime() {
