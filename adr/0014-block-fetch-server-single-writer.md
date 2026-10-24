@@ -2,7 +2,7 @@
 
 Date: 2026-10-11
 
-Status: Proposed
+Status: Accepted
 
 Related: [issue #207](https://github.com/bloxbean/yaci/issues/207). Found while validating
 [PR #206](https://github.com/bloxbean/yaci/pull/206) in Yano.
@@ -75,7 +75,9 @@ of the batch went into `pendingMessages`, and the event loop moved it to Netty's
 buffer one message at a time while the channel was writable. Now it goes into the outbound
 buffer straight away, as encoded buffers rather than `Message` objects. Either way the amount
 held is bounded by the range the client requested, and the client limits its bytes in flight.
-No new limit or setting is added.
+No new limit or setting is added. That bound relies on an honest client: a peer that requests
+large ranges without reading them can still make the server hold them in memory. Bounding that
+is left to a follow-up.
 
 If the channel closes during a batch, the loop stops reading blocks. Without this check every
 remaining block would be read and its write rejected with a warning, which the old queue
@@ -97,12 +99,13 @@ hid.
 
 ### D4: No change to `Agent`
 
-`Agent.writeSegmentedMessage()` stays as it is. Its `synchronized (ch)` serialises the calls
-but not the order in which writes from different threads reach the pipeline, which is how the
-segments in #207 were split. After D1, a whole message from one thread is queued in order. The other server agent that sends messages larger than one segment,
-`AppChainSyncServerAgent` (`MsgBlocks`), already writes only on the event loop, so its segments
-are written together. If another agent later writes large messages from more than one thread,
-the fix belongs in that agent's write path, as here.
+This change does not touch `Agent`'s write path. The segments in #207 were split because two
+threads wrote block-fetch messages; after D1 one thread writes them, so each message's segments
+are queued together and in order. (`Agent`'s write path was later reworked for a lock-order
+deadlock in #226; that does not change this.) The other server agent that sends messages larger
+than one segment, `AppChainSyncServerAgent` (`MsgBlocks`), already writes only on the event
+loop, so its segments are written together. If another agent later writes large messages from
+more than one thread, the fix belongs in that agent's write path, as here.
 
 ## Alternatives considered
 
@@ -122,13 +125,14 @@ the fix belongs in that agent's write path, as here.
   Haskell or Yano node no longer drops the connection with decode errors.
 - Store reads no longer run on the event loop, and the event loop no longer waits on the agent's
   monitor.
-- An idle connection no longer keeps an executor thread busy.
+- An idle connection no longer keeps an executor thread busy, and a closed connection's executor
+  thread is stopped.
 - The public API, configuration and wire format are unchanged.
 
 ## Validation
 
-- `BlockFetchServerAgentConcurrencyTest.pipelinedBatchesStayInOrderAndUninterleavedUnderBackpressure` runs 20 pipelined ranges of 5 blocks
-  (20 KB to 200 KB each) over a Netty local channel. Each store read makes the channel not
+- `BlockFetchServerAgentConcurrencyTest.pipelinedBatchesStayInOrderAndUninterleavedUnderBackpressure`
+  runs 20 pipelined ranges of 5 blocks (20 KB to 200 KB each) over a Netty local channel. Each store read makes the channel not
   writable, and the event loop makes it writable again shortly after, as a slow peer would. The
   test reassembles the block-fetch segments the peer receives and compares them with the
   expected batches. On the code before this change it failed in 3 of 3 runs, either at byte
@@ -137,7 +141,11 @@ the fix belongs in that agent's write path, as here.
   passes deterministically, because only one thread writes.
 - `idleAgentStopsPollingOnceItsRequestsAreAnswered` checks that an agent whose requests are
   answered stops touching the channel. It fails on the old code, which kept polling.
+- `disconnectStopsTheWorkerThread` checks that a disconnect stops the agent's executor thread
+  and that a request arriving after it is dropped.
 - The existing yaci test suite passes.
 - Yano is built against this change and run as a preprod relay that syncs from a Haskell node,
-  with a Haskell node downstream. Block-fetch decode failures and `WrongBlock` are counted and
-  compared with the #206 validation run.
+  with a Haskell node downstream. Compared with the #206 validation run, the downstream's
+  `DecoderFailure` exits went from 140 to 0 and its `WrongBlock` exits from 3 to 0. It synced
+  from block 1,028,420 to the tip (5,278,547) with a tip hash matching the relay's, and relay
+  CPU at the tip stayed under 1%.

@@ -35,6 +35,7 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -191,6 +192,27 @@ class BlockFetchServerAgentConcurrencyTest {
         Thread.sleep(200);
 
         verify(channel, never()).isActive();
+    }
+
+    @Test
+    void disconnectStopsTheWorkerThread() throws Exception {
+        ChainState chainState = mock(ChainState.class);
+        AtomicReference<Thread> worker = new AtomicReference<>();
+        when(chainState.findBlocksInRange(any(), any())).thenAnswer(invocation -> {
+            worker.set(Thread.currentThread());
+            return List.of();
+        });
+        agent = new BlockFetchServerAgent(chainState);
+        agent.setChannel(new EmbeddedChannel());
+        RequestRange request = new RequestRange(new Point(1, "00"), new Point(1, "00"));
+        agent.receiveResponse(request);
+        verify(chainState, timeout(5_000)).findBlocksInRange(any(), any());
+
+        agent.disconnected();
+
+        worker.get().join(5_000);
+        assertThat(worker.get().isAlive()).isFalse();
+        agent.receiveResponse(request); // a request after the disconnect is dropped
     }
 
     /** Appends one message and counts its wire size: an 8-byte mux header per segment of at most 65535 bytes. */

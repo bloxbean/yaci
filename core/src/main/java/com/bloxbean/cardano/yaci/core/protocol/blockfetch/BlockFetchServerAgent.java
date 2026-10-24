@@ -76,7 +76,11 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
     // The executor is the only thread that writes block-fetch messages, so they reach the peer in order (ADR 0014)
     private void maybeStartProcessing() {
         if (!processing.get() && !requestQueue.isEmpty()) {
-            executor.submit(this::processNext);
+            try {
+                executor.submit(this::processNext);
+            } catch (RejectedExecutionException e) {
+                log.debug("BlockFetch: client disconnected, request not processed");
+            }
         }
     }
 
@@ -253,6 +257,8 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
         log.info("Client disconnected - stopping BlockFetch processing");
         processing.set(false);
         requestQueue.clear();
+        // The agent serves one connection; stop its worker thread
+        shutdown();
         super.disconnected();
     }
 
