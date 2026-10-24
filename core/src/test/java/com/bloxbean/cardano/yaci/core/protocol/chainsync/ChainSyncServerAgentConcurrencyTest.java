@@ -9,6 +9,7 @@ import com.bloxbean.cardano.yaci.core.storage.ChainState;
 import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import io.netty.channel.*;
+import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
 import io.netty.util.concurrent.Future;
@@ -371,6 +372,8 @@ class ChainSyncServerAgentConcurrencyTest {
     // ---- Stub Channel that simulates immediate successful writes ----
 
     static class StubChannel implements Channel {
+        // Agent writes on the channel's event loop; an embedded loop counts every thread as the loop
+        private static final EventLoop EVENT_LOOP = new EmbeddedChannel().eventLoop();
         private final StubChannelFuture successFuture = new StubChannelFuture();
 
         @Override public ChannelFuture writeAndFlush(Object msg) {
@@ -381,7 +384,7 @@ class ChainSyncServerAgentConcurrencyTest {
 
         // -- Remaining Channel methods (unused, minimal stubs) --
         @Override public ChannelId id() { return null; }
-        @Override public EventLoop eventLoop() { return null; }
+        @Override public EventLoop eventLoop() { return EVENT_LOOP; }
         @Override public Channel parent() { return null; }
         @Override public ChannelConfig config() { return null; }
         @Override public boolean isOpen() { return true; }

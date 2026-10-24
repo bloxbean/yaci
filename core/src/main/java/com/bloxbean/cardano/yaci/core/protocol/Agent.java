@@ -2,13 +2,14 @@ package com.bloxbean.cardano.yaci.core.protocol;
 
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
+import io.netty.channel.EventLoop;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.RejectedExecutionException;
 
 @Slf4j
 public abstract class Agent<T extends AgentListener> {
@@ -102,78 +103,62 @@ public abstract class Agent<T extends AgentListener> {
         }
 
         byte[] payload = message.serialize();
+        List<Segment> segments = toSegments(protocolWithFlag, payload);
 
-        // Handle large payloads with automatic segmentation
-        if (payload.length > 65535) {
-            log.info("Large payload detected ({} bytes) - using mux-level segmentation", payload.length);
-            writeSegmentedMessage(ch, protocolWithFlag, payload, onSuccess);
-            return;
+        // The segments are written on the channel's event loop, without holding a lock: completing a write can run
+        // the listeners of earlier writes on the writing thread, and onSuccess takes the agent lock. A writer that
+        // held the channel lock there would invert the agent -> channel order of writers that hold the agent lock
+        // (e.g. ChainSyncServerAgent.onNewDataAvailable) and deadlock both threads. Netty runs event-loop tasks in
+        // order, so the segments of one message reach the channel together and messages keep their order.
+        EventLoop eventLoop = ch.eventLoop();
+        if (eventLoop.inEventLoop()) {
+            writeSegments(ch, segments, onSuccess);
+        } else {
+            try {
+                eventLoop.execute(() -> writeSegments(ch, segments, onSuccess));
+            } catch (RejectedExecutionException e) {
+                log.warn("Cannot write message for protocol {}: event loop is shut down", getProtocolId());
+            }
         }
-
-        // Normal single segment message
-        writeSingleSegment(ch, protocolWithFlag, payload, onSuccess);
     }
 
-    private void writeSingleSegment(Channel ch, int protocolWithFlag, byte[] payload, Runnable onSuccess) {
-        int elapseTime = calculateElapsedTime();
+    private List<Segment> toSegments(int protocolWithFlag, byte[] payload) {
+        final int MAX_SEGMENT_SIZE = 65535;
 
-        Segment segment = Segment.builder()
-                .timestamp(elapseTime)
+        // Handle large payloads with automatic segmentation
+        if (payload.length <= MAX_SEGMENT_SIZE)
+            return List.of(segment(protocolWithFlag, payload));
+
+        final int totalSegments = (payload.length + MAX_SEGMENT_SIZE - 1) / MAX_SEGMENT_SIZE;
+        log.info("Segmenting large message: {} bytes into {} segments", payload.length, totalSegments);
+
+        List<Segment> segments = new ArrayList<>(totalSegments);
+        for (int i = 0; i < totalSegments; i++) {
+            int offset = i * MAX_SEGMENT_SIZE;
+            int segmentSize = Math.min(MAX_SEGMENT_SIZE, payload.length - offset);
+
+            byte[] segmentPayload = new byte[segmentSize];
+            System.arraycopy(payload, offset, segmentPayload, 0, segmentSize);
+            segments.add(segment(protocolWithFlag, segmentPayload));
+        }
+        return segments;
+    }
+
+    private Segment segment(int protocolWithFlag, byte[] payload) {
+        return Segment.builder()
+                .timestamp(calculateElapsedTime())
                 .protocol(protocolWithFlag)
                 .payload(payload)
                 .build();
-
-        // Synchronize on channel to prevent concurrent writes from different agents. The listener is attached
-        // after the lock is released: a write that has already completed runs it on this thread, and onSuccess
-        // takes the agent lock. Running it under the channel lock inverts the agent -> channel order of writers
-        // that hold the agent lock (e.g. ChainSyncServerAgent.onNewDataAvailable) and deadlocks both threads.
-        ChannelFuture write;
-        synchronized (ch) {
-            write = ch.writeAndFlush(segment);
-        }
-        write.addListener(future -> {
-            if (future.isSuccess()) {
-                if (onSuccess != null) onSuccess.run();
-            } else {
-                log.error("Failed to send message for protocol {}", getProtocolId(), future.cause());
-            }
-        });
     }
 
-    private void writeSegmentedMessage(Channel ch, int protocolWithFlag, byte[] payload, Runnable onSuccess) {
-        final int MAX_SEGMENT_SIZE = 65535;
-        final int totalSegments = (payload.length + MAX_SEGMENT_SIZE - 1) / MAX_SEGMENT_SIZE;
-
-        log.info("Segmenting large message: {} bytes into {} segments", payload.length, totalSegments);
-
-        // Writes stay under the channel lock so segments of different agents do not interleave; listeners are
-        // attached after it is released, for the same reason as in writeSingleSegment.
-        List<ChannelFuture> writes = new ArrayList<>(totalSegments);
-        synchronized (ch) {
-            for (int i = 0; i < totalSegments; i++) {
-                int offset = i * MAX_SEGMENT_SIZE;
-                int segmentSize = Math.min(MAX_SEGMENT_SIZE, payload.length - offset);
-
-                byte[] segmentPayload = new byte[segmentSize];
-                System.arraycopy(payload, offset, segmentPayload, 0, segmentSize);
-
-                int elapseTime = calculateElapsedTime();
-
-                Segment segment = Segment.builder()
-                        .timestamp(elapseTime)
-                        .protocol(protocolWithFlag)
-                        .payload(segmentPayload)
-                        .build();
-
-                log.debug("Sending segment {}/{} - {} bytes", i + 1, totalSegments, segmentSize);
-
-                writes.add(ch.writeAndFlush(segment));
-            }
-        }
+    // Called on the event loop only. onSuccess runs once, after the last segment is written.
+    private void writeSegments(Channel ch, List<Segment> segments, Runnable onSuccess) {
+        int totalSegments = segments.size();
         for (int i = 0; i < totalSegments; i++) {
             final boolean isLastSegment = (i == totalSegments - 1);
             final int segmentIndex = i;
-            writes.get(i).addListener(future -> {
+            ch.write(segments.get(i)).addListener(future -> {
                 if (future.isSuccess()) {
                     if (isLastSegment && onSuccess != null) {
                         onSuccess.run();
@@ -181,10 +166,11 @@ public abstract class Agent<T extends AgentListener> {
                     log.debug("Segment {}/{} sent successfully", segmentIndex + 1, totalSegments);
                 } else {
                     log.error("Failed to send segment {}/{} for protocol {}",
-                             segmentIndex + 1, totalSegments, getProtocolId(), future.cause());
+                            segmentIndex + 1, totalSegments, getProtocolId(), future.cause());
                 }
             });
         }
+        ch.flush();
     }
 
     private int calculateElapsedTime() {
