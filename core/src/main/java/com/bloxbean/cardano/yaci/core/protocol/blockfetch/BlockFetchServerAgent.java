@@ -19,6 +19,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
 
     private static final int MAX_QUEUE_SIZE = 100;
+    private static final ThreadFactory PLATFORM_THREADS =
+            Thread.ofPlatform().name("yaci-blockfetch-server-", 0).daemon(false).factory();
+    private static final ThreadFactory VIRTUAL_THREADS =
+            Thread.ofVirtual().name("yaci-blockfetch-server-", 0).factory();
     private final ChainState chainState;
     private final BlockingQueue<RequestRange> requestQueue;
     private final ExecutorService executor;
@@ -31,7 +35,8 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
         this.chainState = chainState;
         this.currentState = BlockfetchState.Idle;
         this.requestQueue = new ArrayBlockingQueue<>(MAX_QUEUE_SIZE);
-        this.executor = Executors.newSingleThreadExecutor();
+        this.executor = Executors.newSingleThreadExecutor(
+                YaciConfig.INSTANCE.isServerVirtualThreads() ? VIRTUAL_THREADS : PLATFORM_THREADS);
     }
 
 
