@@ -2,7 +2,7 @@
 
 Date: 2026-10-10
 
-Status: Proposed
+Status: Accepted
 
 Related: [issue #205](https://github.com/bloxbean/yaci/issues/205),
 [PR #206](https://github.com/bloxbean/yaci/pull/206).
@@ -130,7 +130,9 @@ await-reply flag in the baseline, even when the peer sends it with outstanding
 requests. Treat it as a new request-accounting interval: prior unanswered
 obligations are discarded without final replies. The existing response queue is
 not cleared. Preserve this permissive behavior without declaring the sequence
-protocol-legal or extending I2 to it. After processing the intersection, the
+protocol-legal or extending I2 to it. A found intersection also clears the last
+sent point, so the next `RequestNext` rolls the client back to the new
+intersection rather than continuing from the old position. After processing the intersection, the
 agent selects `Intersect` if the intersect reply is first in the queue, or
 `CanAwait` if an older non-intersect reply, such as `AwaitReply`, is still at its
 head. Queue draining then

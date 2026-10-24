@@ -527,6 +527,25 @@ class ChainSyncServerAgentConcurrencyTest {
     }
 
     @Test
+    void secondIntersection_restartsFromTheNewIntersection() {
+        populateChain(100, 110);
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(100)}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(102));
+        channel.written.clear();
+
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(105)}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+
+        assertThat(channel.writtenMessageIds()).containsExactly(INTERSECT_FOUND, ROLL_BACKWARD, ROLL_FORWARD);
+        assertThat(channel.writtenReplies().get(1)).isEqualTo("RB " + chainState.pointAt(105).getSlot());
+        assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(106));
+    }
+
+    @Test
     void agentStateUpdatesAreVisibleAcrossNettyAndProducerThreads() throws Exception {
         var currentState = Agent.class.getDeclaredField("currentState");
         assertThat(Modifier.isVolatile(currentState.getModifiers())).isTrue();

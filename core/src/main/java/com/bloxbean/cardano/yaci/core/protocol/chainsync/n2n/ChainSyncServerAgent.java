@@ -190,8 +190,9 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
             }
 
             if (intersectionPoint != null) {
-                // Found intersection
+                // Found intersection: the next RequestNext rolls the client back to it, even on a re-intersection
                 this.intersectedPoint = intersectionPoint;
+                this.lastSentPoint = null;
 
                 Tip tip = createTipFromChainTip(currentTip);
                 IntersectFound intersectFound = new IntersectFound(intersectionPoint, tip);
