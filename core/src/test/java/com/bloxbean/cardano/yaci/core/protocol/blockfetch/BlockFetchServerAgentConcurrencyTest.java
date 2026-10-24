@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
 
+import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.network.handlers.MiniProtoRequestDataEncoder;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.BatchDone;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.MsgBlock;
@@ -35,7 +36,6 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -195,24 +195,76 @@ class BlockFetchServerAgentConcurrencyTest {
     }
 
     @Test
-    void disconnectStopsTheWorkerThread() throws Exception {
+    void pipelinedBatchesStayInOrderOnVirtualThreads() throws Exception {
+        YaciConfig.INSTANCE.setServerVirtualThreads(true);
+        try {
+            pipelinedBatchesStayInOrderAndUninterleavedUnderBackpressure();
+        } finally {
+            YaciConfig.INSTANCE.setServerVirtualThreads(false);
+        }
+    }
+
+    @Test
+    void workerThreadIsNamedAndVirtualOnlyWhenConfigured() throws Exception {
+        assertThat(workerThread().isVirtual()).isFalse();
+
+        YaciConfig.INSTANCE.setServerVirtualThreads(true);
+        try {
+            Thread worker = workerThread();
+            assertThat(worker.isVirtual()).isTrue();
+            assertThat(worker.getName()).startsWith("yaci-blockfetch-server-");
+        } finally {
+            YaciConfig.INSTANCE.setServerVirtualThreads(false);
+        }
+    }
+
+    /** Starts an agent, answers one request and returns the thread that ran it. */
+    private Thread workerThread() throws Exception {
+        CompletableFuture<Thread> worker = new CompletableFuture<>();
+        BlockFetchServerAgent serverAgent = new BlockFetchServerAgent(chainStateRecordingWorker(worker));
+        try {
+            serverAgent.setChannel(new EmbeddedChannel());
+            serverAgent.receiveResponse(new RequestRange(new Point(1, "00"), new Point(1, "00")));
+            return worker.get(5, TimeUnit.SECONDS);
+        } finally {
+            serverAgent.shutdown();
+        }
+    }
+
+    /** A store with no blocks that completes {@code worker} with the thread answering a request. */
+    private static ChainState chainStateRecordingWorker(CompletableFuture<Thread> worker) {
         ChainState chainState = mock(ChainState.class);
-        AtomicReference<Thread> worker = new AtomicReference<>();
         when(chainState.findBlocksInRange(any(), any())).thenAnswer(invocation -> {
-            worker.set(Thread.currentThread());
+            worker.complete(Thread.currentThread());
             return List.of();
         });
-        agent = new BlockFetchServerAgent(chainState);
+        return chainState;
+    }
+
+    @Test
+    void disconnectStopsTheWorkerThread() throws Exception {
+        CompletableFuture<Thread> worker = new CompletableFuture<>();
+        agent = new BlockFetchServerAgent(chainStateRecordingWorker(worker));
         agent.setChannel(new EmbeddedChannel());
         RequestRange request = new RequestRange(new Point(1, "00"), new Point(1, "00"));
         agent.receiveResponse(request);
-        verify(chainState, timeout(5_000)).findBlocksInRange(any(), any());
+        Thread thread = worker.get(5, TimeUnit.SECONDS);
 
         agent.disconnected();
 
-        worker.get().join(5_000);
-        assertThat(worker.get().isAlive()).isFalse();
+        thread.join(5_000);
+        assertThat(thread.isAlive()).isFalse();
         agent.receiveResponse(request); // a request after the disconnect is dropped
+    }
+
+    @Test
+    void disconnectStopsTheWorkerThreadOnVirtualThreads() throws Exception {
+        YaciConfig.INSTANCE.setServerVirtualThreads(true);
+        try {
+            disconnectStopsTheWorkerThread();
+        } finally {
+            YaciConfig.INSTANCE.setServerVirtualThreads(false);
+        }
     }
 
     /** Appends one message and counts its wire size: an 8-byte mux header per segment of at most 65535 bytes. */
