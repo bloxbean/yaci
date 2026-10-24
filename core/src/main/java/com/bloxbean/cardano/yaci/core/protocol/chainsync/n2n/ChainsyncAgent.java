@@ -221,6 +221,9 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
     }
 
     private void onRollBackward(Rollbackward rollBackward) {
+        // A Rollbackward answers a RequestNext just like a RollForward, but it is never confirmed via confirmBlock()
+        releaseOutstandingRequest();
+
         if (rollBackward.getPoint().equals(currentPoint)) {//Rollback on same point. So don't rollback. But call listeners
             getAgentListeners().stream().forEach(
                     chainSyncAgentListener -> {
@@ -361,13 +364,14 @@ public class ChainsyncAgent extends Agent<ChainSyncAgentListener> {
             this.requestedPoint = null;
         }
 
-        int outstanding = outstandingRequests.decrementAndGet();
-        if (outstanding < 0) {
-            outstandingRequests.set(0);
-        }
+        releaseOutstandingRequest();
 
         if (log.isDebugEnabled())
             log.debug("Block confirmed: {}, outstanding requests: {}", confirmedPoint, outstandingRequests.get());
+    }
+
+    private void releaseOutstandingRequest() {
+        outstandingRequests.updateAndGet(outstanding -> Math.max(0, outstanding - 1));
     }
 
     /**
