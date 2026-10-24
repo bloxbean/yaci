@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.protocol.txsubmission;
 
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.*;
+import com.bloxbean.cardano.yaci.core.protocol.txsubmission.serializers.TxSubmissionMessagesSerializers.ReplyTxsSerializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
@@ -417,6 +418,24 @@ class TxSubmissionServerAgentTest {
 
         // The client leaves out transactions it no longer has
         agent.receiveResponse(replyTxs(1));
+
+        assertEquals(0, agent.getOutstandingTxCount());
+        RequestTxIds next = assertInstanceOf(RequestTxIds.class, agent.buildNextMessage());
+        assertTrue(next.isBlocking());
+        assertEquals(3, next.getAckTxIds());
+    }
+
+    @Test
+    void testEmptyReplyTxsFromTheWire_acknowledgesAllAndContinues() {
+        agent.receiveResponse(new Init());
+        agent.buildNextMessage();
+        agent.receiveResponse(replyTxIds("tx1", "tx2", "tx3"));
+        assertInstanceOf(RequestTxs.class, agent.buildNextMessage());
+
+        // The client no longer has any of the requested transactions; decoded as a peer's reply would be
+        ReplyTxs empty = ReplyTxsSerializer.INSTANCE.deserialize(new ReplyTxs().serialize());
+        assertTrue(empty.getTxns().isEmpty());
+        agent.receiveResponse(empty);
 
         assertEquals(0, agent.getOutstandingTxCount());
         RequestTxIds next = assertInstanceOf(RequestTxIds.class, agent.buildNextMessage());

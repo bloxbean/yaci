@@ -207,19 +207,17 @@ public class TxSubmissionMessagesSerializers {
             Array txArray = new Array();
             txArray.setChunked(true);
 
-            if (replyTxs.getTxns() != null) {
-                replyTxs.getTxns().forEach(tx -> {
+            replyTxs.getTxns().forEach(tx -> {
 
-                    var transactions = new Array();
-                    var txBody = new ByteString(tx.getTx());
-                    txBody.setTag(24L);
+                var transactions = new Array();
+                var txBody = new ByteString(tx.getTx());
+                txBody.setTag(24L);
 
-                    transactions.add(new UnsignedInteger(tx.getEra().getValue())); // Era
-                    transactions.add(txBody);
+                transactions.add(new UnsignedInteger(tx.getEra().getValue())); // Era
+                transactions.add(txBody);
 
-                    txArray.add(transactions);
-                });
-            }
+                txArray.add(transactions);
+            });
 
             txArray.add(SimpleValue.BREAK);
             array.add(txArray);
