@@ -18,6 +18,7 @@ import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -201,13 +202,15 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 // Found intersection
                 // The offered points older than the intersection are on the client's chain too
                 long intersectionSlot = intersectionPoint.getSlot();
-                clientChain.clear();
-                Arrays.stream(clientPoints)
+                List<Point> older = Arrays.stream(clientPoints)
                         .filter(point -> point != null && point.getSlot() < intersectionSlot)
                         .sorted(Comparator.comparingLong(Point::getSlot))
-                        .forEach(clientChain::addLast);
+                        .toList();
+                // Only the newest are inserted: ArrayDeque never shrinks, so a large offer must not grow it
+                clientChain.clear();
+                int first = Math.max(0, older.size() - (MAX_CLIENT_CHAIN_POINTS - 1));
+                clientChain.addAll(older.subList(first, older.size()));
                 clientChain.addLast(intersectionPoint);
-                trimClientChain();
                 // The next RequestNext is answered with a Rollbackward to the intersection, even on a re-intersection
                 lastSentPoint = null;
 
