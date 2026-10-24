@@ -556,10 +556,10 @@ class ChainSyncServerAgentConcurrencyTest {
     }
 
     /**
-     * A drain scheduled before the client's Done runs after it. It must not write or turn Done back into Idle.
+     * A drain scheduled before the client's Done runs after it. Done resets the agent, so the drain writes nothing.
      */
     @Test
-    void drainScheduledBeforeDone_keepsAgentDone() throws Exception {
+    void drainScheduledBeforeDone_writesNothingMore() throws Exception {
         DefaultEventLoop loop = new DefaultEventLoop();
         try {
             channel.useEventLoop(loop);
@@ -583,14 +583,14 @@ class ChainSyncServerAgentConcurrencyTest {
             release.countDown();
             loop.submit(() -> { }).sync();
 
-            assertThat(agent.isDone()).isTrue();
+            assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Idle);
             assertThat(channel.writtenMessageIds())
                     .containsExactly(INTERSECT_FOUND, ROLL_BACKWARD, AWAIT_REPLY, ROLL_FORWARD, AWAIT_REPLY, ROLL_FORWARD);
 
             chainState.addBlock(113);
             agent.onNewDataAvailable();
             loop.submit(() -> { }).sync();
-            assertThat(agent.isDone()).isTrue();
+            assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Idle);
             assertThat(channel.writtenMessageIds()).hasSize(6);
         } finally {
             loop.shutdownGracefully().sync();
@@ -682,6 +682,25 @@ class ChainSyncServerAgentConcurrencyTest {
         var field = ChainSyncServerAgent.class.getDeclaredField("clientChain");
         field.setAccessible(true);
         return ((Collection<?>) field.get(agent)).size();
+    }
+
+    /** A Haskell node ends the protocol on demotion to warm and starts it again on the same connection. */
+    @Test
+    void msgDone_letsTheClientStartTheProtocolAgainOnTheSameConnection() {
+        populateChain(100, 110);
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(100)}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        channel.written.clear();
+
+        deliverInbound(new ChainSyncMsgDone());
+        assertThat(agent.isDone()).isFalse();
+        assertThat(agent.getCurrentState()).isEqualTo(ChainSyncState.Idle);
+
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(105)}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 105", "RF 106/0");
     }
 
     @Test

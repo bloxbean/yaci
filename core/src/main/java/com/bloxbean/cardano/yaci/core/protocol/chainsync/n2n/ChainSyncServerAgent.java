@@ -67,7 +67,10 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
     public synchronized void receiveResponse(Message message) {
         State oldState = currentState;
         if (message instanceof ChainSyncMsgDone) {
-            currentState = ChainSyncState.Done;
+            // A Haskell node ends the protocol when it demotes the peer from hot to warm and starts it again on the
+            // same connection when it promotes it back, so the next FindIntersect must be answered
+            log.info("ChainSync client sent MsgDone; ready for the protocol to restart on this connection");
+            reset();
         } else {
             processResponse(message);
             updateState();
@@ -83,7 +86,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
      * producer calling {@link #onNewDataAvailable()}) is queued as an event-loop task, so writing it directly
      * could let the reply to a later request, written inline by the inbound handler, overtake it.
      * <p>
-     * Once the client has sent Done nothing more is written; a drain scheduled earlier must not revive the agent.
+     * The client's Done resets the agent and drops queued replies, so a drain scheduled earlier writes nothing.
      */
     @Override
     public synchronized void sendNextMessage() {

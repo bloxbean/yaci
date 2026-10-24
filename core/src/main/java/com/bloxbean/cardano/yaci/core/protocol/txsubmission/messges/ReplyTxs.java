@@ -9,16 +9,14 @@ import java.util.List;
 
 @Getter
 public class ReplyTxs implements Message {
-    private List<Tx> txns;
+    // Never null: a reply may hold no transactions, when the client no longer has any of those requested
+    private List<Tx> txns = new ArrayList<>();
 
     public ReplyTxs() {
 
     }
 
     public void addTx(Tx tx) {
-        if (txns == null)
-            txns = new ArrayList<>();
-
         txns.add(tx);
     }
 

@@ -121,7 +121,11 @@ unanswered-request count; do not force both into one shared mutable counter.
 Changing client pipeline strategies or the generic `Agent`/`State` contract is
 outside this decision.
 
-Preserve the reviewed server's handling of received `Done`. This decision does
+Preserve the reviewed server's handling of received `Done`. (Changed later in #229:
+a received `Done` resets the agent, because a Haskell node restarts the protocol
+on the same connection when it promotes the peer from warm to hot. The reset
+drops queued replies, so a drain scheduled before `Done` still writes nothing.)
+This decision does
 not introduce stricter rejection of out-of-order peer messages. Such protocol
 validation requires a separate decision and compatibility tests.
 
