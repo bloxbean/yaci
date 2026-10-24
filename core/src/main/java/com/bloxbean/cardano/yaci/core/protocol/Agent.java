@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.core.protocol;
 
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelPromise;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
@@ -101,79 +102,80 @@ public abstract class Agent<T extends AgentListener> {
         }
 
         byte[] payload = message.serialize();
+        List<Segment> segments = toSegments(protocolWithFlag, payload);
 
-        // Handle large payloads with automatic segmentation
-        if (payload.length > 65535) {
-            log.info("Large payload detected ({} bytes) - using mux-level segmentation", payload.length);
-            writeSegmentedMessage(ch, protocolWithFlag, payload, onSuccess);
-            return;
+        // Completing a write runs the listeners of earlier writes on the flushing thread, and onSuccess takes the agent
+        // lock, so the event loop must not hold the channel lock here: writers holding the agent lock (e.g.
+        // ChainSyncServerAgent.onNewDataAvailable) take the locks in the opposite order. Off the event loop Netty only
+        // queues the writes, still counted against writability; the lock keeps a message's segments together there.
+        List<ChannelPromise> promises = newPromises(ch, segments.size(), onSuccess);
+        if (ch.eventLoop().inEventLoop()) {
+            writeSegments(ch, segments, promises);
+        } else {
+            synchronized (ch) {
+                writeSegments(ch, segments, promises);
+            }
         }
-
-        // Normal single segment message
-        writeSingleSegment(ch, protocolWithFlag, payload, onSuccess);
     }
 
-    private void writeSingleSegment(Channel ch, int protocolWithFlag, byte[] payload, Runnable onSuccess) {
-        int elapseTime = calculateElapsedTime();
+    private List<Segment> toSegments(int protocolWithFlag, byte[] payload) {
+        final int MAX_SEGMENT_SIZE = 65535;
 
-        Segment segment = Segment.builder()
-                .timestamp(elapseTime)
+        // Handle large payloads with automatic segmentation
+        if (payload.length <= MAX_SEGMENT_SIZE)
+            return List.of(segment(protocolWithFlag, payload));
+
+        final int totalSegments = (payload.length + MAX_SEGMENT_SIZE - 1) / MAX_SEGMENT_SIZE;
+        log.info("Segmenting large message: {} bytes into {} segments", payload.length, totalSegments);
+
+        List<Segment> segments = new ArrayList<>(totalSegments);
+        for (int i = 0; i < totalSegments; i++) {
+            int offset = i * MAX_SEGMENT_SIZE;
+            int segmentSize = Math.min(MAX_SEGMENT_SIZE, payload.length - offset);
+
+            byte[] segmentPayload = new byte[segmentSize];
+            System.arraycopy(payload, offset, segmentPayload, 0, segmentSize);
+            segments.add(segment(protocolWithFlag, segmentPayload));
+        }
+        return segments;
+    }
+
+    private Segment segment(int protocolWithFlag, byte[] payload) {
+        return Segment.builder()
+                .timestamp(calculateElapsedTime())
                 .protocol(protocolWithFlag)
                 .payload(payload)
                 .build();
-
-        // Synchronize on channel to prevent concurrent writes from different agents
-        synchronized (ch) {
-            ch.writeAndFlush(segment).addListener(future -> {
-                if (future.isSuccess()) {
-                    if (onSuccess != null) onSuccess.run();
-                } else {
-                    log.error("Failed to send message for protocol {}", getProtocolId(), future.cause());
-                }
-            });
-        }
     }
 
-    private void writeSegmentedMessage(Channel ch, int protocolWithFlag, byte[] payload, Runnable onSuccess) {
-        final int MAX_SEGMENT_SIZE = 65535;
-        final int totalSegments = (payload.length + MAX_SEGMENT_SIZE - 1) / MAX_SEGMENT_SIZE;
+    private static void writeSegments(Channel ch, List<Segment> segments, List<ChannelPromise> promises) {
+        int last = segments.size() - 1;
+        for (int i = 0; i < last; i++)
+            ch.write(segments.get(i), promises.get(i));
+        ch.writeAndFlush(segments.get(last), promises.get(last));
+    }
 
-        log.info("Segmenting large message: {} bytes into {} segments", payload.length, totalSegments);
-
-        synchronized (ch) {
-            for (int i = 0; i < totalSegments; i++) {
-                int offset = i * MAX_SEGMENT_SIZE;
-                int segmentSize = Math.min(MAX_SEGMENT_SIZE, payload.length - offset);
-
-                byte[] segmentPayload = new byte[segmentSize];
-                System.arraycopy(payload, offset, segmentPayload, 0, segmentSize);
-
-                int elapseTime = calculateElapsedTime();
-
-                Segment segment = Segment.builder()
-                        .timestamp(elapseTime)
-                        .protocol(protocolWithFlag)
-                        .payload(segmentPayload)
-                        .build();
-
-                final boolean isLastSegment = (i == totalSegments - 1);
-                final int segmentIndex = i;
-
-                log.debug("Sending segment {}/{} - {} bytes", segmentIndex + 1, totalSegments, segmentSize);
-
-                ch.writeAndFlush(segment).addListener(future -> {
-                    if (future.isSuccess()) {
-                        if (isLastSegment && onSuccess != null) {
-                            onSuccess.run();
-                        }
-                        log.debug("Segment {}/{} sent successfully", segmentIndex + 1, totalSegments);
-                    } else {
-                        log.error("Failed to send segment {}/{} for protocol {}",
-                                 segmentIndex + 1, totalSegments, getProtocolId(), future.cause());
+    // Listeners are attached before the writes, so they run in write order; onSuccess runs once, after the last segment
+    private List<ChannelPromise> newPromises(Channel ch, int totalSegments, Runnable onSuccess) {
+        List<ChannelPromise> promises = new ArrayList<>(totalSegments);
+        for (int i = 0; i < totalSegments; i++) {
+            final boolean isLastSegment = (i == totalSegments - 1);
+            final int segmentIndex = i;
+            ChannelPromise promise = ch.newPromise();
+            promise.addListener(future -> {
+                if (future.isSuccess()) {
+                    if (isLastSegment && onSuccess != null) {
+                        onSuccess.run();
                     }
-                });
-            }
+                    log.debug("Segment {}/{} sent successfully", segmentIndex + 1, totalSegments);
+                } else {
+                    log.error("Failed to send segment {}/{} for protocol {}",
+                            segmentIndex + 1, totalSegments, getProtocolId(), future.cause());
+                }
+            });
+            promises.add(promise);
         }
+        return promises;
     }
 
     private int calculateElapsedTime() {

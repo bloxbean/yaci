@@ -11,7 +11,6 @@ import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
-import java.util.Queue;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,8 +24,6 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
     private final ExecutorService executor;
 
     private final AtomicBoolean processing = new AtomicBoolean(false);
-
-    private final Queue<Message> pendingMessages = new ConcurrentLinkedQueue<>();
     private final AtomicInteger counter = new AtomicInteger(0);
 
     public BlockFetchServerAgent(ChainState chainState) {
@@ -76,13 +73,18 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
         return null;
     }
 
-    private synchronized void maybeStartProcessing() {
-        if (!processing.get()) {
-            executor.submit(this::processNext);
+    // The executor is the only thread that writes block-fetch messages, so they reach the peer in order (ADR 0014)
+    private void maybeStartProcessing() {
+        if (!processing.get() && !requestQueue.isEmpty()) {
+            try {
+                executor.submit(this::processNext);
+            } catch (RejectedExecutionException e) {
+                log.debug("BlockFetch: client disconnected, request not processed");
+            }
         }
     }
 
-    private synchronized void processNext() {
+    private void processNext() {
         if (!processing.compareAndSet(false, true)) return;
 
         // Check if channel is still active
@@ -95,6 +97,10 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
         if (!getChannel().isWritable()) {
             log.warn("BlockFetch: Channel not writable, deferring processing. Pending requests: {}", requestQueue.size());
             processing.set(false);
+            // Writability may have returned before processing was cleared
+            if (getChannel().isWritable()) {
+                maybeStartProcessing();
+            }
             return;
         }
 
@@ -102,7 +108,6 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
         try {
             RequestRange request = requestQueue.poll();
             if (request == null) {
-                processing.set(false);
                 return;
             }
 
@@ -148,6 +153,10 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
             counter.incrementAndGet();
             log.info("BATCH STARTED: {} → {} -> batch NO: {} -> pending requests: {}", from, to, counter.get(), requestQueue.size());
             for (Point point : range) {
+                if (!getChannel().isActive()) {
+                    log.info("Channel closed during batch {} → {}. Stopping.", from, to);
+                    break;
+                }
                 byte[] blockHash = HexUtil.decodeHexString(point.getHash());
                 byte[] blockBody = chainState.getBlock(blockHash);
 
@@ -174,37 +183,28 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
                 }
             }
             processing.set(false);
-            executor.submit(this::processNext);
+            maybeStartProcessing();
         }
     }
 
+    // Called on the executor only. While the channel is not writable, Netty's outbound buffer keeps the writes in order.
     private void sendToClient(Message message) {
-        if (getChannel().isWritable()) {
-            if (log.isDebugEnabled()) {
-                byte[] msgBytes = message.serialize();
-                log.debug("Sending {} ({} bytes) to {} - first 20 hex: {}",
-                        message.getClass().getSimpleName(), msgBytes.length,
-                        getChannel().remoteAddress(),
-                        HexUtil.encodeHexString(
-                                java.util.Arrays.copyOf(msgBytes, Math.min(20, msgBytes.length))));
-            }
-            writeMessage(message, null);
-            currentState = currentState.nextState(message);
-        } else {
-            log.warn("Channel not writable. Queuing: {}", message.getClass().getSimpleName());
-            pendingMessages.add(message);
+        if (log.isDebugEnabled()) {
+            byte[] msgBytes = message.serialize();
+            log.debug("Sending {} ({} bytes) to {} - first 20 hex: {}",
+                    message.getClass().getSimpleName(), msgBytes.length,
+                    getChannel().remoteAddress(),
+                    HexUtil.encodeHexString(
+                            java.util.Arrays.copyOf(msgBytes, Math.min(20, msgBytes.length))));
         }
-
+        writeMessage(message, null);
+        currentState = currentState.nextState(message);
     }
 
     @Override
     public void onChannelWritabilityChanged(Channel channel) {
-        while (channel.isWritable() && !pendingMessages.isEmpty()) {
-            sendToClient(pendingMessages.poll());
-        }
-
-        if (!processing.get()) {
-            processNext();
+        if (channel.isWritable()) {
+            maybeStartProcessing();
         }
     }
 
@@ -248,7 +248,6 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
     public void reset() {
         this.currentState = BlockfetchState.Idle;
         requestQueue.clear();
-        pendingMessages.clear();
 
         processing.set(false);
     }
@@ -258,7 +257,8 @@ public class BlockFetchServerAgent extends Agent<BlockfetchAgentListener> {
         log.info("Client disconnected - stopping BlockFetch processing");
         processing.set(false);
         requestQueue.clear();
-        pendingMessages.clear();
+        // The agent serves one connection; stop its worker thread
+        shutdown();
         super.disconnected();
     }
 

@@ -206,7 +206,7 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                         .sorted(Comparator.comparingLong(Point::getSlot))
                         .forEach(clientChain::addLast);
                 clientChain.addLast(intersectionPoint);
-                // The next RequestNext is answered with a Rollbackward to the intersection
+                // The next RequestNext is answered with a Rollbackward to the intersection, even on a re-intersection
                 lastSentPoint = null;
 
                 Tip tip = createTipFromChainTip(currentTip);

@@ -16,6 +16,7 @@ import com.bloxbean.cardano.yaci.core.storage.ChainTip;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import io.netty.channel.*;
+import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
 import io.netty.util.concurrent.Future;
@@ -626,6 +627,25 @@ class ChainSyncServerAgentConcurrencyTest {
     }
 
     @Test
+    void secondIntersection_restartsFromTheNewIntersection() {
+        populateChain(100, 110);
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(100)}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(102));
+        channel.written.clear();
+
+        deliverInbound(new FindIntersect(new Point[]{chainState.pointAt(105)}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+
+        assertThat(channel.writtenMessageIds()).containsExactly(INTERSECT_FOUND, ROLL_BACKWARD, ROLL_FORWARD);
+        assertThat(channel.writtenReplies().get(1)).isEqualTo("RB " + chainState.pointAt(105).getSlot());
+        assertThat(agent.getLastSentPoint()).isEqualTo(chainState.pointAt(106));
+    }
+
+    @Test
     void agentStateUpdatesAreVisibleAcrossNettyAndProducerThreads() throws Exception {
         var currentState = Agent.class.getDeclaredField("currentState");
         assertThat(Modifier.isVolatile(currentState.getModifiers())).isTrue();
@@ -770,28 +790,24 @@ class ChainSyncServerAgentConcurrencyTest {
     // ---- Stub Channel that simulates immediate successful writes ----
 
     static class StubChannel implements Channel {
+        // Agent writes on the channel's event loop; an embedded loop counts every thread as the loop
+        private static final EventLoop EVENT_LOOP = new EmbeddedChannel().eventLoop();
         private final StubChannelFuture successFuture = new StubChannelFuture();
         private final List<Object> written = new CopyOnWriteArrayList<>();
         private final List<Thread> writerThreads = new CopyOnWriteArrayList<>();
-        private volatile ChannelFuture writeFuture = successFuture;
-        private volatile EventLoop eventLoop;
+        private volatile boolean holdWrites;
+        private volatile EventLoop eventLoop = EVENT_LOOP;
         private volatile boolean closed;
 
         void useEventLoop(EventLoop eventLoop) {
             this.eventLoop = eventLoop;
         }
 
-        /** Leave write futures incomplete, as when the socket is not immediately writable. */
+        /** Leave write promises incomplete, as when the socket is not immediately writable. */
         void holdWriteCompletion() {
-            writeFuture = new StubChannelFuture() {
-                @Override
-                public ChannelFuture addListener(GenericFutureListener<? extends Future<? super Void>> listener) {
-                    return this;
-                }
-            };
+            holdWrites = true;
         }
 
-        /** ChainSync message ids of the segments written so far. */
         /** Written replies as AW, RB slot, RF block/fork or IF, to check points as well as order. */
         List<String> writtenReplies() {
             return written.stream()
@@ -820,6 +836,7 @@ class ChainSyncServerAgentConcurrencyTest {
             }
         }
 
+        /** ChainSync message ids of the segments written so far. */
         List<Integer> writtenMessageIds() {
             return written.stream()
                     .map(segment -> (Array) CborSerializationUtil.deserializeOne(((Segment) segment).getPayload()))
@@ -827,13 +844,15 @@ class ChainSyncServerAgentConcurrencyTest {
                     .toList();
         }
 
-        @Override public ChannelFuture writeAndFlush(Object msg) {
+        private ChannelFuture record(Object msg, ChannelPromise promise) {
             written.add(msg);
             writerThreads.add(Thread.currentThread());
-            return writeFuture;
+            return holdWrites ? promise : promise.setSuccess();
         }
+
+        @Override public ChannelFuture writeAndFlush(Object msg) { return successFuture; }
         @Override public boolean isActive() { return !closed; }
-        @Override public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) { return successFuture; }
+        @Override public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) { return record(msg, promise); }
 
         // -- Remaining Channel methods (unused, minimal stubs) --
         @Override public ChannelId id() { return null; }
@@ -868,9 +887,9 @@ class ChainSyncServerAgentConcurrencyTest {
         @Override public ChannelFuture deregister(ChannelPromise promise) { return null; }
         @Override public Channel read() { return this; }
         @Override public ChannelFuture write(Object msg) { return successFuture; }
-        @Override public ChannelFuture write(Object msg, ChannelPromise promise) { return successFuture; }
+        @Override public ChannelFuture write(Object msg, ChannelPromise promise) { return record(msg, promise); }
         @Override public Channel flush() { return this; }
-        @Override public ChannelPromise newPromise() { return null; }
+        @Override public ChannelPromise newPromise() { return new DefaultChannelPromise(this, eventLoop); }
         @Override public ChannelProgressivePromise newProgressivePromise() { return null; }
         @Override public ChannelFuture newSucceededFuture() { return successFuture; }
         @Override public ChannelFuture newFailedFuture(Throwable cause) { return null; }
