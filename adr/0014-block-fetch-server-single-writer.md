@@ -132,13 +132,14 @@ more than one thread, the fix belongs in that agent's write path, as here.
 ## Validation
 
 - `BlockFetchServerAgentConcurrencyTest.pipelinedBatchesStayInOrderAndUninterleavedUnderBackpressure`
-  runs 20 pipelined ranges of 5 blocks (20 KB to 200 KB each) over a Netty local channel. Each store read makes the channel not
-  writable, and the event loop makes it writable again shortly after, as a slow peer would. The
-  test reassembles the block-fetch segments the peer receives and compares them with the
-  expected batches. On the code before this change it failed in 3 of 3 runs, either at byte
-  65537, right after the first segment of the first block, or by stalling. It passes with the
-  change. Its power to detect the old defect depends on thread timing; with the change it
-  passes deterministically, because only one thread writes.
+  runs 20 pipelined ranges of 5 blocks (20 KB to 200 KB each) over a Netty local channel. Each
+  store read makes the channel not writable, and the event loop makes it writable again
+  shortly after, as a slow peer would. The test reassembles the block-fetch segments the peer
+  receives and compares them with the expected batches. On the code before this change it
+  failed in 3 of 3 runs, either at byte 65537, right after the first segment of the first
+  block, or by stalling. It passes with the change. Its power to detect the old defect depends
+  on thread timing; with the change it passes deterministically, because only one thread
+  writes.
 - `idleAgentStopsPollingOnceItsRequestsAreAnswered` checks that an agent whose requests are
   answered stops touching the channel. It fails on the old code, which kept polling.
 - `disconnectStopsTheWorkerThread` checks that a disconnect stops the agent's executor thread
