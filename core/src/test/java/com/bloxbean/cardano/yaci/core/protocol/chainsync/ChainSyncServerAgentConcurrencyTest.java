@@ -31,8 +31,12 @@ import java.net.SocketAddress;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Concurrency tests for ChainSyncServerAgent to verify:
@@ -736,6 +740,37 @@ class ChainSyncServerAgentConcurrencyTest {
         assertThat(channel.writtenReplies()).containsExactly("RB 108", "AW", "RF 109/1");
     }
 
+    /**
+     * A Byron epoch boundary block and the main block after it share a slot. With the EBB as the tip, the main block
+     * is not announced (its body may not be stored yet) until the tip reaches it.
+     */
+    @Test
+    void ebbAtTheTip_mainBlockInTheSameSlotWaitsForTheTip() {
+        SameSlotEbbChain chain = new SameSlotEbbChain(SameSlotEbbChain::ebbTip);
+        useChainState(chain.state);
+
+        deliverInbound(new FindIntersect(new Point[]{chain.ebb}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 4320", "AW");
+
+        chain.tip = chain.mainTip();
+        agent.onNewDataAvailable();
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 4320", "AW", "RF 2/0");
+    }
+
+    /** With the main block as the tip, the EBB before it in the same slot and the main block are both announced. */
+    @Test
+    void mainBlockAtTheTip_ebbInTheSameSlotIsAnnouncedFirst() {
+        SameSlotEbbChain chain = new SameSlotEbbChain(SameSlotEbbChain::mainTip);
+        useChainState(chain.state);
+
+        deliverInbound(new FindIntersect(new Point[]{chain.previous}));
+        for (int i = 0; i < 4; i++)
+            deliverInbound(new RequestNext());
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 4319", "RF 1/0", "RF 2/0", "AW");
+    }
+
     @Test
     void agentStateUpdatesAreVisibleAcrossNettyAndProducerThreads() throws Exception {
         var currentState = Agent.class.getDeclaredField("currentState");
@@ -819,6 +854,41 @@ class ChainSyncServerAgentConcurrencyTest {
         agent.receiveResponse(message);
         if (agent.hasAgency())
             agent.sendNextMessage();
+    }
+
+    private void useChainState(ChainState state) {
+        agent = new ChainSyncServerAgent(state);
+        agent.setChannel(channel);
+    }
+
+    /** Block 0 at slot 4319, then an epoch boundary block (1) and a main block (2) both at slot 4320. */
+    static class SameSlotEbbChain {
+        final Point previous = new Point(4319, "00".repeat(32));
+        final Point ebb = new Point(4320, "01".repeat(32));
+        final Point main = new Point(4320, "02".repeat(32));
+        final ChainState state = mock(ChainState.class);
+        volatile ChainTip tip;
+
+        SameSlotEbbChain(Function<SameSlotEbbChain, ChainTip> initialTip) {
+            tip = initialTip.apply(this);
+            when(state.getTip()).thenAnswer(invocation -> tip);
+            when(state.hasPoint(any())).thenReturn(true);
+            when(state.findNextBlock(previous)).thenReturn(ebb);
+            when(state.findNextBlock(ebb)).thenReturn(main);
+            when(state.getBlockHeader(any())).thenAnswer(invocation -> {
+                String hash = HexUtil.encodeHexString(invocation.<byte[]>getArgument(0));
+                byte blockNumber = (byte) (hash.equals(ebb.getHash()) ? 1 : 2);
+                return new byte[]{(byte) 0x82, 0x07, 0x43, blockNumber, 0, 0};
+            });
+        }
+
+        ChainTip ebbTip() {
+            return new ChainTip(ebb.getSlot(), HexUtil.decodeHexString(ebb.getHash()), 1);
+        }
+
+        ChainTip mainTip() {
+            return new ChainTip(main.getSlot(), HexUtil.decodeHexString(main.getHash()), 2);
+        }
     }
 
     private void populateChain(int fromBlock, int toBlock) {
