@@ -13,7 +13,7 @@ import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxIds
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.messges.RequestTxs;
 import lombok.extern.slf4j.Slf4j;
 
-import static com.bloxbean.cardano.yaci.core.common.TxBodyType.BABBAGE;
+import static com.bloxbean.cardano.yaci.core.common.TxBodyType.CONWAY;
 
 /**
  * This helper is still under development.
@@ -105,7 +105,7 @@ public class TxSubmissionClient {
 
     public void submitTxBytes(byte[] txBytes) {
         var txHash = TransactionUtil.getTxHash(txBytes);
-        this.submitTxBytes(txHash, txBytes, BABBAGE);
+        this.submitTxBytes(txHash, txBytes, CONWAY);
     }
 
     public void submitTxBytes(String txHash, byte[] txBytes, TxBodyType txBodyType) {

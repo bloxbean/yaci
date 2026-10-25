@@ -10,11 +10,6 @@ import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 public enum IntersectNotFoundSerializer implements Serializer<IntersectNotFound> {
     INSTANCE();
 
-    @Override
-    public byte[] serialize(IntersectNotFound object) {
-        return new byte[0];
-    }
-
     public IntersectNotFound deserialize(byte[] bytes) {
         DataItem di = CborSerializationUtil.deserializeOne(bytes);
         Array array = (Array) di;
@@ -25,5 +20,14 @@ public enum IntersectNotFoundSerializer implements Serializer<IntersectNotFound>
         IntersectNotFound intersectNotFound
                 = new IntersectNotFound(TipSerializer.INSTANCE.deserializeDI(array.getDataItems().get(1)));
         return intersectNotFound;
+    }
+
+    @Override
+    public DataItem serializeDI(IntersectNotFound obj) {
+        Array array = new Array();
+        array.add(new UnsignedInteger(6));
+        array.add(TipSerializer.INSTANCE.serializeDI(obj.getTip()));
+        return array;
+
     }
 }
