@@ -703,6 +703,39 @@ class ChainSyncServerAgentConcurrencyTest {
         assertThat(channel.writtenReplies()).containsExactly("IF", "RB 105", "RF 106/0");
     }
 
+    /** A block known only by its header, past the advertised tip, is announced once the tip reaches it. */
+    @Test
+    void blockPastTheTip_isAnnouncedWhenTheTipReachesIt() {
+        populateChain(100, 110);
+        followToTipFrom(105, 110);
+
+        chainState.addBlockAheadOfTip(111);
+        agent.onNewDataAvailable();
+        assertThat(channel.written).isEmpty();
+
+        chainState.advanceTip();
+        agent.onNewDataAvailable();
+        assertThat(channel.writtenReplies()).containsExactly("RF 111/0");
+    }
+
+    /** After a rollback, the new fork's next block is not announced before the tip reaches it (#232). */
+    @Test
+    void rollbackToAForkWhoseNextBlockIsPastTheTip_waitsForTheTip() {
+        populateChain(100, 110);
+        followToTipFrom(105, 110);
+        deliverInbound(new RequestNext());
+
+        chainState.switchForkAfter(108L);
+        chainState.addBlockAheadOfTip(109);
+        agent.onNewDataAvailable();
+        // the second parked request waits at the tip instead of being sent a block it could not fetch
+        assertThat(channel.writtenReplies()).containsExactly("RB 108", "AW");
+
+        chainState.advanceTip();
+        agent.onNewDataAvailable();
+        assertThat(channel.writtenReplies()).containsExactly("RB 108", "AW", "RF 109/1");
+    }
+
     @Test
     void agentStateUpdatesAreVisibleAcrossNettyAndProducerThreads() throws Exception {
         var currentState = Agent.class.getDeclaredField("currentState");
@@ -1028,6 +1061,19 @@ class ChainSyncServerAgentConcurrencyTest {
             blocksBySlot.put(slot, entry);
             blocksByHash.put(hashHex, entry);
             tip = new ChainTip(slot, hash, blockNumber);
+        }
+
+        /** Adds a block whose header is known but which is not yet the tip, as when its body is still arriving. */
+        void addBlockAheadOfTip(int blockNumber) {
+            ChainTip before = tip;
+            addBlock(blockNumber);
+            tip = before;
+        }
+
+        /** Moves the tip to the newest block, as when the body of a block added ahead of the tip is stored. */
+        void advanceTip() {
+            BlockEntry e = blocksBySlot.lastEntry().getValue();
+            tip = new ChainTip(e.slot, e.hash, e.blockNumber);
         }
 
         /** Roll back to {@code slot}; blocks added afterwards are on a new fork, with different hashes. */

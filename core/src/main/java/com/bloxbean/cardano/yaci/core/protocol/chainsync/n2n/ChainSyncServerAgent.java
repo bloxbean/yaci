@@ -338,6 +338,12 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 return false;
             }
 
+            // Announce only blocks up to the tip we advertise: a node may know a block's header before it has stored
+            // the body, and the client would fail to fetch it. A Haskell node likewise serves only its selected chain.
+            if (nextPoint != null && nextPoint.getSlot() > currentTip.getSlot()) {
+                nextPoint = null;
+            }
+
             if (nextPoint != null) {
                 if (log.isDebugEnabled()) {
                     log.debug("Found next block: slot={}, hash={}, last sent: slot={}",
