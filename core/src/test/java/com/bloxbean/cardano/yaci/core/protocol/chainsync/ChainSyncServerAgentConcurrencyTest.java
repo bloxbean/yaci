@@ -31,8 +31,12 @@ import java.net.SocketAddress;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Concurrency tests for ChainSyncServerAgent to verify:
@@ -703,6 +707,70 @@ class ChainSyncServerAgentConcurrencyTest {
         assertThat(channel.writtenReplies()).containsExactly("IF", "RB 105", "RF 106/0");
     }
 
+    /** A block known only by its header, past the advertised tip, is announced once the tip reaches it. */
+    @Test
+    void blockPastTheTip_isAnnouncedWhenTheTipReachesIt() {
+        populateChain(100, 110);
+        followToTipFrom(105, 110);
+
+        chainState.addBlockAheadOfTip(111);
+        agent.onNewDataAvailable();
+        assertThat(channel.written).isEmpty();
+
+        chainState.advanceTip();
+        agent.onNewDataAvailable();
+        assertThat(channel.writtenReplies()).containsExactly("RF 111/0");
+    }
+
+    /** After a rollback, the new fork's next block is not announced before the tip reaches it (#232). */
+    @Test
+    void rollbackToAForkWhoseNextBlockIsPastTheTip_waitsForTheTip() {
+        populateChain(100, 110);
+        followToTipFrom(105, 110);
+        deliverInbound(new RequestNext());
+
+        chainState.switchForkAfter(108L);
+        chainState.addBlockAheadOfTip(109);
+        agent.onNewDataAvailable();
+        // the second parked request waits at the tip instead of being sent a block it could not fetch
+        assertThat(channel.writtenReplies()).containsExactly("RB 108", "AW");
+
+        chainState.advanceTip();
+        agent.onNewDataAvailable();
+        assertThat(channel.writtenReplies()).containsExactly("RB 108", "AW", "RF 109/1");
+    }
+
+    /**
+     * A Byron epoch boundary block and the main block after it share a slot. With the EBB as the tip, the main block
+     * is not announced (its body may not be stored yet) until the tip reaches it.
+     */
+    @Test
+    void ebbAtTheTip_mainBlockInTheSameSlotWaitsForTheTip() {
+        SameSlotEbbChain chain = new SameSlotEbbChain(SameSlotEbbChain::ebbTip);
+        useChainState(chain.state);
+
+        deliverInbound(new FindIntersect(new Point[]{chain.ebb}));
+        deliverInbound(new RequestNext());
+        deliverInbound(new RequestNext());
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 4320", "AW");
+
+        chain.tip = chain.mainTip();
+        agent.onNewDataAvailable();
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 4320", "AW", "RF 2/0");
+    }
+
+    /** With the main block as the tip, the EBB before it in the same slot and the main block are both announced. */
+    @Test
+    void mainBlockAtTheTip_ebbInTheSameSlotIsAnnouncedFirst() {
+        SameSlotEbbChain chain = new SameSlotEbbChain(SameSlotEbbChain::mainTip);
+        useChainState(chain.state);
+
+        deliverInbound(new FindIntersect(new Point[]{chain.previous}));
+        for (int i = 0; i < 4; i++)
+            deliverInbound(new RequestNext());
+        assertThat(channel.writtenReplies()).containsExactly("IF", "RB 4319", "RF 1/0", "RF 2/0", "AW");
+    }
+
     @Test
     void agentStateUpdatesAreVisibleAcrossNettyAndProducerThreads() throws Exception {
         var currentState = Agent.class.getDeclaredField("currentState");
@@ -786,6 +854,41 @@ class ChainSyncServerAgentConcurrencyTest {
         agent.receiveResponse(message);
         if (agent.hasAgency())
             agent.sendNextMessage();
+    }
+
+    private void useChainState(ChainState state) {
+        agent = new ChainSyncServerAgent(state);
+        agent.setChannel(channel);
+    }
+
+    /** Block 0 at slot 4319, then an epoch boundary block (1) and a main block (2) both at slot 4320. */
+    static class SameSlotEbbChain {
+        final Point previous = new Point(4319, "00".repeat(32));
+        final Point ebb = new Point(4320, "01".repeat(32));
+        final Point main = new Point(4320, "02".repeat(32));
+        final ChainState state = mock(ChainState.class);
+        volatile ChainTip tip;
+
+        SameSlotEbbChain(Function<SameSlotEbbChain, ChainTip> initialTip) {
+            tip = initialTip.apply(this);
+            when(state.getTip()).thenAnswer(invocation -> tip);
+            when(state.hasPoint(any())).thenReturn(true);
+            when(state.findNextBlock(previous)).thenReturn(ebb);
+            when(state.findNextBlock(ebb)).thenReturn(main);
+            when(state.getBlockHeader(any())).thenAnswer(invocation -> {
+                String hash = HexUtil.encodeHexString(invocation.<byte[]>getArgument(0));
+                byte blockNumber = (byte) (hash.equals(ebb.getHash()) ? 1 : 2);
+                return new byte[]{(byte) 0x82, 0x07, 0x43, blockNumber, 0, 0};
+            });
+        }
+
+        ChainTip ebbTip() {
+            return new ChainTip(ebb.getSlot(), HexUtil.decodeHexString(ebb.getHash()), 1);
+        }
+
+        ChainTip mainTip() {
+            return new ChainTip(main.getSlot(), HexUtil.decodeHexString(main.getHash()), 2);
+        }
     }
 
     private void populateChain(int fromBlock, int toBlock) {
@@ -1028,6 +1131,19 @@ class ChainSyncServerAgentConcurrencyTest {
             blocksBySlot.put(slot, entry);
             blocksByHash.put(hashHex, entry);
             tip = new ChainTip(slot, hash, blockNumber);
+        }
+
+        /** Adds a block whose header is known but which is not yet the tip, as when its body is still arriving. */
+        void addBlockAheadOfTip(int blockNumber) {
+            ChainTip before = tip;
+            addBlock(blockNumber);
+            tip = before;
+        }
+
+        /** Moves the tip to the newest block, as when the body of a block added ahead of the tip is stored. */
+        void advanceTip() {
+            BlockEntry e = blocksBySlot.lastEntry().getValue();
+            tip = new ChainTip(e.slot, e.hash, e.blockNumber);
         }
 
         /** Roll back to {@code slot}; blocks added afterwards are on a new fork, with different hashes. */

@@ -290,6 +290,11 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
         }
     }
 
+    private static boolean isAtTip(Point point, ChainTip tip) {
+        return point.getSlot() == tip.getSlot() && point.getHash() != null && tip.getBlockHash() != null
+                && point.getHash().equalsIgnoreCase(HexUtil.encodeHexString(tip.getBlockHash()));
+    }
+
     /**
      * @return true if the oldest unanswered request got its RollForward/Rollbackward, false if it has to wait
      */
@@ -336,6 +341,14 @@ public class ChainSyncServerAgent extends Agent<ChainSyncAgentListener> {
                 log.error("Chain state returned null tip during RequestNext");
                 sendAwaitReplyResponse();
                 return false;
+            }
+
+            // Announce only blocks up to the tip we advertise: a node may know a block's header before it has stored
+            // the body, and the client would fail to fetch it. A Haskell node likewise serves only its selected chain.
+            // The slot alone is not enough: a Byron epoch boundary block and the main block after it share a slot.
+            if (nextPoint != null
+                    && (nextPoint.getSlot() > currentTip.getSlot() || isAtTip(lastSentPoint, currentTip))) {
+                nextPoint = null;
             }
 
             if (nextPoint != null) {
