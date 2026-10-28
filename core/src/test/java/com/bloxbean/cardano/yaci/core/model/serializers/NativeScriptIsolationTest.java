@@ -95,8 +95,9 @@ class NativeScriptIsolationTest {
             }
         }
         for (int type : new int[]{3, 4, 5}) {
-            Array input = new Array().add(new UnsignedInteger(type))
-                    .add(new UnsignedInteger(new BigInteger("18446744073709551615")));
+            // The client library limits atLeast's m to int64, as the CDDL does; slots are uint64.
+            BigInteger max = type == 3 ? BigInteger.valueOf(Long.MAX_VALUE) : new BigInteger("18446744073709551615");
+            Array input = new Array().add(new UnsignedInteger(type)).add(new UnsignedInteger(max));
             if (type == 3) {
                 input.add(new Array().add(pubkeyScript()));
             }
@@ -104,6 +105,12 @@ class NativeScriptIsolationTest {
                     .isEqualTo(JsonUtil.getPrettyJson(
                             com.bloxbean.cardano.client.transaction.spec.script.NativeScript.deserialize(input)));
         }
+        // atLeast is written without the client library, so an m beyond int64 is still rendered as is.
+        Array oversized = new Array().add(new UnsignedInteger(3))
+                .add(new UnsignedInteger(new BigInteger("18446744073709551615")))
+                .add(new Array().add(pubkeyScript()));
+        assertThat(WitnessesSerializer.INSTANCE.deserializeNativeScript(oversized).getContent())
+                .contains("\"required\" : 18446744073709551615");
     }
 
     @Test
