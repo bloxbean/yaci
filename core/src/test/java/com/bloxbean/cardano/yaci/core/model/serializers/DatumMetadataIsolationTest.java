@@ -9,6 +9,7 @@ import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.Special;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.client.exception.CborDeserializationException;
+import com.bloxbean.cardano.client.exception.CborRuntimeException;
 import com.bloxbean.cardano.client.metadata.cbor.CBORMetadata;
 import com.bloxbean.cardano.client.plutus.spec.PlutusData;
 import com.bloxbean.cardano.client.util.JsonUtil;
@@ -302,8 +303,9 @@ class DatumMetadataIsolationTest {
         assertThat(witness.getDatums().get(1).getJson()).isEqualTo(Datum.fromCbor(
                 HexUtil.decodeHexString("182a")).getJson());
         assertThat(witness.getDatums().get(1).getParseError()).isNull();
+        // ADR 0003 M4: CCL's reader rejects native scripts that are no array, where a cast did
         assertThatThrownBy(() -> WitnessesSerializer.INSTANCE.deserialize(
-                HexUtil.decodeHexString("a20481" + deep + "0100"))).isInstanceOf(ClassCastException.class);
+                HexUtil.decodeHexString("a20481" + deep + "0100"))).isInstanceOf(CborRuntimeException.class);
         assertThatThrownBy(() -> WitnessesSerializer.INSTANCE.deserialize(
                 HexUtil.decodeHexString("a10482" + deep))).isInstanceOf(Exception.class);
     }
@@ -398,13 +400,6 @@ class DatumMetadataIsolationTest {
                 assertThat(result.getTransactionWitness().get(0).getDatums().get(0).getCbor()).isEqualTo(datum);
             }
         }
-        // This historical fixture contains two complete blocks in its byte buffer.
-        byte[] duplicateFixture = CborLoader.getHexBytes("block/preprod286677.txt");
-        var fallback = BlockSerializer.class.getDeclaredMethod("deserializeWithIsolatedData", byte[].class);
-        fallback.setAccessible(true);
-        Block isolated = (Block) fallback.invoke(BlockSerializer.INSTANCE, (Object) duplicateFixture);
-        assertThat(new ObjectMapper().writeValueAsString(isolated)).isEqualTo(
-                new ObjectMapper().writeValueAsString(BlockSerializer.INSTANCE.deserialize(duplicateFixture)));
     }
 
     @Test
@@ -442,17 +437,21 @@ class DatumMetadataIsolationTest {
         List<CborSlice> witness = fields.get(2).items(MajorType.ARRAY).get(0).items(MajorType.MAP);
         CborSlice datumSlot = null;
         for (int i = 0; i < witness.size(); i += 2) {
-            if (DataItemIsolation.unsigned(witness.get(i)) == 4) {
+            if (unsigned(witness.get(i)) == 4) {
                 datumSlot = witness.get(i + 1).items(MajorType.ARRAY).get(0);
             }
         }
         List<CborSlice> auxiliary = fields.get(3).items(MajorType.MAP);
         CborSlice metadataSlot = null;
         for (int i = 0; i < auxiliary.size(); i += 2) {
-            if (DataItemIsolation.unsigned(auxiliary.get(i)) == 0) metadataSlot = auxiliary.get(i + 1);
+            if (unsigned(auxiliary.get(i)) == 0) metadataSlot = auxiliary.get(i + 1);
         }
         return source.replacing(Arrays.asList(datumSlot, metadataSlot),
                 Arrays.asList(HexUtil.decodeHexString(datum), HexUtil.decodeHexString(metadata)));
+    }
+
+    private static int unsigned(CborSlice source) {
+        return ((UnsignedInteger) CborSerializationUtil.deserializeOne(source.bytes())).getValue().intValueExact();
     }
 
     private static DataItem nestedList(int depth, boolean indefinite) {

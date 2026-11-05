@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
@@ -16,7 +15,6 @@ import com.bloxbean.cardano.yaci.core.model.Era;
 import com.bloxbean.cardano.yaci.core.model.HeaderBody;
 import com.bloxbean.cardano.yaci.core.model.Redeemer;
 import com.bloxbean.cardano.yaci.core.model.Witnesses;
-import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.MsgBlock;
@@ -26,26 +24,16 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers.RollForward
 import com.bloxbean.cardano.yaci.core.util.CborLoader;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
-import org.apache.log4j.AppenderSkeleton;
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
-import org.apache.log4j.spi.LoggingEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
 
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.CALLS_REAL_METHODS;
-import static org.mockito.Mockito.mockStatic;
 
 /**
  * Pins what block parsing does, from before ADR 0003 moved it onto the shared reader (D8, I11, I12).
@@ -430,47 +418,20 @@ class BlockParsingPinTest {
 
     // ---- Count mismatches between parsed and raw items ----
 
+    /**
+     * ADR 0003 D8's "a count mismatch between parsed and raw items logs and continues" has nothing to apply to from M4:
+     * a witness set is read once, from its source bytes, so no parsed and raw items are counted against each other.
+     */
     @Test
-    void witnessCountMismatchLogsAndKeepsParsedWitnesses() throws Exception {
-        Block healthy = BlockSerializer.INSTANCE.deserialize(FIXTURE);
+    void eachWitnessSetIsReadOnceFromItsSourceBytes() {
         YaciConfig.INSTANCE.setReturnFullTxCbor(true);
-        try (LogCapture logs = new LogCapture();
-             MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, CALLS_REAL_METHODS)) {
-            mock.when(() -> WitnessUtil.getWitnessRawData(any(byte[].class))).thenReturn(Collections.emptyList());
-            Block block = BlockSerializer.INSTANCE.deserialize(FIXTURE);
-            assertThat(block.getTransactionWitness()).hasSameSizeAs(healthy.getTransactionWitness());
-            assertThat(block.getTransactionWitness().get(0).getCbor()).isNull();
-            assertThat(logs.at(Level.ERROR)).anyMatch(m -> m.contains("witness set count mismatch"));
-        }
-    }
-
-    @Test
-    void witnessExtractionFailureLogsAndKeepsParsedWitnesses() throws Exception {
-        try (LogCapture logs = new LogCapture();
-             MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, CALLS_REAL_METHODS)) {
-            mock.when(() -> WitnessUtil.getWitnessRawData(any(byte[].class))).thenThrow(new CborException("injected"));
-            assertThat(BlockSerializer.INSTANCE.deserialize(FIXTURE).getTransactionWitness()).hasSize(3);
-            assertThat(logs.at(Level.ERROR)).anyMatch(m -> m.contains("Extraction of witness bytes"));
-        }
-    }
-
-    @Test
-    void datumAndRedeemerCountMismatchesLogAndKeepParsedValues() throws Exception {
-        Witnesses healthy = BlockSerializer.INSTANCE.deserialize(FIXTURE).getTransactionWitness().get(0);
-        try (LogCapture logs = new LogCapture();
-             MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, CALLS_REAL_METHODS)) {
-            mock.when(() -> WitnessUtil.getWitnessFields(any(byte[].class))).thenAnswer(invocation -> {
-                @SuppressWarnings("unchecked")
-                var fields = (Map<BigInteger, byte[]>) invocation.callRealMethod();
-                fields.put(BigInteger.valueOf(4), HexUtil.decodeHexString("820000"));
-                fields.put(BigInteger.valueOf(5), HexUtil.decodeHexString("80"));
-                return fields;
-            });
-            Witnesses witness = BlockSerializer.INSTANCE.deserialize(FIXTURE).getTransactionWitness().get(0);
-            assertThat(witness.getDatums()).hasSameSizeAs(healthy.getDatums());
-            assertThat(witness.getRedeemers()).hasSameSizeAs(healthy.getRedeemers());
-            assertThat(logs.at(Level.WARN)).anyMatch(m -> m.contains("Datum count mismatch"));
-            assertThat(logs.at(Level.WARN)).anyMatch(m -> m.contains("Redeemer count mismatch"));
+        Block block = BlockSerializer.INSTANCE.deserialize(FIXTURE);
+        List<CborSpan> sets = block().get(WITNESSES).items();
+        assertThat(block.getTransactionWitness()).hasSameSizeAs(sets);
+        for (int i = 0; i < sets.size(); i++) {
+            Witnesses expected = WitnessesSerializer.INSTANCE.deserialize(sets.get(i).bytes()).toBuilder()
+                    .cbor(hex(sets.get(i))).build();
+            assertThat(block.getTransactionWitness().get(i)).usingRecursiveComparison().isEqualTo(expected);
         }
     }
 
@@ -796,35 +757,5 @@ class BlockParsingPinTest {
     private static final class AgentResult {
         final List<Block> blocks = new ArrayList<>();
         final List<BlockParseRuntimeException> errors = new ArrayList<>();
-    }
-
-    /** Collects BlockSerializer's log events while open. */
-    private static final class LogCapture extends AppenderSkeleton implements AutoCloseable {
-        private final Logger logger = Logger.getLogger(BlockSerializer.class);
-        private final List<LoggingEvent> events = new ArrayList<>();
-
-        LogCapture() {
-            logger.addAppender(this);
-        }
-
-        List<String> at(Level level) {
-            return events.stream().filter(e -> e.getLevel().equals(level))
-                    .map(LoggingEvent::getRenderedMessage).toList();
-        }
-
-        @Override
-        protected void append(LoggingEvent event) {
-            events.add(event);
-        }
-
-        @Override
-        public boolean requiresLayout() {
-            return false;
-        }
-
-        @Override
-        public void close() {
-            logger.removeAppender(this);
-        }
     }
 }
