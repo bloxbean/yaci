@@ -78,9 +78,8 @@ public enum BlockSerializer implements Serializer<Block> {
         long blockNumber = header.getHeaderBody().getBlockNumber();
         List<TransactionBody> bodies = new ArrayList<>(rawBlock.txCount());
         for (CborSpan body : rawBlock.transactionBodies().items()) {
-            byte[] raw = body.bytes(); // The source bytes keep the transaction hash the same.
-            DataItem tree = CborSerializationUtil.deserializeOne(raw);
-            bodies.add(TransactionBodySerializer.INSTANCE.deserializeDI(tree, raw));
+            // The source bytes keep the transaction hash the same.
+            bodies.add(TransactionBodySerializer.INSTANCE.read(body.bytes(), rawBlock.era()));
         }
         List<CborSpan> sets = rawBlock.transactionWitnessSets().items();
         return Block.builder().era(era).header(header).transactionBodies(bodies)
