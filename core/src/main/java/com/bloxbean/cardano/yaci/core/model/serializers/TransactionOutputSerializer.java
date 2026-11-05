@@ -1,11 +1,11 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.address.util.AddressUtil;
 import com.bloxbean.cardano.client.api.util.AssetUtil;
 import com.bloxbean.cardano.client.transaction.raw.RawMultiAsset;
 import com.bloxbean.cardano.client.transaction.raw.RawOutput;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.Amount;
 import com.bloxbean.cardano.yaci.core.model.TransactionOutput;
@@ -31,7 +31,7 @@ public enum TransactionOutputSerializer implements Serializer<TransactionOutput>
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public TransactionOutput deserializeDI(DataItem dataItem) {
-        return read(RawOutput.tolerant(RawModels.span(dataItem)));
+        return read(RawOutput.tolerant(CborSerializationUtil.span(dataItem)));
     }
 
     /**

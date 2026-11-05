@@ -140,6 +140,16 @@ public class CborSerializationUtil {
     }
 
     /**
+     * A span over a decoded item, re-encoded with its map order kept, for a mapper that reads views (ADR 0003 D7).
+     *
+     * @param item a decoded item
+     * @return the span
+     */
+    public static CborSpan span(@NonNull DataItem item) {
+        return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.span(item);
+    }
+
+    /**
      * Deserialize bytes to list of DataItem.
      * @param bytes
      * @return DataItem

@@ -5,7 +5,6 @@ import com.bloxbean.cardano.client.transaction.raw.RawGovActionId;
 import com.bloxbean.cardano.client.transaction.raw.RawVoter;
 import com.bloxbean.cardano.client.transaction.raw.RawVotingProcedure;
 import com.bloxbean.cardano.client.transaction.raw.RawVotingProcedures;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.governance.*;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
@@ -36,7 +35,7 @@ public enum VotingProceduresSerializer implements Serializer<VotingProcedures> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public VotingProcedures deserializeDI(DataItem di) {
-        return read(RawVotingProcedures.lenient(RawModels.span(di)));
+        return read(RawVotingProcedures.lenient(CborSerializationUtil.span(di)));
     }
 
     /**

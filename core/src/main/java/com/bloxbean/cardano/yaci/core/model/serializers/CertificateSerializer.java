@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
@@ -8,7 +9,6 @@ import com.bloxbean.cardano.client.transaction.raw.RawAnchor;
 import com.bloxbean.cardano.client.transaction.raw.RawCertificate;
 import com.bloxbean.cardano.client.transaction.raw.RawCredential;
 import com.bloxbean.cardano.client.transaction.raw.RawMir;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.Credential;
 import com.bloxbean.cardano.yaci.core.model.certs.*;
 import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
@@ -38,7 +38,7 @@ public enum CertificateSerializer implements Serializer<Certificate> {
     @Override
     public Certificate deserializeDI(DataItem certArrayDI) {
         Objects.requireNonNull(certArrayDI);
-        return read(RawModels.span(certArrayDI));
+        return read(CborSerializationUtil.span(certArrayDI));
     }
 
     /**

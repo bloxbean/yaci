@@ -1,11 +1,11 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.transaction.raw.CertKind;
 import com.bloxbean.cardano.client.transaction.raw.RawCertificate;
 import com.bloxbean.cardano.client.transaction.raw.RawPoolMetadata;
 import com.bloxbean.cardano.client.transaction.raw.RawRelay;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.PoolParams;
 import com.bloxbean.cardano.yaci.core.model.Relay;
 import com.bloxbean.cardano.yaci.core.model.certs.PoolRegistration;
@@ -32,7 +32,7 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public PoolRegistration deserializeDI(DataItem di) {
-        return (PoolRegistration) CertificateSerializer.INSTANCE.read(CertKind.POOL_REGISTRATION, RawModels.span(di));
+        return (PoolRegistration) CertificateSerializer.INSTANCE.read(CertKind.POOL_REGISTRATION, CborSerializationUtil.span(di));
     }
 
     static PoolRegistration read(RawCertificate cert) {

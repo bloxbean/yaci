@@ -3,7 +3,6 @@ package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.transaction.raw.EraSpec;
 import com.bloxbean.cardano.client.transaction.raw.RawProposal;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.governance.ProposalProcedure;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
@@ -31,7 +30,7 @@ public enum ProposalProcedureSerializer implements Serializer<ProposalProcedure>
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public ProposalProcedure deserializeDI(DataItem di) {
-        return read(RawProposal.lenient(RawModels.span(di), EraSpec.newest()));
+        return read(RawProposal.lenient(CborSerializationUtil.span(di), EraSpec.newest()));
     }
 
     /**

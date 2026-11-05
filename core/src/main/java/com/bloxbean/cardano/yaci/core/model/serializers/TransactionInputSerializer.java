@@ -1,8 +1,8 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.transaction.raw.RawInput;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.TransactionInput;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -18,7 +18,7 @@ public enum TransactionInputSerializer implements Serializer<TransactionInput> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public TransactionInput deserializeDI(DataItem di) {
-        return read(RawInput.of(RawModels.span(di)));
+        return read(RawInput.of(CborSerializationUtil.span(di)));
     }
 
     /**

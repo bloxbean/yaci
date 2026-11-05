@@ -1,9 +1,9 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.transaction.raw.CertKind;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.certs.GenesisKeyDelegation;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 
@@ -16,7 +16,7 @@ public enum GenesisKeyDelegationSerializer implements Serializer<GenesisKeyDeleg
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public GenesisKeyDelegation deserializeDI(DataItem di) {
-        return read(RawModels.span(di));
+        return read(CborSerializationUtil.span(di));
     }
 
     GenesisKeyDelegation read(CborSpan span) {

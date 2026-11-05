@@ -1,8 +1,8 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.transaction.raw.CertKind;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.certs.VoteDelegCert;
 import com.bloxbean.cardano.yaci.core.model.serializers.CertificateSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
@@ -16,6 +16,6 @@ public enum VoteDelegCertSerializer implements Serializer<VoteDelegCert> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public VoteDelegCert deserializeDI(DataItem di) {
-        return (VoteDelegCert) CertificateSerializer.INSTANCE.read(CertKind.VOTE_DELEG_CERT, RawModels.span(di));
+        return (VoteDelegCert) CertificateSerializer.INSTANCE.read(CertKind.VOTE_DELEG_CERT, CborSerializationUtil.span(di));
     }
 }

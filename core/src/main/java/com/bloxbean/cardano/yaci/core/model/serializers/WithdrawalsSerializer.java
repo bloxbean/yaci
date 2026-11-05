@@ -1,8 +1,8 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.transaction.raw.RawWithdrawal;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
@@ -23,7 +23,7 @@ public enum WithdrawalsSerializer implements Serializer<Map<String, BigInteger>>
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Map<String, BigInteger> deserializeDI(DataItem di) {
-        return read(RawWithdrawal.tolerant(RawModels.span(di)));
+        return read(RawWithdrawal.tolerant(CborSerializationUtil.span(di)));
     }
 
     /**

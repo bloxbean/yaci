@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.spec.Era;
@@ -8,7 +9,6 @@ import com.bloxbean.cardano.client.transaction.raw.EraSpec;
 import com.bloxbean.cardano.client.transaction.raw.RawAuxData;
 import com.bloxbean.cardano.client.transaction.raw.RawItems;
 import com.bloxbean.cardano.client.transaction.raw.RawScript;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.AuxData;
 import com.bloxbean.cardano.yaci.core.model.PlutusScript;
 import com.bloxbean.cardano.yaci.core.model.PlutusScriptType;
@@ -44,7 +44,7 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public AuxData deserializeDI(DataItem di) {
-        return read(RawModels.span(di), EraSpec.newest(), false);
+        return read(CborSerializationUtil.span(di), EraSpec.newest(), false);
     }
 
     /**

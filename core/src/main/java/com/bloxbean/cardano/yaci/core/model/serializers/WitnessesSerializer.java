@@ -11,7 +11,6 @@ import com.bloxbean.cardano.client.transaction.raw.RawRedeemer;
 import com.bloxbean.cardano.client.transaction.raw.RawScript;
 import com.bloxbean.cardano.client.transaction.raw.RawVkeyWitness;
 import com.bloxbean.cardano.client.transaction.raw.RawWitnessSet;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.BootstrapWitness;
 import com.bloxbean.cardano.yaci.core.model.Datum;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
@@ -53,7 +52,7 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Witnesses deserializeDI(DataItem di) {
-        return read(RawModels.span(di), EraSpec.newest(), false);
+        return read(CborSerializationUtil.span(di), EraSpec.newest(), false);
     }
 
     /**

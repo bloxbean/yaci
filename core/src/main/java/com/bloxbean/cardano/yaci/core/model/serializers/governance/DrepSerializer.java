@@ -1,8 +1,8 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.transaction.raw.RawDRep;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.governance.Drep;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -16,7 +16,7 @@ public enum DrepSerializer implements Serializer<Drep> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Drep deserializeDI(DataItem di) {
-        return read(RawDRep.lenient(RawModels.span(di)));
+        return read(RawDRep.lenient(CborSerializationUtil.span(di)));
     }
 
     public Drep read(RawDRep drep) {

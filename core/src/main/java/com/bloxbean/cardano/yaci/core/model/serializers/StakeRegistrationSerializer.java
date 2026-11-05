@@ -1,8 +1,8 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.transaction.raw.CertKind;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.certs.StakeRegistration;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 
@@ -15,6 +15,6 @@ public enum StakeRegistrationSerializer implements Serializer<StakeRegistration>
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public StakeRegistration deserializeDI(DataItem di) {
-        return (StakeRegistration) CertificateSerializer.INSTANCE.read(CertKind.STAKE_REGISTRATION, RawModels.span(di));
+        return (StakeRegistration) CertificateSerializer.INSTANCE.read(CertKind.STAKE_REGISTRATION, CborSerializationUtil.span(di));
     }
 }

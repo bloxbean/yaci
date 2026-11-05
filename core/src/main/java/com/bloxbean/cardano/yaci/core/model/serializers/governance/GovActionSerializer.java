@@ -9,7 +9,6 @@ import com.bloxbean.cardano.client.transaction.raw.RawConstitution;
 import com.bloxbean.cardano.client.transaction.raw.RawCredential;
 import com.bloxbean.cardano.client.transaction.raw.RawGovAction;
 import com.bloxbean.cardano.client.transaction.raw.RawProtocolVersion;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.Credential;
 import com.bloxbean.cardano.yaci.core.model.ProtocolVersion;
 import com.bloxbean.cardano.yaci.core.model.governance.Constitution;
@@ -182,7 +181,7 @@ public enum GovActionSerializer implements Serializer<GovAction> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public GovAction deserializeDI(DataItem di) {
-        return read(RawGovAction.lenient(RawModels.span(di), EraSpec.newest()));
+        return read(RawGovAction.lenient(CborSerializationUtil.span(di), EraSpec.newest()));
     }
 
     /**

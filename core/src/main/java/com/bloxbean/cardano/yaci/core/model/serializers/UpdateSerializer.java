@@ -12,7 +12,6 @@ import com.bloxbean.cardano.client.transaction.raw.RawUpdate;
 import com.bloxbean.cardano.client.transaction.raw.RawVotingThresholds;
 import com.bloxbean.cardano.client.transaction.raw.RawVotingThresholds.DRep;
 import com.bloxbean.cardano.client.transaction.raw.RawVotingThresholds.Pool;
-import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.DrepVoteThresholds;
 import com.bloxbean.cardano.yaci.core.model.PoolVotingThresholds;
@@ -60,7 +59,7 @@ public enum UpdateSerializer implements Serializer<Update> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Update deserializeDI(DataItem di) {
-        return read(RawUpdate.lenient(RawModels.span(di), EraSpec.newest()));
+        return read(RawUpdate.lenient(CborSerializationUtil.span(di), EraSpec.newest()));
     }
 
     /**
@@ -83,7 +82,7 @@ public enum UpdateSerializer implements Serializer<Update> {
      */
     @Deprecated(since = "0.5.0", forRemoval = true)
     public ProtocolParamUpdate getProtocolParams(Map genesisProtocolParamsMap) {
-        return read(RawProtocolParamUpdate.lenient(RawModels.span(genesisProtocolParamsMap), EraSpec.newest()));
+        return read(RawProtocolParamUpdate.lenient(CborSerializationUtil.span(genesisProtocolParamsMap), EraSpec.newest()));
     }
 
     /**
