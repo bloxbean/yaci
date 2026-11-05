@@ -30,7 +30,9 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
             AuxData result = Serializer.super.deserialize(bytes);
             if (result == null) return null; // Preserve the default serializer's empty-input behavior.
             // Recovery needs the original buffer, which deserializeDI alone does not have.
-            return result.getMetadataParseError() == null ? result : DataItemIsolation.auxiliary(bytes);
+            if (result.getMetadataParseError() != null) return DataItemIsolation.auxiliary(bytes);
+            NativeScriptHashes.fromAuxiliaryData(result.getNativeScripts(), bytes);
+            return result;
         } catch (StackOverflowError e) {
             // Restart at a known boundary; the decoder's partially consumed state is discarded.
             return DataItemIsolation.auxiliary(bytes);

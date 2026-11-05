@@ -23,7 +23,9 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
             Witnesses result = Serializer.super.deserialize(bytes);
             if (result == null) return null; // Preserve the default serializer's empty-input behavior.
             // Keep the original datum bytes even when only the optional JSON conversion failed.
-            return DataItemIsolation.hasDataError(result) ? DataItemIsolation.witness(bytes) : result;
+            if (DataItemIsolation.hasDataError(result)) return DataItemIsolation.witness(bytes);
+            NativeScriptHashes.fromWitness(result.getNativeScripts(), bytes);
+            return result;
         } catch (StackOverflowError e) {
             // Isolate datums/redeemer data from source bytes before retrying the remaining fields.
             return DataItemIsolation.witness(bytes);

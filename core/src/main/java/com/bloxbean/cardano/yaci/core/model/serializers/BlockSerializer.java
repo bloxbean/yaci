@@ -206,6 +206,7 @@ public enum BlockSerializer implements Serializer<Block> {
             }
             auxDataMap.put(txIndex, auxData);
         }
+        NativeScriptHashes.fromBlock(auxDataMap, blockBody);
         blockBuilder.auxiliaryDataMap(auxDataMap);
 
         if (blockArray.getDataItems().size() > 4) {
@@ -243,6 +244,7 @@ public enum BlockSerializer implements Serializer<Block> {
 
         for (int witnessIndex = 0; witnessIndex < witnesses.size(); witnessIndex++) {
             Witnesses witness = witnesses.get(witnessIndex);
+            NativeScriptHashes.fromWitness(witness.getNativeScripts(), transactionWitness.get(witnessIndex));
             boolean hasDatums = witness.getDatums() != null && !witness.getDatums().isEmpty();
             boolean hasRedeemers = witness.getRedeemers() != null && !witness.getRedeemers().isEmpty();
             // Signature/script-only witnesses need no optional data correction or field copies.

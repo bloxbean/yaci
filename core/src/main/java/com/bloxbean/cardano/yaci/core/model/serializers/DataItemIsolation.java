@@ -80,6 +80,7 @@ final class DataItemIsolation {
         Arrays.fill(placeholders, EMPTY_ARRAY);
         Witnesses skeleton = WitnessesSerializer.INSTANCE.deserializeDI(
                 CborSerializationUtil.deserializeOne(root.replacing(replacements, placeholders)));
+        NativeScriptHashes.fromWitness(skeleton.getNativeScripts(), bytes);
         List<Datum> datumValues = new ArrayList<>();
         if (datums != null) {
             for (CborSlice datum : datums.items(MajorType.ARRAY)) {
@@ -171,8 +172,14 @@ final class DataItemIsolation {
      * d9 01 03 a2 00 ... = 259({0: metadata, 1: native scripts, ...})  (Alonzo onward)
      * </pre>
      */
-    @SneakyThrows
     static AuxData auxiliary(byte[] bytes) {
+        AuxData result = isolatedAuxiliary(bytes);
+        NativeScriptHashes.fromAuxiliaryData(result.getNativeScripts(), bytes);
+        return result;
+    }
+
+    @SneakyThrows
+    private static AuxData isolatedAuxiliary(byte[] bytes) {
         CborSlice root = CborSlice.of(bytes);
         CborSlice metadata = null;
         if (root.type() == MajorType.MAP && root.tag() == AUXILIARY_DATA_TAG) {
