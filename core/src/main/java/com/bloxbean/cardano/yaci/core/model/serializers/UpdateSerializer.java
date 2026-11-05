@@ -1,9 +1,8 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.CborDecoder;
-import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
+import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.DrepVoteThresholds;
 import com.bloxbean.cardano.yaci.core.model.PoolVotingThresholds;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
@@ -415,9 +414,8 @@ public enum UpdateSerializer implements Serializer<Update> {
             for (var entry : ppu.getCostModels().entrySet()) {
                 try {
                     byte[] costModelBytes = HexUtil.decodeHexString(entry.getValue());
-                    DataItem costModelDI = CborDecoder.decode(costModelBytes).get(0);
-                    cmMap.put(cborUInt(entry.getKey()), costModelDI);
-                } catch (CborException e) {
+                    cmMap.put(cborUInt(entry.getKey()), CborSerializationUtil.deserializeOne(costModelBytes));
+                } catch (CborRuntimeException e) {
                     throw new RuntimeException("Failed to decode cost model CBOR for version " + entry.getKey(), e);
                 }
             }

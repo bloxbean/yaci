@@ -15,7 +15,14 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
 
-/** Decodes consecutive nested arrays without consuming one Java stack frame per array. */
+/**
+ * Decodes consecutive nested arrays without consuming one Java stack frame per array.
+ *
+ * @deprecated Use {@link CborSerializationUtil#deserialize(byte[])}, which is iterative for every type. This decoder
+ * hands maps, tags and scalars to cbor-java's, which tags its shared {@code SimpleValue.NULL} on {@code d818f6} and so
+ * changes how every later null in the JVM encodes. Nothing in Yaci uses it.
+ */
+@Deprecated
 public final class ArrayCborDecoder extends CborDecoder {
     private final PushbackInputStream input;
     private final ArrayLengthDecoder lengths;

@@ -7,12 +7,10 @@ import com.bloxbean.cardano.yaci.core.model.certs.*;
 import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
 import com.bloxbean.cardano.yaci.core.model.governance.Drep;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.RegCertSerializer;
-import com.bloxbean.cardano.yaci.core.util.ArrayCborDecoder;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayInputStream;
 import java.math.BigInteger;
 import java.util.List;
 
@@ -53,7 +51,7 @@ class CertificateMappingTest {
 
     private static TransactionBody body(String hex) throws Exception {
         byte[] bytes = HexUtil.decodeHexString(hex);
-        DataItem tree = new ArrayCborDecoder(new ByteArrayInputStream(bytes)).decodeNext();
+        DataItem tree = CborSerializationUtil.deserializeOne(bytes);
         return TransactionBodySerializer.INSTANCE.deserializeDI(tree, bytes);
     }
 
