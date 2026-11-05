@@ -2,14 +2,17 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.yaci.core.model.Relay;
+import com.bloxbean.cardano.yaci.core.model.TransactionBody;
 import com.bloxbean.cardano.yaci.core.model.certs.*;
 import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
 import com.bloxbean.cardano.yaci.core.model.governance.Drep;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.RegCertSerializer;
+import com.bloxbean.cardano.yaci.core.util.ArrayCborDecoder;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.math.BigInteger;
 import java.util.List;
 
@@ -46,6 +49,12 @@ class CertificateMappingTest {
 
     private static StakeCredential stakeKey() {
         return StakeCredential.fromKeyHash(HexUtil.decodeHexString(KEY));
+    }
+
+    private static TransactionBody body(String hex) throws Exception {
+        byte[] bytes = HexUtil.decodeHexString(hex);
+        DataItem tree = new ArrayCborDecoder(new ByteArrayInputStream(bytes)).decodeNext();
+        return TransactionBodySerializer.INSTANCE.deserializeDI(tree, bytes);
     }
 
     @Test
@@ -170,5 +179,28 @@ class CertificateMappingTest {
                 String.format(POOL, "81" + "8420" + "f6f6f6", "f6"), // negative relay tag
                 String.format(POOL, "81" + "8400" + "20" + "f6f6", "f6"))) // negative port
             assertThatThrownBy(() -> certificate(cert)).as(cert).isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void aBodyReadsItsCertificatesFromTheBytesReceived() throws Exception {
+        String min = "008001" + "80";
+        assertThat(body("a3" + min + "04" + "d90102" + "81" + "8200" + CRED).getCertificates())
+                .containsExactly(new StakeRegistration(stakeKey()));
+        // A repeated key means its last value, however it is encoded
+        assertThat(body("a4" + min + "04" + "81" + "8201" + CRED + "1804" + "81" + "8200" + CRED).getCertificates())
+                .containsExactly(new StakeRegistration(stakeKey()));
+        // A tagged key is another key
+        assertThat(body("a4" + min + "04" + "81" + "8200" + CRED + "c104" + "80").getCertificates())
+                .containsExactly(new StakeRegistration(stakeKey()));
+        // An empty set, including an indefinite one, whose decoded array holds its BREAK
+        assertThat(body("a3" + min + "04" + "80").getCertificates()).isEmpty();
+        assertThat(body("a3" + min + "04" + "9fff").getCertificates()).isEmpty();
+    }
+
+    /** The old block path counted a decoded indefinite array's BREAK as an item, and failed the block (yaci#113). */
+    @Test
+    void aBodyAcceptsIndefiniteCertificates() throws Exception {
+        assertThat(body("a3008001" + "80" + "04" + "81" + "9f00" + "9f00" + HASH28 + "ffff").getCertificates())
+                .containsExactly(new StakeRegistration(stakeKey()));
     }
 }

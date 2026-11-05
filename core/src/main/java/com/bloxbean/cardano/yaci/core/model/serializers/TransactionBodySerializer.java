@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.api.util.AssetUtil;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
@@ -26,6 +27,29 @@ import static com.bloxbean.cardano.yaci.core.util.StringUtil.sanitize;
 @Slf4j
 public enum TransactionBodySerializer implements Serializer<TransactionBody> {
     INSTANCE;
+
+    private static final BigInteger CERTIFICATES_KEY = BigInteger.valueOf(4);
+
+    /**
+     * The certificates of a body as encoded, so they need no re-encoding. A repeated key means its last value, as in
+     * the decoded body.
+     */
+    private static List<CborSpan> certificates(byte[] txBytes) {
+        CborSpan certificates = null;
+        for (var entry : untagged(CborSpan.at(txBytes, 0)).entries()) {
+            CborSpan key = entry.getKey();
+            if (key.tag() == -1 && key.majorType() == 0 && key.asBigInteger().equals(CERTIFICATES_KEY))
+                certificates = entry.getValue();
+        }
+        return untagged(certificates).items();
+    }
+
+    private static CborSpan untagged(CborSpan item) {
+        CborSpan content = item;
+        while (content.tag() != -1)
+            content = content.untag();
+        return content;
+    }
 
     public TransactionBody deserializeDI(DataItem di, byte[] txBytes) {
         Map bodyMap = (Map) di;
@@ -76,12 +100,8 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         Array certArray = (Array)bodyMap.get(new UnsignedInteger(4));
         if (certArray != null && certArray.getDataItems() != null && certArray.getDataItems().size() > 0) {
             certificates = new ArrayList<>();
-            for (DataItem dataItem: certArray.getDataItems()) {
-                if (dataItem == Special.BREAK)
-                    continue;
-                Certificate cert = CertificateSerializer.INSTANCE.deserializeDI(dataItem);
-                certificates.add(cert);
-            }
+            for (CborSpan cert : certificates(txBytes))
+                certificates.add(CertificateSerializer.INSTANCE.read(cert));
         }
         if (certificates != null)
             transactionBodyBuilder.certificates(certificates);
