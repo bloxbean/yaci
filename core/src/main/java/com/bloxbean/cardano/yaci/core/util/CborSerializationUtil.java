@@ -4,7 +4,6 @@ import co.nstant.in.cbor.CborBuilder;
 import co.nstant.in.cbor.CborEncoder;
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.*;
-import co.nstant.in.cbor.model.Number;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.types.NonNegativeInterval;
 import com.bloxbean.cardano.yaci.core.types.UnitInterval;
@@ -22,19 +21,7 @@ public class CborSerializationUtil {
      * @return
      */
     public static BigInteger toBigInteger(DataItem valueItem) {
-        BigInteger value = null;
-        if (MajorType.UNSIGNED_INTEGER.equals(valueItem.getMajorType())
-                || MajorType.NEGATIVE_INTEGER.equals(valueItem.getMajorType())) {
-            value = ((Number) valueItem).getValue();
-        } else if (MajorType.BYTE_STRING.equals(valueItem.getMajorType())) { //For BigNum. >  2 pow 64 Tag 2
-            if (valueItem.getTag().getValue() == 2) { //positive
-                value = new BigInteger(((ByteString) valueItem).getBytes());
-            } else if (valueItem.getTag().getValue() == 3) { //Negative
-                value = new BigInteger(((ByteString) valueItem).getBytes()).multiply(BigInteger.valueOf(-1));
-            }
-        }
-
-        return value;
+        return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.getBigInteger(valueItem);
     }
 
     /**
@@ -64,15 +51,15 @@ public class CborSerializationUtil {
     }
 
     public static String toHex(DataItem di) {
-        return HexUtil.encodeHexString(((ByteString)di).getBytes());
+        return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.toHex(di);
     }
 
     public static byte[] toBytes(DataItem di) {
-        return ((ByteString)di).getBytes();
+        return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.toBytes(di);
     }
 
     public static String toUnicodeString(DataItem di) {
-        return ((UnicodeString)di).getString();
+        return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.toUnicodeString(di);
     }
 
     public static UnitInterval toUnitInterval(DataItem di) {

@@ -122,20 +122,9 @@ public enum TransactionOutputSerializer implements Serializer<TransactionOutput>
                     .build();
             amounts.add(amount);
         } else if(MajorType.BYTE_STRING.equals(valueItem.getMajorType())) { //For BigNum. >  2 pow 64 Tag 2
-            if(valueItem.getTag().getValue() == 2) {
-                Amount amount = Amount.builder()
-                        .unit(LOVELACE)
-                        .assetName(LOVELACE)
-                        .quantity(new BigInteger(((ByteString) valueItem).getBytes()))
-                        .build();
-                amounts.add(amount);
-            } else if(valueItem.getTag().getValue() == 3) {
-                Amount amount = Amount.builder()
-                        .unit(LOVELACE)
-                        .assetName(LOVELACE)
-                        .quantity(new BigInteger(((ByteString) valueItem).getBytes()).multiply(BigInteger.valueOf(-1)))
-                        .build();
-                amounts.add(amount);
+            BigInteger coin = CborSerializationUtil.toBigInteger(valueItem);
+            if (coin != null) {
+                amounts.add(Amount.builder().unit(LOVELACE).assetName(LOVELACE).quantity(coin).build());
             }
         } else if(MajorType.ARRAY.equals(valueItem.getMajorType())) {
             Array coinAssetArray = (Array) valueItem;
