@@ -27,26 +27,6 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * gov_action =
- * [ parameter_change_action
- * // hard_fork_initiation_action
- * // treasury_withdrawals_action
- * // no_confidence
- * // update_committee
- * // new_constitution
- * // info_action
- * ]
- * {@literal
- * parameter_change_action = (0, gov_action_id / null, protocol_param_update)
- * hard_fork_initiation_action = (1, gov_action_id / null, [protocol_version])
- * treasury_withdrawals_action = (2, { reward_account => coin })
- * no_confidence = (3, gov_action_id / null)
- * update_committee = (4, gov_action_id / null, set<committee_cold_credential>, { committee_cold_credential => epoch }, unit_interval)
- * new_constitution = (5, gov_action_id / null, constitution)
- * committee = [{ committee_cold_credential => epoch }, unit_interval]
- * }
- */
-/**
  * Maps governance actions read by {@link RawGovAction} to Yaci's models (ADR 0003 D8), and writes them.
  */
 public enum GovActionSerializer implements Serializer<GovAction> {

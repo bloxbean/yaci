@@ -33,6 +33,11 @@ public enum BlockSerializer implements Serializer<Block> {
             return read(bytes);
         } catch (com.bloxbean.cardano.client.exception.CborRuntimeException e) {
             throw new CborRuntimeException("Invalid block", e);
+        } catch (StackOverflowError e) {
+            // Every recursive reader on this path guards itself; this keeps a missed one a parse error for listeners.
+            CborRuntimeException error = new CborRuntimeException("Invalid block: too deeply nested");
+            error.initCause(e);
+            throw error;
         }
     }
 
