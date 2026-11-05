@@ -1,45 +1,26 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 
-import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
+import com.bloxbean.cardano.client.transaction.raw.RawDRep;
+import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.governance.Drep;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
-import java.util.List;
-
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toInt;
-
-/**
- * drep =
- *   [ 0, addr_keyhash
- *   // 1, scripthash
- *   // 2  ; always abstain
- *   // 3  ; always no confidence
- *   ]
- */
 public enum DrepSerializer implements Serializer<Drep> {
     INSTANCE;
 
     @Override
     public Drep deserializeDI(DataItem di) {
-        List<DataItem> dataItemList = ((Array) di).getDataItems();
+        return read(RawDRep.lenient(RawModels.span(di)));
+    }
 
-        int key = toInt(dataItemList.get(0));
-
-        switch (key) {
-            case 0:
-                String addKeyHash = toHex(dataItemList.get(1));
-                return Drep.addrKeyHash(addKeyHash);
-            case 1:
-                String scriptHash = toHex(dataItemList.get(1));
-                return Drep.scriptHash(scriptHash);
-            case 2:
-                return Drep.abstain();
-            case 3:
-                return Drep.noConfidence();
-            default:
-                throw new IllegalArgumentException("Invalid Drep key: " + key);
-        }
+    public Drep read(RawDRep drep) {
+        return switch (drep.kind()) {
+            case KEY_HASH -> Drep.addrKeyHash(HexUtil.encodeHexString(drep.hash()));
+            case SCRIPT_HASH -> Drep.scriptHash(HexUtil.encodeHexString(drep.hash()));
+            case ABSTAIN -> Drep.abstain();
+            case NO_CONFIDENCE -> Drep.noConfidence();
+        };
     }
 }

@@ -1,19 +1,20 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
-import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
+import com.bloxbean.cardano.client.transaction.raw.CertKind;
+import com.bloxbean.cardano.client.transaction.raw.RawCertificate;
+import com.bloxbean.cardano.client.transaction.raw.RawPoolMetadata;
+import com.bloxbean.cardano.client.transaction.raw.RawRelay;
+import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.PoolParams;
 import com.bloxbean.cardano.yaci.core.model.Relay;
 import com.bloxbean.cardano.yaci.core.model.certs.PoolRegistration;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.types.UnitInterval;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.extern.slf4j.Slf4j;
 
-import java.math.BigInteger;
-import java.net.Inet4Address;
-import java.net.Inet6Address;
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -27,72 +28,44 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
 
     @Override
     public PoolRegistration deserializeDI(DataItem di) {
-        Array poolRegistrationArr = (Array) di;
-
-        List<DataItem> dataItemList = poolRegistrationArr.getDataItems();
-        if (dataItemList == null || dataItemList.size() != 10) {
-            throw new CborRuntimeException("PoolRegistration deserialization failed. Invalid number of DataItem(s) : "
-                    + (dataItemList != null ? String.valueOf(dataItemList.size()) : null));
-        }
-
-        UnsignedInteger type = (UnsignedInteger) dataItemList.get(0);
-        if (type == null || type.getValue().intValue() != 3)
-            throw new CborRuntimeException("PoolRegistration deserialization failed. Invalid type : "
-                    + type != null ? String.valueOf(type.getValue().intValue()) : null);
-
-        //List<DataItem> paramDataItems = ((Array)dataItemList.get(1)).getDataItems();
-        String operator = toHex(dataItemList.get(1));
-        String vrfKeyHash = toHex(dataItemList.get(2));
-        BigInteger pledge = toBigInteger(dataItemList.get(3));
-        BigInteger cost = toBigInteger(dataItemList.get(4));
-
-        UnitInterval margin = toUnitInterval(dataItemList.get(5));
-        String rewardAccount = toHex(dataItemList.get(6));
-
-        //Pool Owners0
-        Set<String> poolOwners = new HashSet<>();
-        List<DataItem> poolOwnersDataItems = ((Array) dataItemList.get(7)).getDataItems();
-        for (DataItem poolOwnerDI : poolOwnersDataItems) {
-            if (poolOwnerDI == SimpleValue.BREAK)
-                continue;
-            poolOwners.add(toHex(poolOwnerDI));
-        }
-
-        //Relays
-        List<DataItem> relaysDataItems = ((Array) dataItemList.get(8)).getDataItems();
-        List<Relay> relays = new ArrayList<>();
-        for (DataItem relayDI : relaysDataItems) {
-            if (relayDI == SimpleValue.BREAK)
-                continue;
-            relays.add(deserializeRelay(relayDI));
-        }
-
-        //pool metadata
-        DataItem poolMetaDataDI = dataItemList.get(9);
-        String metadataUrl = null;
-        String metadataHash = null;
-        if (poolMetaDataDI != SimpleValue.NULL) {
-            List<DataItem> poolMetadataDataItems = ((Array) poolMetaDataDI).getDataItems();
-            metadataUrl = toUnicodeString(poolMetadataDataItems.get(0));
-            metadataHash = toHex(poolMetadataDataItems.get(1));
-        }
-
-        PoolParams poolParams = PoolParams.builder()
-                .operator(operator)
-                .vrfKeyHash(vrfKeyHash)
-                .pledge(pledge)
-                .cost(cost)
-                .margin(margin)
-                .rewardAccount(rewardAccount)
-                .poolOwners(poolOwners)
-                .relays(relays)
-                .poolMetadataUrl(metadataUrl)
-                .poolMetadataHash(metadataHash)
-                .build();
-
-        return new PoolRegistration(poolParams);
+        return (PoolRegistration) CertificateSerializer.INSTANCE.read(CertKind.POOL_REGISTRATION, RawModels.span(di));
     }
 
+    static PoolRegistration read(RawCertificate cert) {
+        Set<String> poolOwners = new HashSet<>();
+        for (byte[] poolOwner : cert.poolOwners())
+            poolOwners.add(HexUtil.encodeHexString(poolOwner));
+
+        List<Relay> relays = new ArrayList<>();
+        for (RawRelay relay : cert.relays())
+            relays.add(relay(relay));
+
+        RawPoolMetadata metadata = cert.poolMetadata().orElse(null);
+        var margin = cert.margin();
+        return new PoolRegistration(PoolParams.builder()
+                .operator(HexUtil.encodeHexString(cert.poolKeyHash()))
+                .vrfKeyHash(HexUtil.encodeHexString(cert.vrfKeyHash()))
+                .pledge(cert.pledge())
+                .cost(cert.cost())
+                .margin(new UnitInterval(margin.getNumerator(), margin.getDenominator()))
+                .rewardAccount(HexUtil.encodeHexString(cert.rewardAccount()))
+                .poolOwners(poolOwners)
+                .relays(relays)
+                .poolMetadataUrl(metadata != null ? metadata.url() : null)
+                .poolMetadataHash(metadata != null ? HexUtil.encodeHexString(metadata.hash()) : null)
+                .build());
+    }
+
+    private static Relay relay(RawRelay relay) {
+        return switch (relay.kind()) {
+            case SINGLE_HOST_ADDR ->
+                    new Relay(relay.port(), hostAddress(relay.ipv4()), hostAddress(relay.ipv6()), null);
+            case SINGLE_HOST_NAME -> new Relay(relay.port(), null, null, relay.dnsName());
+            case MULTI_HOST_NAME -> new Relay(0, null, null, relay.dnsName());
+        };
+    }
+
+    /** Reads a relay of a node-to-client query result: Yaci is the only reader of those (ADR 0003 section 2). */
     public static Relay deserializeRelay(DataItem relayDI) {
         List<DataItem> relayItems = ((Array) relayDI).getDataItems();
         int type = toInt(relayItems.get(0));
@@ -107,27 +80,13 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
             port = itemDI != SimpleValue.NULL ? toInt(itemDI) : null;
 
             itemDI = relayItems.get(2);
-            if (itemDI != SimpleValue.NULL) {
-                byte[] ipv4Bytes = toBytes(itemDI);
-                try {
-                    ipv4 = Inet4Address.getByAddress(ipv4Bytes).getHostAddress();
-                } catch (Exception ex) {
-                    log.error("Unable to convert byte[] to ipv4 address, {}, cbor: {}", ipv4Bytes,
-                            HexUtil.encodeHexString(CborSerializationUtil.serialize(relayDI)), ex);
-                }
-            }
+            if (itemDI != SimpleValue.NULL)
+                ipv4 = hostAddress(toBytes(itemDI));
 
             //ipv6
             itemDI = relayItems.get(3);
-            if (itemDI != SimpleValue.NULL) {
-                byte[] ipv6Bytes = toBytes(itemDI);
-                try {
-                    ipv6 = Inet6Address.getByAddress(ipv6Bytes).getHostAddress();
-                } catch (Exception ex) {
-                    log.error("Unable to convert byte[] to ipv6 address, {}, cbor: {}", ipv6Bytes,
-                            HexUtil.encodeHexString(CborSerializationUtil.serialize(relayDI)), ex);
-                }
-            }
+            if (itemDI != SimpleValue.NULL)
+                ipv6 = hostAddress(toBytes(itemDI));
         } else if (type == 1) {
             DataItem itemDI = relayItems.get(1);
             port = itemDI != SimpleValue.NULL? toInt(itemDI) : null;
@@ -140,5 +99,16 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
         }
 
         return new Relay(port, ipv4, ipv6, dns);
+    }
+
+    private static String hostAddress(byte[] address) {
+        if (address == null)
+            return null;
+        try {
+            return InetAddress.getByAddress(address).getHostAddress();
+        } catch (Exception ex) {
+            log.error("Unable to convert byte[] to an IP address, {}", HexUtil.encodeHexString(address), ex);
+            return null;
+        }
     }
 }
