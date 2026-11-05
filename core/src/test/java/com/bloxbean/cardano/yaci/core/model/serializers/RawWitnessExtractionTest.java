@@ -506,13 +506,18 @@ class RawWitnessExtractionTest {
         }
     }
 
-    /** Reuse the era-specific parser fixtures and replace only their witness array with source encodings. */
+    /**
+     * Reuse the era-specific parser fixtures and replace their witness array with source encodings. Their bodies and
+     * auxiliary data follow, as a block has as many bodies as witness sets and aux data only for those (ADR 0003 Q6).
+     */
     private static byte[] withWitnesses(int era, String... witnesses) throws Exception {
         CborSlice root = CborSlice.of(SyncDataIsolationTest.eraBlock(era, "a0"));
-        CborSlice slot = root.items(MajorType.ARRAY).get(1).items(MajorType.ARRAY).get(2);
-        // Indefinite witness array: 9f witness_0 ... witness_n ff.
-        return root.replacing(Collections.singletonList(slot),
-                Collections.singletonList(hex("9f" + String.join("", witnesses) + "ff")));
+        List<CborSlice> block = root.items(MajorType.ARRAY).get(1).items(MajorType.ARRAY);
+        String body = HexUtil.encodeHexString(block.get(1).items(MajorType.ARRAY).get(0).bytes());
+        // Indefinite arrays: 9f item_0 ... item_n ff.
+        return root.replacing(List.of(block.get(1), block.get(2), block.get(3)), List.of(
+                hex("9f" + body.repeat(witnesses.length) + "ff"), hex("9f" + String.join("", witnesses) + "ff"),
+                hex("a0")));
     }
 
     /** Check exact encoding and its hash; JSON remains successfully parsed. */

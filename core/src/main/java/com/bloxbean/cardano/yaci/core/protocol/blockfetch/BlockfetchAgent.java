@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.core.protocol.blockfetch;
 
-import co.nstant.in.cbor.model.Array;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.common.GenesisConfig;
 import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
@@ -13,12 +12,10 @@ import com.bloxbean.cardano.yaci.core.model.serializers.BlockHeaderSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.ByronBlockSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.ByronEbBlockSerializer;
-import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.*;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import static com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchState.Idle;
@@ -146,9 +143,7 @@ public class BlockfetchAgent extends Agent<BlockfetchAgentListener> {
             //Catch exception to avoid exception propagation
             try {
                 // Diagnostics must not decode the failing transaction data again.
-                byte[] headerBytes = CborSlice.arrayItem(body, 1, 0).bytes();
-                Array headerArray = (Array) CborSerializationUtil.deserializeOne(headerBytes);
-                BlockHeader blockHeader = BlockHeaderSerializer.INSTANCE.getBlockHeaderFromHeaderArray(headerArray);
+                BlockHeader blockHeader = BlockHeaderSerializer.INSTANCE.deserializeHeaderOfBlock(body);
                 log.error("BlockHeader >> Block No: " + blockHeader.getHeaderBody().getBlockNumber() + ", Slot: " + blockHeader.getHeaderBody().getSlot());
                 blockNumber = blockHeader.getHeaderBody().getBlockNumber();
             } catch (Exception | StackOverflowError e1) {

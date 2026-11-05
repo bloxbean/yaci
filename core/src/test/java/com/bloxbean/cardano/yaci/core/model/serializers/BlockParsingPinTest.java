@@ -1,22 +1,30 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.CborException;
+import co.nstant.in.cbor.model.Array;
+import co.nstant.in.cbor.model.ByteString;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
+import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.AuxData;
 import com.bloxbean.cardano.yaci.core.model.Block;
+import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.Datum;
 import com.bloxbean.cardano.yaci.core.model.Era;
+import com.bloxbean.cardano.yaci.core.model.HeaderBody;
 import com.bloxbean.cardano.yaci.core.model.Redeemer;
 import com.bloxbean.cardano.yaci.core.model.Witnesses;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.MsgBlock;
+import com.bloxbean.cardano.yaci.core.protocol.blockfetch.serializers.MsgBlockSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2c.LocalChainSyncState;
+import com.bloxbean.cardano.yaci.core.protocol.chainsync.serializers.RollForwardSerializer;
 import com.bloxbean.cardano.yaci.core.util.CborLoader;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import org.apache.log4j.AppenderSkeleton;
 import org.apache.log4j.Level;
@@ -40,12 +48,12 @@ import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
 
 /**
- * Pins what block parsing does today, before ADR 0003 moves any of it onto the shared reader (D8, I11, I12).
+ * Pins what block parsing does, from before ADR 0003 moved it onto the shared reader (D8, I11, I12).
  * Inputs are built with CCL's {@link CborSpan} and expected hashes with CCL's Blake2b, so these tests do not rest on
  * the code they pin. Fixture {@code preprod292683}: Babbage envelope (era 6), three transactions, one datum and one
  * redeemer in witness 0, native scripts in witnesses 1 and 2, auxiliary data for transactions 1 and 2, no invalid
  * transactions.
- * Tests named {@code knownDifference} and {@code correction} pin values ADR 0003 decides to change.
+ * Tests named {@code differenceQ6} pin what ADR 0003 M2 narrowed, and {@code correction} what it corrected.
  */
 class BlockParsingPinTest {
     private static final byte[] FIXTURE = CborLoader.getHexBytes("block/preprod292683.txt");
@@ -110,21 +118,140 @@ class BlockParsingPinTest {
         assertThat(BlockSerializer.INSTANCE.deserialize(bytes).getCbor()).isEqualTo(HexUtil.encodeHexString(bytes));
     }
 
-    /** Table row 3. Known difference awaiting Q6: under ADR 0003 this raises onParsingError. */
+    /** Table row 3. Q6: this was delivered with three bodies and no witnesses. */
     @Test
-    void knownDifferenceQ6_emptyWitnessArrayIsDeliveredWithNoCountCheck() {
-        Block block = BlockSerializer.INSTANCE.deserialize(replacing(block().get(WITNESSES), "80"));
-        assertThat(block.getEra()).isEqualTo(Era.Babbage);
-        assertThat(block.getTransactionBodies()).hasSize(3);
-        assertThat(block.getTransactionWitness()).isEmpty();
+    void differenceQ6_emptyWitnessArrayRaisesParsingError() {
+        assertThat(parsingError(replacing(block().get(WITNESSES), "80")).getBlockNumber()).isEqualTo(BLOCK_NUMBER);
     }
 
-    /** Table row 4. Known difference awaiting Q6: under ADR 0003 this raises onParsingError. */
+    /** Table row 4. Q6: this was delivered with invalid transaction 3 of 3. */
     @Test
-    void knownDifferenceQ6_outOfRangeInvalidIndexIsDeliveredWithNoCheck() {
-        Block block = BlockSerializer.INSTANCE.deserialize(replacing(block().get(INVALID), "8103"));
+    void differenceQ6_outOfRangeInvalidIndexRaisesParsingError() {
+        assertThat(parsingError(replacing(block().get(INVALID), "8103")).getBlockNumber()).isEqualTo(BLOCK_NUMBER);
+    }
+
+    /** Q6: all of these were delivered. The reader rejects each one. */
+    @Test
+    void differenceQ6_blockShapesTheReaderRejectsRaiseParsingError() {
+        CborSpan block = block();
+        String header = hex(block.get(HEADER));
+        String flatHeader = flatHeader();
+        String bodies = hex(block.get(BODIES));
+        String witnesses = hex(block.get(WITNESSES));
+        String auxiliary = hex(block.get(AUXILIARY));
+        String invalid = hex(block.get(INVALID));
+        String parts = bodies + witnesses + auxiliary;
+        String[] shapes = {
+                // The wrong layout for the era, known or not
+                "820684" + header + parts,
+                "820585" + header + parts + invalid,
+                "820485" + flatHeader + parts + invalid,
+                "820584" + flatHeader + parts,
+                "820984" + header + parts,
+                "820985" + flatHeader + parts + invalid,
+                // Extra items in the block and the envelope
+                "820686" + header + parts + invalid + "80",
+                "830685" + header + parts + invalid + "00",
+                // A tag on the era index and the parts that were read through one
+                "82" + "d90102" + "06" + hex(block),
+                "820685" + header + bodies + "d90102" + witnesses + auxiliary + invalid,
+                "820685" + header + bodies + witnesses + "d90102" + auxiliary + invalid,
+                "820685" + header + parts + "d90102" + invalid,
+        };
+        for (String shape : shapes) parsingError(HexUtil.decodeHexString(shape));
+    }
+
+    /** Q6: all of these were delivered. Counts and indexes are the reader's checks from ADR 0001 D6. */
+    @Test
+    void differenceQ6_badCountsAndIndexesRaiseParsingError() {
+        CborSpan block = block();
+        List<Map.Entry<CborSpan, CborSpan>> aux = block.get(AUXILIARY).entries();
+        String oneMoreWitness = "84" + hex(block.get(WITNESSES)).substring(2) + "a0";
+        for (byte[] input : List.of(
+                replacing(block.get(WITNESSES), oneMoreWitness),
+                replacing(aux.get(0).getKey(), "03"),
+                replacing(aux.get(0).getKey(), "d9010201"),
+                replacing(block.get(INVALID), "820100"),
+                replacing(block.get(INVALID), "820000"))) {
+            assertThat(parsingError(input).getBlockNumber()).isEqualTo(BLOCK_NUMBER);
+        }
+    }
+
+    /** Q6: a repeated aux data index is rejected from Conway, and takes the last value before it (ADR 0001 D6). */
+    @Test
+    void differenceQ6_repeatedAuxiliaryIndexRaisesParsingErrorFromConway() {
+        List<Map.Entry<CborSpan, CborSpan>> aux = block().get(AUXILIARY).entries();
+        byte[] repeated = replacing(aux.get(1).getKey(), hex(aux.get(0).getKey()));
+
+        assertThat(BlockSerializer.INSTANCE.deserialize(repeated).getAuxiliaryDataMap()).containsOnlyKeys(1);
+        byte[] conway = repeated.clone();
+        conway[1] = 7;
+        assertThat(parsingError(conway).getBlockNumber()).isEqualTo(BLOCK_NUMBER);
+    }
+
+    /** Q6: extra items in the header's records. The header does not fit a layout, so it gives no number. */
+    @Test
+    void differenceQ6_extraItemsInAHeaderRaiseParsingError() {
+        CborSpan header = block().get(HEADER);
+        CborSpan body = header.get(0);
+        for (CborSpan array : List.of(header, body, body.get(5), body.get(8), body.get(9))) {
+            assertThat(parsingError(replacing(array, withExtraItem(array))).getBlockNumber()).isNull();
+        }
+    }
+
+    /** Not a difference: tags on a header and its records are looked through, as they were. */
+    @Test
+    void tagsInAHeaderAreLookedThrough() {
+        CborSpan header = block().get(HEADER);
+        CborSpan body = header.get(0);
+        BlockHeader healthy = BlockSerializer.INSTANCE.deserialize(FIXTURE).getHeader();
+        for (CborSpan item : List.of(body, body.get(0), body.get(2), body.get(5), body.get(8), body.get(9))) {
+            HeaderBody parsed = BlockSerializer.INSTANCE.deserialize(replacing(item, "d90102" + hex(item)))
+                    .getHeader().getHeaderBody();
+            assertThat(parsed).usingRecursiveComparison().ignoringFields("blockHash")
+                    .isEqualTo(healthy.getHeaderBody());
+        }
+    }
+
+    /** Not a difference: rejected before and now. The tree was accepted, and the old extractor misread these heads. */
+    @Test
+    void tagsTheOldExtractorCouldNotReadStayRejected() {
+        CborSpan block = block();
+        String header = hex(block.get(HEADER));
+        String rest = hex(block.get(WITNESSES)) + hex(block.get(AUXILIARY)) + hex(block.get(INVALID));
+        for (String shape : new String[]{"d90102" + "8206" + hex(block), "8206" + "d90102" + hex(block),
+                "820685" + header + "d90102" + hex(block.get(BODIES)) + rest}) {
+            parsingError(HexUtil.decodeHexString(shape));
+        }
+    }
+
+    /** A difference on the era only: an index past int was truncated to a known one, and is an unknown one now. */
+    @Test
+    void eraIndexPastIntIsAnUnknownEraHere() {
+        byte[] bytes = HexUtil.decodeHexString("821b0000000100000006" + hex(block()));
+        Block block = BlockSerializer.INSTANCE.deserialize(bytes);
+        assertThat(block.getEra()).isNull();
         assertThat(block.getTransactionBodies()).hasSize(3);
-        assertThat(block.getInvalidTransactions()).containsExactly(3);
+    }
+
+    /** Q6: an index of 0 or 1 is Byron. The agents read those with the Byron serializers before reaching this class. */
+    @Test
+    void differenceQ6_byronIndexIsNotReadByThisClass() {
+        for (int era : new int[]{0, 1}) {
+            assertThatThrownBy(() -> BlockSerializer.INSTANCE.deserialize(withEra(era)))
+                    .isInstanceOf(com.bloxbean.cardano.yaci.core.exception.CborRuntimeException.class);
+        }
+    }
+
+    /** The message serializers take tag 24 off, so it never reaches this class, which rejected it and still does. */
+    @Test
+    void aBlockInTag24IsNotRead() {
+        byte[] wrapped = CborSerializationUtil.serialize(new ByteString(FIXTURE));
+        String tagged = "d818" + HexUtil.encodeHexString(wrapped);
+        assertThatThrownBy(() -> BlockSerializer.INSTANCE.deserialize(HexUtil.decodeHexString(tagged)))
+                .isInstanceOf(com.bloxbean.cardano.yaci.core.exception.CborRuntimeException.class);
+        assertThat(MsgBlockSerializer.INSTANCE.deserialize(HexUtil.decodeHexString("8204" + tagged)).getBytes())
+                .isEqualTo(FIXTURE);
     }
 
     /** Five items with an empty list give an empty list; four items, as to Mary, leave it null. */
@@ -132,9 +259,10 @@ class BlockParsingPinTest {
     void invalidTransactionsAreEmptyWhenPresentAndNullWhenAbsent() {
         assertThat(BlockSerializer.INSTANCE.deserialize(FIXTURE).getInvalidTransactions()).isEmpty();
         CborSpan block = block();
-        byte[] fourItems = HexUtil.decodeHexString("820684" + hex(block.get(HEADER)) + hex(block.get(BODIES))
+        byte[] mary = HexUtil.decodeHexString("820484" + flatHeader() + hex(block.get(BODIES))
                 + hex(block.get(WITNESSES)) + hex(block.get(AUXILIARY)));
-        assertThat(BlockSerializer.INSTANCE.deserialize(fourItems).getInvalidTransactions()).isNull();
+        assertThat(BlockSerializer.INSTANCE.deserialize(mary).getEra()).isEqualTo(Era.Mary);
+        assertThat(BlockSerializer.INSTANCE.deserialize(mary).getInvalidTransactions()).isNull();
     }
 
     // ---- I12: a block that does not fit the newest layout ----
@@ -287,6 +415,17 @@ class BlockParsingPinTest {
         assertThat(scriptInt.getPlutusV1Scripts()).hasSize(1);
     }
 
+    /** Metadata with an indefinite array is delivered with no JSON, as cbor-java's decoder made it fail. */
+    @Test
+    void indefiniteArrayInMetadataHasNoJson() {
+        String metadata = "a1009f01ff";
+        AuxData aux = BlockSerializer.INSTANCE.deserialize(
+                replacing(block().get(AUXILIARY).entries().get(0).getValue(), metadata)).getAuxiliaryDataMap().get(1);
+        assertThat(aux.getMetadataCbor()).isEqualTo(metadata);
+        assertThat(aux.getMetadataJson()).isNull();
+        assertThat(aux.getMetadataParseError()).contains("MetadataDeSerializationException");
+    }
+
     // ---- Count mismatches between parsed and raw items ----
 
     @Test
@@ -418,7 +557,7 @@ class BlockParsingPinTest {
     }
 
     @Test
-    void auxiliaryCborIsHiddenOnAHashMismatchOrAnIndexPastTheBodies() {
+    void auxiliaryCborIsHiddenOnAHashMismatch() {
         YaciConfig.INSTANCE.setReturnFullTxCbor(true);
         // Entries swapped: each is now checked against the other transaction's hash.
         List<Map.Entry<CborSpan, CborSpan>> entries = block().get(AUXILIARY).entries();
@@ -428,10 +567,6 @@ class BlockParsingPinTest {
         assertThat(mismatched.getAuxiliaryDataMap().get(1).getCbor()).isNull();
         assertThat(mismatched.getAuxiliaryDataMap().get(2).getCbor()).isNull();
         assertThat(mismatched.getAuxiliaryDataMap().get(1).getMetadataCbor()).isNotNull();
-
-        Block pastBodies = BlockSerializer.INSTANCE.deserialize(replacing(entries.get(0).getKey(), "09"));
-        assertThat(pastBodies.getAuxiliaryDataMap().get(9).getCbor()).isNull();
-        assertThat(pastBodies.getAuxiliaryDataMap().get(9).getMetadataCbor()).isNotNull();
     }
 
     /** ADR 0003 D8 says "only if it matches": a body with no auxiliary data hash has nothing to match, so it shows. */
@@ -501,26 +636,115 @@ class BlockParsingPinTest {
     }
 
     /**
-     * Correction to apply at ADR 0003 M2, with a release note. The block number is re-encoded from {@code 1a0004774b}
-     * to {@code 1b000000000004774b}. Yaci hashes a re-encoding of the header and so reports the old hash; Haskell keeps
-     * a header's original bytes and hashes those ({@code MemoBytes}, {@code getMemoSafeHash}), giving the second value.
+     * Correction made at ADR 0003 M2, with a release note. The block number is re-encoded from {@code 1a0004774b} to
+     * {@code 1b000000000004774b}. Yaci hashed a re-encoding of the header and so reported the fixture's own hash,
+     * {@code 1cf993e9...d248}. Haskell keeps a header's original bytes and hashes those ({@code MemoBytes},
+     * {@code getMemoSafeHash}), giving this value. Both sync paths read it from the bytes received.
      */
     @Test
-    void correctionM2_blockHashIsOfAReEncodingNotOfTheBytesReceived() {
+    void correctionM2_blockHashIsOfTheBytesReceivedNotOfAReEncoding() {
         String source = HexUtil.encodeHexString(FIXTURE);
         assertThat(source).containsOnlyOnce("1a0004774b");
         byte[] bytes = HexUtil.decodeHexString(source.replace("1a0004774b", "1b000000000004774b"));
+        String expected = "73ee9b5ef0cffd764ddaea205efde71998f1e9b0bbc635e81c1379ce9ddd03ae";
 
         Block block = BlockSerializer.INSTANCE.deserialize(bytes);
 
         assertThat(block.getHeader().getHeaderBody().getBlockNumber()).isEqualTo(BLOCK_NUMBER);
-        assertThat(block.getHeader().getHeaderBody().getBlockHash())
-                .isEqualTo("1cf993e9b77373d0f78f9cfda42717d0f901d1d8d6569436f79f45efe3c7d248");
-        assertThat(blake2b256(CborSpan.of(bytes).get(1).get(HEADER).bytes()))
-                .isEqualTo("73ee9b5ef0cffd764ddaea205efde71998f1e9b0bbc635e81c1379ce9ddd03ae");
+        assertThat(block.getHeader().getHeaderBody().getBlockHash()).isEqualTo(expected);
+        byte[] header = CborSpan.of(bytes).get(1).get(HEADER).bytes();
+        assertThat(blake2b256(header)).isEqualTo(expected);
+        // As chain sync receives it: a byte string holding the header, read by the same mapper.
+        assertThat(BlockHeaderSerializer.INSTANCE.deserializeDI(new ByteString(header)).getHeaderBody().getBlockHash())
+                .isEqualTo(expected);
+        assertThat(blockHeaderThroughChainSync(header).getHeaderBody().getBlockHash()).isEqualTo(expected);
+    }
+
+    /** Agrees with what block fetch gives on a real header, so chain sync's points still match. */
+    @Test
+    void chainSyncAndBlockFetchGiveTheSameBlockHash() {
+        BlockHeader fetched = BlockSerializer.INSTANCE.deserialize(FIXTURE).getHeader();
+        assertThat(blockHeaderThroughChainSync(block().get(HEADER).bytes())).usingRecursiveComparison()
+                .isEqualTo(fetched);
+    }
+
+    /** A caller holding only a decoded array has no original bytes, so its encoding is what is hashed. */
+    @Test
+    void headerFromADecodedArrayHashesItsEncoding() {
+        Array tree = (Array) CborSerializationUtil.deserializeOne(block().get(HEADER).bytes());
+        assertThat(BlockHeaderSerializer.INSTANCE.getBlockHeaderFromHeaderArray(tree)).usingRecursiveComparison()
+                .isEqualTo(BlockSerializer.INSTANCE.deserialize(FIXTURE).getHeader());
+    }
+
+    /** Both header layouts map every field, with the numbers as the old reads gave them: low bits, bignums included. */
+    @Test
+    void headerNumbersAreItsLowBits() {
+        CborSpan body = block().get(HEADER).get(0);
+        byte[] bytes = CborSpan.of(FIXTURE).replacing(List.of(body.get(0), body.get(8).get(1), body.get(8).get(2)),
+                List.of(HexUtil.decodeHexString("c249010000000000000005"),
+                        HexUtil.decodeHexString("1b0000000100000007"), HexUtil.decodeHexString("d81808")));
+        HeaderBody parsed = BlockSerializer.INSTANCE.deserialize(bytes).getHeader().getHeaderBody();
+        assertThat(parsed.getBlockNumber()).isEqualTo(5);
+        assertThat(parsed.getOperationalCert().getSequenceNumber()).isEqualTo(7);
+        assertThat(parsed.getOperationalCert().getKesPeriod()).isEqualTo(8);
+    }
+
+    @Test
+    void flatHeaderFillsItsTwoVrfResults() {
+        CborSpan vrf = block().get(HEADER).get(0).get(5);
+        HeaderBody parsed = BlockHeaderSerializer.INSTANCE.deserializeDI(
+                new ByteString(HexUtil.decodeHexString(flatHeader()))).getHeaderBody();
+        assertThat(parsed.getNonceVrf().get_1()).isEqualTo(HexUtil.encodeHexString(vrf.get(0).byteString()));
+        assertThat(parsed.getLeaderVrf().get_2()).isEqualTo(HexUtil.encodeHexString(vrf.get(1).byteString()));
+        assertThat(parsed.getVrfResult()).isNull();
+        assertThat(parsed.getBlockNumber()).isEqualTo(BLOCK_NUMBER);
+    }
+
+    /** An era index past int fails as it did, whichever way its bits read. */
+    @Test
+    void eraIndexPastIntFailsTheAgentsRead() {
+        for (String index : new String[]{"1a80000000", "1b0000000100000006", "1bffffffffffffffff"}) {
+            assertThatThrownBy(() -> EraUtil.getEraValue(HexUtil.decodeHexString("82" + index + "80")))
+                    .as(index).isInstanceOf(ArithmeticException.class);
+        }
     }
 
     // ---- Helpers ----
+
+    private static BlockParseRuntimeException parsingError(byte[] bytes) {
+        assertThatThrownBy(() -> BlockSerializer.INSTANCE.deserialize(bytes))
+                .isInstanceOf(com.bloxbean.cardano.yaci.core.exception.CborRuntimeException.class);
+        AgentResult result = throughAgent(bytes);
+        assertThat(result.blocks).isEmpty();
+        assertThat(result.errors).hasSize(1);
+        assertThat(result.errors.get(0).getBlockCbor()).isEqualTo(bytes);
+        return result.errors.get(0);
+    }
+
+    /** The fixture's header in the flat layout, as to Alonzo: two VRF results, its other records in line. */
+    private static String flatHeader() {
+        CborSpan header = block().get(HEADER);
+        CborSpan body = header.get(0);
+        StringBuilder flat = new StringBuilder("8f");
+        for (int i = 0; i < 5; i++) flat.append(hex(body.get(i)));
+        flat.append(hex(body.get(5))).append(hex(body.get(5))).append(hex(body.get(6))).append(hex(body.get(7)));
+        body.get(8).items().forEach(item -> flat.append(hex(item)));
+        body.get(9).items().forEach(item -> flat.append(hex(item)));
+        return "82" + flat + hex(header.get(1));
+    }
+
+    /** A definite array of fewer than 23 items, with an empty array added. */
+    private static String withExtraItem(CborSpan array) {
+        String encoded = hex(array);
+        return String.format("%02x", array.bytes()[0] + 1 & 0xff) + encoded.substring(2) + "80";
+    }
+
+    private static BlockHeader blockHeaderThroughChainSync(byte[] header) {
+        String wrapped = HexUtil.encodeHexString(CborSerializationUtil.serialize(new ByteString(header)));
+        byte[] message = HexUtil.decodeHexString("8302" + "8206" + "d818" + wrapped
+                + "8282" + "01" + "5820" + "00".repeat(32) + "01");
+        return RollForwardSerializer.INSTANCE.deserialize(message).getBlockHeader();
+    }
 
     private static byte[] withEra(int era) {
         byte[] bytes = FIXTURE.clone();

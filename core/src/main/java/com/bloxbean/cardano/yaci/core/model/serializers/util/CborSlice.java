@@ -17,7 +17,7 @@ import java.util.Map;
  * This checks CBOR framing, not ledger rules or the semantic validity of Plutus data.
  *
  * <p>The walk is CCL's {@link CborSpan}. This class adds what its callers use and a span does not offer: reading
- * through tags, and {@link #arrayItem} reading a value without walking what follows it.</p>
+ * through tags.</p>
  *
  * <p>Hex examples (spaces separate bytes):</p>
  * <pre>
@@ -28,14 +28,7 @@ import java.util.Map;
  * </pre>
  */
 public final class CborSlice {
-    private static final int ARRAY = 4;
-    private static final int TAG = 6;
     private static final int MAJOR_TYPE_SHIFT = 5;
-    private static final int ADDITIONAL_INFO_MASK = 0x1f;
-    private static final int BYTE_MASK = 0xff;
-    private static final int FIRST_WIDTH_CODE = 24;
-    private static final int LAST_WIDTH_CODE = 27;
-    private static final int INDEFINITE = 31;
 
     private final CborSpan span;
 
@@ -80,45 +73,15 @@ public final class CborSlice {
      */
     public static CborSlice arrayItem(byte[] bytes, int... indexes) throws CborException {
         try {
-            int position = 0;
-            for (int index : indexes) {
-                position = arrayItems(bytes, position, index);
-                for (int i = 0; i < index; i++) position = CborSpan.skip(bytes, position, bytes.length);
-            }
-            return new CborSlice(CborSpan.at(bytes, position));
+            return new CborSlice(CborSpan.arrayItem(bytes, indexes));
         } catch (CborRuntimeException e) {
             throw new CborException(e.getMessage(), e);
         }
     }
 
-    /**
-     * The offset of the first item of the array at {@code position}, past any tags. A span must walk the whole array
-     * first, which this exists to avoid.
-     */
-    private static int arrayItems(byte[] bytes, int position, int index) throws CborException {
-        while (true) {
-            if (position >= bytes.length) throw new CborException("Truncated CBOR header");
-            int initial = bytes[position++] & BYTE_MASK;
-            int major = initial >>> MAJOR_TYPE_SHIFT;
-            int additional = initial & ADDITIONAL_INFO_MASK;
-            long argument = additional;
-            if (additional == INDEFINITE && major == ARRAY) {
-                argument = -1;
-            } else if (additional >= FIRST_WIDTH_CODE && additional <= LAST_WIDTH_CODE) {
-                int width = 1 << (additional - FIRST_WIDTH_CODE);
-                if (width > bytes.length - position) throw new CborException("Truncated CBOR argument");
-                argument = 0;
-                for (int i = 0; i < width; i++) argument = (argument << 8) | (bytes[position++] & BYTE_MASK);
-                if (major == ARRAY && argument < 0) throw new CborException("Invalid CBOR array index");
-            } else if (additional > LAST_WIDTH_CODE) {
-                throw new CborException("Invalid CBOR additional information");
-            }
-            if (major == TAG) continue;
-            if (major != ARRAY || index < 0 || (argument >= 0 && index >= argument)) {
-                throw new CborException("Invalid CBOR array index");
-            }
-            return position;
-        }
+    /** The value as CCL's span over the source buffer. */
+    public CborSpan span() {
+        return span;
     }
 
     /** Copy the exact source encoding, retaining tags, map ordering, and non-minimal lengths. */

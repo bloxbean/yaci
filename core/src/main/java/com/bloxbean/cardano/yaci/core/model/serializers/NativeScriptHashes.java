@@ -2,7 +2,6 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.transaction.raw.RawScript;
-import com.bloxbean.cardano.yaci.core.model.AuxData;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
 import com.bloxbean.cardano.yaci.core.model.NativeScriptType;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -24,8 +23,6 @@ final class NativeScriptHashes {
     private static final int MAJOR_ARRAY = 4;
     private static final BigInteger NATIVE_SCRIPTS_KEY = BigInteger.ONE; // In witnesses and tag-259 auxiliary data.
     private static final int SHELLEY_MA_NATIVE_SCRIPTS = 1; // [metadata, native scripts]
-    private static final int BLOCK_BODY = 1;
-    private static final int BLOCK_AUXILIARY_DATA = 3;
 
     private NativeScriptHashes() {
     }
@@ -45,24 +42,6 @@ final class NativeScriptHashes {
             set(parsed, scriptsOf(CborSpan.of(auxiliaryData)));
         } catch (RuntimeException e) {
             log.warn("Native script hashes are unavailable for auxiliary data", e);
-        }
-    }
-
-    /** The block's auxiliary data is walked only when one of its parsed entries holds a native script. */
-    static void fromBlock(Map<Integer, AuxData> parsed, byte[] block) {
-        if (parsed.values().stream().allMatch(aux -> aux.getNativeScripts() == null
-                || aux.getNativeScripts().isEmpty())) {
-            return;
-        }
-        try {
-            CborSpan auxiliaryData = CborSpan.at(block, 0).get(BLOCK_BODY).get(BLOCK_AUXILIARY_DATA);
-            for (Map.Entry<CborSpan, CborSpan> entry : auxiliaryData.entries()) {
-                AuxData aux = parsed.get(entry.getKey().asBigInteger().intValue());
-                if (aux == null || aux.getNativeScripts() == null || aux.getNativeScripts().isEmpty()) continue;
-                set(aux.getNativeScripts(), scriptsOf(entry.getValue()));
-            }
-        } catch (RuntimeException e) {
-            log.warn("Native script hashes are unavailable for a block's auxiliary data", e);
         }
     }
 
