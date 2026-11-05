@@ -16,6 +16,11 @@ import java.util.Map;
 public enum WithdrawalsSerializer implements Serializer<Map<String, BigInteger>> {
     INSTANCE;
 
+    /**
+     * @deprecated Decoded withdrawals have lost their source encoding. Use {@link #read(List)}, or
+     * {@link BlockSerializer} for a block.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Map<String, BigInteger> deserializeDI(DataItem di) {
         return read(RawWithdrawal.tolerant(RawModels.span(di)));

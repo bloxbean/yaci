@@ -23,8 +23,8 @@ import java.util.function.Supplier;
 
 /**
  * Maps CCL's {@link RawHeader}, which reads both header layouts, to Yaci's model. {@code blockHash} is the hash of the
- * header's original bytes (ADR 0003 D8), except from {@link #getBlockHeaderFromHeaderArray(Array)}, which has only a
- * decoded array and so hashes its encoding.
+ * header's original bytes (ADR 0003 D8), except from the deprecated {@code getBlockHeaderFromHeaderArray}, which has
+ * only a decoded array and so hashes its encoding.
  */
 public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
     INSTANCE;
@@ -42,6 +42,11 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
         return read(() -> first(headerBytes));
     }
 
+    /**
+     * @deprecated A decoded header has lost its source encoding, so its {@code blockHash} is that of a re-encoding.
+     * Use {@link #deserializeDI(DataItem)} with the header's bytes, or {@link #deserializeHeaderOfBlock(byte[])}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     public BlockHeader getBlockHeaderFromHeaderArray(Array headerArray) {
         return read(() -> CborSpan.of(CborSerializationUtil.serialize(headerArray)));
     }

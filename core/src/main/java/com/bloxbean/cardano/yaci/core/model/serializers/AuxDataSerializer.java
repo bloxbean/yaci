@@ -10,7 +10,6 @@ import com.bloxbean.cardano.client.transaction.raw.RawItems;
 import com.bloxbean.cardano.client.transaction.raw.RawScript;
 import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.AuxData;
-import com.bloxbean.cardano.yaci.core.model.NativeScript;
 import com.bloxbean.cardano.yaci.core.model.PlutusScript;
 import com.bloxbean.cardano.yaci.core.model.PlutusScriptType;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
@@ -36,7 +35,13 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
         return bytes.length == 0 ? null : read(CborSpan.of(bytes), EraSpec.newest(), true);
     }
 
-    /** A decoded item is read from its encoding, which is not the source, so native scripts get no hash. */
+    /**
+     * A decoded item is read from its encoding, which is not the source, so native scripts get no hash.
+     *
+     * @deprecated Decoded aux data has lost its source encoding. Use {@link #deserialize(byte[])} with its bytes, or
+     * {@link BlockSerializer} for a block.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public AuxData deserializeDI(DataItem di) {
         return read(RawModels.span(di), EraSpec.newest(), false);
@@ -47,8 +52,8 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
      */
     AuxData read(CborSpan span, Era era, boolean hashed) {
         RawAuxData aux = RawAuxData.tolerant(span, era);
-        AuxData.AuxDataBuilder builder = AuxData.builder();
-        aux.metadata().ifPresent(metadata -> DataItemIsolation.metadata(builder, metadata));
+        AuxData.AuxDataBuilder builder = aux.metadata().map(DataItemIsolation::metadata).map(AuxData::toBuilder)
+                .orElseGet(AuxData::builder);
         List<RawScript> nativeScripts = aux.nativeScripts();
         if (aux.has(AuxDataField.NATIVE_SCRIPTS) || !nativeScripts.isEmpty())
             builder.nativeScripts(WitnessesSerializer.nativeScripts(nativeScripts, hashed));

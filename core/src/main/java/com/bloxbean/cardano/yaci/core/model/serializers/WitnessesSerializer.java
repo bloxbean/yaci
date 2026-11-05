@@ -44,7 +44,13 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
         return bytes.length == 0 ? null : read(CborSpan.of(bytes), EraSpec.newest(), true);
     }
 
-    /** A decoded item is read from its encoding, which is not the source, so native scripts get no hash. */
+    /**
+     * A decoded item is read from its encoding, which is not the source, so native scripts get no hash.
+     *
+     * @deprecated A decoded witness set has lost its source encoding. Use {@link #deserialize(byte[])} with its bytes,
+     * or {@link BlockSerializer} for a block.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Witnesses deserializeDI(DataItem di) {
         return read(RawModels.span(di), EraSpec.newest(), false);
@@ -81,7 +87,7 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
     static List<NativeScript> nativeScripts(List<RawScript> scripts, boolean hashed) {
         List<NativeScript> parsed = new ArrayList<>(scripts.size());
         for (RawScript script : scripts) {
-            NativeScript json = INSTANCE.deserializeNativeScript(
+            NativeScript json = NativeScriptJson.parse(
                     (Array) CborSerializationUtil.deserializeOne(script.span().bytes()));
             if (json != null) {
                 parsed.add(hashed ? new NativeScript(json.getType(), json.getContent(), json.getParseError(),
@@ -103,6 +109,11 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
         return HexUtil.encodeHexString(bytes);
     }
 
+    /**
+     * @deprecated A native script is read with its witness set or aux data, from their bytes: use
+     * {@link #deserialize(byte[])} or {@link AuxDataSerializer#deserialize(byte[])}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     public NativeScript deserializeNativeScript(Array nativeScriptArray) {
         return NativeScriptJson.parse(nativeScriptArray);
     }

@@ -10,6 +10,10 @@ import com.bloxbean.cardano.yaci.core.util.HexUtil;
 public enum DrepSerializer implements Serializer<Drep> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded DRep has lost its source encoding. Use {@link #read(RawDRep)}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Drep deserializeDI(DataItem di) {
         return read(RawDRep.lenient(RawModels.span(di)));

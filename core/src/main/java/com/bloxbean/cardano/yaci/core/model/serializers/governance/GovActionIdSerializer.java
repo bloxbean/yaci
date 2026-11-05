@@ -32,6 +32,10 @@ public enum GovActionIdSerializer implements Serializer<GovActionId> {
         return array;
     }
 
+    /**
+     * @deprecated A decoded governance action id has lost its source encoding. Use {@link #read(RawGovActionId)}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public GovActionId deserializeDI(DataItem di) {
         return read(RawGovActionId.lenient(RawModels.span(di)));

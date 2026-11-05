@@ -13,7 +13,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Extract original witness encodings without decoding or re-encoding their nested data. */
+/**
+ * Extract original witness encodings without decoding or re-encoding their nested data.
+ *
+ * @deprecated {@link com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer} reads witness sets through CCL's
+ * reader and keeps their source bytes; CCL's {@code RawBlock} and {@code RawWitnessSet} give each item's source bytes.
+ */
+@Deprecated(since = "0.5.0", forRemoval = true)
 public final class WitnessUtil {
     private WitnessUtil() {}
 

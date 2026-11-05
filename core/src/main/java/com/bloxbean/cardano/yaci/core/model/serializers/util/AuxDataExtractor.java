@@ -8,9 +8,9 @@ import java.util.Map;
 
 /**
  * @deprecated {@link com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer} reads the block through CCL's
- * reader and sets the source bytes on its models. This is kept for outside callers.
+ * reader and sets the source bytes on its models; CCL's {@code RawBlock} gives each item's source bytes.
  */
-@Deprecated
+@Deprecated(since = "0.5.0", forRemoval = true)
 public class AuxDataExtractor {
     private static final int BLOCK = 1;
     private static final int AUXILIARY_DATA = 3;

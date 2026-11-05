@@ -74,8 +74,10 @@ final class DataItemIsolation {
 
     /**
      * Metadata that converts keeps the canonical CBOR Yaci has always given. Metadata that fails keeps its source.
+     *
+     * @return aux data with only its metadata fields set
      */
-    static void metadata(AuxData.AuxDataBuilder aux, CborSpan metadata) {
+    static AuxData metadata(CborSpan metadata) {
         String cbor = null;
         String json = null;
         String error = null;
@@ -104,7 +106,7 @@ final class DataItemIsolation {
         }
         if (error != null)
             cbor = hex(metadata);
-        aux.metadataCbor(cbor).metadataJson(json).metadataParseError(error);
+        return AuxData.builder().metadataCbor(cbor).metadataJson(json).metadataParseError(error).build();
     }
 
     private static DataItem decode(CborSpan item) {

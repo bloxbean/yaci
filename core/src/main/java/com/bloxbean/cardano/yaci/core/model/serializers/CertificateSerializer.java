@@ -30,6 +30,11 @@ import java.util.Optional;
 public enum CertificateSerializer implements Serializer<Certificate> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded certificate has lost its source encoding. Use {@link #read(CborSpan)}, or
+     * {@link BlockSerializer} for a block.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Certificate deserializeDI(DataItem certArrayDI) {
         Objects.requireNonNull(certArrayDI);
@@ -96,7 +101,11 @@ public enum CertificateSerializer implements Serializer<Certificate> {
         };
     }
 
-    static StakeCredential stakeCredential(RawCredential credential) {
+    /**
+     * @param credential a stake credential as received
+     * @return the credential
+     */
+    public static StakeCredential stakeCredential(RawCredential credential) {
         return credential.isScript() ? StakeCredential.fromScriptHash(credential.hash())
                 : StakeCredential.fromKeyHash(credential.hash());
     }

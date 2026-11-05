@@ -9,6 +9,10 @@ import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 public enum StakeDelegationSerializer implements Serializer<StakeDelegation> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded certificate has lost its source encoding. Use {@link CertificateSerializer#read}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public StakeDelegation deserializeDI(DataItem di) {
         return (StakeDelegation) CertificateSerializer.INSTANCE.read(CertKind.STAKE_DELEGATION, RawModels.span(di));

@@ -22,7 +22,7 @@ import java.util.List;
  * hands maps, tags and scalars to cbor-java's, which tags its shared {@code SimpleValue.NULL} on {@code d818f6} and so
  * changes how every later null in the JVM encodes. Nothing in Yaci uses it.
  */
-@Deprecated
+@Deprecated(since = "0.5.0", forRemoval = true)
 public final class ArrayCborDecoder extends CborDecoder {
     private final PushbackInputStream input;
     private final ArrayLengthDecoder lengths;

@@ -24,6 +24,11 @@ public enum ProposalProcedureSerializer implements Serializer<ProposalProcedure>
         return read(RawProposal.lenient(CborSerializationUtil.span(bytes), EraSpec.newest()));
     }
 
+    /**
+     * @deprecated A decoded proposal procedure has lost its source encoding. Use {@link #deserialize(byte[])} with its
+     * bytes, or {@link #read(RawProposal)}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public ProposalProcedure deserializeDI(DataItem di) {
         return read(RawProposal.lenient(RawModels.span(di), EraSpec.newest()));

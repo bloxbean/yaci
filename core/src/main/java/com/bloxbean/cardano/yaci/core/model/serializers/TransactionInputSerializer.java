@@ -11,12 +11,21 @@ import com.bloxbean.cardano.yaci.core.util.HexUtil;
 public enum TransactionInputSerializer implements Serializer<TransactionInput> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded input has lost its source encoding. Use {@link #read(RawInput)}, or
+     * {@link BlockSerializer} for a block.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public TransactionInput deserializeDI(DataItem di) {
         return read(RawInput.of(RawModels.span(di)));
     }
 
-    TransactionInput read(RawInput input) {
+    /**
+     * @param input an input as received
+     * @return the input
+     */
+    public TransactionInput read(RawInput input) {
         return TransactionInput.builder()
                 .transactionId(HexUtil.encodeHexString(input.transactionId()))
                 .index(input.index())

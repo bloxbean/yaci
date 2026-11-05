@@ -11,8 +11,8 @@ import java.util.Map;
 
 /**
  * A view of one complete value in its original CBOR buffer. The scanner only finds boundaries;
- * it never builds recursive DataItems, hashes map keys, or changes the encoding. Used by raw
- * witness extraction and the failure fallback. Invalid/truncated framing is rejected.
+ * it never builds recursive DataItems, hashes map keys, or changes the encoding. Invalid/truncated
+ * framing is rejected.
  * All ranges use an inclusive start and an exclusive end in the same source buffer.
  * This checks CBOR framing, not ledger rules or the semantic validity of Plutus data.
  *

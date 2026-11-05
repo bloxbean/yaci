@@ -53,6 +53,11 @@ public enum UpdateSerializer implements Serializer<Update> {
         return read(RawUpdate.lenient(CborSerializationUtil.span(bytes), EraSpec.newest()));
     }
 
+    /**
+     * @deprecated A decoded update has lost its source encoding. Use {@link #deserialize(byte[])} with its bytes, or
+     * {@link #read(RawUpdate)}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Update deserializeDI(DataItem di) {
         return read(RawUpdate.lenient(RawModels.span(di), EraSpec.newest()));
@@ -73,7 +78,10 @@ public enum UpdateSerializer implements Serializer<Update> {
     /**
      * @param genesisProtocolParamsMap a parameter update, decoded
      * @return the parameter update, read in the newest era
+     * @deprecated A decoded parameter update has lost its source encoding, which its cost models hash. Use
+     * {@link #read(RawProtocolParamUpdate)}.
      */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     public ProtocolParamUpdate getProtocolParams(Map genesisProtocolParamsMap) {
         return read(RawProtocolParamUpdate.lenient(RawModels.span(genesisProtocolParamsMap), EraSpec.newest()));
     }

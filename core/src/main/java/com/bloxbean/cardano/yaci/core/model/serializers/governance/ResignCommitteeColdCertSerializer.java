@@ -10,6 +10,10 @@ import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 public enum ResignCommitteeColdCertSerializer implements Serializer<ResignCommitteeColdCert> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded certificate has lost its source encoding. Use {@link CertificateSerializer#read}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public ResignCommitteeColdCert deserializeDI(DataItem di) {
         return (ResignCommitteeColdCert) CertificateSerializer.INSTANCE.read(CertKind.RESIGN_COMMITTEE_COLD_CERT, RawModels.span(di));

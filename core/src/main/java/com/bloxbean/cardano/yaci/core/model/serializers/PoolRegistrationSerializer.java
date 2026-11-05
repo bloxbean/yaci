@@ -26,6 +26,10 @@ import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
 public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded certificate has lost its source encoding. Use {@link CertificateSerializer#read}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public PoolRegistration deserializeDI(DataItem di) {
         return (PoolRegistration) CertificateSerializer.INSTANCE.read(CertKind.POOL_REGISTRATION, RawModels.span(di));

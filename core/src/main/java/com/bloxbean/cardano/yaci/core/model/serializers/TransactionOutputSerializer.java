@@ -24,12 +24,21 @@ import static com.bloxbean.cardano.yaci.core.util.StringUtil.sanitize;
 public enum TransactionOutputSerializer implements Serializer<TransactionOutput> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded output has lost its source encoding. Use {@link #read(RawOutput)}, or
+     * {@link BlockSerializer} for a block.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public TransactionOutput deserializeDI(DataItem dataItem) {
         return read(RawOutput.tolerant(RawModels.span(dataItem)));
     }
 
-    TransactionOutput read(RawOutput output) {
+    /**
+     * @param output an output as received
+     * @return the output
+     */
+    public TransactionOutput read(RawOutput output) {
         return TransactionOutput.builder()
                 .address(output.addressBytes().map(TransactionOutputSerializer::address).orElse(null))
                 .amounts(amounts(output))

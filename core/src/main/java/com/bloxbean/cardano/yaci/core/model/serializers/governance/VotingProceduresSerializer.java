@@ -29,6 +29,11 @@ public enum VotingProceduresSerializer implements Serializer<VotingProcedures> {
         return read(RawVotingProcedures.lenient(CborSerializationUtil.span(bytes)));
     }
 
+    /**
+     * @deprecated Decoded voting procedures have lost their source encoding. Use {@link #deserialize(byte[])} with
+     * their bytes, or {@link #read(RawVotingProcedures)}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public VotingProcedures deserializeDI(DataItem di) {
         return read(RawVotingProcedures.lenient(RawModels.span(di)));

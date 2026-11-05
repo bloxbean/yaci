@@ -9,6 +9,11 @@ import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 public enum StakeCredentialSerializer implements Serializer<StakeCredential> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded credential has lost its source encoding. Use
+     * {@link CertificateSerializer#stakeCredential(RawCredential)}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     public StakeCredential deserializeDI(DataItem stakeCredArrayDI)  {
         return CertificateSerializer.stakeCredential(RawCredential.of(RawModels.span(stakeCredArrayDI)));
     }

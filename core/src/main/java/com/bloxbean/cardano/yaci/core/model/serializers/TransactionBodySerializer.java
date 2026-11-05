@@ -39,12 +39,19 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
      * @param di      the body decoded from {@code txBytes}; the fields are read from {@code txBytes}
      * @param txBytes the body as encoded
      * @return the body, read in the newest era: in any other, only a key that has changed meaning reads differently
+     * @deprecated {@code di} is not used. Use {@link #read(byte[], Era)}, or {@link BlockSerializer} for a block.
      */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     public TransactionBody deserializeDI(DataItem di, byte[] txBytes) {
         return read(txBytes, EraSpec.newest());
     }
 
-    TransactionBody read(byte[] txBytes, Era era) {
+    /**
+     * @param txBytes the body as encoded
+     * @param era     the era of its block
+     * @return the body
+     */
+    public TransactionBody read(byte[] txBytes, Era era) {
         RawTxBody body = RawTxBody.tolerant(CborSpan.at(txBytes, 0), era);
         TransactionBody.TransactionBodyBuilder builder = TransactionBody.builder();
 

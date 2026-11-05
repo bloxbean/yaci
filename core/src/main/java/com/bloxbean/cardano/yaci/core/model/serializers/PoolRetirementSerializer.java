@@ -9,6 +9,10 @@ import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 public enum PoolRetirementSerializer implements Serializer<PoolRetirement> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded certificate has lost its source encoding. Use {@link CertificateSerializer#read}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public PoolRetirement deserializeDI(DataItem di) {
         return (PoolRetirement) CertificateSerializer.INSTANCE.read(CertKind.POOL_RETIREMENT, RawModels.span(di));

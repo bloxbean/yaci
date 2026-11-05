@@ -14,9 +14,9 @@ import java.util.List;
  * This is only for Shelley and post Shelley era blocks.
  *
  * @deprecated {@link com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer} reads the block through CCL's
- * reader and sets the source bytes on its models. This is kept for outside callers.
+ * reader and sets the source bytes on its models; CCL's {@code RawBlock} gives each item's source bytes.
  */
-@Deprecated
+@Deprecated(since = "0.5.0", forRemoval = true)
 public class TransactionBodyExtractor {
     private static final int BLOCK = 1;
     private static final int TRANSACTION_BODIES = 1;

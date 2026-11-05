@@ -175,6 +175,11 @@ public enum GovActionSerializer implements Serializer<GovAction> {
         return read(RawGovAction.lenient(CborSerializationUtil.span(bytes), EraSpec.newest()));
     }
 
+    /**
+     * @deprecated A decoded governance action has lost its source encoding. Use {@link #deserialize(byte[])} with its
+     * bytes, or {@link #read(RawGovAction)}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public GovAction deserializeDI(DataItem di) {
         return read(RawGovAction.lenient(RawModels.span(di), EraSpec.newest()));
