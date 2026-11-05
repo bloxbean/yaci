@@ -59,9 +59,10 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
     private static Relay relay(RawRelay relay) {
         return switch (relay.kind()) {
             case SINGLE_HOST_ADDR ->
-                    new Relay(relay.port(), hostAddress(relay.ipv4()), hostAddress(relay.ipv6()), null);
-            case SINGLE_HOST_NAME -> new Relay(relay.port(), null, null, relay.dnsName());
-            case MULTI_HOST_NAME -> new Relay(0, null, null, relay.dnsName());
+                    new Relay(relay.port().orElse(null), hostAddress(relay.ipv4().orElse(null)),
+                            hostAddress(relay.ipv6().orElse(null)), null);
+            case SINGLE_HOST_NAME -> new Relay(relay.port().orElse(null), null, null, relay.dnsName().orElse(null));
+            case MULTI_HOST_NAME -> new Relay(0, null, null, relay.dnsName().orElse(null));
         };
     }
 
