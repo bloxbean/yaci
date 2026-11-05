@@ -152,6 +152,8 @@ class BlockParsingPinTest {
                 // Extra items in the block and the envelope
                 "820686" + header + parts + invalid + "80",
                 "830685" + header + parts + invalid + "00",
+                // Not an array where the bodies are: the old extractor read any head as a length
+                "820685" + header + "00" + "80" + "a0" + "80",
                 // A tag on the era index and the parts that were read through one
                 "82" + "d90102" + "06" + hex(block),
                 "820685" + header + bodies + "d90102" + witnesses + auxiliary + invalid,
