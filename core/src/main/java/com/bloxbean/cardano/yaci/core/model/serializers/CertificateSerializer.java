@@ -12,6 +12,7 @@ import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.Credential;
 import com.bloxbean.cardano.yaci.core.model.certs.*;
 import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
+import com.bloxbean.cardano.yaci.core.model.serializers.governance.AnchorSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.DrepSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -100,13 +101,17 @@ public enum CertificateSerializer implements Serializer<Certificate> {
                 : StakeCredential.fromKeyHash(credential.hash());
     }
 
-    private static Credential credential(RawCredential credential) {
+    /**
+     * @param credential a committee, DRep or other credential as received
+     * @return the credential
+     */
+    public static Credential credential(RawCredential credential) {
         return credential.isScript() ? Credential.fromScriptHash(credential.hash())
                 : Credential.fromKeyHash(credential.hash());
     }
 
     private static Anchor anchor(Optional<RawAnchor> anchor) {
-        return anchor.map(item -> new Anchor(item.url(), hex(item.dataHash()))).orElse(null);
+        return anchor.map(AnchorSerializer.INSTANCE::read).orElse(null);
     }
 
     private static MoveInstataneous moveInstantaneous(RawMir mir) {

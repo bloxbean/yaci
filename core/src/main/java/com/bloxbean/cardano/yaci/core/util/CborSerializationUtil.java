@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.core.util;
 
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.*;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.types.NonNegativeInterval;
 import com.bloxbean.cardano.yaci.core.types.UnitInterval;
@@ -123,6 +124,19 @@ public class CborSerializationUtil {
      */
     public static DataItem deserializeOne(@NonNull byte[] bytes) {
         return decodeAll(bytes).get(0);
+    }
+
+    /**
+     * A span over bytes, for a reader that reads them in place of a decoded tree (ADR 0003 D8).
+     *
+     * @param bytes exactly one CBOR item
+     * @return the span
+     * @throws com.bloxbean.cardano.client.exception.CborRuntimeException if decoding the bytes would reject them
+     */
+    public static CborSpan span(@NonNull byte[] bytes) {
+        CborSpan span = CborSpan.of(bytes);
+        com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.checkTags(span);
+        return span;
     }
 
     /**

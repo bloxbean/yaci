@@ -5,8 +5,8 @@ import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.spec.Era;
 import com.bloxbean.cardano.client.transaction.raw.EraSpec;
 import com.bloxbean.cardano.client.transaction.raw.RawInput;
-import com.bloxbean.cardano.client.transaction.raw.RawItems;
 import com.bloxbean.cardano.client.transaction.raw.RawOutput;
+import com.bloxbean.cardano.client.transaction.raw.RawProposal;
 import com.bloxbean.cardano.client.transaction.raw.RawTxBody;
 import com.bloxbean.cardano.client.transaction.raw.RawWithdrawal;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
@@ -18,7 +18,6 @@ import com.bloxbean.cardano.yaci.core.model.governance.ProposalProcedure;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.ProposalProcedureSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.VotingProceduresSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.TxUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -30,8 +29,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Maps bodies read by {@link RawTxBody} to Yaci's model (ADR 0003 D8). Update and the governance fields keep their
- * serializers (M5), which get the same bytes.
+ * Maps bodies read by {@link RawTxBody} to Yaci's model (ADR 0003 D8).
  */
 @Slf4j
 public enum TransactionBodySerializer implements Serializer<TransactionBody> {
@@ -76,7 +74,7 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         if (!withdrawals.isEmpty())
             builder.withdrawals(WithdrawalsSerializer.INSTANCE.read(withdrawals));
 
-        body.update().ifPresent(update -> builder.update(UpdateSerializer.INSTANCE.deserializeDI(tree(update))));
+        body.update().map(UpdateSerializer.INSTANCE::read).ifPresent(builder::update);
         body.auxDataHash().map(HexUtil::encodeHexString).ifPresent(builder::auxiliaryDataHash);
         body.validityStart().ifPresent(builder::validityIntervalStart);
         builder.mint(TransactionOutputSerializer.assets(body.mint()));
@@ -93,11 +91,10 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         body.totalCollateral().ifPresent(builder::totalCollateral);
         body.referenceInputs().ifPresent(inputs -> builder.referenceInputs(inputs(inputs, new LinkedHashSet<>())));
 
-        body.votingProcedures().ifPresent(procedures ->
-                builder.votingProcedures(VotingProceduresSerializer.INSTANCE.deserializeDI(tree(procedures))));
+        body.votingProcedures().map(VotingProceduresSerializer.INSTANCE::read).ifPresent(builder::votingProcedures);
         body.proposalProcedures().ifPresent(procedures -> builder.proposalProcedures(proposals(procedures)));
-        body.currentTreasury().ifPresent(value -> builder.currentTreasuryValue(RawItems.integer(value, true)));
-        body.donation().ifPresent(value -> builder.donation(RawItems.integer(value, true)));
+        body.currentTreasury().ifPresent(builder::currentTreasuryValue);
+        body.donation().ifPresent(builder::donation);
 
         return builder.build();
     }
@@ -115,14 +112,10 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         return set;
     }
 
-    private static List<ProposalProcedure> proposals(CborSpan procedures) {
-        List<ProposalProcedure> read = new ArrayList<>();
-        for (CborSpan procedure : RawItems.array(procedures, "proposal procedures"))
-            read.add(ProposalProcedureSerializer.INSTANCE.deserializeDI(tree(procedure)));
+    private static List<ProposalProcedure> proposals(List<RawProposal> procedures) {
+        List<ProposalProcedure> read = new ArrayList<>(procedures.size());
+        for (RawProposal procedure : procedures)
+            read.add(ProposalProcedureSerializer.INSTANCE.read(procedure));
         return read;
-    }
-
-    private static DataItem tree(CborSpan item) {
-        return CborSerializationUtil.deserializeOne(item.bytes());
     }
 }

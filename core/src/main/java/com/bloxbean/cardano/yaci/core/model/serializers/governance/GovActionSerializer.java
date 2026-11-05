@@ -4,13 +4,18 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.SimpleValue;
+import com.bloxbean.cardano.client.transaction.raw.EraSpec;
+import com.bloxbean.cardano.client.transaction.raw.RawConstitution;
+import com.bloxbean.cardano.client.transaction.raw.RawCredential;
+import com.bloxbean.cardano.client.transaction.raw.RawGovAction;
+import com.bloxbean.cardano.client.transaction.raw.RawProtocolVersion;
+import com.bloxbean.cardano.client.transaction.util.RawModels;
 import com.bloxbean.cardano.yaci.core.model.Credential;
-import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.core.model.ProtocolVersion;
-import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
 import com.bloxbean.cardano.yaci.core.model.governance.Constitution;
 import com.bloxbean.cardano.yaci.core.model.governance.GovActionId;
 import com.bloxbean.cardano.yaci.core.model.governance.actions.*;
+import com.bloxbean.cardano.yaci.core.model.serializers.CertificateSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.UpdateSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.WithdrawalsSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
@@ -18,13 +23,9 @@ import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
-import java.math.BigDecimal;
-import java.math.BigInteger;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
-
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
 
 /**
  * gov_action =
@@ -46,7 +47,9 @@ import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
  * committee = [{ committee_cold_credential => epoch }, unit_interval]
  * }
  */
-//TODO -- Test this class
+/**
+ * Maps governance actions read by {@link RawGovAction} to Yaci's models (ADR 0003 D8), and writes them.
+ */
 public enum GovActionSerializer implements Serializer<GovAction> {
     INSTANCE;
 
@@ -161,147 +164,67 @@ public enum GovActionSerializer implements Serializer<GovAction> {
         return CborSerializationUtil.serializeRational(ui);
     }
 
+    /**
+     * @param bytes a governance action, exactly one CBOR item
+     * @return the action, read in the newest era; null for empty input
+     */
+    @Override
+    public GovAction deserialize(byte[] bytes) {
+        if (bytes.length == 0)
+            return null;
+        return read(RawGovAction.lenient(CborSerializationUtil.span(bytes), EraSpec.newest()));
+    }
+
     @Override
     public GovAction deserializeDI(DataItem di) {
-        Array govActionArray = (Array) di;
-        DataItem fistItem = govActionArray.getDataItems().get(0);
-        List<DataItem> govActionDIList = govActionArray.getDataItems();
-        int actionType = toInt(fistItem);
-        switch (actionType) {
-            case 0:
-                return deserializeParameterChangeAction(govActionDIList);
-            case 1:
-                return deserializeHardForkInitiationAction(govActionDIList);
-            case 2:
-                return deserializeTreasuryWithdrawalAction(govActionDIList);
-            case 3:
-                return deserializeNoConfidenceAction(govActionDIList);
-            case 4:
-                return deserializeUpdateCommitteeAction(govActionDIList);
-            case 5:
-                return deserializeNewConstitutionAction(govActionDIList);
-            case 6:
-                return new InfoAction();
-            default:
-                throw new IllegalArgumentException("GovAction is not a valid type : " + actionType);
-        }
-    }
-
-    private GovAction deserializeParameterChangeAction(List<DataItem> govActionArray) {
-        DataItem actionIdDI = govActionArray.get(1);
-        GovActionId govActionId = getGovActionId(actionIdDI);
-
-        ProtocolParamUpdate protocolParamUpdate = UpdateSerializer.INSTANCE.getProtocolParams((Map) govActionArray.get(2));
-
-        String policyHash = null;
-        if (govActionArray.size() > 3) { //TODO -- Remove this once the node supports policy hash
-            var policyHashDI = govActionArray.get(3);
-            policyHash = policyHashDI == SimpleValue.NULL ? null : HexUtil.encodeHexString(toBytes(policyHashDI));
-        }
-
-        return new ParameterChangeAction(govActionId, protocolParamUpdate, policyHash);
-    }
-
-    private GovAction deserializeHardForkInitiationAction(List<DataItem> govActionArray) {
-        DataItem actionIdDI = govActionArray.get(1);
-        GovActionId govActionId = getGovActionId(actionIdDI);
-
-        List<DataItem> protocolVerDIList = ((Array) govActionArray.get(2)).getDataItems();
-        if (protocolVerDIList.size() != 2)
-            throw new IllegalArgumentException("Invalid protocol version array. Expected 2 items. Found : "
-                    + protocolVerDIList.size());
-
-        int major = toInt(protocolVerDIList.get(0));
-        int minor = toInt(protocolVerDIList.get(1));
-
-        return new HardForkInitiationAction(govActionId, new ProtocolVersion(major, minor));
-
-    }
-
-    private GovAction deserializeTreasuryWithdrawalAction(List<DataItem> govActionArray) {
-        java.util.Map<String, BigInteger> withdrawals = WithdrawalsSerializer.INSTANCE.deserializeDI(govActionArray.get(1));
-
-        String policyHash = null;
-        if (govActionArray.size() > 2) { //TODO -- Remove this once the node supports policy hash
-            var policyHashDI = govActionArray.get(2);
-            policyHash = policyHashDI == SimpleValue.NULL ? null : HexUtil.encodeHexString(toBytes(policyHashDI));
-        }
-
-        return new TreasuryWithdrawalsAction(withdrawals, policyHash);
-    }
-
-    private GovAction deserializeNoConfidenceAction(List<DataItem> govActionArray) {
-        DataItem actionIdDI = govActionArray.get(1);
-        GovActionId govActionId = getGovActionId(actionIdDI);
-
-        return new NoConfidence(govActionId);
+        return read(RawGovAction.lenient(RawModels.span(di), EraSpec.newest()));
     }
 
     /**
-     * update_committee = (4, gov_action_id / null, set<committee_cold_credential>, { committee_cold_credential => epoch }, unit_interval)
-     *
-     * @param govActionArray
-     * @return
+     * @param action a governance action as received
+     * @return the action
      */
-    private GovAction deserializeUpdateCommitteeAction(List<DataItem> govActionArray) {
-        DataItem actionIdDI = govActionArray.get(1);
-        GovActionId govActionId = getGovActionId(actionIdDI);
-
-        //committee_cold_credentials
-        List<DataItem> committeeColdCredArray = ((Array) govActionArray.get(2)).getDataItems();
-        Set<Credential> committeeColdCredSet = new LinkedHashSet<>();
-        committeeColdCredArray.stream()
-                .map(coldCredDI -> Credential.deserialize((Array) coldCredDI))
-                .forEach(coldCred -> committeeColdCredSet.add(coldCred));
-
-        //committee_cold_credential => epoch
-        java.util.Map<Credential, Integer> committeeColdCredEpochMap = new java.util.LinkedHashMap<>();
-        Map committeeColdCredEpochMapDI = (Map) govActionArray.get(3);
-        for (DataItem key : committeeColdCredEpochMapDI.getKeys()) {
-            Credential cred = Credential.deserialize((Array) key);
-            int epoch = toInt(committeeColdCredEpochMapDI.get(key));
-            committeeColdCredEpochMap.put(cred, epoch);
-        }
-
-        //unit_interval
-        UnitInterval unitInterval = toUnitInterval(govActionArray.get(4));
-        return new UpdateCommittee(govActionId, committeeColdCredSet, committeeColdCredEpochMap, unitInterval);
+    public GovAction read(RawGovAction action) {
+        return switch (action.kind()) {
+            case PARAMETER_CHANGE -> new ParameterChangeAction(previous(action),
+                    UpdateSerializer.INSTANCE.read(action.protocolParamUpdate()), policy(action));
+            case HARD_FORK_INITIATION -> {
+                RawProtocolVersion version = action.protocolVersion();
+                // the minor version keeps only its low 32 bits, as it always has
+                yield new HardForkInitiationAction(previous(action),
+                        new ProtocolVersion(version.major(), version.minor().intValue()));
+            }
+            case TREASURY_WITHDRAWALS -> new TreasuryWithdrawalsAction(
+                    WithdrawalsSerializer.INSTANCE.read(action.withdrawals()), policy(action));
+            case NO_CONFIDENCE -> new NoConfidence(previous(action));
+            case UPDATE_COMMITTEE -> updateCommittee(action);
+            case NEW_CONSTITUTION -> {
+                RawConstitution constitution = action.constitution();
+                yield new NewConstitution(previous(action), new Constitution(
+                        AnchorSerializer.INSTANCE.read(constitution.anchor()),
+                        constitution.scriptHash().map(HexUtil::encodeHexString).orElse(null)));
+            }
+            case INFO -> new InfoAction();
+        };
     }
 
-    private GovAction deserializeNewConstitutionAction(List<DataItem> govActionArray) {
-        DataItem actionIdDI = govActionArray.get(1);
-        GovActionId govActionId = getGovActionId(actionIdDI);
-
-        //consititution
-        //constitution =
-        //  [ anchor
-        //  , scripthash / null
-        //  ]
-
-        List<DataItem> constitutionDIList = ((Array) govActionArray.get(2)).getDataItems();
-        if (constitutionDIList.size() != 2)
-            throw new IllegalArgumentException("Invalid constitution array. Expected 2 items. Found : "
-                    + constitutionDIList.size());
-
-        Anchor anchor = AnchorSerializer.INSTANCE.deserializeDI(constitutionDIList.get(0));
-
-        DataItem scriptHashDI = constitutionDIList.get(1);
-        String scriptHash;
-        if (scriptHashDI == SimpleValue.NULL)
-            scriptHash = null;
-        else
-            scriptHash = toHex(scriptHashDI);
-
-        return new NewConstitution(govActionId, new Constitution(anchor, scriptHash));
+    private static GovAction updateCommittee(RawGovAction action) {
+        Set<Credential> removed = new LinkedHashSet<>();
+        for (RawCredential member : action.membersToRemove())
+            removed.add(CertificateSerializer.credential(member));
+        java.util.Map<Credential, Integer> added = new LinkedHashMap<>();
+        for (java.util.Map.Entry<RawCredential, Long> member : action.membersToAdd())
+            added.put(CertificateSerializer.credential(member.getKey()), member.getValue().intValue());
+        com.bloxbean.cardano.client.spec.UnitInterval quorum = action.quorum();
+        return new UpdateCommittee(previous(action), removed, added,
+                new UnitInterval(quorum.getNumerator(), quorum.getDenominator()));
     }
 
-    private static GovActionId getGovActionId(DataItem actionIdDI) {
-        GovActionId govActionId;
-        if (actionIdDI == SimpleValue.NULL)
-            govActionId = null;
-        else {
-            govActionId = GovActionIdSerializer.INSTANCE.deserializeDI(actionIdDI);
-        }
-        return govActionId;
+    private static GovActionId previous(RawGovAction action) {
+        return action.previousActionId().map(GovActionIdSerializer.INSTANCE::read).orElse(null);
+    }
+
+    private static String policy(RawGovAction action) {
+        return action.policyHash().map(HexUtil::encodeHexString).orElse(null);
     }
 }

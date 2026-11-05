@@ -21,7 +21,11 @@ public enum WithdrawalsSerializer implements Serializer<Map<String, BigInteger>>
         return read(RawWithdrawal.tolerant(RawModels.span(di)));
     }
 
-    Map<String, BigInteger> read(List<RawWithdrawal> withdrawals) {
+    /**
+     * @param withdrawals withdrawals as received
+     * @return the withdrawals, by reward account in hex, in the order received
+     */
+    public Map<String, BigInteger> read(List<RawWithdrawal> withdrawals) {
         Map<String, BigInteger> withdrawalsMap = new LinkedHashMap<>();
         for (RawWithdrawal withdrawal : withdrawals)
             withdrawalsMap.put(HexUtil.encodeHexString(withdrawal.rewardAccount()), withdrawal.coin());
