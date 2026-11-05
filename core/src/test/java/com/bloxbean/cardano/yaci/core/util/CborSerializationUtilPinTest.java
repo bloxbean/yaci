@@ -11,23 +11,22 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * Pins what {@link CborSerializationUtil} accepts and writes today. Delegating it to CCL (ADR 0002 D8) changes the two
- * tests marked below, so that move needs the maintainer's decision.
- */
+/** Pins what {@link CborSerializationUtil} accepts and writes, on top of CCL's decoder and encoder. */
 class CborSerializationUtilPinTest {
 
     /**
-     * Not well-formed under RFC 8949 section 5.3, and accepted today: BREAK where none can be, a two-byte simple value
-     * below 32, a chunk inside a chunk, and an indefinite argument on an integer or tag. CCL's decoder rejects them all.
-     * Never add a tag on BREAK here ({@code d879ff}): cbor-java tags its shared BREAK object for the rest of the JVM.
+     * Not well-formed under RFC 8949 section 5.3, and accepted before this decoder moved to CCL: BREAK where none can
+     * be, a tag on BREAK, a two-byte simple value below 32, a chunk inside a chunk, and an indefinite argument on an
+     * integer or tag. cbor-java tagged its one shared BREAK object for the rest of the JVM on {@code d879ff}.
      */
     @Test
-    void nonWellFormedInputThatDelegatingToCclWouldReject() {
-        for (String hex : new String[]{"ff", "81ff", "a100ff", "a0ff", "00ff", "f800", "f81f", "8181f800",
+    void nonWellFormedInputIsRejected() {
+        for (String hex : new String[]{"ff", "81ff", "a100ff", "a0ff", "00ff", "d879ff", "f800", "f81f", "8181f800",
                 "5f5f40ffff", "7f7f60ffff", "1f", "3f", "df00"}) {
-            assertThat(CborSerializationUtil.deserialize(HexUtil.decodeHexString(hex))).as(hex).isNotEmpty();
-            assertThat(CborSerializationUtil.deserializeOne(HexUtil.decodeHexString(hex))).as(hex).isNotNull();
+            assertThatThrownBy(() -> CborSerializationUtil.deserialize(HexUtil.decodeHexString(hex)))
+                    .as(hex).isInstanceOf(CborRuntimeException.class);
+            assertThatThrownBy(() -> CborSerializationUtil.deserializeOne(HexUtil.decodeHexString(hex)))
+                    .as(hex).isInstanceOf(CborRuntimeException.class);
         }
     }
 
@@ -56,16 +55,13 @@ class CborSerializationUtilPinTest {
         assertThat(CborSerializationUtil.deserializeOne(bytes)).isEqualTo(new UnsignedInteger(1));
     }
 
-    /**
-     * Canonical order is cbor-java's: shorter keys first, then bytes compared as signed. CCL's encoder compares unsigned
-     * bytes whatever the length, and so writes all three of these maps the other way round.
-     */
+    /** Canonical order is CCL's: unsigned bytes whatever the length. cbor-java wrote shorter first, then signed. */
     @Test
-    void canonicalMapOrderThatDelegatingToCclWouldChange() {
-        assertThat(canonical(new NegativeInteger(-1), new UnsignedInteger(32))).isEqualTo("a2" + "2000" + "182001");
-        assertThat(canonical(new UnsignedInteger(32), new UnsignedInteger(128))).isEqualTo("a2" + "188001" + "182000");
+    void canonicalMapOrderComparesUnsignedBytes() {
+        assertThat(canonical(new NegativeInteger(-1), new UnsignedInteger(32))).isEqualTo("a2" + "182001" + "2000");
+        assertThat(canonical(new UnsignedInteger(32), new UnsignedInteger(128))).isEqualTo("a2" + "182000" + "188001");
         assertThat(canonical(new ByteString(new byte[]{0x7f}), new ByteString(new byte[]{(byte) 0x80})))
-                .isEqualTo("a2" + "418001" + "417f00");
+                .isEqualTo("a2" + "417f00" + "418001");
     }
 
     @Test

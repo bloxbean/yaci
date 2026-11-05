@@ -1,7 +1,5 @@
 package com.bloxbean.cardano.yaci.core.util;
 
-import co.nstant.in.cbor.CborBuilder;
-import co.nstant.in.cbor.CborEncoder;
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
@@ -9,8 +7,8 @@ import com.bloxbean.cardano.yaci.core.types.NonNegativeInterval;
 import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import lombok.NonNull;
 
-import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
+import java.util.List;
 
 public class CborSerializationUtil {
 
@@ -111,27 +109,11 @@ public class CborSerializationUtil {
      * @return
      */
     public static byte[] serialize(DataItem[] values, boolean canonical) {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        CborBuilder cborBuilder = new CborBuilder();
-
-        for (DataItem value : values) {
-            cborBuilder.add(value);
-        }
-
         try {
-            if (canonical) {
-                new CborEncoder(baos).encode(cborBuilder.build());
-            } else {
-                new ArrayCborEncoder(baos).encode(cborBuilder.build());
-            }
+            return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.serialize(values, canonical);
         } catch (CborException e) {
             throw new CborRuntimeException("Cbor serialization error", e);
         }
-
-        byte[] encodedBytes = baos.toByteArray();
-
-        return encodedBytes;
-
     }
 
     /**
@@ -140,11 +122,7 @@ public class CborSerializationUtil {
      * @return DataItem
      */
     public static DataItem deserializeOne(@NonNull byte[] bytes) {
-        try {
-            return ArrayCborDecoder.decode(bytes).get(0);
-        } catch (CborException e) {
-            throw new CborRuntimeException("Cbor de-serialization error", e);
-        }
+        return decodeAll(bytes).get(0);
     }
 
     /**
@@ -153,9 +131,13 @@ public class CborSerializationUtil {
      * @return DataItem
      */
     public static DataItem[] deserialize(@NonNull byte[] bytes) {
+        return decodeAll(bytes).toArray(new DataItem[0]);
+    }
+
+    private static List<DataItem> decodeAll(byte[] bytes) {
         try {
-            return ArrayCborDecoder.decode(bytes).toArray(new DataItem[0]);
-        } catch (CborException e) {
+            return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.deserializeAll(bytes);
+        } catch (com.bloxbean.cardano.client.exception.CborRuntimeException e) {
             throw new CborRuntimeException("Cbor de-serialization error", e);
         }
     }
