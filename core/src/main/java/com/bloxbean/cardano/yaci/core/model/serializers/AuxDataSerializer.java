@@ -30,7 +30,8 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
             AuxData result = Serializer.super.deserialize(bytes);
             if (result == null) return null; // Preserve the default serializer's empty-input behavior.
             // Recovery needs the original buffer, which deserializeDI alone does not have.
-            return result.getMetadataParseError() == null ? result : DataItemIsolation.auxiliary(bytes);
+            return result.getMetadataParseError() == null
+                    ? DataItemIsolation.withSourceMetadata(result, bytes) : DataItemIsolation.auxiliary(bytes);
         } catch (StackOverflowError e) {
             // Restart at a known boundary; the decoder's partially consumed state is discarded.
             return DataItemIsolation.auxiliary(bytes);
@@ -129,7 +130,7 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
             if (metadata != null) {
                 byte[] cbor;
                 try {
-                    // Preserve the existing canonical representation for ordinary metadata.
+                    // A DataItem has lost the source encoding; callers holding the bytes replace this.
                     cbor = metadata.serialize();
                 } catch (StackOverflowError e) {
                     // The canonical encoder is recursive. Retain valid CBOR using the existing

@@ -187,11 +187,33 @@ public enum BlockSerializer implements Serializer<Block> {
         //auxiliary data
         java.util.Map<Integer, AuxData> auxDataMap = new LinkedHashMap<>();
         Map auxDataMapDI = (Map) blockArray.getDataItems().get(3);
+
+        // Metadata CBOR must keep its on-chain encoding (key order, duplicate keys), whatever the config.
+        java.util.Map<Integer, byte[]> auxDataSourceBytes = Collections.emptyMap();
+        if (!auxDataMapDI.getKeys().isEmpty()) {
+            try {
+                auxDataSourceBytes = getAuxDataSourceBytes(blockBody);
+            } catch (Exception e) {
+                log.error("Extraction of auxiliary data source bytes failed for block : "
+                        + blockHeader.getHeaderBody().getBlockNumber(), e);
+            }
+        }
+
         for (DataItem txIdDI: auxDataMapDI.getKeys()) {
             if (txIdDI == SimpleValue.BREAK)
                 continue;
             int txIndex = toInt(txIdDI);
             AuxData auxData = AuxDataSerializer.INSTANCE.deserializeDI(auxDataMapDI.get(txIdDI));
+            byte[] sourceBytes = auxDataSourceBytes.get(txIndex);
+            if (sourceBytes != null) {
+                // Optional correction: on failure keep the parsed (canonical) metadata CBOR.
+                try {
+                    auxData = DataItemIsolation.withSourceMetadata(auxData, sourceBytes);
+                } catch (Exception e) {
+                    log.error("Source metadata extraction failed. block: {}, tx index: {}",
+                            blockHeader.getHeaderBody().getBlockNumber(), txIndex, e);
+                }
+            }
             if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
                 byte[] auxBytes = auxDataRawBytes.get(txIndex);
                 if (auxBytes != null && isAuxDataHashValid(blockHeader.getHeaderBody().getBlockNumber(),
@@ -368,6 +390,19 @@ public enum BlockSerializer implements Serializer<Block> {
                     .cbor(HexUtil.encodeHexString(transactionWitness.get(i)))
                     .build());
         }
+    }
+
+    /**
+     * Auxiliary-data values by transaction index, sliced from the block without decoding.
+     * Network envelope: [era, [header, txBodies, witnesses, {txIndex: auxData}, ...]].
+     */
+    private java.util.Map<Integer, byte[]> getAuxDataSourceBytes(byte[] blockBody) throws CborException {
+        List<CborSlice> entries = CborSlice.arrayItem(blockBody, 1, 3).items(MajorType.MAP);
+        java.util.Map<Integer, byte[]> result = new LinkedHashMap<>();
+        for (int i = 0; i < entries.size(); i += 2) {
+            result.put(DataItemIsolation.unsigned(entries.get(i)), entries.get(i + 1).bytes());
+        }
+        return result;
     }
 
     private boolean isAuxDataHashValid(long block, int txIndex, List<TransactionBody> txnBodies, byte[] auxBytes) {
