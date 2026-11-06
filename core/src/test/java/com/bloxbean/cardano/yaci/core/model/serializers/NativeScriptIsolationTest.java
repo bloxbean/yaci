@@ -6,7 +6,9 @@ import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import co.nstant.in.cbor.model.Special;
 import co.nstant.in.cbor.model.UnicodeString;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
+import com.bloxbean.cardano.client.spec.Era;
 import com.bloxbean.cardano.client.util.JsonUtil;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonToken;
@@ -15,10 +17,12 @@ import com.fasterxml.jackson.core.StreamWriteConstraints;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigInteger;
+import java.util.List;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
 import com.bloxbean.cardano.yaci.core.util.CborLoader;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -163,8 +167,9 @@ class NativeScriptIsolationTest {
         assertThatThrownBy(() -> NativeScriptJson.parse(script)).isInstanceOf(CborRuntimeException.class);
     }
 
+    /** An unknown type is kept with a parse error, where it was left out (ADR 0003 D4a). */
     @Test
-    void indefiniteAuxiliaryNativeScriptsSkipBreakAndUnknownTypes() {
+    void indefiniteAuxiliaryNativeScriptsSkipBreakAndKeepUnknownTypes() {
         Map metadata = new Map().put(new UnsignedInteger(1), new UnsignedInteger(42));
         Array scripts = new Array().add(pubkeyScript()).add(new Array().add(new UnsignedInteger(6)))
                 .add(Special.BREAK);
@@ -173,9 +178,39 @@ class NativeScriptIsolationTest {
         alonzo.setTag(259);
         for (var data : new co.nstant.in.cbor.model.DataItem[]{alonzo, new Array().add(metadata).add(scripts)}) {
             var result = AuxDataSerializer.INSTANCE.deserialize(CborSerializationUtil.serialize(data, false));
-            assertThat(result.getNativeScripts()).hasSize(1).doesNotContainNull();
+            assertThat(result.getNativeScripts()).hasSize(2).doesNotContainNull();
             assertThat(result.getNativeScripts().get(0).getContent()).contains("keyHash");
+            assertThat(result.getNativeScripts().get(1).getType()).isEqualTo(6);
+            assertThat(result.getNativeScripts().get(1).getContent()).isNull();
+            assertThat(result.getNativeScripts().get(1).getParseError()).contains("unknown native script type 6");
             assertThat(result.getMetadataJson()).contains("42");
+        }
+    }
+
+    /**
+     * Dijkstra's {@code script_require_guard} (type 6) has no JSON. A guard, or a script holding one, is kept with no
+     * JSON and a parse error, its type and its hash, where the guard was left out of the tree or of the list.
+     */
+    @Test
+    void anUnknownTypeGivesAParseErrorInsteadOfAnAlteredTreeOrList() {
+        String guard = "8206" + "8200581c" + "00".repeat(28);
+        String scripts = "83" + "820181" + guard
+                + HexUtil.encodeHexString(CborSerializationUtil.serialize(pubkeyScript())) + guard;
+        byte[] witnessSet = HexUtil.decodeHexString("a101" + scripts);
+        byte[] auxData = HexUtil.decodeHexString("d90103a101" + scripts);
+        List<List<NativeScript>> read = List.of(
+                WitnessesSerializer.INSTANCE.read(CborSpan.of(witnessSet), Era.Dijkstra, true).getNativeScripts(),
+                AuxDataSerializer.INSTANCE.read(CborSpan.of(auxData), Era.Dijkstra, true).getNativeScripts(),
+                WitnessesSerializer.INSTANCE.deserialize(witnessSet).getNativeScripts());
+        for (List<NativeScript> nativeScripts : read) {
+            assertThat(nativeScripts).hasSize(3);
+            assertThat(nativeScripts).extracting(NativeScript::getType).containsExactly(1, 0, 6);
+            for (int i : new int[]{0, 2}) {
+                assertThat(nativeScripts.get(i).getContent()).isNull();
+                assertThat(nativeScripts.get(i).getParseError()).contains("unknown native script type 6");
+                assertThat(nativeScripts.get(i).getScriptHash()).isNotNull();
+            }
+            assertThat(nativeScripts.get(1).getContent()).contains("keyHash");
         }
     }
 

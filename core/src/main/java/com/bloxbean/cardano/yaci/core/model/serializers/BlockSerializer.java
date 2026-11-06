@@ -21,7 +21,8 @@ import java.util.stream.Collectors;
 
 /**
  * Reads a Shelley-family block: CCL's reader, then mappers, then Yaci's models (ADR 0003 D8). Bodies, witnesses and
- * auxiliary data are read from their source bytes, each with its own serializer.
+ * auxiliary data are read from their source bytes, each with its own serializer: from the parallel arrays to Conway,
+ * and from each whole transaction in Dijkstra (D4a; experimental, as Dijkstra is not final).
  */
 @Slf4j
 public enum BlockSerializer implements Serializer<Block> {
@@ -53,14 +54,15 @@ public enum BlockSerializer implements Serializer<Block> {
 
         BlockHeader header = BlockHeaderSerializer.INSTANCE.map(rawBlock.rawHeader());
         long blockNumber = header.getHeaderBody().getBlockNumber();
-        List<TransactionBody> bodies = new ArrayList<>(rawBlock.txCount());
-        for (CborSpan body : rawBlock.transactionBodies().items()) {
+        TxParts parts = isUnified(rawBlock) ? TxParts.ofTransactions(rawBlock) : TxParts.ofParallelArrays(rawBlock);
+        List<TransactionBody> bodies = new ArrayList<>(parts.bodies().size());
+        for (CborSpan body : parts.bodies()) {
             // The source bytes keep the transaction hash the same.
             bodies.add(TransactionBodySerializer.INSTANCE.read(body.bytes(), rawBlock.era()));
         }
         return Block.builder().era(era).header(header).transactionBodies(bodies)
-                .transactionWitness(witnesses(rawBlock))
-                .auxiliaryDataMap(auxData(rawBlock, blockNumber, bodies))
+                .transactionWitness(witnesses(parts.witnessSets(), rawBlock))
+                .auxiliaryDataMap(auxData(parts.auxData(), rawBlock, blockNumber, bodies))
                 .invalidTransactions(invalidTransactions(rawBlock))
                 .cbor(YaciConfig.INSTANCE.isReturnBlockCbor() ? HexUtil.encodeHexString(bytes) : null)
                 .build();
@@ -70,16 +72,25 @@ public enum BlockSerializer implements Serializer<Block> {
         return eraIndex == (int) eraIndex ? EraUtil.getEra((int) eraIndex) : null;
     }
 
-    /** Empty when the block has the list and none are invalid, and null when its era has no such list. */
+    // CCL's and Yaci's Era values coincide by construction: both are the hard-fork combinator's block index.
+
+    /** Whether the block holds each transaction whole: from Dijkstra, also for an unknown era read as the newest. */
+    private static boolean isUnified(RawBlock rawBlock) {
+        return rawBlock.era().getValue() >= Era.Dijkstra.getValue();
+    }
+
+    /**
+     * Empty when none is invalid, and null before Alonzo, whose blocks have no validity. Alonzo to Conway list them;
+     * from Dijkstra each transaction carries its flag.
+     */
     private static List<Integer> invalidTransactions(RawBlock rawBlock) {
-        if (rawBlock.invalidTransactions().isEmpty()) return null;
+        if (rawBlock.era().getValue() < Era.Alonzo.getValue()) return null;
         int[] indexes = rawBlock.invalidTxIndexes();
         return indexes.length == 0 ? Collections.emptyList()
                 : Arrays.stream(indexes).boxed().collect(Collectors.toCollection(ArrayList::new));
     }
 
-    private List<Witnesses> witnesses(RawBlock rawBlock) {
-        List<CborSpan> witnessSets = rawBlock.transactionWitnessSets().items();
+    private List<Witnesses> witnesses(List<CborSpan> witnessSets, RawBlock rawBlock) {
         List<Witnesses> witnesses = new ArrayList<>(witnessSets.size());
         for (CborSpan witnessSet : witnessSets) {
             Witnesses witness = WitnessesSerializer.INSTANCE.read(witnessSet, rawBlock.era(), true);
@@ -90,12 +101,8 @@ public enum BlockSerializer implements Serializer<Block> {
         return witnesses;
     }
 
-    /** A repeated transaction index keeps its first position and takes the last value. */
-    private java.util.Map<Integer, AuxData> auxData(RawBlock rawBlock, long blockNumber, List<TransactionBody> bodies) {
-        java.util.Map<Integer, CborSpan> spans = new LinkedHashMap<>();
-        for (java.util.Map.Entry<CborSpan, CborSpan> entry : rawBlock.auxiliaryDataSet().entries()) {
-            spans.put((int) entry.getKey().asLong(), entry.getValue());
-        }
+    private java.util.Map<Integer, AuxData> auxData(java.util.Map<Integer, CborSpan> spans, RawBlock rawBlock,
+                                                    long blockNumber, List<TransactionBody> bodies) {
         java.util.Map<Integer, AuxData> auxDataMap = new LinkedHashMap<>();
         spans.forEach((txIndex, span) -> {
             AuxData auxData = AuxDataSerializer.INSTANCE.read(span, rawBlock.era(), true);
@@ -108,6 +115,38 @@ public enum BlockSerializer implements Serializer<Block> {
             auxDataMap.put(txIndex, auxData);
         });
         return auxDataMap;
+    }
+
+    /** A block's transaction parts as encoded: bodies and witness sets in block order, aux data by transaction. */
+    private record TxParts(List<CborSpan> bodies, List<CborSpan> witnessSets,
+                           java.util.Map<Integer, CborSpan> auxData) {
+
+        /** Aux data in the map's encoded order: a repeated index keeps its first position and takes the last value. */
+        static TxParts ofParallelArrays(RawBlock rawBlock) {
+            java.util.Map<Integer, CborSpan> auxData = new LinkedHashMap<>();
+            for (java.util.Map.Entry<CborSpan, CborSpan> entry : rawBlock.auxiliaryDataSet().entries()) {
+                auxData.put((int) entry.getKey().asLong(), entry.getValue());
+            }
+            return new TxParts(rawBlock.transactionBodies().items(), rawBlock.transactionWitnessSets().items(),
+                    auxData);
+        }
+
+        /**
+         * Aux data in transaction order. The parts are taken as encoded, [body, witnesses, aux / null, isValid], so
+         * their records are read only by the serializers, tolerantly, as from the parallel arrays.
+         */
+        static TxParts ofTransactions(RawBlock rawBlock) {
+            List<CborSpan> bodies = new ArrayList<>(rawBlock.txCount());
+            List<CborSpan> witnessSets = new ArrayList<>(rawBlock.txCount());
+            java.util.Map<Integer, CborSpan> auxData = new LinkedHashMap<>();
+            for (int i = 0; i < rawBlock.txCount(); i++) {
+                CborSpan tx = rawBlock.transaction(i);
+                bodies.add(tx.get(0));
+                witnessSets.add(tx.get(1));
+                if (!tx.get(2).isNull()) auxData.put(i, tx.get(2));
+            }
+            return new TxParts(bodies, witnessSets, auxData);
+        }
     }
 
     private boolean isAuxDataHashValid(long block, int txIndex, List<TransactionBody> txnBodies, byte[] auxBytes) {

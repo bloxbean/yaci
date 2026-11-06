@@ -3,7 +3,6 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.spec.Era;
-import com.bloxbean.cardano.client.transaction.raw.EraSpec;
 import com.bloxbean.cardano.client.transaction.raw.RawInput;
 import com.bloxbean.cardano.client.transaction.raw.RawOutput;
 import com.bloxbean.cardano.client.transaction.raw.RawProposal;
@@ -38,12 +37,12 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
     /**
      * @param di      the body decoded from {@code txBytes}; the fields are read from {@code txBytes}
      * @param txBytes the body as encoded
-     * @return the body, read in the newest era: in any other, only a key that has changed meaning reads differently
+     * @return the body, read as Conway: in any other era, only a key that has changed meaning reads differently
      * @deprecated {@code di} is not used. Use {@link #read(byte[], Era)}, or {@link BlockSerializer} for a block.
      */
     @Deprecated(since = "0.5.0", forRemoval = true)
     public TransactionBody deserializeDI(DataItem di, byte[] txBytes) {
-        return read(txBytes, EraSpec.newest());
+        return read(txBytes, Era.Conway);
     }
 
     /**
@@ -73,7 +72,7 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         if (!certificates.isEmpty()) {
             List<Certificate> read = new ArrayList<>(certificates.size());
             for (CborSpan certificate : certificates)
-                read.add(CertificateSerializer.INSTANCE.read(certificate));
+                read.add(CertificateSerializer.INSTANCE.read(certificate, era));
             builder.certificates(read);
         }
 

@@ -4,7 +4,6 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.spec.Era;
-import com.bloxbean.cardano.client.transaction.raw.EraSpec;
 import com.bloxbean.cardano.client.transaction.raw.RawBootstrapWitness;
 import com.bloxbean.cardano.client.transaction.raw.RawDatum;
 import com.bloxbean.cardano.client.transaction.raw.RawRedeemer;
@@ -36,11 +35,11 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
 
     /**
      * @param bytes a witness set, exactly one CBOR item
-     * @return the witness set, read in the newest era; null for empty input
+     * @return the witness set, read as Conway; null for empty input
      */
     @Override
     public Witnesses deserialize(byte[] bytes) {
-        return bytes.length == 0 ? null : read(CborSpan.of(bytes), EraSpec.newest(), true);
+        return bytes.length == 0 ? null : read(CborSpan.of(bytes), Era.Conway, true);
     }
 
     /**
@@ -52,7 +51,7 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Witnesses deserializeDI(DataItem di) {
-        return read(CborSerializationUtil.span(di), EraSpec.newest(), false);
+        return read(CborSerializationUtil.span(di), Era.Conway, false);
     }
 
     /**
@@ -82,16 +81,14 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
                 plutusV2Scripts, plutusV3Scripts);
     }
 
-    /** Scripts of an unknown type are left out. */
+    /** A script of an unknown type is kept, with no JSON and a parse error. */
     static List<NativeScript> nativeScripts(List<RawScript> scripts, boolean hashed) {
         List<NativeScript> parsed = new ArrayList<>(scripts.size());
         for (RawScript script : scripts) {
             NativeScript json = NativeScriptJson.parse(
                     (Array) CborSerializationUtil.deserializeOne(script.span().bytes()));
-            if (json != null) {
-                parsed.add(hashed ? new NativeScript(json.getType(), json.getContent(), json.getParseError(),
-                        hex(script.hash())) : json);
-            }
+            parsed.add(hashed ? new NativeScript(json.getType(), json.getContent(), json.getParseError(),
+                    hex(script.hash())) : json);
         }
         return parsed;
     }

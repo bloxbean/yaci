@@ -65,17 +65,36 @@ class BlockParsingPinTest {
 
     // ---- ADR 0003 D8's four inputs ----
 
-    /** Table row 1 (I12): era 6 changed to 9. RawBlock.of rejects this; Yaci must keep delivering it. */
+    /**
+     * Table row 1 (I12, re-pinned by ADR 0003 D4a): an unknown index reads in the newest layout, Dijkstra's.
+     * RawBlock.of rejects it; Yaci delivers a Dijkstra-shaped block, here a real one with one transaction, with a null
+     * era.
+     */
     @Test
     void unknownEraIndexGivesAPopulatedBlockWithNullEra() throws Exception {
-        for (int era : new int[]{8, 9, 23}) {
-            for (Block block : SyncDataIsolationTest.throughBothSyncPaths(withEra(era))) {
+        byte[] dijkstra = CborLoader.getHexBytes("block/dijkstra/musashi-dijkstra2.txt");
+        assertThat(dijkstra[1]).isEqualTo((byte) 8);
+        for (int era : new int[]{9, 23}) {
+            byte[] bytes = dijkstra.clone();
+            bytes[1] = (byte) era;
+            for (Block block : SyncDataIsolationTest.throughBothSyncPaths(bytes)) {
                 assertThat(block.getEra()).as("era index %d", era).isNull();
-                assertThat(block.getTransactionBodies()).hasSize(3);
-                assertThat(block.getTransactionWitness()).hasSize(3);
-                assertThat(block.getAuxiliaryDataMap()).containsOnlyKeys(1, 2);
-                assertThat(block.getHeader().getHeaderBody().getBlockNumber()).isEqualTo(BLOCK_NUMBER);
+                assertThat(block.getTransactionBodies()).hasSize(1);
+                assertThat(block.getTransactionWitness()).hasSize(1);
+                assertThat(block.getInvalidTransactions()).isEmpty();
+                assertThat(block.getHeader().getHeaderBody().getBlockNumber()).isEqualTo(4277);
             }
+        }
+    }
+
+    /**
+     * I12 re-pinned by ADR 0003 D4a: a Conway-shaped block at index 8 (Dijkstra) or at an unknown index, which reads
+     * in Dijkstra's layout, raises onParsingError, where an unknown index was delivered with a null era.
+     */
+    @Test
+    void conwayShapedBlockAtDijkstraOrUnknownIndexRaisesParsingError() {
+        for (int era : new int[]{8, 9, 23}) {
+            assertThat(parsingError(withEra(era)).getBlockNumber()).as("era index %d", era).isEqualTo(BLOCK_NUMBER);
         }
     }
 
@@ -215,13 +234,19 @@ class BlockParsingPinTest {
         }
     }
 
-    /** A difference on the era only: an index past int was truncated to a known one, and is an unknown one now. */
+    /**
+     * A difference on the era only: an index past int was truncated to a known one, and is an unknown one now, read in
+     * Dijkstra's layout (D4a): a Dijkstra-shaped block is delivered, and this Babbage-shaped one is a parse error.
+     */
     @Test
     void eraIndexPastIntIsAnUnknownEraHere() {
-        byte[] bytes = HexUtil.decodeHexString("821b0000000100000006" + hex(block()));
-        Block block = BlockSerializer.INSTANCE.deserialize(bytes);
+        CborSpan dijkstra = CborSpan.of(CborLoader.getHexBytes("block/dijkstra/musashi-dijkstra2.txt")).get(1);
+        Block block = BlockSerializer.INSTANCE.deserialize(
+                HexUtil.decodeHexString("821b0000000100000008" + hex(dijkstra)));
         assertThat(block.getEra()).isNull();
-        assertThat(block.getTransactionBodies()).hasSize(3);
+        assertThat(block.getTransactionBodies()).hasSize(1);
+        assertThat(parsingError(HexUtil.decodeHexString("821b0000000100000006" + hex(block())))
+                .getBlockNumber()).isEqualTo(BLOCK_NUMBER);
     }
 
     /** Q6: an index of 0 or 1 is Byron. The agents read those with the Byron serializers before reaching this class. */
@@ -257,7 +282,7 @@ class BlockParsingPinTest {
 
     // ---- I12: a block that does not fit the newest layout ----
 
-    /** Dijkstra's [header, block_body] fails, and block fetch reports it with the number read from the header. */
+    /** A [header, block_body] whose body is not Dijkstra's fails, and block fetch reports the header's number. */
     @Test
     void twoItemBlockRaisesParsingErrorWithItsBlockNumber() {
         CborSpan block = block();

@@ -1,0 +1,25 @@
+Dijkstra test vectors (ADR 0003 D4a, I15), each file one item's CBOR in hex, copied unchanged from
+cardano-client-lib transaction-spec/src/test/resources/cbor/dijkstra-vectors.json (commit e59e9356), whose items
+come from Haskell code or from networks of Haskell nodes. Expected values are the ones recorded there with the item.
+
+musashi-dijkstra1.txt (block)
+  source: Musashi (magic 164, ouroboros-leios prototype-2026w36), txpipe/pallas 4b76c2e8 (Apache-2.0), test_data/dijkstra-fixtures.md
+  expected: {"blockHash": "d0c2a26a0192baf397b75cd38137987d82036c269089362842888279f3e19daf", "blockNumber": 4255, "slot": 86463, "txCount": 0, "headerItems": 12, "leiosCertificate": false}
+musashi-dijkstra2.txt (block)
+  source: Musashi (magic 164, ouroboros-leios prototype-2026w36), txpipe/pallas 4b76c2e8 (Apache-2.0), test_data/dijkstra-fixtures.md
+  expected: {"blockHash": "adb23531ebb61891912e6a4bdabcbaaa053223d2de342eedbaa9b6af4fb526f3", "blockNumber": 4277, "slot": 86855, "txCount": 1, "headerItems": 12, "leiosCertificate": false}
+musashi-dijkstra5.txt (block)
+  source: Musashi (magic 164, ouroboros-leios prototype-2026w36), txpipe/pallas 4b76c2e8 (Apache-2.0), test_data/dijkstra-fixtures.md
+  expected: {"blockHash": "7b7c9f48ac331106e9f9ef03856090bc6275f09fca5bb4c789068d04c54b079a", "blockNumber": 14534, "slot": 299514, "txCount": 3, "headerItems": 12, "leiosCertificate": false}
+musashi-dijkstra8.txt (block)
+  source: Musashi (magic 164, ouroboros-leios prototype-2026w36), txpipe/pallas 4b76c2e8 (Apache-2.0), test_data/dijkstra-fixtures.md
+  expected: {"blockHash": "33a48eee693522320891dd4d1da8ee33c288c854eb25337802dbc4c912571d07", "blockNumber": 17403, "slot": 371723, "txCount": 0, "headerItems": 12, "leiosCertificate": true}
+dijkstranet-first-block.txt (block)
+  source: DijkstraNet (magic 6), block-fetch from a cardano-node 11.2.0 relay, blinklabs-io/gouroboros v0.217.1 (Apache-2.0) ledger/dijkstra/dijkstra_header_dijkstranet_test.go
+  expected: {"blockHash": "060b416fd53c32e94b6e45a2b03dd01dcdc914702cefe8993d4a205f471a476a", "slot": 1296023, "blockNumber": 64739, "prevHash": "f14caba43c84e11a6c79b1063ea4d00bcc02fb766e3212c06ab466e84fd20541", "headerItems": 10}
+dijkstranet-first-header.txt (header)
+  source: DijkstraNet (magic 6), chain-sync from a cardano-node 11.2.0 relay, blinklabs-io/gouroboros v0.217.1 (Apache-2.0) ledger/dijkstra/dijkstra_header_dijkstranet_test.go
+  expected: {"slot": 1296023, "blockNumber": 64739, "prevHash": "f14caba43c84e11a6c79b1063ea4d00bcc02fb766e3212c06ab466e84fd20541", "blockHash": "060b416fd53c32e94b6e45a2b03dd01dcdc914702cefe8993d4a205f471a476a", "headerItems": 10, "protocolMajor": 12}
+musashi-subtx.txt (block_tx)
+  source: Musashi chain, txpipe/pallas 4b76c2e8 (Apache-2.0), test_data/dijkstra-fixtures.md
+  expected: {"txId": "74e2116ca6e0c809f156aa062a9d4ee8b156322618846f1bdea5d9ad7a206a12", "subTxCount": 1}

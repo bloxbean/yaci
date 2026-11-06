@@ -5,6 +5,7 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
+import com.bloxbean.cardano.client.spec.Era;
 import com.bloxbean.cardano.client.transaction.raw.BlockEnvelope;
 import com.bloxbean.cardano.client.transaction.raw.RawHeader;
 import com.bloxbean.cardano.client.transaction.raw.RawVrfCert;
@@ -38,8 +39,20 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
 
     @Override
     public BlockHeader deserializeDI(DataItem di) {
+        return deserializeDI(di, null);
+    }
+
+    /**
+     * Reads a header of a known era in that era's layouts only: a Conway header has 10 items, a Dijkstra one 10 or 12
+     * (ADR 0003 D4a; Dijkstra is experimental, as it is not final).
+     *
+     * @param di  the header's bytes, a byte string
+     * @param era its era, or null to read it in any layout, as {@link #deserializeDI(DataItem)} does
+     * @return the header
+     */
+    public BlockHeader deserializeDI(DataItem di, Era era) {
         byte[] headerBytes = ((ByteString) di).getBytes();
-        return read(() -> first(headerBytes));
+        return read(() -> first(headerBytes), era);
     }
 
     /**
@@ -74,8 +87,13 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
     }
 
     private BlockHeader read(Supplier<CborSpan> header) {
+        return read(header, null);
+    }
+
+    private BlockHeader read(Supplier<CborSpan> header, Era era) {
         try {
-            return map(RawHeader.of(header.get()));
+            CborSpan span = header.get();
+            return map(era == null ? RawHeader.of(span) : RawHeader.of(span, era));
         } catch (com.bloxbean.cardano.client.exception.CborRuntimeException e) {
             throw new CborRuntimeException("Invalid block header", e);
         }
@@ -96,6 +114,7 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
                         .kesPeriod((int) header.kesPeriod())
                         .sigma(hex(header.sigma()))
                         .build())
+                // In Dijkstra the pair is the highest supported major version and the software tag (ADR 0003 D4a).
                 .protocolVersion(new ProtocolVersion(header.protocolMajor(), header.protocolMinor()))
                 .blockHash(hex(header.hash()));
         header.vrfResult().ifPresent(vrf -> body.vrfResult(vrfCert(vrf)));

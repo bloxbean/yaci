@@ -4,7 +4,7 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.SimpleValue;
-import com.bloxbean.cardano.client.transaction.raw.EraSpec;
+import com.bloxbean.cardano.client.spec.Era;
 import com.bloxbean.cardano.client.transaction.raw.RawConstitution;
 import com.bloxbean.cardano.client.transaction.raw.RawCredential;
 import com.bloxbean.cardano.client.transaction.raw.RawGovAction;
@@ -145,13 +145,13 @@ public enum GovActionSerializer implements Serializer<GovAction> {
 
     /**
      * @param bytes a governance action, exactly one CBOR item
-     * @return the action, read in the newest era; null for empty input
+     * @return the action, read as Conway; null for empty input
      */
     @Override
     public GovAction deserialize(byte[] bytes) {
         if (bytes.length == 0)
             return null;
-        return read(RawGovAction.lenient(CborSerializationUtil.span(bytes), EraSpec.newest()));
+        return read(RawGovAction.lenient(CborSerializationUtil.span(bytes), Era.Conway));
     }
 
     /**
@@ -161,7 +161,7 @@ public enum GovActionSerializer implements Serializer<GovAction> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public GovAction deserializeDI(DataItem di) {
-        return read(RawGovAction.lenient(CborSerializationUtil.span(di), EraSpec.newest()));
+        return read(RawGovAction.lenient(CborSerializationUtil.span(di), Era.Conway));
     }
 
     /**

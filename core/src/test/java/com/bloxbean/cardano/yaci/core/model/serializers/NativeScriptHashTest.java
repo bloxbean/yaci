@@ -1,10 +1,14 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
+import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.AuxData;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
 import com.bloxbean.cardano.yaci.core.model.Witnesses;
+import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
+import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.MsgBlock;
 import com.bloxbean.cardano.yaci.core.util.CborLoader;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -48,11 +52,16 @@ class NativeScriptHashTest {
                 .isEqualTo("9ee89906404c9dc39067699f22e5e0b7124d023b59fbdd178ee89af5");
     }
 
+    /** Unknown types are kept with a parse error and their own hashes, where they were left out (ADR 0003 D4a). */
     @Test
-    void unknownScriptTypesAreLeftOutOfTheParsedListAndDoNotShiftTheHashes() {
+    void unknownScriptTypesAreKeptWithAParseErrorAndDoNotShiftTheHashes() {
         List<NativeScript> scripts = witnessScripts("a10183" + "8106" + SIG + "8106");
-        assertThat(scripts).hasSize(1);
-        assertThat(scripts.get(0).getScriptHash()).isEqualTo(SIG_HASH);
+        assertThat(scripts).hasSize(3);
+        assertThat(scripts.get(1).getScriptHash()).isEqualTo(SIG_HASH);
+        for (int i : new int[]{0, 2}) {
+            assertThat(scripts.get(i).getParseError()).contains("unknown native script type 6");
+            assertThat(scripts.get(i).getScriptHash()).isNotNull().isNotEqualTo(SIG_HASH);
+        }
     }
 
     @Test
@@ -134,6 +143,24 @@ class NativeScriptHashTest {
         assertThat(witness.getNativeScripts().get(0).getScriptHash()).isNull();
     }
 
+    /**
+     * An unknown type does not hide a malformed known node after it: block fetch still reports a parsing error, as when
+     * the unknown child was left out. Alone, the unknown child gives its script a parse error and the block arrives.
+     */
+    @Test
+    void anUnknownChildDoesNotHideAMalformedNodeFromBlockFetch() {
+        String unknownThenMalformedTimeScript = "a10181" + "8201" + "82" + "8106" + "8104";
+        assertThat(throughBlockFetch(withWitness(unknownThenMalformedTimeScript)))
+                .isInstanceOf(BlockParseRuntimeException.class);
+
+        Object delivered = throughBlockFetch(withWitness("a10181" + "8201" + "81" + "8106"));
+        assertThat(delivered).isInstanceOf(Block.class);
+        NativeScript script = ((Block) delivered).getTransactionWitness().get(0).getNativeScripts().get(0);
+        assertThat(script.getType()).isEqualTo(1);
+        assertThat(script.getContent()).isNull();
+        assertThat(script.getParseError()).contains("unknown native script type 6");
+    }
+
     @Test
     void existingConstructorsStay() {
         assertThat(new NativeScript(1, "{}").getScriptHash()).isNull();
@@ -142,6 +169,20 @@ class NativeScriptHashTest {
 
     private static List<NativeScript> witnessScripts(String witness) {
         return WitnessesSerializer.INSTANCE.deserialize(HexUtil.decodeHexString(witness)).getNativeScripts();
+    }
+
+    /** The block block fetch delivers, or the parsing error it reports. */
+    private static Object throughBlockFetch(byte[] block) {
+        AtomicReference<Object> result = new AtomicReference<>();
+        BlockfetchAgent agent = new BlockfetchAgent();
+        agent.addListener(new BlockfetchAgentListener() {
+            @Override
+            public void blockFound(Block found) { result.set(found); }
+            @Override
+            public void onParsingError(BlockParseRuntimeException error) { result.set(error); }
+        });
+        agent.processResponse(new MsgBlock(block));
+        return result.get();
     }
 
     private static byte[] withWitness(String witness) {

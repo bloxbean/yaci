@@ -2,7 +2,7 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
-import com.bloxbean.cardano.client.transaction.raw.EraSpec;
+import com.bloxbean.cardano.client.spec.Era;
 import com.bloxbean.cardano.client.transaction.raw.RawCostModels;
 import com.bloxbean.cardano.client.transaction.raw.RawExUnitPrices;
 import com.bloxbean.cardano.client.transaction.raw.RawExUnits;
@@ -43,13 +43,13 @@ public enum UpdateSerializer implements Serializer<Update> {
 
     /**
      * @param bytes an update, exactly one CBOR item
-     * @return the update, read in the newest era; null for empty input
+     * @return the update, read as Conway; null for empty input
      */
     @Override
     public Update deserialize(byte[] bytes) {
         if (bytes.length == 0)
             return null;
-        return read(RawUpdate.lenient(CborSerializationUtil.span(bytes), EraSpec.newest()));
+        return read(RawUpdate.lenient(CborSerializationUtil.span(bytes), Era.Conway));
     }
 
     /**
@@ -59,7 +59,7 @@ public enum UpdateSerializer implements Serializer<Update> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Update deserializeDI(DataItem di) {
-        return read(RawUpdate.lenient(CborSerializationUtil.span(di), EraSpec.newest()));
+        return read(RawUpdate.lenient(CborSerializationUtil.span(di), Era.Conway));
     }
 
     /**
@@ -76,13 +76,13 @@ public enum UpdateSerializer implements Serializer<Update> {
 
     /**
      * @param genesisProtocolParamsMap a parameter update, decoded
-     * @return the parameter update, read in the newest era
+     * @return the parameter update, read as Conway
      * @deprecated A decoded parameter update has lost its source encoding, which its cost models hash. Use
      * {@link #read(RawProtocolParamUpdate)}.
      */
     @Deprecated(since = "0.5.0", forRemoval = true)
     public ProtocolParamUpdate getProtocolParams(Map genesisProtocolParamsMap) {
-        return read(RawProtocolParamUpdate.lenient(CborSerializationUtil.span(genesisProtocolParamsMap), EraSpec.newest()));
+        return read(RawProtocolParamUpdate.lenient(CborSerializationUtil.span(genesisProtocolParamsMap), Era.Conway));
     }
 
     /**

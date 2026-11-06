@@ -5,7 +5,6 @@ import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.spec.Era;
 import com.bloxbean.cardano.client.transaction.raw.AuxDataField;
-import com.bloxbean.cardano.client.transaction.raw.EraSpec;
 import com.bloxbean.cardano.client.transaction.raw.RawAuxData;
 import com.bloxbean.cardano.client.transaction.raw.RawItems;
 import com.bloxbean.cardano.client.transaction.raw.RawScript;
@@ -28,11 +27,11 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
 
     /**
      * @param bytes aux data, exactly one CBOR item
-     * @return the aux data, read in the newest era; null for empty input
+     * @return the aux data, read as Conway; null for empty input
      */
     @Override
     public AuxData deserialize(byte[] bytes) {
-        return bytes.length == 0 ? null : read(CborSpan.of(bytes), EraSpec.newest(), true);
+        return bytes.length == 0 ? null : read(CborSpan.of(bytes), Era.Conway, true);
     }
 
     /**
@@ -44,7 +43,7 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
     @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public AuxData deserializeDI(DataItem di) {
-        return read(CborSerializationUtil.span(di), EraSpec.newest(), false);
+        return read(CborSerializationUtil.span(di), Era.Conway, false);
     }
 
     /**

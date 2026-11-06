@@ -7,6 +7,8 @@ dependencies {
 
     // BlockParsingPinTest captures log events; the runtime binding comes from the root build.
     testCompileOnly libs.slf4j.reload4j
+    // DijkstraBlockTest takes transaction ids with Blake2b directly, not through the code it tests.
+    testImplementation libs.bouncycastle.bcprov
 }
 
 publishing {

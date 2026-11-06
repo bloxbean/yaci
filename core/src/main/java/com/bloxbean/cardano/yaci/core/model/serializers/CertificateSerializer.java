@@ -4,6 +4,7 @@ import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
+import com.bloxbean.cardano.client.spec.Era;
 import com.bloxbean.cardano.client.transaction.raw.CertKind;
 import com.bloxbean.cardano.client.transaction.raw.RawAnchor;
 import com.bloxbean.cardano.client.transaction.raw.RawCertificate;
@@ -46,10 +47,22 @@ public enum CertificateSerializer implements Serializer<Certificate> {
      * @return the certificate, or an empty one for a genesis delegation that fails to parse (ADR 0003 section 12)
      */
     public Certificate read(CborSpan span) {
+        return read(span, null);
+    }
+
+    /**
+     * As {@link #read(CborSpan)}, in the era of its block: from Dijkstra, a pool registration may hold a BLS key slot
+     * after its VRF key hash (ADR 0003 D4a; experimental, as Dijkstra is not final). Yaci's model does not carry it.
+     *
+     * @param span a certificate as encoded
+     * @param era  the era of its block, or null to read it as {@link #read(CborSpan)} does
+     * @return the certificate, or an empty one for a genesis delegation that fails to parse (ADR 0003 section 12)
+     */
+    public Certificate read(CborSpan span, Era era) {
         CertKind kind = CertKind.of(span).orElseThrow(() ->
                 new CborRuntimeException("Certificate deserialization failed. Unknown type : " + span));
         if (kind != CertKind.GENESIS_KEY_DELEGATION)
-            return read(kind, span);
+            return read(kind, span, era);
 
         // What is too short for any certificate is not a genesis delegation that failed: stake registration is the
         // shortest, and this rejects it.
@@ -68,7 +81,11 @@ public enum CertificateSerializer implements Serializer<Certificate> {
      * @return the certificate
      */
     public Certificate read(CertKind kind, CborSpan span) {
-        RawCertificate cert = RawCertificate.lenient(kind, span);
+        return read(kind, span, null);
+    }
+
+    private Certificate read(CertKind kind, CborSpan span, Era era) {
+        RawCertificate cert = RawCertificate.lenient(kind, span, era);
         return switch (kind) {
             case STAKE_REGISTRATION -> new StakeRegistration(stakeCredential(cert.exact().credential()));
             case STAKE_DEREGISTRATION -> new StakeDeregistration(stakeCredential(cert.exact().credential()));

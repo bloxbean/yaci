@@ -22,5 +22,6 @@ harmcrest-library="org.hamcrest:hamcrest-library:2.2"
 mockito-core="org.mockito:mockito-core:5.23.0"
 mockito-junit-jupiter="org.mockito:mockito-junit-jupiter:5.23.0"
 assertj-core="org.assertj:assertj-core:3.21.0"
+bouncycastle-bcprov="org.bouncycastle:bcprov-jdk18on:1.83"
 
 reload4j="ch.qos.reload4j:reload4j:1.2.22"
