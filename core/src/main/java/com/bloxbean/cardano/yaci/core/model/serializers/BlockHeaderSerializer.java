@@ -11,6 +11,7 @@ import com.bloxbean.cardano.client.transaction.raw.RawHeader;
 import com.bloxbean.cardano.client.transaction.raw.RawVrfCert;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
+import com.bloxbean.cardano.yaci.core.model.EbAnnouncement;
 import com.bloxbean.cardano.yaci.core.model.HeaderBody;
 import com.bloxbean.cardano.yaci.core.model.OperationalCert;
 import com.bloxbean.cardano.yaci.core.model.ProtocolVersion;
@@ -120,6 +121,11 @@ public enum BlockHeaderSerializer implements Serializer<BlockHeader> {
         header.vrfResult().ifPresent(vrf -> body.vrfResult(vrfCert(vrf)));
         header.nonceVrf().ifPresent(vrf -> body.nonceVrf(vrfCert(vrf)));
         header.leaderVrf().ifPresent(vrf -> body.leaderVrf(vrfCert(vrf)));
+        // A 12-item Dijkstra header's Leios fields (D4b; experimental, as Dijkstra is not final).
+        header.leiosCertInBody().ifPresent(body::leiosCertInBody);
+        header.ebReferencesAnnouncement()
+                .ifPresent(announcement -> body.ebAnnouncement(new EbAnnouncement(hex(announcement.hash()),
+                        announcement.size())));
         return new BlockHeader(body.build(), hex(header.bodySignature()));
     }
 

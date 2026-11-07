@@ -36,7 +36,8 @@ import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
 /**
  * Maps updates and parameter updates read by {@link RawUpdate} and {@link RawProtocolParamUpdate} to Yaci's models (ADR
  * 0003 D8). Key 17 is kept in {@code adaPerUtxoByte} whatever the era. The cost models and their hash are the bytes
- * received (I8).
+ * received (I8). Dijkstra's keys 34 to 56 come from the view, which reads them only in Dijkstra (D4b; experimental, as
+ * Dijkstra is not final).
  */
 public enum UpdateSerializer implements Serializer<Update> {
     INSTANCE;
@@ -87,8 +88,8 @@ public enum UpdateSerializer implements Serializer<Update> {
 
     /**
      * @param update a parameter update as received
-     * @return the parameter update. A field of 32 bits, such as the maximum block size, keeps only the low 32 bits of
-     * its value in an {@code Integer}, as it always has
+     * @return the parameter update. A field of 32 bits before Dijkstra, such as the maximum block size, keeps only the
+     * low 32 bits of its value in an {@code Integer}, as it always has; Dijkstra's are whole, in a {@code Long}
      */
     public ProtocolParamUpdate read(RawProtocolParamUpdate update) {
         ProtocolParamUpdate.ProtocolParamUpdateBuilder builder = ProtocolParamUpdate.builder()
@@ -147,6 +148,39 @@ public enum UpdateSerializer implements Serializer<Update> {
         Optional<RawExUnits> maxBlock = update.maxBlockExUnits();
         if (maxBlock.isPresent())
             builder.maxBlockExMem(maxBlock.get().mem()).maxBlockExSteps(maxBlock.get().steps());
+
+        builder.maxRefScriptSizePerBlock(orNull(update.maxRefScriptSizePerBlock()))
+                .maxRefScriptSizePerTx(orNull(update.maxRefScriptSizePerTx()))
+                .refScriptCostStride(orNull(update.refScriptCostStride()))
+                .refScriptCostMultiplier(update.refScriptCostMultiplier().map(UpdateSerializer::nonNegative)
+                        .orElse(null))
+                .maxPledgeLeverage(update.maxPledgeLeverage().map(value -> value.map(UpdateSerializer::nonNegative))
+                        .orElse(null))
+                .minPoolMargin(update.minPoolMargin().map(UpdateSerializer::unit).orElse(null))
+                .leiosAnnouncementPeriodLength(orNull(update.leiosAnnouncementPeriodLength()))
+                .leiosVotePeriodLength(orNull(update.leiosVotePeriodLength()))
+                .leiosDiffusionPeriodLength(orNull(update.leiosDiffusionPeriodLength()))
+                .leiosCommitteeSize(orNull(update.leiosCommitteeSize()))
+                .leiosQuorumStakeThreshold(update.leiosQuorumStakeThreshold().map(UpdateSerializer::unit)
+                        .orElse(null))
+                .maxEndorserBlockReferencesSize(orNull(update.maxEndorserBlockReferencesSize()))
+                .maxEndorserBlockTxsSize(orNull(update.maxEndorserBlockTxsSize()))
+                .maxRefScriptSizePerEndorserBlock(orNull(update.maxRefScriptSizePerEndorserBlock()))
+                .perasMinCandidateBlockAge(orNull(update.perasMinCandidateBlockAge()))
+                .perasHealingFactor(update.perasHealingFactor().map(UpdateSerializer::nonNegative).orElse(null))
+                .perasCertBoost(orNull(update.perasCertBoost()))
+                .perasTargetCommitteeSize(orNull(update.perasTargetCommitteeSize()))
+                .perasBootstrapRound(update.perasBootstrapRound()
+                        .map(round -> round.isPresent() ? Optional.of(round.getAsLong()) : Optional.<Long>empty())
+                        .orElse(null))
+                .perasQuorumThresholdSafetyMargin(update.perasQuorumThresholdSafetyMargin()
+                        .map(UpdateSerializer::unit).orElse(null))
+                .refInputsCostPerMultiAssetPolicy(update.refInputsCostPerMultiAssetPolicy().orElse(null))
+                .refInputsCostPerDatumByte(update.refInputsCostPerDatumByte().orElse(null));
+        Optional<RawExUnits> maxEndorserBlock = update.maxEndorserBlockExUnits();
+        if (maxEndorserBlock.isPresent())
+            builder.maxEndorserBlockExMem(maxEndorserBlock.get().mem())
+                    .maxEndorserBlockExSteps(maxEndorserBlock.get().steps());
         return builder.build();
     }
 
@@ -272,21 +306,9 @@ public enum UpdateSerializer implements Serializer<Update> {
             map.put(cborUInt(19), prices);
         }
 
-        // 20: max_tx_ex_units [mem, steps] — BigInteger values
-        if (ppu.getMaxTxExMem() != null || ppu.getMaxTxExSteps() != null) {
-            Array exUnits = new Array();
-            exUnits.add(ppu.getMaxTxExMem() != null ? cborUInt(ppu.getMaxTxExMem()) : cborUInt(0));
-            exUnits.add(ppu.getMaxTxExSteps() != null ? cborUInt(ppu.getMaxTxExSteps()) : cborUInt(0));
-            map.put(cborUInt(20), exUnits);
-        }
-
-        // 21: max_block_ex_units [mem, steps] — BigInteger values
-        if (ppu.getMaxBlockExMem() != null || ppu.getMaxBlockExSteps() != null) {
-            Array exUnits = new Array();
-            exUnits.add(ppu.getMaxBlockExMem() != null ? cborUInt(ppu.getMaxBlockExMem()) : cborUInt(0));
-            exUnits.add(ppu.getMaxBlockExSteps() != null ? cborUInt(ppu.getMaxBlockExSteps()) : cborUInt(0));
-            map.put(cborUInt(21), exUnits);
-        }
+        // 20: max_tx_ex_units, 21: max_block_ex_units
+        putExUnits(map, 20, ppu.getMaxTxExMem(), ppu.getMaxTxExSteps());
+        putExUnits(map, 21, ppu.getMaxBlockExMem(), ppu.getMaxBlockExSteps());
 
         // 22-24: maxValSize, collateralPercent, maxCollateralInputs
         if (ppu.getMaxValSize() != null) map.put(cborUInt(22), cborUInt(ppu.getMaxValSize()));
@@ -308,7 +330,57 @@ public enum UpdateSerializer implements Serializer<Update> {
         // 33: minFeeRefScriptCostPerByte
         if (ppu.getMinFeeRefScriptCostPerByte() != null) map.put(cborUInt(33), serializeRational(ppu.getMinFeeRefScriptCostPerByte()));
 
+        // 34-56: Dijkstra (experimental, as Dijkstra is not final). Words of 32 bits are written whole.
+        putUInt(map, 34, ppu.getMaxRefScriptSizePerBlock());
+        putUInt(map, 35, ppu.getMaxRefScriptSizePerTx());
+        putUInt(map, 36, ppu.getRefScriptCostStride());
+        putRational(map, 37, ppu.getRefScriptCostMultiplier());
+        if (ppu.getMaxPledgeLeverage() != null)
+            map.put(cborUInt(38), ppu.getMaxPledgeLeverage().map(CborSerializationUtil::serializeRational)
+                    .orElse(SimpleValue.NULL));
+        putRational(map, 39, ppu.getMinPoolMargin());
+        putUInt(map, 40, ppu.getLeiosAnnouncementPeriodLength());
+        putUInt(map, 41, ppu.getLeiosVotePeriodLength());
+        putUInt(map, 42, ppu.getLeiosDiffusionPeriodLength());
+        putUInt(map, 43, ppu.getLeiosCommitteeSize());
+        putRational(map, 44, ppu.getLeiosQuorumStakeThreshold());
+        putUInt(map, 45, ppu.getMaxEndorserBlockReferencesSize());
+        putUInt(map, 46, ppu.getMaxEndorserBlockTxsSize());
+        putExUnits(map, 47, ppu.getMaxEndorserBlockExMem(), ppu.getMaxEndorserBlockExSteps());
+        putUInt(map, 48, ppu.getMaxRefScriptSizePerEndorserBlock());
+        putUInt(map, 49, ppu.getPerasMinCandidateBlockAge());
+        putRational(map, 50, ppu.getPerasHealingFactor());
+        putUInt(map, 51, ppu.getPerasCertBoost());
+        putUInt(map, 52, ppu.getPerasTargetCommitteeSize());
+        if (ppu.getPerasBootstrapRound() != null)
+            map.put(cborUInt(53), ppu.getPerasBootstrapRound().<DataItem>map(CborSerializationUtil::cborUInt)
+                    .orElse(SimpleValue.NULL));
+        putRational(map, 54, ppu.getPerasQuorumThresholdSafetyMargin());
+        if (ppu.getRefInputsCostPerMultiAssetPolicy() != null)
+            cborMapPutBigUInt(map, 55, ppu.getRefInputsCostPerMultiAssetPolicy());
+        if (ppu.getRefInputsCostPerDatumByte() != null) cborMapPutBigUInt(map, 56, ppu.getRefInputsCostPerDatumByte());
+
         return map;
+    }
+
+    /** Ex-units, [mem, steps], when either is set; the other is then written as 0. */
+    private static void putExUnits(Map map, int key, BigInteger mem, BigInteger steps) {
+        if (mem == null && steps == null)
+            return;
+        Array exUnits = new Array();
+        exUnits.add(cborUInt(mem != null ? mem : BigInteger.ZERO));
+        exUnits.add(cborUInt(steps != null ? steps : BigInteger.ZERO));
+        map.put(cborUInt(key), exUnits);
+    }
+
+    private static void putUInt(Map map, int key, java.lang.Number value) {
+        if (value != null)
+            map.put(cborUInt(key), cborUInt(value.longValue()));
+    }
+
+    private static void putRational(Map map, int key, UnitInterval value) {
+        if (value != null)
+            map.put(cborUInt(key), serializeRational(value));
     }
 
     private static DataItem serializePoolVotingThresholds(PoolVotingThresholds pvt) {

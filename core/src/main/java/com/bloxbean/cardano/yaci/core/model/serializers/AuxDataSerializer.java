@@ -62,6 +62,9 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
             builder.plutusV2Scripts(plutusScripts(PlutusScriptType.PlutusScriptV2, aux.plutusV2Scripts()));
         if (aux.has(AuxDataField.PLUTUS_V3_SCRIPTS))
             builder.plutusV3Scripts(plutusScripts(PlutusScriptType.PlutusScriptV3, aux.plutusV3Scripts()));
+        // Key 5 is Dijkstra's, and absent from the view before it (D4b; experimental, as Dijkstra is not final).
+        if (aux.has(AuxDataField.PLUTUS_V4_SCRIPTS))
+            builder.plutusV4Scripts(plutusScripts(PlutusScriptType.PlutusScriptV4, aux.plutusV4Scripts()));
         return builder.build();
     }
 

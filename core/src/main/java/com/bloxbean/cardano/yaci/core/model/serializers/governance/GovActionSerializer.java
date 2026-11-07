@@ -145,13 +145,27 @@ public enum GovActionSerializer implements Serializer<GovAction> {
 
     /**
      * @param bytes a governance action, exactly one CBOR item
-     * @return the action, read as Conway; null for empty input
+     * @return the action, read as Conway, so a parameter change has no Dijkstra keys; null for empty input
      */
     @Override
     public GovAction deserialize(byte[] bytes) {
+        return deserialize(bytes, Era.Conway);
+    }
+
+    /**
+     * Reads a governance action in the era of its proposal, such as one {@link #serializeDI(GovAction)} wrote: a
+     * parameter change keeps its Dijkstra keys only when read in Dijkstra.
+     * <p>
+     * Experimental: Dijkstra is not final; this may change in any release.
+     *
+     * @param bytes a governance action, exactly one CBOR item
+     * @param era   the era to read it in
+     * @return the action; null for empty input
+     */
+    public GovAction deserialize(byte[] bytes, Era era) {
         if (bytes.length == 0)
             return null;
-        return read(RawGovAction.lenient(CborSerializationUtil.span(bytes), Era.Conway));
+        return read(RawGovAction.lenient(CborSerializationUtil.span(bytes), era));
     }
 
     /**

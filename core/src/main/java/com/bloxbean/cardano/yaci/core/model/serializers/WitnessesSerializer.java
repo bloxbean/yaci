@@ -77,8 +77,10 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
             redeemers.add(DataItemIsolation.redeemer(redeemer));
         List<PlutusScript> plutusV2Scripts = plutusScripts(PlutusScriptType.PlutusScriptV2, set.plutusV2Scripts());
         List<PlutusScript> plutusV3Scripts = plutusScripts(PlutusScriptType.PlutusScriptV3, set.plutusV3Scripts());
-        return new Witnesses(vkeyWitnesses, nativeScripts, bootstrapWitnesses, plutusV1Scripts, datums, redeemers,
-                plutusV2Scripts, plutusV3Scripts);
+        return Witnesses.builder().vkeyWitnesses(vkeyWitnesses).nativeScripts(nativeScripts)
+                .bootstrapWitnesses(bootstrapWitnesses).plutusV1Scripts(plutusV1Scripts).datums(datums)
+                .redeemers(redeemers).plutusV2Scripts(plutusV2Scripts).plutusV3Scripts(plutusV3Scripts)
+                .plutusV4Scripts(plutusScripts(PlutusScriptType.PlutusScriptV4, set.plutusV4Scripts())).build();
     }
 
     /** A script of an unknown type is kept, with no JSON and a parse error. */

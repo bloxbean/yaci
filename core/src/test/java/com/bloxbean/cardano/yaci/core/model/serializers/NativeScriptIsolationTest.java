@@ -17,8 +17,10 @@ import com.fasterxml.jackson.core.StreamWriteConstraints;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.List;
 import com.bloxbean.cardano.yaci.core.model.Block;
+import com.bloxbean.cardano.yaci.core.model.Credential;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
 import com.bloxbean.cardano.yaci.core.util.CborLoader;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
@@ -167,11 +169,11 @@ class NativeScriptIsolationTest {
         assertThatThrownBy(() -> NativeScriptJson.parse(script)).isInstanceOf(CborRuntimeException.class);
     }
 
-    /** An unknown type is kept with a parse error, where it was left out (ADR 0003 D4a). */
+    /** An unknown type, 7 or more, is kept with a parse error, where it was left out (ADR 0003 D4a). */
     @Test
     void indefiniteAuxiliaryNativeScriptsSkipBreakAndKeepUnknownTypes() {
         Map metadata = new Map().put(new UnsignedInteger(1), new UnsignedInteger(42));
-        Array scripts = new Array().add(pubkeyScript()).add(new Array().add(new UnsignedInteger(6)))
+        Array scripts = new Array().add(pubkeyScript()).add(new Array().add(new UnsignedInteger(7)))
                 .add(Special.BREAK);
         scripts.setChunked(true);
         Map alonzo = new Map().put(new UnsignedInteger(0), metadata).put(new UnsignedInteger(1), scripts);
@@ -180,22 +182,22 @@ class NativeScriptIsolationTest {
             var result = AuxDataSerializer.INSTANCE.deserialize(CborSerializationUtil.serialize(data, false));
             assertThat(result.getNativeScripts()).hasSize(2).doesNotContainNull();
             assertThat(result.getNativeScripts().get(0).getContent()).contains("keyHash");
-            assertThat(result.getNativeScripts().get(1).getType()).isEqualTo(6);
+            assertThat(result.getNativeScripts().get(1).getType()).isEqualTo(7);
             assertThat(result.getNativeScripts().get(1).getContent()).isNull();
-            assertThat(result.getNativeScripts().get(1).getParseError()).contains("unknown native script type 6");
+            assertThat(result.getNativeScripts().get(1).getParseError()).contains("unknown native script type 7");
             assertThat(result.getMetadataJson()).contains("42");
         }
     }
 
     /**
-     * Dijkstra's {@code script_require_guard} (type 6) has no JSON. A guard, or a script holding one, is kept with no
-     * JSON and a parse error, its type and its hash, where the guard was left out of the tree or of the list.
+     * A script of a type Yaci has no JSON for (7 or more), or a script holding one, is kept with no JSON and a parse
+     * error, its type and its hash, where it was left out of the tree or of the list.
      */
     @Test
     void anUnknownTypeGivesAParseErrorInsteadOfAnAlteredTreeOrList() {
-        String guard = "8206" + "8200581c" + "00".repeat(28);
-        String scripts = "83" + "820181" + guard
-                + HexUtil.encodeHexString(CborSerializationUtil.serialize(pubkeyScript())) + guard;
+        String unknown = "8207" + "8200581c" + "00".repeat(28);
+        String scripts = "83" + "820181" + unknown
+                + HexUtil.encodeHexString(CborSerializationUtil.serialize(pubkeyScript())) + unknown;
         byte[] witnessSet = HexUtil.decodeHexString("a101" + scripts);
         byte[] auxData = HexUtil.decodeHexString("d90103a101" + scripts);
         List<List<NativeScript>> read = List.of(
@@ -204,14 +206,66 @@ class NativeScriptIsolationTest {
                 WitnessesSerializer.INSTANCE.deserialize(witnessSet).getNativeScripts());
         for (List<NativeScript> nativeScripts : read) {
             assertThat(nativeScripts).hasSize(3);
-            assertThat(nativeScripts).extracting(NativeScript::getType).containsExactly(1, 0, 6);
+            assertThat(nativeScripts).extracting(NativeScript::getType).containsExactly(1, 0, 7);
             for (int i : new int[]{0, 2}) {
                 assertThat(nativeScripts.get(i).getContent()).isNull();
-                assertThat(nativeScripts.get(i).getParseError()).contains("unknown native script type 6");
+                assertThat(nativeScripts.get(i).getParseError()).contains("unknown native script type 7");
                 assertThat(nativeScripts.get(i).getScriptHash()).isNotNull();
             }
             assertThat(nativeScripts.get(1).getContent()).contains("keyHash");
         }
+    }
+
+    /**
+     * ADR 0003 D4b: Dijkstra's {@code script_require_guard} (type 6) is {@code {"type": "guard", "credential": ...}},
+     * the credential as Yaci's {@link Credential} writes it, alone or nested, key or script. The mapping takes no era:
+     * in Conway, and through the era-less entry point, the same script gets the same JSON, where M7a kept it with a
+     * parse error. That is one of D4b's two listed era-less differences; type 6 is invalid before Dijkstra.
+     */
+    @Test
+    void aGuardScriptHasGuardJsonInAnyEra() throws Exception {
+        String keyHash = "11".repeat(28);
+        String scriptHash = "22".repeat(28);
+        String keyGuard = "8206" + "8200581c" + keyHash;
+        String scriptGuard = "8206" + "8201581c" + scriptHash;
+        String scripts = "82" + keyGuard + "820182" + scriptGuard
+                + HexUtil.encodeHexString(CborSerializationUtil.serialize(pubkeyScript()));
+        byte[] witnessSet = HexUtil.decodeHexString("a101" + scripts);
+        byte[] auxData = HexUtil.decodeHexString("d90103a101" + scripts);
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode keyJson = guardJson(mapper, Credential.fromKeyHash(HexUtil.decodeHexString(keyHash)));
+        JsonNode scriptJson = guardJson(mapper, Credential.fromScriptHash(HexUtil.decodeHexString(scriptHash)));
+        assertThat(keyJson.get("credential").get("type").asText()).isEqualTo("ADDR_KEYHASH");
+        assertThat(scriptJson.get("credential").get("type").asText()).isEqualTo("SCRIPTHASH");
+        List<List<NativeScript>> read = new ArrayList<>();
+        for (Era era : new Era[]{Era.Dijkstra, Era.Conway}) {
+            read.add(WitnessesSerializer.INSTANCE.read(CborSpan.of(witnessSet), era, true).getNativeScripts());
+            read.add(AuxDataSerializer.INSTANCE.read(CborSpan.of(auxData), era, true).getNativeScripts());
+        }
+        read.add(WitnessesSerializer.INSTANCE.deserialize(witnessSet).getNativeScripts());
+        for (List<NativeScript> nativeScripts : read) {
+            assertThat(nativeScripts).extracting(NativeScript::getType).containsExactly(6, 1);
+            assertThat(nativeScripts).extracting(NativeScript::getParseError).containsOnlyNulls();
+            assertThat(mapper.readTree(nativeScripts.get(0).getContent())).isEqualTo(keyJson);
+            JsonNode all = mapper.readTree(nativeScripts.get(1).getContent());
+            assertThat(all.get("type").asText()).isEqualTo("all");
+            assertThat(all.get("scripts").get(0)).isEqualTo(scriptJson);
+            assertThat(all.get("scripts").get(1).get("keyHash")).isNotNull();
+            assertThat(nativeScripts.get(0).getScriptHash()).isNotNull();
+        }
+    }
+
+    /** A guard without its credential is malformed, as a known script is, and fails its parse. */
+    @Test
+    void aGuardWithoutACredentialIsMalformed() {
+        Array guard = new Array().add(new UnsignedInteger(6));
+        assertThatThrownBy(() -> NativeScriptJson.parse(guard)).isInstanceOf(CborRuntimeException.class);
+        Array notACredential = new Array().add(new UnsignedInteger(6)).add(new UnsignedInteger(0));
+        assertThatThrownBy(() -> NativeScriptJson.parse(notACredential)).isInstanceOf(CborRuntimeException.class);
+    }
+
+    private static JsonNode guardJson(ObjectMapper mapper, Credential credential) {
+        return mapper.createObjectNode().put("type", "guard").set("credential", mapper.valueToTree(credential));
     }
 
     @Test

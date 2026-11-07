@@ -55,11 +55,11 @@ class NativeScriptHashTest {
     /** Unknown types are kept with a parse error and their own hashes, where they were left out (ADR 0003 D4a). */
     @Test
     void unknownScriptTypesAreKeptWithAParseErrorAndDoNotShiftTheHashes() {
-        List<NativeScript> scripts = witnessScripts("a10183" + "8106" + SIG + "8106");
+        List<NativeScript> scripts = witnessScripts("a10183" + "8107" + SIG + "8107");
         assertThat(scripts).hasSize(3);
         assertThat(scripts.get(1).getScriptHash()).isEqualTo(SIG_HASH);
         for (int i : new int[]{0, 2}) {
-            assertThat(scripts.get(i).getParseError()).contains("unknown native script type 6");
+            assertThat(scripts.get(i).getParseError()).contains("unknown native script type 7");
             assertThat(scripts.get(i).getScriptHash()).isNotNull().isNotEqualTo(SIG_HASH);
         }
     }
@@ -149,16 +149,16 @@ class NativeScriptHashTest {
      */
     @Test
     void anUnknownChildDoesNotHideAMalformedNodeFromBlockFetch() {
-        String unknownThenMalformedTimeScript = "a10181" + "8201" + "82" + "8106" + "8104";
+        String unknownThenMalformedTimeScript = "a10181" + "8201" + "82" + "8107" + "8104";
         assertThat(throughBlockFetch(withWitness(unknownThenMalformedTimeScript)))
                 .isInstanceOf(BlockParseRuntimeException.class);
 
-        Object delivered = throughBlockFetch(withWitness("a10181" + "8201" + "81" + "8106"));
+        Object delivered = throughBlockFetch(withWitness("a10181" + "8201" + "81" + "8107"));
         assertThat(delivered).isInstanceOf(Block.class);
         NativeScript script = ((Block) delivered).getTransactionWitness().get(0).getNativeScripts().get(0);
         assertThat(script.getType()).isEqualTo(1);
         assertThat(script.getContent()).isNull();
-        assertThat(script.getParseError()).contains("unknown native script type 6");
+        assertThat(script.getParseError()).contains("unknown native script type 7");
     }
 
     @Test

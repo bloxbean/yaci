@@ -22,7 +22,6 @@ import com.bloxbean.cardano.yaci.core.util.CborLoader;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.TxCborUtil;
-import org.bouncycastle.crypto.digests.Blake2bDigest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -137,8 +136,11 @@ class DijkstraBlockTest {
                     com.bloxbean.cardano.client.spec.Era.Dijkstra);
             Certificate inConway = CertificateSerializer.INSTANCE.read(array(withoutBls),
                     com.bloxbean.cardano.client.spec.Era.Conway);
+            // M7c (D4b): the Dijkstra registration also carries its BLS key, which the Conway one has no place for.
             assertThat(inDijkstra).isInstanceOf(PoolRegistration.class).usingRecursiveComparison()
-                    .isEqualTo(inConway);
+                    .ignoringFields("poolParams.blsKey").isEqualTo(inConway);
+            assertThat(((PoolRegistration) inDijkstra).getPoolParams().getBlsKey()).isNotNull();
+            assertThat(((PoolRegistration) inConway).getPoolParams().getBlsKey()).isNull();
         }
     }
 
@@ -164,7 +166,7 @@ class DijkstraBlockTest {
         for (Block block : SyncDataIsolationTest.throughBothSyncPaths(bytes)) {
             TransactionBody read = block.getTransactionBodies().get(0);
             assertThat(read.getFee()).isEqualTo(BigInteger.valueOf(1000));
-            assertThat(read.getTxHash()).isEqualTo(blake2b256(HexUtil.decodeHexString(repeated)));
+            assertThat(read.getTxHash()).isEqualTo(IndependentCbor.blake2b256(HexUtil.decodeHexString(repeated)));
         }
     }
 
@@ -355,15 +357,7 @@ class DijkstraBlockTest {
     private static List<String> txIds(byte[] bytes) {
         List<String> ids = new ArrayList<>();
         for (CborSpan tx : transactions(CborSpan.of(bytes)))
-            ids.add(blake2b256(tx.get(0).bytes()));
+            ids.add(IndependentCbor.blake2b256(tx.get(0).bytes()));
         return ids;
-    }
-
-    private static String blake2b256(byte[] bytes) {
-        Blake2bDigest digest = new Blake2bDigest(256);
-        digest.update(bytes, 0, bytes.length);
-        byte[] hash = new byte[32];
-        digest.doFinal(hash, 0);
-        return HexUtil.encodeHexString(hash);
     }
 }

@@ -4,6 +4,7 @@ import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.transaction.raw.BlockEnvelope;
 import com.bloxbean.cardano.client.transaction.raw.EraSpec;
 import com.bloxbean.cardano.client.transaction.raw.RawBlock;
+import com.bloxbean.cardano.client.transaction.raw.RawItems;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
@@ -17,12 +18,14 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
  * Reads a Shelley-family block: CCL's reader, then mappers, then Yaci's models (ADR 0003 D8). Bodies, witnesses and
  * auxiliary data are read from their source bytes, each with its own serializer: from the parallel arrays to Conway,
- * and from each whole transaction in Dijkstra (D4a; experimental, as Dijkstra is not final).
+ * and from each whole transaction in Dijkstra (D4a; experimental, as Dijkstra is not final). A Dijkstra block's Leios
+ * and Peras certificates come from CCL's views (D4b).
  */
 @Slf4j
 public enum BlockSerializer implements Serializer<Block> {
@@ -65,6 +68,11 @@ public enum BlockSerializer implements Serializer<Block> {
                 .auxiliaryDataMap(auxData(parts.auxData(), rawBlock, blockNumber, bodies))
                 .invalidTransactions(invalidTransactions(rawBlock))
                 .cbor(YaciConfig.INSTANCE.isReturnBlockCbor() ? HexUtil.encodeHexString(bytes) : null)
+                .leiosCertificate(rawBlock.leiosCertificate().map(certificate -> new LeiosCertificate(
+                        HexUtil.encodeHexString(certificate.signers()),
+                        HexUtil.encodeHexString(certificate.signature()))).orElse(null))
+                .perasCertificate(rawBlock.perasCertificate()
+                        .map(certificate -> HexUtil.encodeHexString(RawItems.bytes(certificate))).orElse(null))
                 .build();
     }
 
@@ -92,29 +100,40 @@ public enum BlockSerializer implements Serializer<Block> {
 
     private List<Witnesses> witnesses(List<CborSpan> witnessSets, RawBlock rawBlock) {
         List<Witnesses> witnesses = new ArrayList<>(witnessSets.size());
-        for (CborSpan witnessSet : witnessSets) {
-            Witnesses witness = WitnessesSerializer.INSTANCE.read(witnessSet, rawBlock.era(), true);
-            if (YaciConfig.INSTANCE.isReturnFullTxCbor())
-                witness = witness.toBuilder().cbor(HexUtil.encodeHexString(witnessSet.bytes())).build();
-            witnesses.add(witness);
-        }
+        for (CborSpan witnessSet : witnessSets)
+            witnesses.add(witnessSet(witnessSet, rawBlock.era()));
         return witnesses;
+    }
+
+    /** A witness set of a transaction or sub-transaction, with its CBOR if full transactions are returned. */
+    static Witnesses witnessSet(CborSpan witnessSet, com.bloxbean.cardano.client.spec.Era era) {
+        Witnesses witness = WitnessesSerializer.INSTANCE.read(witnessSet, era, true);
+        if (YaciConfig.INSTANCE.isReturnFullTxCbor())
+            witness = witness.toBuilder().cbor(HexUtil.encodeHexString(witnessSet.bytes())).build();
+        return witness;
     }
 
     private java.util.Map<Integer, AuxData> auxData(java.util.Map<Integer, CborSpan> spans, RawBlock rawBlock,
                                                     long blockNumber, List<TransactionBody> bodies) {
         java.util.Map<Integer, AuxData> auxDataMap = new LinkedHashMap<>();
-        spans.forEach((txIndex, span) -> {
-            AuxData auxData = AuxDataSerializer.INSTANCE.read(span, rawBlock.era(), true);
-            // Check the original auxiliary-data bytes against the transaction's hash.
-            if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
-                byte[] raw = span.bytes();
-                if (isAuxDataHashValid(blockNumber, txIndex, bodies, raw))
-                    auxData = auxData.toBuilder().cbor(HexUtil.encodeHexString(raw)).build();
-            }
-            auxDataMap.put(txIndex, auxData);
-        });
+        spans.forEach((txIndex, span) -> auxDataMap.put(txIndex, auxData(span, rawBlock.era(),
+                raw -> isAuxDataHashValid(blockNumber, txIndex, bodies, raw))));
         return auxDataMap;
+    }
+
+    /**
+     * Aux data of a transaction or sub-transaction. If full transactions are returned, its CBOR is the original bytes,
+     * given only if they match the transaction's hash.
+     */
+    static AuxData auxData(CborSpan span, com.bloxbean.cardano.client.spec.Era era, Predicate<byte[]> hashValid) {
+        AuxData auxData = AuxDataSerializer.INSTANCE.read(span, era, true);
+        // Check the original auxiliary-data bytes against the transaction's hash.
+        if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
+            byte[] raw = span.bytes();
+            if (hashValid.test(raw))
+                auxData = auxData.toBuilder().cbor(HexUtil.encodeHexString(raw)).build();
+        }
+        return auxData;
     }
 
     /** A block's transaction parts as encoded: bodies and witness sets in block order, aux data by transaction. */
@@ -151,17 +170,17 @@ public enum BlockSerializer implements Serializer<Block> {
 
     private boolean isAuxDataHashValid(long block, int txIndex, List<TransactionBody> txnBodies, byte[] auxBytes) {
         String expectedHash = txnBodies.get(txIndex).getAuxiliaryDataHash();
-        if (expectedHash == null) {
+        if (hashMatches(expectedHash, auxBytes)) {
             return true;
         }
 
-        String actualHash = Datum.cborToHash(auxBytes);
-        if (!expectedHash.equals(actualHash)) {
-            log.debug("Auxiliary data hash mismatch : {} - {} - {} - {}",
-                    block, txIndex, expectedHash, actualHash);
-            return false;
-        }
+        log.debug("Auxiliary data hash mismatch : {} - {} - {} - {}",
+                block, txIndex, expectedHash, Datum.cborToHash(auxBytes));
+        return false;
+    }
 
-        return true;
+    /** Whether aux data's original bytes have the hash a body gives, or the body gives none. */
+    static boolean hashMatches(String expectedHash, byte[] auxBytes) {
+        return expectedHash == null || expectedHash.equals(Datum.cborToHash(auxBytes));
     }
 }

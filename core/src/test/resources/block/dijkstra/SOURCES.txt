@@ -23,3 +23,42 @@ dijkstranet-first-header.txt (header)
 musashi-subtx.txt (block_tx)
   source: Musashi chain, txpipe/pallas 4b76c2e8 (Apache-2.0), test_data/dijkstra-fixtures.md
   expected: {"txId": "74e2116ca6e0c809f156aa062a9d4ee8b156322618846f1bdea5d9ad7a206a12", "subTxCount": 1}
+
+Added for ADR 0003 M7c (D4b, I16), copied unchanged from the same file at commit 12608658 (last changed in
+fd15b1d4). The two rc-2026w41 blocks were recorded without their [era, block] envelope. The KleioScan
+transactions are chain data served by a third-party explorer; the values the tests take from them come from the
+explorer's JSON for the same transactions, fetched with them on 2026-11-06.
+
+musashi-dijkstra9.txt (block)
+  source: Musashi (magic 164, ouroboros-leios prototype-2026w36), txpipe/pallas 4b76c2e8 (Apache-2.0), test_data/dijkstra-fixtures.md
+  expected: {"blockHash": "112495349409ccaa7a57e810aa59b014337612438a3e07cd5ce1bb3126dfbbea", "blockNumber": 17512, "slot": 374306, "txCount": 0, "headerItems": 12, "leiosCertificate": true}
+musashi-dijkstra15.txt (block)
+  source: Musashi (magic 164, ouroboros-leios prototype-2026w36), txpipe/pallas 4b76c2e8 (Apache-2.0), test_data/dijkstra-fixtures.md
+  expected: {"blockHash": "0db84efa0259153a240cecacd0f9e52f942d40f96b132ebd0d5b3526e19b3a7b", "blockNumber": 17406, "slot": 371916, "txCount": 0, "headerItems": 12, "leiosCertificate": true}
+rc-2026w41-announcing-block.txt (block)
+  source: Leios rc-2026w41 two-pool devnet, blinklabs-io/gouroboros v0.217.1 (Apache-2.0) ledger/leios/testdata
+  expected: {"txCount": 0, "headerItems": 12}
+rc-2026w41-certifying-block.txt (block)
+  source: Leios rc-2026w41 two-pool devnet, blinklabs-io/gouroboros v0.217.1 (Apache-2.0) ledger/leios/testdata; its prev_hash is the announcing block's hash
+  expected: {"txCount": 0, "headerItems": 12, "leiosCertificate": true, "prevIs": "rc-2026w41-announcing-block", "leiosSigners": "c0"}
+ledger-golden-tx.txt (mempool_tx)
+  source: IntersectMBO/cardano-ledger 95b36905 (Apache-2.0), eras/dijkstra/impl/golden/tx.cbor (exampleDijkstraTx)
+  expected: {}
+kleioscan-musashi-dac250a5.txt (mempool_tx)
+  source: Musashi chain data via the KleioScan explorer API, fetched 2026-11-06
+  expected: {"txId": "dac250a5629c8b6f5d76349588ae5b7fd1762ca6523057748d5aa14762682b94"}
+kleioscan-musashi-5d76e2e9.txt (mempool_tx)
+  source: Musashi chain data via the KleioScan explorer API, fetched 2026-11-06
+  expected: {"txId": "5d76e2e95326df264b9772a1b097957f8eb6a18e7333ab446bac8bb7bfdb92cb"}
+kleioscan-musashi-4b97d4ad.txt (mempool_tx)
+  source: Musashi chain data via the KleioScan explorer API, fetched 2026-11-06
+  expected: {"txId": "4b97d4ad8cb0def27e0dcdccacc280571bd7c6252af47b9a23cbe9b215593e72"}
+musashi-indef-bytes1.txt (mempool_tx)
+  source: Musashi prototype-2026w40a, txpipe/pallas 4b76c2e8 (Apache-2.0), test_data/dijkstra-fixtures.md
+  expected: {"txId": "943a88c97f86522b2cda39d1d6bd076ea51a696e5ad41c41e4c6d38ce8f7dd50"}
+rc-2026w42-v4-witness.txt (block_tx)
+  source: rc-2026w42 testnet (cardano-node 11.2.0.164), txpipe/pallas 4b76c2e8 (Apache-2.0), test_data/dijkstra-fixtures.md
+  expected: {"txId": "931a78483ed17437655db1ad49b1920f4cef45b3c48c165acd42e6759933d358", "plutusV4Scripts": 1}
+rc-2026w42-v4-sub-witness.txt (block_tx)
+  source: rc-2026w42 testnet (cardano-node 11.2.0.164), txpipe/pallas 4b76c2e8 (Apache-2.0), test_data/dijkstra-fixtures.md
+  expected: {"txId": "a9e1e0c39a9d4536ad2cd75c6eac0aead02300adfb12e013147c21cdb8156ada", "subTxCount": 2}

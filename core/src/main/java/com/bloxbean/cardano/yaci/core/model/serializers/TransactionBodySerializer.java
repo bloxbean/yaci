@@ -3,12 +3,21 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 import co.nstant.in.cbor.model.DataItem;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.spec.Era;
+import com.bloxbean.cardano.client.transaction.raw.RawAccountBalanceInterval;
+import com.bloxbean.cardano.client.transaction.raw.RawCredential;
 import com.bloxbean.cardano.client.transaction.raw.RawInput;
 import com.bloxbean.cardano.client.transaction.raw.RawOutput;
 import com.bloxbean.cardano.client.transaction.raw.RawProposal;
+import com.bloxbean.cardano.client.transaction.raw.RawTopLevelGuard;
+import com.bloxbean.cardano.client.transaction.raw.RawTx;
 import com.bloxbean.cardano.client.transaction.raw.RawTxBody;
 import com.bloxbean.cardano.client.transaction.raw.RawWithdrawal;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
+import com.bloxbean.cardano.yaci.core.model.AccountBalanceInterval;
+import com.bloxbean.cardano.yaci.core.model.AuxData;
+import com.bloxbean.cardano.yaci.core.model.Credential;
+import com.bloxbean.cardano.yaci.core.model.SubTransaction;
+import com.bloxbean.cardano.yaci.core.model.TopLevelGuard;
 import com.bloxbean.cardano.yaci.core.model.TransactionBody;
 import com.bloxbean.cardano.yaci.core.model.TransactionInput;
 import com.bloxbean.cardano.yaci.core.model.TransactionOutput;
@@ -22,13 +31,19 @@ import com.bloxbean.cardano.yaci.core.util.TxUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * Maps bodies read by {@link RawTxBody} to Yaci's model (ADR 0003 D8).
+ * Maps bodies read by {@link RawTxBody} to Yaci's model (ADR 0003 D8). A Dijkstra body's fields come from the view's
+ * Dijkstra accessors, which are empty in earlier eras (D4b; experimental, as Dijkstra is not final): its required
+ * signers are the key hashes of its key guards, as the ledger derives them, and its sub-transactions are mapped as a
+ * block's transactions are.
  */
 @Slf4j
 public enum TransactionBodySerializer implements Serializer<TransactionBody> {
@@ -51,13 +66,21 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
      * @return the body
      */
     public TransactionBody read(byte[] txBytes, Era era) {
-        RawTxBody body = RawTxBody.tolerant(CborSpan.at(txBytes, 0), era);
+        return read(RawTxBody.tolerant(CborSpan.at(txBytes, 0), era), txBytes);
+    }
+
+    /**
+     * @param body  a body, read in its era: a sub-transaction's at sub level, without the top-level-only fields
+     * @param bytes the body as encoded, whose hash is its id
+     */
+    private TransactionBody read(RawTxBody body, byte[] bytes) {
+        Era era = body.era();
         TransactionBody.TransactionBodyBuilder builder = TransactionBody.builder();
 
         //derive
-        builder.txHash(TxUtil.calculateTxHash(txBytes));
+        builder.txHash(TxUtil.calculateTxHash(bytes));
         if (YaciConfig.INSTANCE.isReturnTxBodyCbor() || YaciConfig.INSTANCE.isReturnFullTxCbor())
-            builder.cbor(HexUtil.encodeHexString(txBytes));
+            builder.cbor(HexUtil.encodeHexString(bytes));
 
         builder.inputs(inputs(body.inputs(), new LinkedHashSet<>()));
         List<TransactionOutput> outputs = new ArrayList<>();
@@ -87,6 +110,7 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         body.scriptDataHash().map(HexUtil::encodeHexString).ifPresent(builder::scriptDataHash);
         body.collateral().ifPresent(inputs -> builder.collateralInputs(inputs(inputs, new HashSet<>())));
         body.requiredSigners().ifPresent(signers -> builder.requiredSigners(hex(signers)));
+        body.guards().ifPresent(guards -> builder.guards(credentials(guards)).requiredSigners(keyHashes(guards)));
         body.networkId().ifPresent(id -> {
             if (id == 0 || id == 1)
                 builder.netowrkId(id);
@@ -102,7 +126,69 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
         body.currentTreasury().ifPresent(builder::currentTreasuryValue);
         body.donation().ifPresent(builder::donation);
 
+        // Absent and empty read alike from these views, and a valid body has none empty: both are null.
+        List<RawTx> subTransactions = body.subTransactions();
+        if (!subTransactions.isEmpty())
+            builder.subTransactions(subTransactions(subTransactions, era));
+        List<RawTopLevelGuard> topLevelGuards = body.requiredTopLevelGuards();
+        if (!topLevelGuards.isEmpty())
+            builder.requiredTopLevelGuards(topLevelGuards(topLevelGuards));
+        List<RawWithdrawal> directDeposits = body.directDeposits();
+        if (!directDeposits.isEmpty())
+            builder.directDeposits(WithdrawalsSerializer.INSTANCE.read(directDeposits));
+        builder.accountBalanceIntervals(intervals(body.accountBalanceIntervals()));
+        builder.startingAccountBalanceIntervals(intervals(body.startingAccountBalanceIntervals()));
+
         return builder.build();
+    }
+
+    private static List<Credential> credentials(List<RawCredential> credentials) {
+        List<Credential> read = new ArrayList<>(credentials.size());
+        for (RawCredential credential : credentials)
+            read.add(CertificateSerializer.credential(credential));
+        return read;
+    }
+
+    private static Set<String> keyHashes(List<RawCredential> guards) {
+        Set<String> set = new HashSet<>();
+        for (RawCredential guard : guards)
+            if (!guard.isScript())
+                set.add(HexUtil.encodeHexString(guard.hash()));
+        return set;
+    }
+
+    /**
+     * Each sub-transaction's parts are read as those of a transaction of its block, its body from CCL's view of it at
+     * sub level, which has no sub-transactions of its own.
+     */
+    private List<SubTransaction> subTransactions(List<RawTx> transactions, Era era) {
+        List<SubTransaction> read = new ArrayList<>(transactions.size());
+        for (RawTx transaction : transactions) {
+            TransactionBody body = read(transaction.body(era), transaction.body().bytes());
+            AuxData auxData = transaction.auxData().map(aux -> BlockSerializer.auxData(aux, era,
+                    bytes -> BlockSerializer.hashMatches(body.getAuxiliaryDataHash(), bytes))).orElse(null);
+            read.add(new SubTransaction(body, BlockSerializer.witnessSet(transaction.witnessSet(), era), auxData));
+        }
+        return read;
+    }
+
+    private static List<TopLevelGuard> topLevelGuards(List<RawTopLevelGuard> guards) {
+        List<TopLevelGuard> read = new ArrayList<>(guards.size());
+        for (RawTopLevelGuard guard : guards)
+            read.add(new TopLevelGuard(CertificateSerializer.credential(guard.credential()),
+                    guard.data() == null ? null : DataItemIsolation.datum(guard.data().span())));
+        return read;
+    }
+
+    /** By reward account in hex, in the order received, as withdrawals are; null for none. */
+    private static Map<String, AccountBalanceInterval> intervals(List<RawAccountBalanceInterval> intervals) {
+        if (intervals.isEmpty())
+            return null;
+        Map<String, AccountBalanceInterval> read = new LinkedHashMap<>();
+        for (RawAccountBalanceInterval interval : intervals)
+            read.put(HexUtil.encodeHexString(interval.rewardAccount()),
+                    new AccountBalanceInterval(interval.exact(), interval.lower(), interval.upper()));
+        return Collections.unmodifiableMap(read);
     }
 
     private static Set<TransactionInput> inputs(List<RawInput> inputs, Set<TransactionInput> set) {

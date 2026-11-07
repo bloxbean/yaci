@@ -6,6 +6,7 @@ import com.bloxbean.cardano.client.transaction.raw.CertKind;
 import com.bloxbean.cardano.client.transaction.raw.RawCertificate;
 import com.bloxbean.cardano.client.transaction.raw.RawPoolMetadata;
 import com.bloxbean.cardano.client.transaction.raw.RawRelay;
+import com.bloxbean.cardano.yaci.core.model.BlsKey;
 import com.bloxbean.cardano.yaci.core.model.PoolParams;
 import com.bloxbean.cardano.yaci.core.model.Relay;
 import com.bloxbean.cardano.yaci.core.model.certs.PoolRegistration;
@@ -57,6 +58,8 @@ public enum PoolRegistrationSerializer implements Serializer<PoolRegistration> {
                 .relays(relays)
                 .poolMetadataUrl(metadata != null ? metadata.url() : null)
                 .poolMetadataHash(metadata != null ? HexUtil.encodeHexString(metadata.hash()) : null)
+                .blsKey(cert.blsKey().map(key -> new BlsKey(HexUtil.encodeHexString(key.publicKey()),
+                        HexUtil.encodeHexString(key.proofOfPossession()))).orElse(null))
                 .build());
     }
 
