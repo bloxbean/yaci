@@ -5,7 +5,6 @@ import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
-import com.bloxbean.cardano.yaci.core.model.serializers.util.AuxDataExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
@@ -174,21 +173,11 @@ public enum BlockSerializer implements Serializer<Block> {
 
         blockBuilder.transactionWitness(witnessesSet);
 
-        java.util.Map<Integer, byte[]> auxDataRawBytes = Collections.emptyMap();
-        if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
-            try {
-                auxDataRawBytes = AuxDataExtractor.getAuxDataFromBlock(blockBody);
-            } catch (Exception e) {
-                log.error("Extraction of auxiliary data bytes failed for block : "
-                        + blockHeader.getHeaderBody().getBlockNumber(), e);
-            }
-        }
-
         //auxiliary data
         java.util.Map<Integer, AuxData> auxDataMap = new LinkedHashMap<>();
         Map auxDataMapDI = (Map) blockArray.getDataItems().get(3);
 
-        // Metadata CBOR must keep its on-chain encoding (key order, duplicate keys), whatever the config.
+        // Source bytes serve metadata CBOR (whatever the config) and, in full-tx mode, AuxData.cbor.
         java.util.Map<Integer, byte[]> auxDataSourceBytes = Collections.emptyMap();
         if (!auxDataMapDI.getKeys().isEmpty()) {
             try {
@@ -215,13 +204,12 @@ public enum BlockSerializer implements Serializer<Block> {
                 }
             }
             if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
-                byte[] auxBytes = auxDataRawBytes.get(txIndex);
-                if (auxBytes != null && isAuxDataHashValid(blockHeader.getHeaderBody().getBlockNumber(),
-                        txIndex, txnBodies, auxBytes)) {
+                if (sourceBytes != null && isAuxDataHashValid(blockHeader.getHeaderBody().getBlockNumber(),
+                        txIndex, txnBodies, sourceBytes)) {
                     auxData = auxData.toBuilder()
-                            .cbor(HexUtil.encodeHexString(auxBytes))
+                            .cbor(HexUtil.encodeHexString(sourceBytes))
                             .build();
-                } else if (auxBytes == null) {
+                } else if (sourceBytes == null) {
                     log.debug("Missing raw auxiliary data bytes for block: {}, tx index: {}",
                             blockHeader.getHeaderBody().getBlockNumber(), txIndex);
                 }
