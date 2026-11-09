@@ -174,20 +174,7 @@ final class DataItemIsolation {
     @SneakyThrows
     static AuxData auxiliary(byte[] bytes) {
         CborSlice root = CborSlice.of(bytes);
-        CborSlice metadata = null;
-        if (root.type() == MajorType.MAP && root.tag() == AUXILIARY_DATA_TAG) {
-            // Tag 259 distinguishes the auxiliary-data field map from a plain metadata map.
-            List<CborSlice> fields = root.items(MajorType.MAP);
-            for (int i = 0; i < fields.size(); i += 2) {
-                if (unsigned(fields.get(i)) == METADATA) metadata = fields.get(i + 1);
-            }
-        } else if (root.type() == MajorType.MAP) {
-            metadata = root; // Shelley metadata-only auxiliary data.
-        } else if (root.type() == MajorType.ARRAY) {
-            List<CborSlice> fields = root.items(MajorType.ARRAY);
-            requireSize(fields, 2);
-            metadata = fields.get(0); // Shelley-MA [metadata, native scripts].
-        }
+        CborSlice metadata = metadata(root);
         if (metadata == null) {
             // For example, a script-only tagged map: there is no metadata to isolate.
             return AuxDataSerializer.INSTANCE.deserializeDI(decode(root));
@@ -198,11 +185,8 @@ final class DataItemIsolation {
         try {
             // A bare metadata map can use the Shelley decoder regardless of its enclosing era.
             converted = AuxDataSerializer.INSTANCE.deserializeDI(decode(metadata));
-            if (converted.getMetadataParseError() != null) {
-                // Normal metadata keeps its legacy canonical representation. Failed metadata keeps
-                // the exact source encoding so recovery never depends on another encode succeeding.
-                converted = converted.toBuilder().metadataCbor(HexUtil.encodeHexString(metadata.bytes())).build();
-            }
+            // Keep the exact source encoding, so recovery never depends on another encode succeeding.
+            converted = converted.toBuilder().metadataCbor(HexUtil.encodeHexString(metadata.bytes())).build();
         } catch (StackOverflowError e) {
             // Boundaries were validated before decoding, so these bytes remain safe to extract.
             converted = AuxData.builder().metadataCbor(HexUtil.encodeHexString(metadata.bytes()))
@@ -211,6 +195,38 @@ final class DataItemIsolation {
         return skeleton.toBuilder().metadataCbor(converted.getMetadataCbor())
                 .metadataJson(converted.getMetadataJson())
                 .metadataParseError(converted.getMetadataParseError()).build();
+    }
+
+    /** The metadata value inside auxiliary data, in its source encoding, or null when there is none. */
+    static CborSlice metadata(CborSlice root) throws CborException {
+        if (root.type() == MajorType.MAP && root.tag() == AUXILIARY_DATA_TAG) {
+            // Tag 259 distinguishes the auxiliary-data field map from a plain metadata map.
+            List<CborSlice> fields = root.items(MajorType.MAP);
+            CborSlice metadata = null;
+            for (int i = 0; i < fields.size(); i += 2) {
+                if (unsigned(fields.get(i)) == METADATA) metadata = fields.get(i + 1);
+            }
+            return metadata;
+        } else if (root.type() == MajorType.MAP) {
+            return root; // Shelley metadata-only auxiliary data.
+        } else if (root.type() == MajorType.ARRAY) {
+            List<CborSlice> fields = root.items(MajorType.ARRAY);
+            requireSize(fields, 2);
+            return fields.get(0); // Shelley-MA [metadata, native scripts].
+        }
+        return null;
+    }
+
+    /**
+     * Replace re-encoded metadata CBOR with its source bytes, which keep map key order and duplicate keys.
+     * For example, {@code {"b": 1, "a": 2}} stays in that order instead of being sorted.
+     */
+    @SneakyThrows
+    static AuxData withSourceMetadata(AuxData aux, byte[] auxBytes) {
+        if (aux == null || aux.getMetadataCbor() == null) return aux;
+        CborSlice metadata = metadata(CborSlice.first(auxBytes));
+        return metadata == null ? aux
+                : aux.toBuilder().metadataCbor(HexUtil.encodeHexString(metadata.bytes())).build();
     }
 
     private static DataItem decode(CborSlice source) {

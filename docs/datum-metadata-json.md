@@ -40,8 +40,9 @@ when handling untrusted nesting.
 
 ## Compatibility
 
-Ordinary datum JSON keeps the existing pretty format, and ordinary metadata keeps its existing
-canonical CBOR representation. JSON conversion no longer falls back to recursive `toString()`.
+Ordinary datum JSON keeps the existing pretty format. `AuxData.metadataCbor` is the metadata value's
+original encoding, so map key order and duplicate keys are kept; only `deserializeDI`, which has no
+source bytes, still returns canonical CBOR. JSON conversion no longer falls back to recursive `toString()`.
 Healthy Conway map-form redeemers retain their existing re-encoded four-element CBOR representation,
 even if another value triggers recovery. Their data CBOR and datum hashes still use source bytes.
 Empty witness/auxiliary byte buffers continue to return null. Block recovery, like the normal parser,

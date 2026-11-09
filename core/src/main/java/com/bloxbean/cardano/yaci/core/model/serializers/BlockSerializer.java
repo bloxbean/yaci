@@ -5,7 +5,6 @@ import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.yaci.core.common.EraUtil;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.*;
-import com.bloxbean.cardano.yaci.core.model.serializers.util.AuxDataExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
@@ -174,32 +173,43 @@ public enum BlockSerializer implements Serializer<Block> {
 
         blockBuilder.transactionWitness(witnessesSet);
 
-        java.util.Map<Integer, byte[]> auxDataRawBytes = Collections.emptyMap();
-        if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
+        //auxiliary data
+        java.util.Map<Integer, AuxData> auxDataMap = new LinkedHashMap<>();
+        Map auxDataMapDI = (Map) blockArray.getDataItems().get(3);
+
+        // Source bytes serve metadata CBOR (whatever the config) and, in full-tx mode, AuxData.cbor.
+        java.util.Map<Integer, byte[]> auxDataSourceBytes = Collections.emptyMap();
+        if (!auxDataMapDI.getKeys().isEmpty()) {
             try {
-                auxDataRawBytes = AuxDataExtractor.getAuxDataFromBlock(blockBody);
+                auxDataSourceBytes = getAuxDataSourceBytes(blockBody);
             } catch (Exception e) {
-                log.error("Extraction of auxiliary data bytes failed for block : "
+                log.error("Extraction of auxiliary data source bytes failed for block : "
                         + blockHeader.getHeaderBody().getBlockNumber(), e);
             }
         }
 
-        //auxiliary data
-        java.util.Map<Integer, AuxData> auxDataMap = new LinkedHashMap<>();
-        Map auxDataMapDI = (Map) blockArray.getDataItems().get(3);
         for (DataItem txIdDI: auxDataMapDI.getKeys()) {
             if (txIdDI == SimpleValue.BREAK)
                 continue;
             int txIndex = toInt(txIdDI);
             AuxData auxData = AuxDataSerializer.INSTANCE.deserializeDI(auxDataMapDI.get(txIdDI));
+            byte[] sourceBytes = auxDataSourceBytes.get(txIndex);
+            if (sourceBytes != null) {
+                // Optional correction: on failure keep the parsed (canonical) metadata CBOR.
+                try {
+                    auxData = DataItemIsolation.withSourceMetadata(auxData, sourceBytes);
+                } catch (Exception e) {
+                    log.error("Source metadata extraction failed. block: {}, tx index: {}",
+                            blockHeader.getHeaderBody().getBlockNumber(), txIndex, e);
+                }
+            }
             if (YaciConfig.INSTANCE.isReturnFullTxCbor()) {
-                byte[] auxBytes = auxDataRawBytes.get(txIndex);
-                if (auxBytes != null && isAuxDataHashValid(blockHeader.getHeaderBody().getBlockNumber(),
-                        txIndex, txnBodies, auxBytes)) {
+                if (sourceBytes != null && isAuxDataHashValid(blockHeader.getHeaderBody().getBlockNumber(),
+                        txIndex, txnBodies, sourceBytes)) {
                     auxData = auxData.toBuilder()
-                            .cbor(HexUtil.encodeHexString(auxBytes))
+                            .cbor(HexUtil.encodeHexString(sourceBytes))
                             .build();
-                } else if (auxBytes == null) {
+                } else if (sourceBytes == null) {
                     log.debug("Missing raw auxiliary data bytes for block: {}, tx index: {}",
                             blockHeader.getHeaderBody().getBlockNumber(), txIndex);
                 }
@@ -368,6 +378,19 @@ public enum BlockSerializer implements Serializer<Block> {
                     .cbor(HexUtil.encodeHexString(transactionWitness.get(i)))
                     .build());
         }
+    }
+
+    /**
+     * Auxiliary-data values by transaction index, sliced from the block without decoding.
+     * Network envelope: [era, [header, txBodies, witnesses, {txIndex: auxData}, ...]].
+     */
+    private java.util.Map<Integer, byte[]> getAuxDataSourceBytes(byte[] blockBody) throws CborException {
+        List<CborSlice> entries = CborSlice.arrayItem(blockBody, 1, 3).items(MajorType.MAP);
+        java.util.Map<Integer, byte[]> result = new LinkedHashMap<>();
+        for (int i = 0; i < entries.size(); i += 2) {
+            result.put(DataItemIsolation.unsigned(entries.get(i)), entries.get(i + 1).bytes());
+        }
+        return result;
     }
 
     private boolean isAuxDataHashValid(long block, int txIndex, List<TransactionBody> txnBodies, byte[] auxBytes) {
