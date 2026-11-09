@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * metadataCbor keeps the on-chain encoding: map key order and duplicate keys are not changed.
- * Expected sizes are those of the per-label CBOR Blockfrost returns, a one-entry map {label: value}.
+ * Expected sizes are of each label's on-chain CBOR as a one-entry map {label: value}.
  */
 class MetadataSourceCborTest {
 
