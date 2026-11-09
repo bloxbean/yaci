@@ -1,5 +1,9 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
+import co.nstant.in.cbor.model.Map;
+import com.bloxbean.cardano.client.metadata.cbor.CBORMetadata;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -19,6 +23,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * (51e7870) and of that JSON re-read and written again, both taken from a build of that commit. Every entry before
  * Dijkstra must match byte for byte. A Dijkstra block gains D4b's fields, so its JSON must match once they are taken
  * out.
+ * <p>
+ * One listed change since: {@code metadataCbor} is the metadata's source bytes, not its canonical re-encoding
+ * (yaci-store#1215). An entry that differs must match once each {@code metadataCbor} is re-encoded canonically, as
+ * Yaci wrote it at the pin; three fixture blocks have metadata whose source is not canonical.
  */
 class ModelJsonPinTest {
     /** The JSON names of D4b's fields, which no model had before M7c. */
@@ -37,13 +45,20 @@ class ModelJsonPinTest {
     void everyFixtureMapsToTheJsonOfM7a() throws Exception {
         List<String> pins = ModelJsonPin.lines("/compat/m7c-json-pin.txt");
         List<String> changed = new ArrayList<>();
+        List<String> metadataSource = new ArrayList<>();
         int dijkstra = 0;
         int dijkstraFields = 0;
         for (String pin : pins) {
             String[] parts = pin.split(" ");
             String json = ModelJsonPin.json(parts[0]);
             if (!parts[0].contains("/dijkstra/")) {
-                if (!sha256(json).equals(parts[1]))
+                if (sha256(json).equals(parts[1]))
+                    continue;
+                JsonNode tree = ModelJsonPin.JSON.readTree(json);
+                canonicalMetadata(tree);
+                if (sha256(ModelJsonPin.JSON.writeValueAsString(tree)).equals(parts[2]))
+                    metadataSource.add(parts[0]);
+                else
                     changed.add(parts[0]);
                 continue;
             }
@@ -58,6 +73,21 @@ class ModelJsonPinTest {
         // The Leios fields of the four Musashi blocks' 12-item headers, at least
         assertThat(dijkstraFields).isGreaterThanOrEqualTo(8);
         assertThat(changed).as("entries whose JSON changed").isEmpty();
+        assertThat(metadataSource).as("entries whose metadataCbor is now the source").containsExactlyInAnyOrder(
+                "plain:block/preprod292507.txt", "plain:block/preprod292683.txt", "plain:block/preprod4974662.txt",
+                "cbor:block/preprod292507.txt", "cbor:block/preprod292683.txt", "cbor:block/preprod4974662.txt");
+    }
+
+    /** Re-encodes every {@code metadataCbor} canonically, as Yaci wrote it at the pin. */
+    private static void canonicalMetadata(JsonNode node) throws Exception {
+        if (node instanceof ObjectNode object && object.get("metadataCbor") != null
+                && object.get("metadataCbor").isTextual()) {
+            Map metadata = (Map) CborSerializationUtil.deserializeOne(
+                    HexUtil.decodeHexString(object.get("metadataCbor").asText()));
+            object.put("metadataCbor", HexUtil.encodeHexString(CBORMetadata.deserialize(metadata).serialize()));
+        }
+        for (JsonNode child : node)
+            canonicalMetadata(child);
     }
 
     /** Takes D4b's fields out of a tree, and counts them. */

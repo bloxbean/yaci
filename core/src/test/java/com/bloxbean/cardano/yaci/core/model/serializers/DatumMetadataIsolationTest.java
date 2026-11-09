@@ -90,14 +90,16 @@ class DatumMetadataIsolationTest {
     }
 
     @Test
-    void ordinaryMetadataKeepsItsExistingCanonicalCborAndJson() throws Exception {
-        // Unsorted source keys: ordinary metadata must retain the previous canonical encoding.
+    void ordinaryMetadataKeepsItsSourceCborAndItsExistingJson() throws Exception {
+        // Unsorted source keys: the CBOR keeps them as encoded (yaci-store#1215); the JSON is still the canonical
+        // value's. A tree has no source bytes, so its own encoding is the source.
         Map metadata = new Map().put(new UnsignedInteger(9), new UnsignedInteger(42))
                 .put(new UnsignedInteger(1), new Array().add(new UnsignedInteger(5)));
-        byte[] expected = CBORMetadata.deserialize(metadata).serialize();
+        byte[] canonical = CBORMetadata.deserialize(metadata).serialize();
         AuxData result = AuxDataSerializer.INSTANCE.deserializeDI(metadata);
-        assertThat(result.getMetadataCbor()).isEqualTo(HexUtil.encodeHexString(expected));
-        assertThat(result.getMetadataJson()).isEqualTo(MetadataToJsonNoSchemaConverter.cborBytesToJson(expected));
+        assertThat(result.getMetadataCbor()).isEqualTo("a209182a018105")
+                .isNotEqualTo(HexUtil.encodeHexString(canonical));
+        assertThat(result.getMetadataJson()).isEqualTo(MetadataToJsonNoSchemaConverter.cborBytesToJson(canonical));
         assertThat(result.getMetadataParseError()).isNull();
         assertThat(new ObjectMapper().writeValueAsString(result)).doesNotContain("metadataParseError");
         assertThat(new AuxData("cbor", "json", null, null, null, null).getMetadataParseError()).isNull();

@@ -73,26 +73,24 @@ final class DataItemIsolation {
     }
 
     /**
-     * Metadata that converts keeps the canonical CBOR Yaci has always given. Metadata that fails keeps its source.
+     * Metadata keeps its source bytes, as on chain: map key order and repeated keys stay, so a label's CBOR matches what
+     * other indexers serve (yaci-store#1215). The JSON is converted from the decoded value, as before.
      *
      * @return aux data with only its metadata fields set
      */
     static AuxData metadata(CborSpan metadata) {
-        String cbor = null;
         String json = null;
         String error = null;
         try {
             CBORMetadata decoded = CBORMetadata.deserialize((Map) decode(metadata));
-            byte[] encoded;
+            byte[] encoded = null;
             try {
                 encoded = decoded.serialize();
             } catch (StackOverflowError e) {
                 // The canonical encoder is recursive; JSON is skipped for this oversized tree.
-                encoded = CborSerializationUtil.serialize(decoded.getData(), false);
                 error = "Metadata JSON conversion skipped: recursive CBOR serialization exceeded the available stack";
             }
-            cbor = HexUtil.encodeHexString(encoded);
-            if (error == null) {
+            if (encoded != null) {
                 try {
                     json = MetadataToJsonNoSchemaConverter.cborBytesToJson(encoded);
                 } catch (Exception e) {
@@ -104,9 +102,7 @@ final class DataItemIsolation {
         } catch (StackOverflowError e) {
             error = "Metadata decoding exceeded the available stack; JSON unavailable";
         }
-        if (error != null)
-            cbor = hex(metadata);
-        return AuxData.builder().metadataCbor(cbor).metadataJson(json).metadataParseError(error).build();
+        return AuxData.builder().metadataCbor(hex(metadata)).metadataJson(json).metadataParseError(error).build();
     }
 
     private static DataItem decode(CborSpan item) {

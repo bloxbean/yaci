@@ -14,6 +14,7 @@ import java.util.List;
 public class AuxData {
     private String cbor;
 
+    /** The metadata as encoded on chain: map key order and repeated keys are kept. */
     private String metadataCbor;
     /** Optional display JSON; null when conversion fails. See metadataCbor for the data. */
     private String metadataJson;
