@@ -1,107 +1,159 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.model.Array;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
-import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.client.exception.CborRuntimeException;
-import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
-import com.bloxbean.cardano.yaci.core.model.certs.GenesisKeyDelegation;
-import com.bloxbean.cardano.yaci.core.model.serializers.governance.*;
+import com.bloxbean.cardano.client.spec.Era;
+import com.bloxbean.cardano.client.transaction.raw.CertKind;
+import com.bloxbean.cardano.client.transaction.raw.RawAnchor;
+import com.bloxbean.cardano.client.transaction.raw.RawCertificate;
+import com.bloxbean.cardano.client.transaction.raw.RawCredential;
+import com.bloxbean.cardano.client.transaction.raw.RawMir;
+import com.bloxbean.cardano.yaci.core.model.Credential;
+import com.bloxbean.cardano.yaci.core.model.certs.*;
+import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
+import com.bloxbean.cardano.yaci.core.model.serializers.governance.AnchorSerializer;
+import com.bloxbean.cardano.yaci.core.model.serializers.governance.DrepSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
-import lombok.extern.slf4j.Slf4j;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
-import java.util.List;
+import java.math.BigInteger;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
-@Slf4j
+/**
+ * Maps certificates read by {@link RawCertificate} to Yaci's models (ADR 0003 D8). The reader knows the format; this
+ * class knows the models, and which certificates are read exactly.
+ */
 public enum CertificateSerializer implements Serializer<Certificate> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded certificate has lost its source encoding. Use {@link #read(CborSpan)}, or
+     * {@link BlockSerializer} for a block.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Certificate deserializeDI(DataItem certArrayDI) {
-        Array certArray = (Array)certArrayDI;
-        Objects.requireNonNull(certArray);
+        Objects.requireNonNull(certArrayDI);
+        return read(CborSerializationUtil.span(certArrayDI));
+    }
 
-        List<DataItem> dataItemList = certArray.getDataItems();
-        if (dataItemList == null || dataItemList.size() < 2) {
-            throw new CborRuntimeException("Certificate deserialization failed. Invalid number of DataItem(s) : "
-                    + (dataItemList != null ? String.valueOf(dataItemList.size()) : null));
+    /**
+     * @param span a certificate as encoded
+     * @return the certificate, or an empty one for a genesis delegation that fails to parse (ADR 0003 section 12)
+     */
+    public Certificate read(CborSpan span) {
+        return read(span, null);
+    }
+
+    /**
+     * As {@link #read(CborSpan)}, in the era of its block: from Dijkstra, a pool registration may hold a BLS key slot
+     * after its VRF key hash (ADR 0003 D4a; experimental, as Dijkstra is not final). Yaci's model does not carry it.
+     *
+     * @param span a certificate as encoded
+     * @param era  the era of its block, or null to read it as {@link #read(CborSpan)} does
+     * @return the certificate, or an empty one for a genesis delegation that fails to parse (ADR 0003 section 12)
+     */
+    public Certificate read(CborSpan span, Era era) {
+        CertKind kind = CertKind.of(span).orElseThrow(() ->
+                new CborRuntimeException("Certificate deserialization failed. Unknown type : " + span));
+        if (kind != CertKind.GENESIS_KEY_DELEGATION)
+            return read(kind, span, era);
+
+        // What is too short for any certificate is not a genesis delegation that failed: stake registration is the
+        // shortest, and this rejects it.
+        RawCertificate.lenient(CertKind.STAKE_REGISTRATION, span);
+        try {
+            return GenesisKeyDelegationSerializer.INSTANCE.read(span);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return new GenesisKeyDelegation(null, null, null);
         }
+    }
 
-        UnsignedInteger typeUI = (UnsignedInteger) dataItemList.get(0);
-        int type = typeUI.getValue().intValue();
+    /**
+     * @param kind the kind to read it as
+     * @param span a certificate as encoded
+     * @return the certificate
+     */
+    public Certificate read(CertKind kind, CborSpan span) {
+        return read(kind, span, null);
+    }
 
-        Certificate certificate;
-        switch (type) {
-            case 0:
-                certificate = StakeRegistrationSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 1:
-                certificate = StakeDeregistrationSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 2:
-                certificate = StakeDelegationSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 3:
-                certificate = PoolRegistrationSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 4:
-                //Pool retirement
-                certificate = PoolRetirementSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 5:
-                try {
-                    //Genesis key delegation
-                    certificate = GenesisKeyDelegationSerializer.INSTANCE.deserializeDI(certArray);
-                } catch (Exception e) {
-                    e.printStackTrace(); //TODO -- Keep this try catch temporary. Remove once the test is done.
-                    return new GenesisKeyDelegation(null, null, null);
-                }
-                break;
-            case 6:
-                //Move instateneous rewards certs
-                certificate = MoveInstantaneousRewardsSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 7:
-                certificate = RegCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 8:
-                certificate = UnregCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 9:
-                certificate = VoteDelegCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 10:
-                certificate = StakeVoteDelegCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 11:
-                certificate = StakeRegDelegCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 12:
-                certificate = VoteRegDelegCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 13:
-                certificate = StakeVoteRegDelegCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 14:
-                certificate = AuthCommitteeHotCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 15:
-                certificate = ResignCommitteeColdCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 16:
-                certificate = RegDrepCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 17:
-                certificate = UnregDrepCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            case 18:
-                certificate = UpdateDrepCertSerializer.INSTANCE.deserializeDI(certArray);
-                break;
-            default:
-                throw new CborRuntimeException("Certificate deserialization failed. Unknown type : " + type);
+    private Certificate read(CertKind kind, CborSpan span, Era era) {
+        RawCertificate cert = RawCertificate.lenient(kind, span, era);
+        return switch (kind) {
+            case STAKE_REGISTRATION -> new StakeRegistration(stakeCredential(cert.exact().credential()));
+            case STAKE_DEREGISTRATION -> new StakeDeregistration(stakeCredential(cert.exact().credential()));
+            case STAKE_DELEGATION -> new StakeDelegation(stakeCredential(cert.exact().credential()),
+                    new StakePoolId(cert.poolKeyHash()));
+            case POOL_REGISTRATION -> PoolRegistrationSerializer.read(cert.exact());
+            case POOL_RETIREMENT -> new PoolRetirement(hex(cert.exact().poolKeyHash()), cert.epoch());
+            case GENESIS_KEY_DELEGATION -> new GenesisKeyDelegation(hex(cert.exact().genesisHash()),
+                    hex(cert.genesisDelegateHash()), hex(cert.vrfKeyHash()));
+            case MOVE_INSTANTANEOUS_REWARDS -> moveInstantaneous(cert.exact().moveInstantaneousReward());
+            case REG_CERT -> new RegCert(stakeCredential(cert.credential()), cert.coin());
+            case UNREG_CERT -> new UnregCert(stakeCredential(cert.credential()), cert.coin());
+            case VOTE_DELEG_CERT -> new VoteDelegCert(stakeCredential(cert.credential()),
+                    DrepSerializer.INSTANCE.read(cert.drep()));
+            case STAKE_VOTE_DELEG_CERT -> new StakeVoteDelegCert(stakeCredential(cert.credential()),
+                    hex(cert.poolKeyHash()), DrepSerializer.INSTANCE.read(cert.drep()));
+            case STAKE_REG_DELEG_CERT -> new StakeRegDelegCert(stakeCredential(cert.credential()),
+                    hex(cert.poolKeyHash()), cert.coin());
+            case VOTE_REG_DELEG_CERT -> new VoteRegDelegCert(stakeCredential(cert.credential()),
+                    DrepSerializer.INSTANCE.read(cert.drep()), cert.coin());
+            case STAKE_VOTE_REG_DELEG_CERT -> new StakeVoteRegDelegCert(stakeCredential(cert.credential()),
+                    hex(cert.poolKeyHash()), DrepSerializer.INSTANCE.read(cert.drep()), cert.coin());
+            case AUTH_COMMITTEE_HOT_CERT -> new AuthCommitteeHotCert(credential(cert.credential()),
+                    credential(cert.hotCredential()));
+            case RESIGN_COMMITTEE_COLD_CERT -> new ResignCommitteeColdCert(credential(cert.credential()),
+                    anchor(cert.anchor()));
+            case REG_DREP_CERT -> new RegDrepCert(credential(cert.credential()), cert.coin(), anchor(cert.anchor()));
+            case UNREG_DREP_CERT -> new UnregDrepCert(credential(cert.credential()), cert.coin());
+            case UPDATE_DREP_CERT -> new UpdateDrepCert(credential(cert.credential()), anchor(cert.anchor()));
+        };
+    }
+
+    /**
+     * @param credential a stake credential as received
+     * @return the credential
+     */
+    public static StakeCredential stakeCredential(RawCredential credential) {
+        return credential.isScript() ? StakeCredential.fromScriptHash(credential.hash())
+                : StakeCredential.fromKeyHash(credential.hash());
+    }
+
+    /**
+     * @param credential a committee, DRep or other credential as received
+     * @return the credential
+     */
+    public static Credential credential(RawCredential credential) {
+        return credential.isScript() ? Credential.fromScriptHash(credential.hash())
+                : Credential.fromKeyHash(credential.hash());
+    }
+
+    private static Anchor anchor(Optional<RawAnchor> anchor) {
+        return anchor.map(AnchorSerializer.INSTANCE::read).orElse(null);
+    }
+
+    private static MoveInstataneous moveInstantaneous(RawMir mir) {
+        int pot = mir.pot();
+        Map<StakeCredential, BigInteger> targets = new LinkedHashMap<>();
+        BigInteger coin = null;
+        if (mir.movesToCredentials()) {
+            for (Map.Entry<RawCredential, BigInteger> target : mir.targets())
+                targets.put(stakeCredential(target.getKey()), target.getValue());
+        } else {
+            coin = mir.coin();
         }
+        return new MoveInstataneous(pot == 0, pot == 1, coin, targets);
+    }
 
-        return certificate;
+    private static String hex(byte[] bytes) {
+        return HexUtil.encodeHexString(bytes);
     }
 }

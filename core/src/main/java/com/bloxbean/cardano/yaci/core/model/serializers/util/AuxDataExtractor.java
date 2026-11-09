@@ -1,90 +1,30 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.util;
 
-import co.nstant.in.cbor.CborDecoder;
-import com.bloxbean.cardano.yaci.core.util.ArrayCborDecoder;
-import co.nstant.in.cbor.CborException;
-import co.nstant.in.cbor.model.DataItem;
-import co.nstant.in.cbor.model.Special;
-import com.bloxbean.cardano.yaci.core.util.Tuple;
-import lombok.SneakyThrows;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 
-import java.io.ByteArrayInputStream;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import static com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor.getLength;
-import static com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor.getSymbolBytes;
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toInt;
-
+/**
+ * @deprecated {@link com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer} reads the block through CCL's
+ * reader and sets the source bytes on its models; CCL's {@code RawBlock} gives each item's source bytes.
+ */
+@Deprecated(since = "0.5.0", forRemoval = true)
 public class AuxDataExtractor {
+    private static final int BLOCK = 1;
+    private static final int AUXILIARY_DATA = 3;
 
-    @SneakyThrows
+    /**
+     * @param blockBytes a block in its envelope; only what comes before its auxiliary data and that map are read
+     * @return the auxiliary data as encoded, by transaction index
+     */
     public static Map<Integer, byte[]> getAuxDataFromBlock(byte[] blockBytes) {
         Map<Integer, byte[]> auxDataMap = new LinkedHashMap<>();
-        ByteArrayInputStream stream = new ByteArrayInputStream(blockBytes);
-        CborDecoder decoder = new ArrayCborDecoder(stream);
-
-        // era and block body array header
-        stream.read();
-        decoder.decodeNext();
-        stream.read();
-
-        decoder.decodeNext(); // header
-        decoder.decodeNext(); // transaction bodies
-        decoder.decodeNext(); // transaction witness sets
-
-        int auxDataMapByte = stream.read();
-        long auxDataEntryCount = getLength(auxDataMapByte,
-                getSymbolBytes(blockBytes.length - stream.available(), blockBytes));
-
-        int extraBytes = WitnessUtil.skipBytes(auxDataMapByte);
-        if (extraBytes > 0) {
-            stream.skip(extraBytes);
+        for (Map.Entry<CborSpan, CborSpan> entry : CborSpan.arrayItem(blockBytes, BLOCK, AUXILIARY_DATA).entries()) {
+            int txIndex = CborSerializationUtil.toInt(CborSerializationUtil.deserializeOne(entry.getKey().bytes()));
+            auxDataMap.put(txIndex, entry.getValue().bytes());
         }
-
-        if (auxDataEntryCount != TransactionBodyExtractor.INFINITY) {
-            for (int i = 0; i < auxDataEntryCount; i++) {
-                Tuple<Integer, byte[]> auxDataEntry = readAuxDataEntry(blockBytes, stream, decoder);
-                auxDataMap.put(auxDataEntry._1, auxDataEntry._2);
-            }
-        } else {
-            for (;;) {
-                DataItem txIndexDI = decoder.decodeNext();
-                if (txIndexDI == null) {
-                    throw new CborException("Unexpected end of stream");
-                }
-
-                if (Special.BREAK.equals(txIndexDI)) {
-                    break;
-                }
-
-                int txIndex = toInt(txIndexDI);
-                byte[] auxDataBytes = readNextRawValue(blockBytes, stream, decoder);
-                auxDataMap.put(txIndex, auxDataBytes);
-            }
-        }
-
         return auxDataMap;
-    }
-
-    private static Tuple<Integer, byte[]> readAuxDataEntry(byte[] blockBytes,
-                                                           ByteArrayInputStream stream,
-                                                           CborDecoder decoder) throws CborException {
-        DataItem txIndexDI = decoder.decodeNext();
-        int txIndex = toInt(txIndexDI);
-        return new Tuple<>(txIndex, readNextRawValue(blockBytes, stream, decoder));
-    }
-
-    private static byte[] readNextRawValue(byte[] blockBytes,
-                                           ByteArrayInputStream stream,
-                                           CborDecoder decoder) throws CborException {
-        int start = blockBytes.length - stream.available();
-        int previous = stream.available();
-        decoder.decodeNext();
-        int current = stream.available();
-
-        byte[] rawValue = new byte[previous - current];
-        System.arraycopy(blockBytes, start, rawValue, 0, rawValue.length);
-        return rawValue;
     }
 }

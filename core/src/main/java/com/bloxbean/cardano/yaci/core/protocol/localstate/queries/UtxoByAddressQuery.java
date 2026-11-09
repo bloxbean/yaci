@@ -1,9 +1,11 @@
 package com.bloxbean.cardano.yaci.core.protocol.localstate.queries;
 
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.address.Address;
 import com.bloxbean.cardano.client.api.model.Amount;
 import com.bloxbean.cardano.client.api.model.Utxo;
+import com.bloxbean.cardano.client.transaction.raw.RawOutput;
 import com.bloxbean.cardano.yaci.core.model.TransactionOutput;
 import com.bloxbean.cardano.yaci.core.model.serializers.TransactionOutputSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
@@ -60,7 +62,8 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
             String txHash = toHex(keyDIList.get(0));
             int index = toInt(keyDIList.get(1));
 
-            TransactionOutput transactionOutput = TransactionOutputSerializer.INSTANCE.deserializeDI(utxoMap.get(key));
+            TransactionOutput transactionOutput = TransactionOutputSerializer.INSTANCE.read(
+                    RawOutput.tolerant(CborSerializationUtil.span(utxoMap.get(key))));
             List<Amount> amountList = transactionOutput.getAmounts().stream()
                     .map(amount -> new Amount(amount.getUnit(), amount.getQuantity()))
                     .collect(Collectors.toList());

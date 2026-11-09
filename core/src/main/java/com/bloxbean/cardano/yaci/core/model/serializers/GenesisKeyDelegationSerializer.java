@@ -1,37 +1,25 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.model.Array;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
-import co.nstant.in.cbor.model.UnsignedInteger;
-import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
+import com.bloxbean.cardano.client.transaction.raw.CertKind;
 import com.bloxbean.cardano.yaci.core.model.certs.GenesisKeyDelegation;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
-
-import java.util.List;
-
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
 
 public enum GenesisKeyDelegationSerializer implements Serializer<GenesisKeyDelegation> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded certificate has lost its source encoding. Use {@link CertificateSerializer#read}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public GenesisKeyDelegation deserializeDI(DataItem di) {
-        Array genesisKeyDelegationArr = (Array) di;
-        List<DataItem> dataItemList = genesisKeyDelegationArr.getDataItems();
-        if (dataItemList == null || dataItemList.size() != 4) {
-            throw new CborRuntimeException("GenesisKeyDelegation deserialization failed. Invalid number of DataItem(s) : "
-                    + (dataItemList != null ? String.valueOf(dataItemList.size()) : null));
-        }
+        return read(CborSerializationUtil.span(di));
+    }
 
-        UnsignedInteger type = (UnsignedInteger) dataItemList.get(0);
-        if (type == null || type.getValue().intValue() != 5)
-            throw new CborRuntimeException("GenesisKeyDelegation deserialization failed. Invalid type : "
-                    + type != null ? String.valueOf(type.getValue().intValue()) : null);
-
-        String genesisHash = toHex(dataItemList.get(1));
-        String genesisDelegateHash = toHex(dataItemList.get(2));
-        String vrfKeyHash = toHex(dataItemList.get(3));
-
-        return new GenesisKeyDelegation(genesisHash, genesisDelegateHash, vrfKeyHash);
+    GenesisKeyDelegation read(CborSpan span) {
+        return (GenesisKeyDelegation) CertificateSerializer.INSTANCE.read(CertKind.GENESIS_KEY_DELEGATION, span);
     }
 }

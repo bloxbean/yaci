@@ -1,167 +1,78 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.model.*;
-import com.bloxbean.cardano.client.exception.CborDeserializationException;
-import com.bloxbean.cardano.client.exception.CborRuntimeException;
-import com.bloxbean.cardano.client.metadata.Metadata;
-import com.bloxbean.cardano.client.metadata.cbor.CBORMetadata;
-import com.bloxbean.cardano.client.transaction.spec.AuxiliaryData;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import co.nstant.in.cbor.model.DataItem;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
+import com.bloxbean.cardano.client.spec.Era;
+import com.bloxbean.cardano.client.transaction.raw.AuxDataField;
+import com.bloxbean.cardano.client.transaction.raw.RawAuxData;
+import com.bloxbean.cardano.client.transaction.raw.RawItems;
+import com.bloxbean.cardano.client.transaction.raw.RawScript;
 import com.bloxbean.cardano.yaci.core.model.AuxData;
-import com.bloxbean.cardano.yaci.core.model.NativeScript;
 import com.bloxbean.cardano.yaci.core.model.PlutusScript;
 import com.bloxbean.cardano.yaci.core.model.PlutusScriptType;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
-import java.util.stream.Collectors;
 
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toHex;
-
+/**
+ * Maps aux data read by {@link RawAuxData} to Yaci's model (ADR 0003 D8). Metadata is converted from its source bytes
+ * by {@link DataItemIsolation}. A list of scripts is null when the aux data has no such field, and so is an empty list
+ * of native scripts in the array form.
+ */
 public enum AuxDataSerializer implements Serializer<AuxData> {
     INSTANCE;
 
+    /**
+     * @param bytes aux data, exactly one CBOR item
+     * @return the aux data, read as Conway; null for empty input
+     */
     @Override
     public AuxData deserialize(byte[] bytes) {
-        try {
-            AuxData result = Serializer.super.deserialize(bytes);
-            if (result == null) return null; // Preserve the default serializer's empty-input behavior.
-            // Recovery needs the original buffer, which deserializeDI alone does not have.
-            return result.getMetadataParseError() == null ? result : DataItemIsolation.auxiliary(bytes);
-        } catch (StackOverflowError e) {
-            // Restart at a known boundary; the decoder's partially consumed state is discarded.
-            return DataItemIsolation.auxiliary(bytes);
-        }
+        return bytes.length == 0 ? null : read(CborSpan.of(bytes), Era.Conway, true);
     }
 
+    /**
+     * A decoded item is read from its encoding, which is not the source, so native scripts get no hash.
+     *
+     * @deprecated Decoded aux data has lost its source encoding. Use {@link #deserialize(byte[])} with its bytes, or
+     * {@link BlockSerializer} for a block.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public AuxData deserializeDI(DataItem di) {
-        try {
-            Metadata metadata = null;
-            List<NativeScript> nativeScripts = null;
-            List<PlutusScript> plutusV1scripts = null;
-            List<PlutusScript> plutusV2scripts = null;
-            List<PlutusScript> plutusV3scripts = null;
+        return read(CborSerializationUtil.span(di), Era.Conway, false);
+    }
 
-            if (di.getMajorType() == MajorType.MAP) {
-                Tag mapTag = di.getTag();
-                Map map = (Map) di;
+    /**
+     * @param hashed whether the span is the source, of which native script hashes are taken
+     */
+    AuxData read(CborSpan span, Era era, boolean hashed) {
+        RawAuxData aux = RawAuxData.tolerant(span, era);
+        AuxData.AuxDataBuilder builder = aux.metadata().map(DataItemIsolation::metadata).map(AuxData::toBuilder)
+                .orElseGet(AuxData::builder);
+        List<RawScript> nativeScripts = aux.nativeScripts();
+        if (aux.has(AuxDataField.NATIVE_SCRIPTS) || !nativeScripts.isEmpty())
+            builder.nativeScripts(WitnessesSerializer.nativeScripts(nativeScripts, hashed));
+        if (aux.has(AuxDataField.PLUTUS_V1_SCRIPTS))
+            builder.plutusV1Scripts(plutusScripts(PlutusScriptType.PlutusScriptV1, aux.plutusV1Scripts()));
+        if (aux.has(AuxDataField.PLUTUS_V2_SCRIPTS))
+            builder.plutusV2Scripts(plutusScripts(PlutusScriptType.PlutusScriptV2, aux.plutusV2Scripts()));
+        if (aux.has(AuxDataField.PLUTUS_V3_SCRIPTS))
+            builder.plutusV3Scripts(plutusScripts(PlutusScriptType.PlutusScriptV3, aux.plutusV3Scripts()));
+        // Key 5 is Dijkstra's, and absent from the view before it (D4b; experimental, as Dijkstra is not final).
+        if (aux.has(AuxDataField.PLUTUS_V4_SCRIPTS))
+            builder.plutusV4Scripts(plutusScripts(PlutusScriptType.PlutusScriptV4, aux.plutusV4Scripts()));
+        return builder.build();
+    }
 
-                if (mapTag != null && mapTag.getValue() == 259) { //Alonzo and beyond
-                    DataItem metadataValueDI = map.get(new UnsignedInteger(0));
-                    DataItem nativeScriptsValueDI = map.get(new UnsignedInteger(1));
-                    DataItem plutusV1ScriptsValueDI = map.get(new UnsignedInteger(2));
-                    DataItem plutusV2ScriptsValueDI = map.get(new UnsignedInteger(3));
-                    DataItem plutusV3ScriptsValueDI = map.get(new UnsignedInteger(4));
-
-                    if (metadataValueDI != null) {
-                        metadata = CBORMetadata.deserialize((Map) metadataValueDI);
-                    }
-
-                    //Native scripts
-                    if (nativeScriptsValueDI != null) {
-                        Array nativeScriptsArray = (Array) nativeScriptsValueDI;
-                        nativeScripts = nativeScriptsArray.getDataItems()
-                                .stream()
-                                .filter(nativeScriptDI -> !Special.BREAK.equals(nativeScriptDI))
-                                .map(nativeScriptDI -> WitnessesSerializer.INSTANCE.deserializeNativeScript((Array) nativeScriptDI))
-                                .filter(Objects::nonNull)
-                                .collect(Collectors.toList());
-                    }
-
-                    //plutus_v1_script
-                    if (plutusV1ScriptsValueDI != null) {
-                        Array plutusV1ScriptsArray = (Array) plutusV1ScriptsValueDI;
-                        plutusV1scripts = plutusV1ScriptsArray.getDataItems()
-                                .stream()
-                                .map(plutusV1ScriptDI -> new PlutusScript(PlutusScriptType.PlutusScriptV1, toHex(plutusV1ScriptDI)))
-                                .collect(Collectors.toList());
-                    }
-
-                    //plutus_v2_script
-                    if (plutusV2ScriptsValueDI != null) {
-                        Array plutusV2ScriptsArray = (Array) plutusV2ScriptsValueDI;
-                        plutusV2scripts = plutusV2ScriptsArray.getDataItems()
-                                .stream()
-                                .map(plutusV2ScriptDI -> new PlutusScript(PlutusScriptType.PlutusScriptV2, toHex(plutusV2ScriptDI)))
-                                .collect(Collectors.toList());
-                    }
-
-                    //plutus_v3_script
-                    if (plutusV3ScriptsValueDI != null) {
-                        Array plutusV3ScriptsArray = (Array) plutusV3ScriptsValueDI;
-                        plutusV3scripts = plutusV3ScriptsArray.getDataItems()
-                                .stream()
-                                .map(plutusV3ScriptDI -> new PlutusScript(PlutusScriptType.PlutusScriptV3, toHex(plutusV3ScriptDI)))
-                                .collect(Collectors.toList());
-                    }
-
-                } else { //shelley
-                    metadata = CBORMetadata.deserialize(map);
-                }
-
-            } else if (di.getMajorType() == MajorType.ARRAY) { //Shelley ma era. Handle it here as it's not handled in cardano-client-lib
-                List<DataItem> auxDIList = ((Array) di).getDataItems();
-                DataItem metadataDI = auxDIList.get(0);
-                AuxiliaryData auxiliaryData = AuxiliaryData.deserialize((Map)metadataDI);
-                metadata = auxiliaryData.getMetadata();
-
-                Array auxiliaryScriptsArray = (Array)auxDIList.get(1);
-                if (auxiliaryScriptsArray != null && auxiliaryScriptsArray.getDataItems().size() > 0) {
-                    nativeScripts = new ArrayList<>();
-                    for (DataItem auxScriptDI : auxiliaryScriptsArray.getDataItems()) {
-                        if (auxScriptDI == SimpleValue.BREAK)
-                            continue;
-                        NativeScript script = WitnessesSerializer.INSTANCE.deserializeNativeScript((Array) auxScriptDI);
-                        if (script != null) {
-                            nativeScripts.add(script);
-                        }
-                    }
-                }
-            }
-
-            String metadataCbor = null;
-            String metadataJson = null;
-            String metadataParseError = null;
-            if (metadata != null) {
-                byte[] cbor;
-                try {
-                    // Preserve the existing canonical representation for ordinary metadata.
-                    cbor = metadata.serialize();
-                } catch (StackOverflowError e) {
-                    // The canonical encoder is recursive. Retain valid CBOR using the existing
-                    // iterative array encoder, and skip optional JSON for this oversized tree.
-                    cbor = CborSerializationUtil.serialize(((CBORMetadata) metadata).getData(), false);
-                    metadataParseError = "Metadata JSON conversion skipped: recursive CBOR serialization "
-                            + "exceeded the available stack";
-                }
-                metadataCbor = HexUtil.encodeHexString(cbor);
-                if (metadataParseError == null) {
-                    try {
-                        metadataJson = MetadataToJsonNoSchemaConverter.cborBytesToJson(cbor);
-                    } catch (Exception e) {
-                        metadataParseError = "Metadata JSON conversion failed: " + e.getClass().getSimpleName();
-                    } catch (StackOverflowError e) {
-                        metadataParseError = "Metadata JSON conversion exceeded the available stack";
-                    }
-                }
-            }
-
-            return AuxData.builder()
-                    .metadataCbor(metadataCbor)
-                    .metadataJson(metadataJson)
-                    .metadataParseError(metadataParseError)
-                    .nativeScripts(nativeScripts)
-                    .plutusV1Scripts(plutusV1scripts)
-                    .plutusV2Scripts(plutusV2scripts)
-                    .plutusV3Scripts(plutusV3scripts)
-                    .build();
-
-        } catch (CborDeserializationException e) {
-            throw new CborRuntimeException("AuxiliaryData deserialization failed", e);
-        }
+    /** A script's content is its bytes, which a script in a witness set does not share. */
+    private static List<PlutusScript> plutusScripts(PlutusScriptType type, List<RawScript> scripts) {
+        List<PlutusScript> parsed = new ArrayList<>(scripts.size());
+        for (RawScript script : scripts)
+            parsed.add(new PlutusScript(type, HexUtil.encodeHexString(RawItems.bytes(script.span()))));
+        return parsed;
     }
 }

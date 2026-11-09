@@ -7,7 +7,9 @@ public enum Era {
     Mary(4),
     Alonzo(5),
     Babbage(6),
-    Conway(7);
+    Conway(7),
+    /** Experimental: Dijkstra is not final; this may change in any release. */
+    Dijkstra(8);
 
     public final int value;
     Era(int value) {

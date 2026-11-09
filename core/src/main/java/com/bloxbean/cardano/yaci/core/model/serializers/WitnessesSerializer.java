@@ -1,213 +1,117 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.model.*;
-import com.bloxbean.cardano.client.exception.CborRuntimeException;
+import co.nstant.in.cbor.model.Array;
+import co.nstant.in.cbor.model.DataItem;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
+import com.bloxbean.cardano.client.spec.Era;
+import com.bloxbean.cardano.client.transaction.raw.RawBootstrapWitness;
+import com.bloxbean.cardano.client.transaction.raw.RawDatum;
+import com.bloxbean.cardano.client.transaction.raw.RawRedeemer;
+import com.bloxbean.cardano.client.transaction.raw.RawScript;
+import com.bloxbean.cardano.client.transaction.raw.RawVkeyWitness;
+import com.bloxbean.cardano.client.transaction.raw.RawWitnessSet;
+import com.bloxbean.cardano.yaci.core.model.BootstrapWitness;
+import com.bloxbean.cardano.yaci.core.model.Datum;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
-import com.bloxbean.cardano.yaci.core.model.*;
+import com.bloxbean.cardano.yaci.core.model.PlutusScript;
+import com.bloxbean.cardano.yaci.core.model.PlutusScriptType;
+import com.bloxbean.cardano.yaci.core.model.Redeemer;
+import com.bloxbean.cardano.yaci.core.model.VkeyWitness;
+import com.bloxbean.cardano.yaci.core.model.Witnesses;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
-import lombok.SneakyThrows;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
-import static com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString;
-
-//TODO -- More testing required for deserialization --> serialization
+/**
+ * Maps a witness set read by {@link RawWitnessSet} to Yaci's model (ADR 0003 D8). Datums and redeemers are converted
+ * one at a time from their source bytes by {@link DataItemIsolation}.
+ */
 public enum WitnessesSerializer implements Serializer<Witnesses> {
     INSTANCE;
 
+    /**
+     * @param bytes a witness set, exactly one CBOR item
+     * @return the witness set, read as Conway; null for empty input
+     */
     @Override
     public Witnesses deserialize(byte[] bytes) {
-        try {
-            Witnesses result = Serializer.super.deserialize(bytes);
-            if (result == null) return null; // Preserve the default serializer's empty-input behavior.
-            // Keep the original datum bytes even when only the optional JSON conversion failed.
-            return DataItemIsolation.hasDataError(result) ? DataItemIsolation.witness(bytes) : result;
-        } catch (StackOverflowError e) {
-            // Isolate datums/redeemer data from source bytes before retrying the remaining fields.
-            return DataItemIsolation.witness(bytes);
-        }
+        return bytes.length == 0 ? null : read(CborSpan.of(bytes), Era.Conway, true);
     }
 
+    /**
+     * A decoded item is read from its encoding, which is not the source, so native scripts get no hash.
+     *
+     * @deprecated A decoded witness set has lost its source encoding. Use {@link #deserialize(byte[])} with its bytes,
+     * or {@link BlockSerializer} for a block.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
-    @SneakyThrows
     public Witnesses deserializeDI(DataItem di) {
-        Map witnessMap = (Map) di;
-        DataItem vkWitnessesArray = witnessMap.get(new UnsignedInteger(0));
-        DataItem nativeScriptArray = witnessMap.get(new UnsignedInteger(1));
-        DataItem bootstrapWitnessArray = witnessMap.get(new UnsignedInteger(2));
-        DataItem plutusScriptArray = witnessMap.get(new UnsignedInteger(3));
-        DataItem plutusDataArray = witnessMap.get(new UnsignedInteger(4));
-        DataItem redeemersDI = witnessMap.get(new UnsignedInteger(5));
-        DataItem plutusV2ScriptArray = witnessMap.get(new UnsignedInteger(6));
-        DataItem plutusV3ScriptArray = witnessMap.get(new UnsignedInteger(7));
+        return read(CborSerializationUtil.span(di), Era.Conway, false);
+    }
 
-        //vk witnesses
-        List<VkeyWitness> vkeyWitnessList = new ArrayList<>();
-        if (vkWitnessesArray != null) { //vkwitnesses
-            List<DataItem> vkeyWitnessesDIList = ((Array) vkWitnessesArray).getDataItems();
-            for (DataItem vkWitness : vkeyWitnessesDIList) {
-                if (vkWitness == SimpleValue.BREAK)
-                    continue;
-                VkeyWitness vkeyWitness = deserializeVkWitness((Array) vkWitness);
-                vkeyWitnessList.add(vkeyWitness);
-            }
-        }
-
-        //native scripts
-        List<NativeScript> nativeScripts = new ArrayList<>();
-        if (nativeScriptArray != null) { //nativeScriptArray
-            List<DataItem> nativeScriptsDIList = ((Array) nativeScriptArray).getDataItems();
-            for (DataItem nativeScriptDI : nativeScriptsDIList) {
-                if (nativeScriptDI == Special.BREAK)
-                    continue;
-                NativeScript nativeScript = deserializeNativeScript((Array) nativeScriptDI);
-                if (nativeScript != null)
-                    nativeScripts.add(nativeScript);
-            }
-        }
-
-        //Bootstrap Witnesses
+    /**
+     * @param hashed whether the span is the source, of which native script hashes are taken
+     */
+    Witnesses read(CborSpan span, Era era, boolean hashed) {
+        RawWitnessSet set = RawWitnessSet.tolerant(span, era);
+        List<VkeyWitness> vkeyWitnesses = new ArrayList<>();
+        for (RawVkeyWitness witness : set.vkeyWitnesses().orElse(List.of()))
+            vkeyWitnesses.add(new VkeyWitness(hex(witness.vkey()), hex(witness.signature())));
+        List<NativeScript> nativeScripts = nativeScripts(set.nativeScripts().orElse(List.of()), hashed);
         List<BootstrapWitness> bootstrapWitnesses = new ArrayList<>();
-        if (bootstrapWitnessArray != null) {
-            List<DataItem> bootstrapWitnessDIList = ((Array) bootstrapWitnessArray).getDataItems();
-            for (DataItem bootstrapWitnessDI : bootstrapWitnessDIList) {
-                if (bootstrapWitnessDI == SimpleValue.BREAK)
-                    continue;
-                BootstrapWitness bootstrapWitness = deserializeBootstrapWitness((Array) bootstrapWitnessDI);
-                if (bootstrapWitness != null)
-                    bootstrapWitnesses.add(bootstrapWitness);
-            }
+        for (RawBootstrapWitness witness : set.bootstrapWitnesses().orElse(List.of())) {
+            bootstrapWitnesses.add(new BootstrapWitness(hex(witness.publicKey()), hex(witness.signature()),
+                    hex(witness.chainCode()), hex(witness.attributes())));
         }
-
-        //plutus_v1_script
-        List<PlutusScript> plutusV1Scripts = new ArrayList<>();
-        if (plutusScriptArray != null) {
-            List<DataItem> plutusV1ScriptDIList = ((Array) plutusScriptArray).getDataItems();
-
-            try {
-                for (DataItem plutusV1ScriptDI : plutusV1ScriptDIList) {
-                    if (plutusV1ScriptDI == Special.BREAK)
-                        continue;
-
-                    String scriptCborHex = encodeHexString(CborSerializationUtil.serialize(plutusV1ScriptDI, false));
-
-                    PlutusScript plutusScript = new PlutusScript(PlutusScriptType.PlutusScriptV1, scriptCborHex);
-                    plutusV1Scripts.add(plutusScript);
-                }
-            } catch (Exception e) {
-                throw new CborRuntimeException("PlutusV1 script deserialization failed", e);
-            }
-        }
-
-        //plutus_data
-        List<Datum> datumList = new ArrayList<>();
-        if (plutusDataArray != null) {
-            List<DataItem> plutusDataDIList = ((Array) plutusDataArray).getDataItems();
-
-            for (DataItem plutusDataDI : plutusDataDIList) {
-                if (plutusDataDI == Special.BREAK)
-                    continue;
-               // Datum datum = new Datum(HexUtil.encodeHexString(CborSerializationUtil.serialize(plutusDataDI, false)), ""); //TODO -- convert to json later'
-                Datum datum = Datum.from(plutusDataDI);
-                datumList.add(datum);
-//                plutusDataList.add(PlutusData.deserialize(plutusDataDI));
-            }
-        }
-
-        //redeemers
-        List<Redeemer> redeemerList = new ArrayList<>();
-        if (redeemersDI != null) {
-            if (redeemersDI instanceof Array) {
-                List<DataItem> redeemerDIList = ((Array) redeemersDI).getDataItems();
-                for (DataItem redeemerDI : redeemerDIList) {
-                    if (redeemerDI == Special.BREAK) continue;
-                    Redeemer redeemer = Redeemer.deserializePreConway((Array) redeemerDI);
-                    redeemerList.add(redeemer);
-                }
-            } else if (redeemersDI instanceof Map) { //conway era
-                var redeemersMap = (Map) redeemersDI;
-                for (DataItem key : redeemersMap.getKeys()) {
-                    var valueDI = redeemersMap.get(key);
-                    Redeemer redeemer = Redeemer.deserialize((Array)key, (Array) valueDI);
-                    redeemerList.add(redeemer);
-                }
-            }
-        }
-
-        //plutus_v2_script (Babbage era or Post Alonzo)
-        List<PlutusScript> plutusV2Scripts = new ArrayList<>();
-        if (plutusV2ScriptArray != null) {
-            List<DataItem> plutusV2ScriptDIList = ((Array) plutusV2ScriptArray).getDataItems();
-            try {
-                for (DataItem plutusV2ScriptDI : plutusV2ScriptDIList) {
-                    if (plutusV2ScriptDI == Special.BREAK) continue;
-
-                    String scriptCborHex = encodeHexString(CborSerializationUtil.serialize(plutusV2ScriptDI, false));
-
-                    PlutusScript plutusScript = new PlutusScript(PlutusScriptType.PlutusScriptV2, scriptCborHex);
-                    plutusV2Scripts.add(plutusScript);
-
-                }
-            } catch (Exception e) {
-                throw new CborRuntimeException("Plutus V2 script deserialization failed", e);
-            }
-        }
-
-        //plutus_v3 script (Conway era)
-        List<PlutusScript> plutusV3Scripts = new ArrayList<>();
-        if (plutusV3ScriptArray != null) {
-            List<DataItem> plutusV3ScriptDIList = ((Array) plutusV3ScriptArray).getDataItems();
-            try {
-                for (DataItem plutusV3ScriptDI : plutusV3ScriptDIList) {
-                    if (plutusV3ScriptDI == Special.BREAK) continue;
-
-                    String scriptCborHex = encodeHexString(CborSerializationUtil.serialize(plutusV3ScriptDI, false));
-
-                    PlutusScript plutusScript = new PlutusScript(PlutusScriptType.PlutusScriptV3, scriptCborHex);
-                    plutusV3Scripts.add(plutusScript);
-                }
-            } catch (Exception e) {
-                throw new CborRuntimeException("Plutus V3 script deserialization failed", e);
-            }
-        }
-
-        return new Witnesses(vkeyWitnessList, nativeScripts, bootstrapWitnesses, plutusV1Scripts, datumList, redeemerList, plutusV2Scripts, plutusV3Scripts);
+        List<PlutusScript> plutusV1Scripts = plutusScripts(PlutusScriptType.PlutusScriptV1, set.plutusV1Scripts());
+        List<Datum> datums = new ArrayList<>();
+        for (RawDatum datum : set.datums().orElse(List.of()))
+            datums.add(DataItemIsolation.datum(datum.span()));
+        List<Redeemer> redeemers = new ArrayList<>();
+        for (RawRedeemer redeemer : set.redeemers().orElse(List.of()))
+            redeemers.add(DataItemIsolation.redeemer(redeemer));
+        List<PlutusScript> plutusV2Scripts = plutusScripts(PlutusScriptType.PlutusScriptV2, set.plutusV2Scripts());
+        List<PlutusScript> plutusV3Scripts = plutusScripts(PlutusScriptType.PlutusScriptV3, set.plutusV3Scripts());
+        return Witnesses.builder().vkeyWitnesses(vkeyWitnesses).nativeScripts(nativeScripts)
+                .bootstrapWitnesses(bootstrapWitnesses).plutusV1Scripts(plutusV1Scripts).datums(datums)
+                .redeemers(redeemers).plutusV2Scripts(plutusV2Scripts).plutusV3Scripts(plutusV3Scripts)
+                .plutusV4Scripts(plutusScripts(PlutusScriptType.PlutusScriptV4, set.plutusV4Scripts())).build();
     }
 
-    private BootstrapWitness deserializeBootstrapWitness(Array bootstrapWitnessDI) {
-        List<DataItem> dataItemList = bootstrapWitnessDI.getDataItems();
-        if (dataItemList == null || dataItemList.size() != 4)
-            throw new CborRuntimeException("BootstrapWitness deserialization error. Invalid no of DataItem");
-
-        DataItem vkeyDI = dataItemList.get(0);
-        DataItem sigDI = dataItemList.get(1);
-        DataItem chainCodeDI = dataItemList.get(2);
-        DataItem attributesDI = dataItemList.get(3);
-
-        String pubKey = encodeHexString(((ByteString) vkeyDI).getBytes());
-        String signature = encodeHexString(((ByteString) sigDI).getBytes());
-        String chainCode = encodeHexString(((ByteString) chainCodeDI).getBytes());
-        String attributes = encodeHexString(((ByteString) attributesDI).getBytes());
-
-        return new BootstrapWitness(pubKey, signature, chainCode, attributes);
+    /** A script of an unknown type is kept, with no JSON and a parse error. */
+    static List<NativeScript> nativeScripts(List<RawScript> scripts, boolean hashed) {
+        List<NativeScript> parsed = new ArrayList<>(scripts.size());
+        for (RawScript script : scripts) {
+            NativeScript json = NativeScriptJson.parse(
+                    (Array) CborSerializationUtil.deserializeOne(script.span().bytes()));
+            parsed.add(hashed ? new NativeScript(json.getType(), json.getContent(), json.getParseError(),
+                    hex(script.hash())) : json);
+        }
+        return parsed;
     }
 
-    private VkeyWitness deserializeVkWitness(Array vkWitness) {
-        List<DataItem> dataItemList = vkWitness.getDataItems();
-        if (dataItemList == null || dataItemList.size() != 2)
-            throw new CborRuntimeException("VkeyWitness deserialization error. Invalid no of DataItem");
-
-        DataItem vkeyDI = dataItemList.get(0);
-        DataItem sigDI = dataItemList.get(1);
-
-        String key = encodeHexString(((ByteString) vkeyDI).getBytes());
-        String signature = encodeHexString(((ByteString) sigDI).getBytes());
-
-        return new VkeyWitness(key, signature);
+    /** A script's content is its encoding, as received. */
+    private static List<PlutusScript> plutusScripts(PlutusScriptType type, Optional<List<RawScript>> scripts) {
+        List<PlutusScript> parsed = new ArrayList<>();
+        for (RawScript script : scripts.orElse(List.of()))
+            parsed.add(new PlutusScript(type, hex(script.span().bytes())));
+        return parsed;
     }
 
+    private static String hex(byte[] bytes) {
+        return HexUtil.encodeHexString(bytes);
+    }
+
+    /**
+     * @deprecated A native script is read with its witness set or aux data, from their bytes: use
+     * {@link #deserialize(byte[])} or {@link AuxDataSerializer#deserialize(byte[])}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     public NativeScript deserializeNativeScript(Array nativeScriptArray) {
         return NativeScriptJson.parse(nativeScriptArray);
     }

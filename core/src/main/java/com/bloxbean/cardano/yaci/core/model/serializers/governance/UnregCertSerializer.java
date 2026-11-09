@@ -1,30 +1,21 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 
-import co.nstant.in.cbor.model.Array;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
-import com.bloxbean.cardano.yaci.core.model.certs.StakeCredential;
+import com.bloxbean.cardano.client.transaction.raw.CertKind;
 import com.bloxbean.cardano.yaci.core.model.certs.UnregCert;
+import com.bloxbean.cardano.yaci.core.model.serializers.CertificateSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 
-import java.math.BigInteger;
-import java.util.List;
-
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toBigInteger;
-
-/**
- * unreg_cert = (8, stake_credential, coin)
- */
 public enum UnregCertSerializer implements Serializer<UnregCert> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded certificate has lost its source encoding. Use {@link CertificateSerializer#read}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public UnregCert deserializeDI(DataItem di) {
-        Array certArray = (Array)di;
-        List<DataItem> dataItemList = certArray.getDataItems();
-
-        StakeCredential stakeCredential = StakeCredential.deserialize((Array) dataItemList.get(1));
-        BigInteger coin = toBigInteger(dataItemList.get(2));
-
-        return new UnregCert(stakeCredential, coin);
+        return (UnregCert) CertificateSerializer.INSTANCE.read(CertKind.UNREG_CERT, CborSerializationUtil.span(di));
     }
 }

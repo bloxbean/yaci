@@ -1,27 +1,21 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 
-import co.nstant.in.cbor.model.Array;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
-import com.bloxbean.cardano.yaci.core.model.certs.StakeCredential;
+import com.bloxbean.cardano.client.transaction.raw.CertKind;
 import com.bloxbean.cardano.yaci.core.model.certs.VoteDelegCert;
-import com.bloxbean.cardano.yaci.core.model.governance.Drep;
+import com.bloxbean.cardano.yaci.core.model.serializers.CertificateSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 
-import java.util.List;
-
-/**
- * vote_deleg_cert = (9, stake_credential, drep)
- */
 public enum VoteDelegCertSerializer implements Serializer<VoteDelegCert> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded certificate has lost its source encoding. Use {@link CertificateSerializer#read}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public VoteDelegCert deserializeDI(DataItem di) {
-        Array certArray = (Array) di;
-        List<DataItem> dataItemList = certArray.getDataItems();
-
-        StakeCredential stakeCredential = StakeCredential.deserialize((Array) dataItemList.get(1));
-        Drep drep = DrepSerializer.INSTANCE.deserializeDI(dataItemList.get(2));
-        return new VoteDelegCert(stakeCredential, drep);
+        return (VoteDelegCert) CertificateSerializer.INSTANCE.read(CertKind.VOTE_DELEG_CERT, CborSerializationUtil.span(di));
     }
 }

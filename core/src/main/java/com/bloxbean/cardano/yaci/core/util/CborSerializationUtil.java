@@ -1,17 +1,15 @@
 package com.bloxbean.cardano.yaci.core.util;
 
-import co.nstant.in.cbor.CborBuilder;
-import co.nstant.in.cbor.CborEncoder;
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.*;
-import co.nstant.in.cbor.model.Number;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.types.NonNegativeInterval;
 import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import lombok.NonNull;
 
-import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
+import java.util.List;
 
 public class CborSerializationUtil {
 
@@ -22,19 +20,7 @@ public class CborSerializationUtil {
      * @return
      */
     public static BigInteger toBigInteger(DataItem valueItem) {
-        BigInteger value = null;
-        if (MajorType.UNSIGNED_INTEGER.equals(valueItem.getMajorType())
-                || MajorType.NEGATIVE_INTEGER.equals(valueItem.getMajorType())) {
-            value = ((Number) valueItem).getValue();
-        } else if (MajorType.BYTE_STRING.equals(valueItem.getMajorType())) { //For BigNum. >  2 pow 64 Tag 2
-            if (valueItem.getTag().getValue() == 2) { //positive
-                value = new BigInteger(((ByteString) valueItem).getBytes());
-            } else if (valueItem.getTag().getValue() == 3) { //Negative
-                value = new BigInteger(((ByteString) valueItem).getBytes()).multiply(BigInteger.valueOf(-1));
-            }
-        }
-
-        return value;
+        return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.getBigInteger(valueItem);
     }
 
     /**
@@ -64,15 +50,15 @@ public class CborSerializationUtil {
     }
 
     public static String toHex(DataItem di) {
-        return HexUtil.encodeHexString(((ByteString)di).getBytes());
+        return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.toHex(di);
     }
 
     public static byte[] toBytes(DataItem di) {
-        return ((ByteString)di).getBytes();
+        return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.toBytes(di);
     }
 
     public static String toUnicodeString(DataItem di) {
-        return ((UnicodeString)di).getString();
+        return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.toUnicodeString(di);
     }
 
     public static UnitInterval toUnitInterval(DataItem di) {
@@ -124,27 +110,11 @@ public class CborSerializationUtil {
      * @return
      */
     public static byte[] serialize(DataItem[] values, boolean canonical) {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        CborBuilder cborBuilder = new CborBuilder();
-
-        for (DataItem value : values) {
-            cborBuilder.add(value);
-        }
-
         try {
-            if (canonical) {
-                new CborEncoder(baos).encode(cborBuilder.build());
-            } else {
-                new ArrayCborEncoder(baos).encode(cborBuilder.build());
-            }
+            return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.serialize(values, canonical);
         } catch (CborException e) {
             throw new CborRuntimeException("Cbor serialization error", e);
         }
-
-        byte[] encodedBytes = baos.toByteArray();
-
-        return encodedBytes;
-
     }
 
     /**
@@ -153,11 +123,30 @@ public class CborSerializationUtil {
      * @return DataItem
      */
     public static DataItem deserializeOne(@NonNull byte[] bytes) {
-        try {
-            return ArrayCborDecoder.decode(bytes).get(0);
-        } catch (CborException e) {
-            throw new CborRuntimeException("Cbor de-serialization error", e);
-        }
+        return decodeAll(bytes).get(0);
+    }
+
+    /**
+     * A span over bytes, for a reader that reads them in place of a decoded tree (ADR 0003 D8).
+     *
+     * @param bytes exactly one CBOR item
+     * @return the span
+     * @throws com.bloxbean.cardano.client.exception.CborRuntimeException if decoding the bytes would reject them
+     */
+    public static CborSpan span(@NonNull byte[] bytes) {
+        CborSpan span = CborSpan.of(bytes);
+        com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.checkTags(span);
+        return span;
+    }
+
+    /**
+     * A span over a decoded item, re-encoded with its map order kept, for a mapper that reads views (ADR 0003 D7).
+     *
+     * @param item a decoded item
+     * @return the span
+     */
+    public static CborSpan span(@NonNull DataItem item) {
+        return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.span(item);
     }
 
     /**
@@ -166,9 +155,13 @@ public class CborSerializationUtil {
      * @return DataItem
      */
     public static DataItem[] deserialize(@NonNull byte[] bytes) {
+        return decodeAll(bytes).toArray(new DataItem[0]);
+    }
+
+    private static List<DataItem> decodeAll(byte[] bytes) {
         try {
-            return ArrayCborDecoder.decode(bytes).toArray(new DataItem[0]);
-        } catch (CborException e) {
+            return com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.deserializeAll(bytes);
+        } catch (com.bloxbean.cardano.client.exception.CborRuntimeException e) {
             throw new CborRuntimeException("Cbor de-serialization error", e);
         }
     }

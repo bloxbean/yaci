@@ -1,5 +1,47 @@
 [
   {
+    "name":"com.bloxbean.cardano.yaci.core.model.AccountBalanceInterval",
+    "allDeclaredConstructors":true,
+    "allDeclaredFields":true,
+    "allDeclaredMethods":true
+  },
+  {
+    "name":"com.bloxbean.cardano.yaci.core.model.BlsKey",
+    "allDeclaredConstructors":true,
+    "allDeclaredFields":true,
+    "allDeclaredMethods":true
+  },
+  {
+    "name":"com.bloxbean.cardano.yaci.core.model.Credential",
+    "allDeclaredConstructors":true,
+    "allDeclaredFields":true,
+    "allDeclaredMethods":true
+  },
+  {
+    "name":"com.bloxbean.cardano.yaci.core.model.EbAnnouncement",
+    "allDeclaredConstructors":true,
+    "allDeclaredFields":true,
+    "allDeclaredMethods":true
+  },
+  {
+    "name":"com.bloxbean.cardano.yaci.core.model.LeiosCertificate",
+    "allDeclaredConstructors":true,
+    "allDeclaredFields":true,
+    "allDeclaredMethods":true
+  },
+  {
+    "name":"com.bloxbean.cardano.yaci.core.model.SubTransaction",
+    "allDeclaredConstructors":true,
+    "allDeclaredFields":true,
+    "allDeclaredMethods":true
+  },
+  {
+    "name":"com.bloxbean.cardano.yaci.core.model.TopLevelGuard",
+    "allDeclaredConstructors":true,
+    "allDeclaredFields":true,
+    "allDeclaredMethods":true
+  },
+  {
     "name":"io.netty.buffer.AbstractByteBufAllocator",
     "queryAllDeclaredMethods":true
   },

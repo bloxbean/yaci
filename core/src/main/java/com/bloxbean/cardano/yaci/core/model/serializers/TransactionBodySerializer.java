@@ -1,259 +1,213 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.model.Map;
-import co.nstant.in.cbor.model.*;
-import com.bloxbean.cardano.client.api.util.AssetUtil;
+import co.nstant.in.cbor.model.DataItem;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
+import com.bloxbean.cardano.client.spec.Era;
+import com.bloxbean.cardano.client.transaction.raw.RawAccountBalanceInterval;
+import com.bloxbean.cardano.client.transaction.raw.RawCredential;
+import com.bloxbean.cardano.client.transaction.raw.RawInput;
+import com.bloxbean.cardano.client.transaction.raw.RawOutput;
+import com.bloxbean.cardano.client.transaction.raw.RawProposal;
+import com.bloxbean.cardano.client.transaction.raw.RawTopLevelGuard;
+import com.bloxbean.cardano.client.transaction.raw.RawTx;
+import com.bloxbean.cardano.client.transaction.raw.RawTxBody;
+import com.bloxbean.cardano.client.transaction.raw.RawWithdrawal;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
-import com.bloxbean.cardano.yaci.core.model.*;
+import com.bloxbean.cardano.yaci.core.model.AccountBalanceInterval;
+import com.bloxbean.cardano.yaci.core.model.AuxData;
+import com.bloxbean.cardano.yaci.core.model.Credential;
+import com.bloxbean.cardano.yaci.core.model.SubTransaction;
+import com.bloxbean.cardano.yaci.core.model.TopLevelGuard;
+import com.bloxbean.cardano.yaci.core.model.TransactionBody;
+import com.bloxbean.cardano.yaci.core.model.TransactionInput;
+import com.bloxbean.cardano.yaci.core.model.TransactionOutput;
 import com.bloxbean.cardano.yaci.core.model.certs.Certificate;
 import com.bloxbean.cardano.yaci.core.model.governance.ProposalProcedure;
-import com.bloxbean.cardano.yaci.core.model.governance.VotingProcedures;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.ProposalProcedureSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.VotingProceduresSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
-import com.bloxbean.cardano.yaci.core.util.StringUtil;
 import com.bloxbean.cardano.yaci.core.util.TxUtil;
 import lombok.extern.slf4j.Slf4j;
 
-import java.math.BigInteger;
-import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
-import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toBigInteger;
-import static com.bloxbean.cardano.yaci.core.util.StringUtil.sanitize;
-
+/**
+ * Maps bodies read by {@link RawTxBody} to Yaci's model (ADR 0003 D8). A Dijkstra body's fields come from the view's
+ * Dijkstra accessors, which are empty in earlier eras (D4b; experimental, as Dijkstra is not final): its required
+ * signers are the key hashes of its key guards, as the ledger derives them, and its sub-transactions are mapped as a
+ * block's transactions are.
+ */
 @Slf4j
 public enum TransactionBodySerializer implements Serializer<TransactionBody> {
     INSTANCE;
 
+    /**
+     * @param di      the body decoded from {@code txBytes}; the fields are read from {@code txBytes}
+     * @param txBytes the body as encoded
+     * @return the body, read as Conway: in any other era, only a key that has changed meaning reads differently
+     * @deprecated {@code di} is not used. Use {@link #read(byte[], Era)}, or {@link BlockSerializer} for a block.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     public TransactionBody deserializeDI(DataItem di, byte[] txBytes) {
-        Map bodyMap = (Map) di;
+        return read(txBytes, Era.Conway);
+    }
 
-        TransactionBody.TransactionBodyBuilder transactionBodyBuilder = TransactionBody.builder();
+    /**
+     * @param txBytes the body as encoded
+     * @param era     the era of its block
+     * @return the body
+     */
+    public TransactionBody read(byte[] txBytes, Era era) {
+        return read(RawTxBody.tolerant(CborSpan.at(txBytes, 0), era), txBytes);
+    }
+
+    /**
+     * @param body  a body, read in its era: a sub-transaction's at sub level, without the top-level-only fields
+     * @param bytes the body as encoded, whose hash is its id
+     */
+    private TransactionBody read(RawTxBody body, byte[] bytes) {
+        Era era = body.era();
+        TransactionBody.TransactionBodyBuilder builder = TransactionBody.builder();
 
         //derive
-        String txHash = TxUtil.calculateTxHash(txBytes);
-        transactionBodyBuilder.txHash(txHash);
+        builder.txHash(TxUtil.calculateTxHash(bytes));
+        if (YaciConfig.INSTANCE.isReturnTxBodyCbor() || YaciConfig.INSTANCE.isReturnFullTxCbor())
+            builder.cbor(HexUtil.encodeHexString(bytes));
 
-        if (YaciConfig.INSTANCE.isReturnTxBodyCbor() || YaciConfig.INSTANCE.isReturnFullTxCbor()) {
-            transactionBodyBuilder.cbor(HexUtil.encodeHexString(txBytes));
-        }
-
-        Array inputArray =  (Array)bodyMap.get(new UnsignedInteger(0));
-        Set<TransactionInput> inputs = new LinkedHashSet<>();
-        for(DataItem inputItem: inputArray.getDataItems()) {
-            if (inputItem == Special.BREAK)
-                continue;
-
-            TransactionInput ti = TransactionInputSerializer.INSTANCE.deserializeDI(inputItem);
-            inputs.add(ti);
-        }
-        transactionBodyBuilder.inputs(inputs);
-
-        Array outputArray =  (Array)bodyMap.get(new UnsignedInteger(1));
+        builder.inputs(inputs(body.inputs(), new LinkedHashSet<>()));
         List<TransactionOutput> outputs = new ArrayList<>();
-        for(DataItem ouptutItem: outputArray.getDataItems()) {
-            if (ouptutItem == Special.BREAK)
-                continue;
-            TransactionOutput to = TransactionOutputSerializer.INSTANCE.deserializeDI(ouptutItem);
-            outputs.add(to);
-        }
-        transactionBodyBuilder.outputs(outputs);
+        for (RawOutput output : body.outputs())
+            outputs.add(TransactionOutputSerializer.INSTANCE.read(output));
+        builder.outputs(outputs);
 
-        UnsignedInteger feeUI = (UnsignedInteger)bodyMap.get(new UnsignedInteger(2));
-        if(feeUI != null) {
-            transactionBodyBuilder.fee(feeUI.getValue());
-        }
+        body.fee().ifPresent(builder::fee);
+        body.ttl().ifPresent(builder::ttl);
 
-        UnsignedInteger ttlUI = (UnsignedInteger)bodyMap.get(new UnsignedInteger(3));
-        if(ttlUI != null) {
-            transactionBodyBuilder.ttl(ttlUI.getValue().longValue());
+        List<CborSpan> certificates = body.certificateItems();
+        if (!certificates.isEmpty()) {
+            List<Certificate> read = new ArrayList<>(certificates.size());
+            for (CborSpan certificate : certificates)
+                read.add(CertificateSerializer.INSTANCE.read(certificate, era));
+            builder.certificates(read);
         }
 
-        //certs
-        List<Certificate> certificates = null;
-        Array certArray = (Array)bodyMap.get(new UnsignedInteger(4));
-        if (certArray != null && certArray.getDataItems() != null && certArray.getDataItems().size() > 0) {
-            certificates = new ArrayList<>();
-            for (DataItem dataItem: certArray.getDataItems()) {
-                if (dataItem == Special.BREAK)
-                    continue;
-                Certificate cert = CertificateSerializer.INSTANCE.deserializeDI(dataItem);
-                certificates.add(cert);
-            }
+        List<RawWithdrawal> withdrawals = body.withdrawals();
+        if (!withdrawals.isEmpty())
+            builder.withdrawals(WithdrawalsSerializer.INSTANCE.read(withdrawals));
+
+        body.update().map(UpdateSerializer.INSTANCE::read).ifPresent(builder::update);
+        body.auxDataHash().map(HexUtil::encodeHexString).ifPresent(builder::auxiliaryDataHash);
+        body.validityStart().ifPresent(builder::validityIntervalStart);
+        builder.mint(TransactionOutputSerializer.assets(body.mint()));
+        body.scriptDataHash().map(HexUtil::encodeHexString).ifPresent(builder::scriptDataHash);
+        body.collateral().ifPresent(inputs -> builder.collateralInputs(inputs(inputs, new HashSet<>())));
+        body.requiredSigners().ifPresent(signers -> builder.requiredSigners(hex(signers)));
+        body.guards().ifPresent(guards -> builder.guards(credentials(guards)).requiredSigners(keyHashes(guards)));
+        body.networkId().ifPresent(id -> {
+            if (id == 0 || id == 1)
+                builder.netowrkId(id);
+            else
+                log.error("Invalid networkId value : " + id);
+        });
+        body.collateralReturn().map(TransactionOutputSerializer.INSTANCE::read).ifPresent(builder::collateralReturn);
+        body.totalCollateral().ifPresent(builder::totalCollateral);
+        body.referenceInputs().ifPresent(inputs -> builder.referenceInputs(inputs(inputs, new LinkedHashSet<>())));
+
+        body.votingProcedures().map(VotingProceduresSerializer.INSTANCE::read).ifPresent(builder::votingProcedures);
+        body.proposalProcedures().ifPresent(procedures -> builder.proposalProcedures(proposals(procedures)));
+        body.currentTreasury().ifPresent(builder::currentTreasuryValue);
+        body.donation().ifPresent(builder::donation);
+
+        // Absent and empty read alike from these views, and a valid body has none empty: both are null.
+        List<RawTx> subTransactions = body.subTransactions();
+        if (!subTransactions.isEmpty())
+            builder.subTransactions(subTransactions(subTransactions, era));
+        List<RawTopLevelGuard> topLevelGuards = body.requiredTopLevelGuards();
+        if (!topLevelGuards.isEmpty())
+            builder.requiredTopLevelGuards(topLevelGuards(topLevelGuards));
+        List<RawWithdrawal> directDeposits = body.directDeposits();
+        if (!directDeposits.isEmpty())
+            builder.directDeposits(WithdrawalsSerializer.INSTANCE.read(directDeposits));
+        builder.accountBalanceIntervals(intervals(body.accountBalanceIntervals()));
+        builder.startingAccountBalanceIntervals(intervals(body.startingAccountBalanceIntervals()));
+
+        return builder.build();
+    }
+
+    private static List<Credential> credentials(List<RawCredential> credentials) {
+        List<Credential> read = new ArrayList<>(credentials.size());
+        for (RawCredential credential : credentials)
+            read.add(CertificateSerializer.credential(credential));
+        return read;
+    }
+
+    private static Set<String> keyHashes(List<RawCredential> guards) {
+        Set<String> set = new HashSet<>();
+        for (RawCredential guard : guards)
+            if (!guard.isScript())
+                set.add(HexUtil.encodeHexString(guard.hash()));
+        return set;
+    }
+
+    /**
+     * Each sub-transaction's parts are read as those of a transaction of its block, its body from CCL's view of it at
+     * sub level, which has no sub-transactions of its own.
+     */
+    private List<SubTransaction> subTransactions(List<RawTx> transactions, Era era) {
+        List<SubTransaction> read = new ArrayList<>(transactions.size());
+        for (RawTx transaction : transactions) {
+            TransactionBody body = read(transaction.body(era), transaction.body().bytes());
+            AuxData auxData = transaction.auxData().map(aux -> BlockSerializer.auxData(aux, era,
+                    bytes -> BlockSerializer.hashMatches(body.getAuxiliaryDataHash(), bytes))).orElse(null);
+            read.add(new SubTransaction(body, BlockSerializer.witnessSet(transaction.witnessSet(), era), auxData));
         }
-        if (certificates != null)
-            transactionBodyBuilder.certificates(certificates);
+        return read;
+    }
 
-        //withdrawals
-        Map withdrawalMap = (Map)bodyMap.get(new UnsignedInteger(5));
-        if (withdrawalMap != null && withdrawalMap.getKeys() != null && withdrawalMap.getKeys().size() > 0) {
-            java.util.Map<String, BigInteger> withdrawals = WithdrawalsSerializer.INSTANCE.deserializeDI(withdrawalMap);
-            if (withdrawals != null)
-                transactionBodyBuilder.withdrawals(withdrawals);
-        }
+    private static List<TopLevelGuard> topLevelGuards(List<RawTopLevelGuard> guards) {
+        List<TopLevelGuard> read = new ArrayList<>(guards.size());
+        for (RawTopLevelGuard guard : guards)
+            read.add(new TopLevelGuard(CertificateSerializer.credential(guard.credential()),
+                    guard.data() == null ? null : DataItemIsolation.datum(guard.data().span())));
+        return read;
+    }
 
-        //Update
-        DataItem updateDI = bodyMap.get(new UnsignedInteger(6));
-        if (updateDI != null) {
-            Update update = UpdateSerializer.INSTANCE.deserializeDI(updateDI);
-            transactionBodyBuilder.update(update);
-        }
+    /** By reward account in hex, in the order received, as withdrawals are; null for none. */
+    private static Map<String, AccountBalanceInterval> intervals(List<RawAccountBalanceInterval> intervals) {
+        if (intervals.isEmpty())
+            return null;
+        Map<String, AccountBalanceInterval> read = new LinkedHashMap<>();
+        for (RawAccountBalanceInterval interval : intervals)
+            read.put(HexUtil.encodeHexString(interval.rewardAccount()),
+                    new AccountBalanceInterval(interval.exact(), interval.lower(), interval.upper()));
+        return Collections.unmodifiableMap(read);
+    }
 
-        //Aux data hash
-        ByteString metadataHashBS = (ByteString)bodyMap.get(new UnsignedInteger(7));
-        if(metadataHashBS != null) {
-            String auxDataHash = HexUtil.encodeHexString(metadataHashBS.getBytes());
-            transactionBodyBuilder.auxiliaryDataHash(auxDataHash);
-        }
+    private static Set<TransactionInput> inputs(List<RawInput> inputs, Set<TransactionInput> set) {
+        for (RawInput input : inputs)
+            set.add(TransactionInputSerializer.INSTANCE.read(input));
+        return set;
+    }
 
-        //Validity interval start
-        UnsignedInteger validityStartIntervalUI = (UnsignedInteger)bodyMap.get(new UnsignedInteger(8));
-        if(validityStartIntervalUI != null) {
-            transactionBodyBuilder.validityIntervalStart(validityStartIntervalUI.getValue().longValue());
-        }
+    private static Set<String> hex(List<byte[]> hashes) {
+        Set<String> set = new HashSet<>();
+        for (byte[] hash : hashes)
+            set.add(HexUtil.encodeHexString(hash));
+        return set;
+    }
 
-        //Mint
-        Map mintMap = (Map)bodyMap.get(new UnsignedInteger(9));
-        if(mintMap != null) {
-            List<Amount> mintAssets = new ArrayList<>();
-            for (DataItem key : mintMap.getKeys()) {
-                ByteString keyBS = (ByteString) key;
-                String policyId = HexUtil.encodeHexString(keyBS.getBytes());
-
-                Map assetsMap = (Map) mintMap.get(key);
-                for (DataItem assetKey : assetsMap.getKeys()) {
-                    ByteString assetNameBS = (ByteString) assetKey;
-
-                    DataItem assetValueDI = assetsMap.get(assetKey);
-                    BigInteger value = toBigInteger(assetValueDI);
-
-                    String hexName = HexUtil.encodeHexString(assetNameBS.getBytes(), false);
-                    String assetName = StringUtil.isUtf8(assetNameBS.getBytes())?
-                            new String(assetNameBS.getBytes(), StandardCharsets.UTF_8): AssetUtil.calculateFingerPrint(policyId, hexName);
-
-                    Amount amount = Amount.builder()
-                            .unit(policyId + "." + hexName)
-                            .policyId(policyId)
-                            .assetName(sanitize(assetName))
-                            .assetNameBytes(assetNameBS.getBytes())
-                            .quantity(value).build();
-
-                    mintAssets.add(amount);
-                }
-            }
-            transactionBodyBuilder.mint(mintAssets);
-        }
-
-        //script_data_hash
-        ByteString scriptDataHashBS = (ByteString)bodyMap.get(new UnsignedInteger(11));
-        if (scriptDataHashBS != null) {
-            transactionBodyBuilder.scriptDataHash(HexUtil.encodeHexString(scriptDataHashBS.getBytes()));
-        }
-
-        //collateral inputs
-        Array collateralArray =  (Array)bodyMap.get(new UnsignedInteger(13));
-        if (collateralArray != null) {
-            Set<TransactionInput> collateral = new HashSet<>();
-            for (DataItem inputItem : collateralArray.getDataItems()) {
-                if (inputItem == Special.BREAK)
-                    continue;
-
-                TransactionInput ti = TransactionInputSerializer.INSTANCE.deserializeDI(inputItem);
-                collateral.add(ti);
-            }
-            transactionBodyBuilder.collateralInputs(collateral);
-        }
-
-        //required_signers
-        Array requiredSignerArray = (Array)bodyMap.get(new UnsignedInteger(14));
-        if (requiredSignerArray != null) {
-            Set<String> requiredSigners = new HashSet<>();
-            for (DataItem requiredSigDI: requiredSignerArray.getDataItems()) {
-                if (requiredSigDI == Special.BREAK)
-                    continue;
-
-                ByteString requiredSigBS = (ByteString) requiredSigDI;
-                requiredSigners.add(HexUtil.encodeHexString(requiredSigBS.getBytes()));
-            }
-            transactionBodyBuilder.requiredSigners(requiredSigners);
-        }
-
-        //network Id
-        UnsignedInteger networkIdUI = (UnsignedInteger) bodyMap.get(new UnsignedInteger(15));
-        if (networkIdUI != null) {
-            int networkIdInt = networkIdUI.getValue().intValue();
-            if (networkIdInt == 0) {
-                transactionBodyBuilder.netowrkId(0);
-            }else if (networkIdInt == 1) {
-                transactionBodyBuilder.netowrkId(1);
-            } else {
-                log.error("Invalid networkId value : " + networkIdInt);
-            }
-        }
-
-        //collateral return
-        DataItem collateralReturnDI = bodyMap.get(new UnsignedInteger(16));
-        if (collateralReturnDI != null) {
-            TransactionOutput collateralReturn = TransactionOutputSerializer.INSTANCE.deserializeDI(collateralReturnDI);
-            transactionBodyBuilder.collateralReturn(collateralReturn);
-        }
-
-        //total collateral
-        UnsignedInteger totalCollateralUI = (UnsignedInteger) bodyMap.get(new UnsignedInteger(17));
-        if (totalCollateralUI != null) {
-            transactionBodyBuilder.totalCollateral(totalCollateralUI.getValue());
-        }
-
-        //reference inputs
-        Array referenceInputsArray =  (Array)bodyMap.get(new UnsignedInteger(18));
-        if (referenceInputsArray != null) {
-            Set<TransactionInput> referenceInputs = new LinkedHashSet<>();
-            for (DataItem inputItem : referenceInputsArray.getDataItems()) {
-                if (inputItem == Special.BREAK)
-                    continue;
-
-                TransactionInput ti = TransactionInputSerializer.INSTANCE.deserializeDI(inputItem);
-                referenceInputs.add(ti);
-            }
-            transactionBodyBuilder.referenceInputs(referenceInputs);
-        }
-
-        //Voting procedures 19
-        DataItem votingProceduresDI = bodyMap.get(new UnsignedInteger(19));
-        if (votingProceduresDI != null) {
-            VotingProcedures votingProcedures = VotingProceduresSerializer.INSTANCE.deserializeDI(votingProceduresDI);
-            transactionBodyBuilder.votingProcedures(votingProcedures);
-        }
-        //Proposal procedure 20
-        DataItem proposalProcedureDI = bodyMap.get(new UnsignedInteger(20));
-        if (proposalProcedureDI != null) {
-            List<ProposalProcedure> proposalProcedures = new ArrayList<>();
-            for (DataItem ppDI: ((Array)proposalProcedureDI).getDataItems()) {
-                if (ppDI == Special.BREAK)
-                    continue;
-                ProposalProcedure proposalProcedure = ProposalProcedureSerializer.INSTANCE.deserializeDI(ppDI);
-                proposalProcedures.add(proposalProcedure);
-            }
-            transactionBodyBuilder.proposalProcedures(proposalProcedures);
-        }
-
-        //Current Treasury Value 21
-        DataItem currentTreasuryValueDI = bodyMap.get(new UnsignedInteger(21));
-        if (currentTreasuryValueDI != null) {
-            BigInteger currentTreasuryValue = toBigInteger(currentTreasuryValueDI);
-            transactionBodyBuilder.currentTreasuryValue(currentTreasuryValue);
-        }
-
-        //Donatioin Coin 22
-        DataItem donationDI = bodyMap.get(new UnsignedInteger(22));
-        if (donationDI != null) {
-            BigInteger donation = toBigInteger(donationDI);
-            transactionBodyBuilder.donation(donation);
-        }
-
-        return transactionBodyBuilder.build();
-
+    private static List<ProposalProcedure> proposals(List<RawProposal> procedures) {
+        List<ProposalProcedure> read = new ArrayList<>(procedures.size());
+        for (RawProposal procedure : procedures)
+            read.add(ProposalProcedureSerializer.INSTANCE.read(procedure));
+        return read;
     }
 }

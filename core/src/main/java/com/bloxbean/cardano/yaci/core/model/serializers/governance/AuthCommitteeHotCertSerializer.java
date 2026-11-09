@@ -1,27 +1,21 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 
-import co.nstant.in.cbor.model.Array;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import co.nstant.in.cbor.model.DataItem;
-import com.bloxbean.cardano.yaci.core.model.Credential;
+import com.bloxbean.cardano.client.transaction.raw.CertKind;
 import com.bloxbean.cardano.yaci.core.model.certs.AuthCommitteeHotCert;
+import com.bloxbean.cardano.yaci.core.model.serializers.CertificateSerializer;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 
-import java.util.List;
-
-/**
- * auth_committee_hot_cert = (14, committee_cold_credential, committee_hot_credential)
- */
 public enum AuthCommitteeHotCertSerializer implements Serializer<AuthCommitteeHotCert> {
     INSTANCE;
 
+    /**
+     * @deprecated A decoded certificate has lost its source encoding. Use {@link CertificateSerializer#read}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public AuthCommitteeHotCert deserializeDI(DataItem di) {
-        Array certArray = (Array) di;
-        List<DataItem> dataItemList = certArray.getDataItems();
-
-        Credential committeeColdCred = Credential.deserialize((Array) dataItemList.get(1));
-        Credential committeeHotCred = Credential.deserialize((Array) dataItemList.get(2));
-
-        return new AuthCommitteeHotCert(committeeColdCred, committeeHotCred);
+        return (AuthCommitteeHotCert) CertificateSerializer.INSTANCE.read(CertKind.AUTH_COMMITTEE_HOT_CERT, CborSerializationUtil.span(di));
     }
 }

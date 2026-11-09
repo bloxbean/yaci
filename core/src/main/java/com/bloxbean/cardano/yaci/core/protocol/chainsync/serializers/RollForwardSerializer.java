@@ -4,6 +4,7 @@ import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
+import com.bloxbean.cardano.client.spec.Era;
 import com.bloxbean.cardano.yaci.core.model.BlockHeader;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronBlockHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
@@ -21,6 +22,14 @@ import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.toInt;
 
 public enum RollForwardSerializer implements Serializer<RollForward> {
     INSTANCE;
+
+    /**
+     * A header's HFC variant counts from Byron at 0, so the block envelope's index, which is CCL's era value, is one
+     * more: Conway's variant 6 is era 7. Null for a variant this code does not know, whose header is read in any layout.
+     */
+    private static Era headerEra(int variant) {
+        return variant >= 1 && variant < Era.Dijkstra.value ? Era.fromValue(variant + 1) : null;
+    }
 
     public RollForward deserialize(byte[] bytes) {
         Array headerContentArr = (Array)CborSerializationUtil.deserializeOne(bytes); //rollforward
@@ -50,8 +59,8 @@ public enum RollForwardSerializer implements Serializer<RollForward> {
                 byronBlockHead = ByronBlockSerializer.INSTANCE.deserializeHeader((Array) headerDI);
             }
         } else { //Shelley and later versions
-            blockHeader =
-                    BlockHeaderSerializer.INSTANCE.deserializeDI(wrappedHeader.getDataItems().get(1));
+            blockHeader = BlockHeaderSerializer.INSTANCE.deserializeDI(wrappedHeader.getDataItems().get(1),
+                    headerEra(eraVariant));
         }
 
         // Extract complete wrapped header bytes for storage (includes era variant)

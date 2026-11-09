@@ -1,39 +1,24 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.MajorType;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Datum;
 import com.bloxbean.cardano.yaci.core.model.Witnesses;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
-import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
-import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
-import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
-import com.bloxbean.cardano.yaci.core.protocol.blockfetch.messages.MsgBlock;
-import com.bloxbean.cardano.yaci.core.exception.BlockParseRuntimeException;
 import com.bloxbean.cardano.yaci.core.util.CborLoader;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
 
-import java.math.BigInteger;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.CALLS_REAL_METHODS;
-import static org.mockito.Mockito.mockStatic;
 
-/** Offline regressions for exact source bytes and nonblocking optional witness enrichment. */
+/** Offline regressions for exact source bytes of datums and redeemers. */
 class RawWitnessExtractionTest {
     private static final String DATA = "d8799f18005f41ff4100ffff";
     private static final String REDEEMER = "840000" + DATA + "820a14";
@@ -190,126 +175,16 @@ class RawWitnessExtractionTest {
         }
     }
 
-    /** Signature/script-only witnesses skip field extraction while later datum/redeemer witnesses are corrected. */
+    /** A signature/script-only witness and a later datum/redeemer witness each keep their own fields. */
     @Test
-    void witnessesWithoutOptionalDataSkipFieldExtraction() throws Exception {
-        // {0: [[vkey, signature]], 1: [[native_script_type, key_hash]]} needs no raw-data enrichment.
+    void witnessesWithoutOptionalDataSitBesideWitnessesWithData() throws Exception {
+        // {0: [[vkey, signature]], 1: [[native_script_type, key_hash]]}
         String signaturesAndScript = "a2008182404001818200581c" + "00".repeat(28);
-        byte[] bytes = withWitnesses(7, signaturesAndScript, WITNESS);
-        AtomicInteger calls = new AtomicInteger();
-        try (MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, invocation -> {
-            if (invocation.getMethod().getName().equals("getWitnessFields")) {
-                calls.incrementAndGet();
-                assertThat((byte[]) invocation.getArgument(0)).isEqualTo(hex(WITNESS));
-            }
-            return invocation.callRealMethod();
-        })) {
-            Block block = BlockSerializer.INSTANCE.deserialize(bytes);
-            assertThat(calls.get()).isEqualTo(1);
-            assertThat(block.getTransactionWitness().get(0)).usingRecursiveComparison()
-                    .isEqualTo(WitnessesSerializer.INSTANCE.deserialize(hex(signaturesAndScript)));
-            assertSourceData(block.getTransactionWitness().get(1).getDatums().get(0));
-            assertSourceData(block.getTransactionWitness().get(1).getRedeemers().get(0).getData());
-        }
-    }
-
-    /** A complete extraction failure or count mismatch must return the initial parsed witnesses unchanged. */
-    @Test
-    void unavailableRawWitnessesNeverPreventBlockDelivery() throws Exception {
-        byte[] bytes = withWitnesses(7, WITNESS, WITNESS);
-        for (boolean throwFailure : new boolean[]{false, true}) {
-            for (boolean full : new boolean[]{false, true}) {
-                YaciConfig.INSTANCE.setReturnFullTxCbor(full);
-                try (MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, CALLS_REAL_METHODS)) {
-                    if (throwFailure) {
-                        mock.when(() -> WitnessUtil.getWitnessRawData(any(byte[].class)))
-                                .thenThrow(new CborException("Injected raw witness failure"));
-                    } else {
-                        mock.when(() -> WitnessUtil.getWitnessRawData(any(byte[].class)))
-                                .thenReturn(Collections.emptyList());
-                    }
-                    Block block = BlockSerializer.INSTANCE.deserialize(bytes);
-                    assertThat(block.getTransactionWitness()).hasSize(2);
-                    for (Witnesses witness : block.getTransactionWitness()) {
-                        assertThat(witness).usingRecursiveComparison()
-                                .isEqualTo(WitnessesSerializer.INSTANCE.deserialize(hex(WITNESS)));
-                    }
-                }
-            }
-        }
-    }
-
-    /** Fail one witness's field extraction, then verify later witnesses and the next block are delivered. */
-    @Test
-    void failedWitnessEnrichmentDoesNotStopTheSyncAgent() throws Exception {
-        for (int era = 2; era <= 7; era++) {
-            String witness = era < 5 ? "a10081824040" : WITNESS;
-            byte[] bytes = withWitnesses(era, witness, witness);
-            List<Block> received = new ArrayList<>();
-            List<BlockParseRuntimeException> errors = new ArrayList<>();
-            BlockfetchAgent agent = new BlockfetchAgent();
-            agent.addListener(new BlockfetchAgentListener() {
-                /** Record successfully delivered blocks. */
-                @Override
-                public void blockFound(Block block) { received.add(block); }
-                /** Record parse failures so an enrichment failure cannot silently become a sync failure. */
-                @Override
-                public void onParsingError(BlockParseRuntimeException error) { errors.add(error); }
-            });
-            AtomicInteger calls = new AtomicInteger();
-            try (MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, CALLS_REAL_METHODS)) {
-                mock.when(() -> WitnessUtil.getWitnessFields(any(byte[].class))).thenAnswer(invocation -> {
-                    if (calls.getAndIncrement() == 0) throw new CborException("Injected field failure");
-                    return invocation.callRealMethod();
-                });
-                agent.processResponse(new MsgBlock(bytes));
-                agent.processResponse(new MsgBlock(bytes));
-            }
-            assertThat(errors).isEmpty();
-            assertThat(received).hasSize(2);
-            assertThat(received.get(0).getTransactionWitness().get(0))
-                    .usingRecursiveComparison().isEqualTo(WitnessesSerializer.INSTANCE.deserialize(hex(witness)));
-            if (era >= 5) {
-                assertSourceData(received.get(0).getTransactionWitness().get(1).getDatums().get(0));
-                assertSourceData(received.get(1).getTransactionWitness().get(0).getDatums().get(0));
-            }
-        }
-    }
-
-    /** Datum failures leave redeemers available; redeemer failures leave datums and later witnesses available. */
-    @Test
-    void failedFieldRetainsParsedDataAndDoesNotStopSiblingEnrichment() throws Exception {
-        byte[] bytes = withWitnesses(7, WITNESS, WITNESS);
-        for (int key : new int[]{4, 5}) {
-            for (String bad : new String[]{"81", "80", "a0", "00", "d90102", "missing"}) {
-                AtomicInteger calls = new AtomicInteger();
-                try (MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, CALLS_REAL_METHODS)) {
-                    // Obtain real fields before overriding only the first witness's optional value.
-                    mock.when(() -> WitnessUtil.getWitnessFields(any(byte[].class))).thenAnswer(invocation -> {
-                        @SuppressWarnings("unchecked")
-                        var fields = (Map<BigInteger, byte[]>) invocation.callRealMethod();
-                        if (calls.getAndIncrement() == 0) {
-                            if (bad.equals("missing")) fields.remove(BigInteger.valueOf(key));
-                            else fields.put(BigInteger.valueOf(key), hex(bad));
-                        }
-                        return fields;
-                    });
-                    Block block = BlockSerializer.INSTANCE.deserialize(bytes);
-                    Witnesses first = block.getTransactionWitness().get(0);
-                    Witnesses original = WitnessesSerializer.INSTANCE.deserialize(hex(WITNESS));
-                    if (key == 4) {
-                        assertThat(first.getDatums()).usingRecursiveComparison().isEqualTo(original.getDatums());
-                        assertSourceData(first.getRedeemers().get(0).getData());
-                    } else {
-                        assertThat(first.getRedeemers()).usingRecursiveComparison().isEqualTo(original.getRedeemers());
-                        assertSourceData(first.getDatums().get(0));
-                    }
-                    Witnesses later = block.getTransactionWitness().get(1);
-                    assertSourceData(later.getDatums().get(0));
-                    assertSourceData(later.getRedeemers().get(0).getData());
-                }
-            }
-        }
+        Block block = BlockSerializer.INSTANCE.deserialize(withWitnesses(7, signaturesAndScript, WITNESS));
+        assertThat(block.getTransactionWitness().get(0)).usingRecursiveComparison()
+                .isEqualTo(WitnessesSerializer.INSTANCE.deserialize(hex(signaturesAndScript)));
+        assertSourceData(block.getTransactionWitness().get(1).getDatums().get(0));
+        assertSourceData(block.getTransactionWitness().get(1).getRedeemers().get(0).getData());
     }
 
     /** Resolve duplicate keys in first-key order, taking the last value even for non-minimal key encodings. */
@@ -434,21 +309,12 @@ class RawWitnessExtractionTest {
         }
     }
 
-    /** Replay the observed duplicate-key block and verify every parsed redeemer reaches raw-data correction. */
+    /** Replay the observed duplicate-key block: the repeated key's redeemer has its last value's source bytes. */
     @Test
-    void previewDuplicateKeyBlockCompletesRawCorrection() {
+    void previewDuplicateKeyBlockKeepsTheLastValuesSourceBytes() {
         byte[] bytes = CborLoader.getHexBytes("block/preview2587542.txt");
-        AtomicInteger corrected = new AtomicInteger();
-        Block block;
-        try (MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, invocation -> {
-            if (invocation.getMethod().getName().equals("getRedeemerFields")) corrected.incrementAndGet();
-            return invocation.callRealMethod();
-        })) {
-            block = BlockSerializer.INSTANCE.deserialize(bytes);
-        }
+        Block block = BlockSerializer.INSTANCE.deserialize(bytes);
         assertThat(block.getHeader().getHeaderBody().getBlockNumber()).isEqualTo(2587542);
-        assertThat(corrected.get()).isEqualTo(block.getTransactionWitness().stream()
-                .mapToInt(witness -> witness.getRedeemers().size()).sum());
         var redeemers = block.getTransactionWitness().get(1).getRedeemers();
         assertThat(redeemers).hasSize(1);
         Datum datum = redeemers.get(0).getData();
@@ -458,61 +324,18 @@ class RawWitnessExtractionTest {
         assertThat(datum.getHash()).isEqualTo("8392f0c940435c06888f9bdb8c74a95dc69f156367d6a089cf008ae05caae01e");
     }
 
-    /** A mismatch that remains after duplicate resolution keeps parsed values and continues with later witnesses. */
-    @Test
-    void unresolvedMapCountMismatchRemainsNonblocking() throws Exception {
-        String healthy = "a105a282000082" + DATA + "820a1482010182182a820b15";
-        byte[] bytes = withWitnesses(7, healthy, healthy);
-        AtomicInteger calls = new AtomicInteger();
-        try (MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, invocation -> {
-            if (invocation.getMethod().getName().equals("getWitnessFields") && calls.getAndIncrement() == 0) {
-                @SuppressWarnings("unchecked")
-                var fields = (Map<BigInteger, byte[]>) invocation.callRealMethod();
-                // Three raw copies of one key cannot align with the two originally parsed keys.
-                fields.put(BigInteger.valueOf(5), hex("a3" + ("82000082" + DATA + "820a14").repeat(3)));
-                return fields;
-            }
-            return invocation.callRealMethod();
-        })) {
-            Block block = BlockSerializer.INSTANCE.deserialize(bytes);
-            assertThat(block.getTransactionWitness().get(0)).usingRecursiveComparison()
-                    .isEqualTo(WitnessesSerializer.INSTANCE.deserialize(hex(healthy)));
-            assertSourceData(block.getTransactionWitness().get(1).getRedeemers().get(0).getData());
-        }
-    }
-
-    /** A failed individual redeemer leaves the following redeemer's source correction intact. */
-    @Test
-    void failedRedeemerEntryDoesNotStopLaterEntries() throws Exception {
-        for (String witness : new String[]{
-                "a10582" + REDEEMER + "840001" + DATA + "820a14",
-                "a105a282000082" + DATA + "820a1482000182" + DATA + "820a14"}) {
-            byte[] bytes = withWitnesses(7, witness);
-            for (boolean malformed : new boolean[]{false, true}) {
-                AtomicInteger calls = new AtomicInteger();
-                try (MockedStatic<WitnessUtil> mock = mockStatic(WitnessUtil.class, invocation -> {
-                    if (invocation.getMethod().getName().equals("getRedeemerFields") && calls.getAndIncrement() == 0) {
-                        if (malformed) return Collections.emptyList();
-                        throw new CborException("Injected redeemer entry failure");
-                    }
-                    return invocation.callRealMethod();
-                })) {
-                    Witnesses result = BlockSerializer.INSTANCE.deserialize(bytes).getTransactionWitness().get(0);
-                    assertThat(result.getRedeemers().get(0)).usingRecursiveComparison().isEqualTo(
-                            WitnessesSerializer.INSTANCE.deserialize(hex(witness)).getRedeemers().get(0));
-                    assertSourceData(result.getRedeemers().get(1).getData());
-                }
-            }
-        }
-    }
-
-    /** Reuse the era-specific parser fixtures and replace only their witness array with source encodings. */
+    /**
+     * Reuse the era-specific parser fixtures and replace their witness array with source encodings. Their bodies and
+     * auxiliary data follow, as a block has as many bodies as witness sets and aux data only for those (ADR 0003 Q6).
+     */
     private static byte[] withWitnesses(int era, String... witnesses) throws Exception {
         CborSlice root = CborSlice.of(SyncDataIsolationTest.eraBlock(era, "a0"));
-        CborSlice slot = root.items(MajorType.ARRAY).get(1).items(MajorType.ARRAY).get(2);
-        // Indefinite witness array: 9f witness_0 ... witness_n ff.
-        return root.replacing(Collections.singletonList(slot),
-                Collections.singletonList(hex("9f" + String.join("", witnesses) + "ff")));
+        List<CborSlice> block = root.items(MajorType.ARRAY).get(1).items(MajorType.ARRAY);
+        String body = HexUtil.encodeHexString(block.get(1).items(MajorType.ARRAY).get(0).bytes());
+        // Indefinite arrays: 9f item_0 ... item_n ff.
+        return root.replacing(List.of(block.get(1), block.get(2), block.get(3)), List.of(
+                hex("9f" + body.repeat(witnesses.length) + "ff"), hex("9f" + String.join("", witnesses) + "ff"),
+                hex("a0")));
     }
 
     /** Check exact encoding and its hash; JSON remains successfully parsed. */

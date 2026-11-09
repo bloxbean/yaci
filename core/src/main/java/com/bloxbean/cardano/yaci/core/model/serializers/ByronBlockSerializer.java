@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import co.nstant.in.cbor.model.*;
+import com.bloxbean.cardano.client.address.ByronAddressType;
 import com.bloxbean.cardano.client.crypto.Base58;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.client.util.JsonUtil;
@@ -256,55 +257,33 @@ public enum ByronBlockSerializer implements Serializer<ByronMainBlock> {
         return new ByronTxPayload(txBody, witnesses);
     }
 
-    private ByronAddress deserializeAddress(Array addressArray) {
-        String b58Address = Base58.encode(CborSerializationUtil.serialize(addressArray));
-        ByteString addressCbor = (ByteString) addressArray.getDataItems().get(0);
-        List<DataItem> addressDIs = ((Array) CborSerializationUtil.deserializeOne(
-                addressCbor.getBytes())).getDataItems();
+    /**
+     * Decodes an address with CCL's {@code ByronAddress}, as the Byron ledger decodes it; an address the ledger
+     * would not decode is a parse error. The model keeps its fields: the base58 form, the root, the attribute values
+     * as CBOR byte strings and the type.
+     */
+    static ByronAddress deserializeAddress(Array addressArray) {
+        byte[] bytes = CborSerializationUtil.serialize(addressArray);
+        com.bloxbean.cardano.client.address.ByronAddress address =
+                new com.bloxbean.cardano.client.address.ByronAddress(bytes);
 
-        String addressId = HexUtil.encodeHexString(((ByteString) addressDIs.get(0)).getBytes());
-        ByronAddressAttr addressAttr = deserializeAddressAttr(addressDIs.get(1));
-        String addressType = deserializeAddressType(
-                ((UnsignedInteger) addressDIs.get(2)).getValue().intValue());
+        ByronAddressAttr.ByronAddressAttrBuilder attr = ByronAddressAttr.builder();
+        address.getProtocolMagic().ifPresent(magic -> attr.stakeDistribution(
+                attributeValue(CborSerializationUtil.serialize(new UnsignedInteger(magic)))));
+        address.getDerivationPath().ifPresent(path -> attr.pkDerivationPath(
+                attributeValue(CborSerializationUtil.serialize(new ByteString(path)))));
 
         return new ByronAddress(
-                b58Address,
-                addressId,
-                addressAttr,
-                addressType
+                Base58.encode(bytes),
+                HexUtil.encodeHexString(address.getRoot()),
+                attr.build(),
+                address.getByronType() == ByronAddressType.Redeem ? REDEEM : PUB_KEY
         );
     }
 
-    private static ByronAddressAttr deserializeAddressAttr(DataItem dataItem) {
-        co.nstant.in.cbor.model.Map addressAttributes = (co.nstant.in.cbor.model.Map) dataItem;
-        DataItem stakeDistribution = addressAttributes.get(new UnsignedInteger(2));
-        DataItem pkDerivationPath = addressAttributes.get(new UnsignedInteger(1));
-
-        ByronAddressAttr.ByronAddressAttrBuilder builder = ByronAddressAttr.builder();
-        if (stakeDistribution != null) {
-            builder.stakeDistribution(
-                    HexUtil.encodeHexString(CborSerializationUtil.serialize(stakeDistribution)));
-        }
-
-        if (pkDerivationPath != null) {
-            builder.pkDerivationPath(
-                    HexUtil.encodeHexString(CborSerializationUtil.serialize(pkDerivationPath)));
-        }
-
-        return builder.build();
-    }
-
-    private static String deserializeAddressType(int addrType) {
-        switch (addrType) {
-            case 0:
-                return PUB_KEY;
-            case 1:
-                return SCRIPT;
-            case 2:
-                return REDEEM;
-            default:
-                return UNKNOWN;
-        }
+    /** An attribute's value as the address holds it, a byte string of its CBOR encoding, in hex. */
+    private static String attributeValue(byte[] cbor) {
+        return HexUtil.encodeHexString(CborSerializationUtil.serialize(new ByteString(cbor)));
     }
 
     private List<ByronTxWitnesses> deserializeTxWitnesses(Array txnWitnessArray) {
