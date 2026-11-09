@@ -4,6 +4,7 @@ import co.nstant.in.cbor.model.MajorType;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.AuxData;
 import com.bloxbean.cardano.yaci.core.model.Block;
+import com.bloxbean.cardano.yaci.core.model.Datum;
 import com.bloxbean.cardano.yaci.core.model.TransactionBody;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.CborSlice;
 import com.bloxbean.cardano.yaci.core.util.CborLoader;
@@ -61,7 +62,13 @@ class MetadataSourceCborTest {
             Block block = BlockSerializer.INSTANCE.deserialize(CborLoader.getHexBytes(file));
             List<TransactionBody> bodies = block.getTransactionBodies();
             for (int i = 0; i < bodies.size(); i++) {
-                if (bodies.get(i).getTxHash().equals(txHash)) return block.getAuxiliaryDataMap().get(i);
+                if (!bodies.get(i).getTxHash().equals(txHash)) continue;
+                AuxData aux = block.getAuxiliaryDataMap().get(i);
+                // Both fixture txs use the Shelley form, where auxiliary data is the metadata map itself,
+                // so every byte of metadataCbor is checked against the tx body's auxiliary_data_hash.
+                assertThat(Datum.cborToHash(HexUtil.decodeHexString(aux.getMetadataCbor())))
+                        .isEqualTo(bodies.get(i).getAuxiliaryDataHash());
+                return aux;
             }
             throw new AssertionError("tx not found: " + txHash);
         } finally {
