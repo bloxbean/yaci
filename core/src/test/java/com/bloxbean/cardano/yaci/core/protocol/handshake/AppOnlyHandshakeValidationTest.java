@@ -74,6 +74,25 @@ class AppOnlyHandshakeValidationTest {
     }
 
     @Test
+    void validLegacyAcceptanceWireShapesRemainSupported() {
+        for (String hex : List.of(
+                "830104821a00067932f4",          // Legacy V4 N2N two-field tuple.
+                "83010b841a00067932f400f4",      // V11 N2N four-field tuple.
+                "83011864841a00067932f400f4",    // Integrated app-layer V100.
+                "83011980011a00067932")) {      // Legacy N2C scalar.
+            AcceptVersion decoded = AcceptVersionSerializer.INSTANCE.deserialize(HexUtil.decodeHexString(hex));
+            assertEquals(MAGIC, decoded.getVersionData().getNetworkMagic(), hex);
+            assertNotEquals(N2NVersionTableConstant.PROTOCOL_V101, decoded.getVersionNumber(), hex);
+        }
+    }
+
+    @Test
+    void directAcceptanceDecoderAlsoRejectsOverflowingTag() {
+        assertThrows(RuntimeException.class, () -> AcceptVersionSerializer.INSTANCE.deserialize(
+                HexUtil.decodeHexString("831b00000001000000011865841a00067932f400f4")));
+    }
+
+    @Test
     void sharedProposalDecoderPreservesLegacyNodeToClientUnsignedMagic() {
         VersionTable table = new VersionTable(Map.of(
                 32769L, new OldN2CVersionData(0xffff_ffffL),

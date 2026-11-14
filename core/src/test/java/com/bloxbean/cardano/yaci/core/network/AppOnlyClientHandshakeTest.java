@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.List;
+import java.util.HexFormat;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -163,6 +164,68 @@ class AppOnlyClientHandshakeTest {
                 assertEquals(1, rejected.get());
                 assertTrue(handshake.isDone());
                 assertFalse(handshake.isHandshakeSuccessful());
+                assertTimeoutPreemptively(Duration.ofSeconds(1), () ->
+                        assertThrows(IllegalStateException.class, session(handshake)::handshake));
+            } finally {
+                channel.finishAndReleaseAll();
+            }
+        }
+    }
+
+    @Test
+    void missingV101QueryCannotOpenApplicationTraffic() {
+        assertMalformedWireAcceptance("83011865831a00067932f400");
+    }
+
+    @Test
+    void oversizedMessageTagCannotAliasAcceptance() {
+        assertMalformedWireAcceptance("831b00000001000000011865841a00067932f400f4");
+    }
+
+    @Test
+    void malformedV101TupleTypesAndLengthsFailBeforeNormalization() {
+        for (String data : List.of(
+                "821a00067932f4",                    // Two-field legacy tuple.
+                "851a00067932f400f400",              // Extra version-data field.
+                "1a00067932",                       // Old N2C scalar.
+                "841a000679320000f4",                // Integer diffusion flag.
+                "841a00067932f600f4",                // Null diffusion flag.
+                "841a00067932f40000",                // Integer query flag.
+                "841a00067932f400f6",                // Null query flag.
+                "841a00067932f420f4",                // Negative peer sharing.
+                "841a00067932f460f4",                // Text peer sharing.
+                "841a00067932f41b0000000100000000f4", // Peer sharing must not narrow 2^32 to zero.
+                "8420f400f4",                        // Negative magic.
+                "841b0000000100000000f400f4",        // Magic beyond uint32.
+                "841b8000000000000000f400f4")) {      // Magic beyond signed long.
+            assertMalformedWireAcceptance("83011865" + data);
+        }
+        assertMalformedWireAcceptance("84011865841a00067932f400f400"); // Extra outer field.
+        assertMalformedWireAcceptance("83201865841a00067932f400f4");   // Negative message tag.
+    }
+
+    private void assertMalformedWireAcceptance(String hex) {
+        for (int protocol : List.of(100, 103)) {
+            HandshakeAgent handshake = appHandshake();
+            CountingAgent agent = new CountingAgent(protocol);
+            EmbeddedChannel channel = channel(handshake, agent);
+            AtomicInteger successes = new AtomicInteger();
+            AtomicInteger errors = new AtomicInteger();
+            handshake.addListener(new HandshakeAgentListener() {
+                @Override public void handshakeOk() { successes.incrementAndGet(); }
+                @Override public void handshakeError(Reason reason) { errors.incrementAndGet(); }
+            });
+            try {
+                handshake.sendRequest(handshake.buildNextMessage());
+                channel.writeInbound(Unpooled.wrappedBuffer(frame(0, HexFormat.of().parseHex(hex)),
+                        frame(protocol, EMPTY_CBOR_ARRAY)));
+                assertFalse(channel.isActive());
+                assertEquals(0, successes.get());
+                assertEquals(1, errors.get());
+                assertEquals(0, agent.messages);
+                assertTrue(handshake.isDone());
+                assertFalse(handshake.isHandshakeSuccessful());
+                assertNull(handshake.getProtocolVersion());
                 assertTimeoutPreemptively(Duration.ofSeconds(1), () ->
                         assertThrows(IllegalStateException.class, session(handshake)::handshake));
             } finally {

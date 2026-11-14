@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HexFormat;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -79,6 +80,45 @@ class AppOnlyHandshakeBoundaryTest {
                     } finally {
                         refusal.release();
                     }
+                } finally {
+                    channel.finishAndReleaseAll();
+                }
+            }
+        }
+    }
+
+    @Test
+    void malformedV101WireProposalsCannotOpenApplicationTraffic() {
+        List<String> proposals = new ArrayList<>();
+        for (String data : List.of(
+                "821a00067932f4", "831a00067932f400", "851a00067932f400f400",
+                "1a00067932", "841a000679320000f4", "841a00067932f600f4",
+                "841a00067932f40000", "841a00067932f400f6", "841a00067932f420f4",
+                "841a00067932f460f4", "841a00067932f41b0000000100000000f4",
+                "8420f400f4", "841b0000000100000000f400f4", "841b8000000000000000f400f4")) {
+            proposals.add("8200a11865" + data);
+        }
+        proposals.add("8300a11865841a00067932f400f400"); // Extra proposal field.
+        proposals.add("821b0000000100000000a11865841a00067932f400f4"); // Tag 2^32, not zero.
+        for (String hex : proposals) {
+            for (int protocol : List.of(100, 103)) {
+                EmbeddedChannel channel = new EmbeddedChannel();
+                CountingAgent agent = new CountingAgent(protocol);
+                AtomicInteger failures = new AtomicInteger();
+                try {
+                    NodeServerSession session = session(channel, MAGIC, agent, new ServerConnectionListener() {
+                        @Override public void onHandshakeFailed(Channel failedChannel, Throwable error) {
+                            failures.incrementAndGet();
+                        }
+                    });
+                    channel.writeInbound(Unpooled.wrappedBuffer(frame(0, HexFormat.of().parseHex(hex)),
+                            frame(protocol, EMPTY_CBOR_ARRAY)));
+                    assertFalse(channel.isActive(), hex);
+                    assertFalse(session.isReadyForProtocolMessages(), hex);
+                    assertFalse(session.getHandshakeAgent().isHandshakeSuccessful(), hex);
+                    assertNull(session.getHandshakeAgent().getProtocolVersion(), hex);
+                    assertEquals(0, agent.messages, hex);
+                    assertEquals(1, failures.get(), hex);
                 } finally {
                     channel.finishAndReleaseAll();
                 }
