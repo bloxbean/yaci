@@ -31,6 +31,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableCon
 @Slf4j
 public class NodeServerSession {
     private final boolean appOnly;
+    private volatile boolean handshakeComplete;
     private final Channel clientChannel;
     private final HandshakeAgent handshakeAgent;
     private final Agent[] agents;
@@ -83,18 +84,30 @@ public class NodeServerSession {
     }
 
     private void attachConnectionListener() {
-        if (connectionListener == null) {
+        if (connectionListener == null && !appOnly) {
             return;
         }
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
-                connectionListener.onHandshakeComplete(clientChannel, handshakeAgent.getProtocolVersion());
+                handshakeComplete = true;
+                if (connectionListener != null) {
+                    connectionListener.onHandshakeComplete(clientChannel, handshakeAgent.getProtocolVersion());
+                }
             }
 
             @Override
             public void handshakeError(Reason reason) {
-                connectionListener.onHandshakeFailed(clientChannel, new IllegalStateException(String.valueOf(reason)));
+                handshakeComplete = false;
+                try {
+                    if (connectionListener != null) {
+                        connectionListener.onHandshakeFailed(clientChannel, new IllegalStateException(String.valueOf(reason)));
+                    }
+                } finally {
+                    if (appOnly) {
+                        close();
+                    }
+                }
             }
         });
     }
@@ -106,6 +119,11 @@ public class NodeServerSession {
         pipeline.addLast(new MiniProtoRequestDataEncoder());
         pipeline.addLast(new MiniProtoStreamingByteToMessageDecoder(agents));
         pipeline.addLast(new MiniProtoServerInboundHandler(this));
+    }
+
+    /** Legacy Cardano dispatch is unchanged; app-only traffic requires successful negotiation. */
+    public boolean isReadyForProtocolMessages() {
+        return !appOnly || (handshakeComplete && clientChannel.isActive());
     }
 
     public HandshakeAgent getHandshakeAgent() {

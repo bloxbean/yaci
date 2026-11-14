@@ -27,6 +27,9 @@ public class N2NVersionTableConstant {
 
     /** Exclusive app-only capability; intentionally has no Cardano/hybrid fallback. */
     public static VersionTable appOnly(long networkMagic, boolean initiatorOnly) {
+        if (networkMagic < 0 || networkMagic > 0xffff_ffffL) {
+            throw new IllegalArgumentException("Network magic must be an unsigned 32-bit value");
+        }
         return new VersionTable(Map.of(PROTOCOL_V101,
                 new N2NVersionData(networkMagic, initiatorOnly, 0, false)));
     }

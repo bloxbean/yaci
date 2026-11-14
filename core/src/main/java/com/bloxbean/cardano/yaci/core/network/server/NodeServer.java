@@ -62,6 +62,8 @@ public class NodeServer {
     private NodeServer(int port, VersionTable versionTable, ChainState chainState,
                        TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig,
                        List<AgentFactory> agentFactories, boolean appOnly) {
+        this.agentFactories = agentFactories == null ? Collections.emptyList()
+                : appOnly ? List.copyOf(agentFactories) : agentFactories;
         this.appOnly = appOnly;
         this.port = port;
         this.bossGroup = new NioEventLoopGroup(1);
@@ -70,7 +72,6 @@ public class NodeServer {
         this.chainState = chainState;
         this.txSubmissionListener = txSubmissionListener;
         this.txSubmissionConfig = txSubmissionConfig != null ? txSubmissionConfig : TxSubmissionConfig.createDefault();
-        this.agentFactories = agentFactories != null ? List.copyOf(agentFactories) : Collections.emptyList();
     }
 
     public void setConnectionListener(ServerConnectionListener connectionListener) {
@@ -183,6 +184,9 @@ public class NodeServer {
 
         for (NodeServerSession session : sessions.values()) {
             try {
+                if (!session.isReadyForProtocolMessages()) {
+                    continue;
+                }
                 // Notify all agents in this session
                 for (Agent agent : session.getAgents()) {
                     try {
