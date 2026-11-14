@@ -2,6 +2,7 @@ package com.bloxbean.cardano.yaci.core.network.server;
 
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionListener;
 import com.bloxbean.cardano.yaci.core.protocol.txsubmission.TxSubmissionConfig;
 import com.bloxbean.cardano.yaci.core.storage.ChainState;
@@ -24,6 +25,7 @@ public class NodeServer {
     private final EventLoopGroup workerGroup;
     private Channel serverChannel;
     private VersionTable versionTable;
+    private final boolean appOnly;
     private ChainState chainState;
     private TxSubmissionListener txSubmissionListener;
     private TxSubmissionConfig txSubmissionConfig;
@@ -48,6 +50,19 @@ public class NodeServer {
     public NodeServer(int port, VersionTable versionTable, ChainState chainState,
                       TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig,
                       List<AgentFactory> agentFactories) {
+        this(port, versionTable, chainState, txSubmissionListener, txSubmissionConfig, agentFactories, false);
+    }
+
+    /** Creates a server without constructing any Cardano mini-protocol agents. */
+    public static NodeServer appOnly(int port, long networkMagic, List<AgentFactory> agentFactories) {
+        return new NodeServer(port,
+                N2NVersionTableConstant.appOnly(networkMagic, false), null, null, null, agentFactories, true);
+    }
+
+    private NodeServer(int port, VersionTable versionTable, ChainState chainState,
+                       TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig,
+                       List<AgentFactory> agentFactories, boolean appOnly) {
+        this.appOnly = appOnly;
         this.port = port;
         this.bossGroup = new NioEventLoopGroup(1);
         this.workerGroup = new NioEventLoopGroup();
@@ -55,7 +70,7 @@ public class NodeServer {
         this.chainState = chainState;
         this.txSubmissionListener = txSubmissionListener;
         this.txSubmissionConfig = txSubmissionConfig != null ? txSubmissionConfig : TxSubmissionConfig.createDefault();
-        this.agentFactories = agentFactories != null ? agentFactories : Collections.emptyList();
+        this.agentFactories = agentFactories != null ? List.copyOf(agentFactories) : Collections.emptyList();
     }
 
     public void setConnectionListener(ServerConnectionListener connectionListener) {
@@ -100,7 +115,7 @@ public class NodeServer {
                             try {
                                 NodeServerSession session = new NodeServerSession(
                                         ch, versionTable, chainState, txSubmissionListener,
-                                        txSubmissionConfig, agentFactories, listener);
+                                        txSubmissionConfig, agentFactories, listener, appOnly);
                                 sessions.put(ch, session);
                                 log.info("Created session for client: {}", ch.remoteAddress());
                             } catch (Exception e) {
