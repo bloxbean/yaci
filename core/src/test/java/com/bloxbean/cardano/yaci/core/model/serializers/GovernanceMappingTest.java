@@ -10,6 +10,7 @@ import com.bloxbean.cardano.yaci.core.model.serializers.governance.GovActionSeri
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.ProposalProcedureSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.VotingProceduresSerializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import com.bloxbean.cardano.yaci.core.types.UnitInterval;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
@@ -80,10 +81,20 @@ class GovernanceMappingTest {
     /** Kept: bytes read with no tree still reject what decoding them to a tree rejects, as the block path does. */
     @Test
     void bytesRejectWhatATreeRejects() {
-        String badRational = "d81e82" + "c24101" + "01";
+        // a zero denominator: both CCL readers refuse it (a bignum part is read since CCL 0.8.0-pre8, #753, as
+        // cardano-ledger's decodeInteger reads it; see bignumPartsOfARationalAreRead)
+        String badRational = "d81e82" + "01" + "00";
         assertThatThrownBy(() -> parameters("a1" + "0c" + badRational)).isInstanceOf(RuntimeException.class);
         assertThatThrownBy(() -> GovActionSerializer.INSTANCE.deserialize(bytes("d81e" + "8106")))
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    /** CCL 0.8.0-pre8 (#753): a rational's part may be a bignum (tag 2 or 3), kept as read. */
+    @Test
+    void bignumPartsOfARationalAreRead() {
+        UnitInterval d = parameters("a1" + "0c" + "d81e82" + "c24101" + "01").getDecentralisationParam();
+        assertThat(d.getNumerator()).isEqualTo(BigInteger.ONE);
+        assertThat(d.getDenominator()).isEqualTo(BigInteger.ONE);
     }
 
     /** Arrays of a definite length only, as the ledger decodes them below protocol version 12. */
