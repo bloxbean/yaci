@@ -19,7 +19,7 @@ class CertificateSerializerPinTest {
     private static final String HASH32 = "5820" + "22".repeat(32);
 
     @Test
-    void genesisDelegationThatFailsToParseIsAnEmptyCertificateAndAStackTrace() {
+    void genesisDelegationThatFailsToParseIsAnEmptyCertificateAndAWarning() {
         // Too few items, and the right count with integers in place of hashes.
         for (String cert : new String[]{"8205" + "00", "83" + "05" + HASH28 + HASH28, "84" + "05" + "010203"}) {
             PrintStream originalErr = System.err;
@@ -35,7 +35,8 @@ class CertificateSerializerPinTest {
             assertThat(parsed.getGenesisHash()).as(cert).isNull();
             assertThat(parsed.getGenesisDelegateHash()).as(cert).isNull();
             assertThat(parsed.getVrfKeyHash()).as(cert).isNull();
-            assertThat(err.toString()).as(cert).contains("Exception").contains("GenesisKeyDelegationSerializer");
+            // a WARN in the log, no longer a stack trace on stderr (SonarCloud S4507)
+            assertThat(err.toString()).as(cert).doesNotContain("GenesisKeyDelegationSerializer");
         }
     }
 

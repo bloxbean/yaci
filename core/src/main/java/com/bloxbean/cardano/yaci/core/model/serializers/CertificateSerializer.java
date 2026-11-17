@@ -23,11 +23,13 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Maps certificates read by {@link RawCertificate} to Yaci's models (ADR 0003 D8). The reader knows the format; this
  * class knows the models, and which certificates are read exactly.
  */
+@Slf4j
 public enum CertificateSerializer implements Serializer<Certificate> {
     INSTANCE;
 
@@ -70,7 +72,7 @@ public enum CertificateSerializer implements Serializer<Certificate> {
         try {
             return GenesisKeyDelegationSerializer.INSTANCE.read(span);
         } catch (Exception e) {
-            e.printStackTrace();
+            log.warn("Genesis key delegation certificate could not be read; kept as an empty one: {}", e.getMessage());
             return new GenesisKeyDelegation(null, null, null);
         }
     }
