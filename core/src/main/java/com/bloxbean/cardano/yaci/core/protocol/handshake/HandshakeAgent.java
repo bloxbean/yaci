@@ -3,7 +3,9 @@ package com.bloxbean.cardano.yaci.core.protocol.handshake;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.*;
+import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,6 +17,8 @@ import static com.bloxbean.cardano.yaci.core.protocol.handshake.HandshkeState.Pr
 public class HandshakeAgent extends Agent<HandshakeAgentListener> {
 
     private final VersionTable versionTable;
+    // The protocol state reaches Done before processResponse validates the peer.
+    private volatile boolean handshakeFinished;
     private boolean suppressConnectionInfoLog = false;
 
     private ProposedVersions proposedVersions;
@@ -108,10 +112,30 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
 
     @Override
     public void processResponse(Message message) {
+        if (isAppOnly() && (handshakeFinished || message == null
+                || !(message instanceof ProposedVersions || message instanceof AcceptVersion
+                        || message instanceof Reason || message instanceof Refuse)
+                || (isClient() && message instanceof ProposedVersions))) {
+            setProtocolVersion(null);
+            handshakeError(new ReasonRefused(N2NVersionTableConstant.PROTOCOL_V101,
+                    "Unexpected app-only handshake response"));
+            return;
+        }
         if (message == null) return;
         if (message instanceof ProposedVersions) {
             this.proposedVersions = (ProposedVersions) message;
-        } else if (message instanceof AcceptVersion) {
+        } else if (message instanceof AcceptVersion accepted) {
+            if (isAppOnly()) {
+                VersionData offered = versionTable.getVersionDataMap().get(accepted.getVersionNumber());
+                if (!isClient() || currentState != HandshkeState.Done || offered == null
+                        || !(accepted.getVersionData() instanceof N2NVersionData)
+                        || offered.getNetworkMagic() != accepted.getVersionData().getNetworkMagic()) {
+                    setProtocolVersion(null);
+                    handshakeError(new ReasonRefused(accepted.getVersionNumber(),
+                            "Unsolicited app-only version or network magic"));
+                    return;
+                }
+            }
             if (log.isDebugEnabled() || !suppressConnectionInfoLog)
                 log.info("Handshake Ok!!! {}", message);
             setProtocolVersion((AcceptVersion)message);
@@ -128,6 +152,7 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     }
 
     private void handshakeOk() {
+        handshakeFinished = true;
         getAgentListeners().forEach(handshakeAgentListener -> handshakeAgentListener.handshakeOk());
     }
 
@@ -140,15 +165,37 @@ public class HandshakeAgent extends Agent<HandshakeAgentListener> {
     }
 
     private void handshakeError(Reason reason) {
-        getAgentListeners().forEach(handshakeAgentListener -> handshakeAgentListener.handshakeError(reason));
+        handshakeFinished = true;
+        Channel failedChannel = isAppOnly() ? getChannel() : null;
+        try {
+            getAgentListeners().forEach(handshakeAgentListener -> handshakeAgentListener.handshakeError(reason));
+        } finally {
+            if (failedChannel != null) {
+                failedChannel.close();
+            }
+        }
+    }
+
+    /** Whether this agent negotiates the exclusive app-only capability. */
+    public boolean isAppOnly() {
+        return N2NVersionTableConstant.isAppOnly(versionTable);
+    }
+
+    /** A completed negotiation with a validated accepted version, rather than a refusal. */
+    public boolean isHandshakeSuccessful() {
+        return handshakeFinished && getProtocolVersion() != null;
     }
 
     @Override
     public boolean isDone() {
-        return currentState == HandshkeState.Done;
+        return isAppOnly() ? handshakeFinished : currentState == HandshkeState.Done;
     }
 
     public void reset() {
+        if (isAppOnly()) {
+            handshakeFinished = false;
+            setProtocolVersion(null);
+        }
         this.currentState = Propose;
     }
 

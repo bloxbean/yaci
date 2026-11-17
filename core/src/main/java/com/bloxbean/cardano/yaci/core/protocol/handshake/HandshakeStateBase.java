@@ -18,7 +18,7 @@ public interface HandshakeStateBase extends State {
     default Message handleInbound(byte[] bytes) {
         try {
             Array array = (Array) CborSerializationUtil.deserializeOne(bytes);
-            int id = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValue();
+            int id = ((UnsignedInteger) array.getDataItems().get(0)).getValue().intValueExact();
             switch (id) {
                 case 0:
                     return ProposedVersionSerializer.INSTANCE.deserialize(bytes); //Not used. Empty implementation as we are the sender here.

@@ -323,6 +323,7 @@ class Session implements Disposable {
     public void handshake() {
         //Handshake First
         while (!handshakeAgent.isDone()) {
+            requireAppOnlyConnection();
             if (handshakeAgent.hasAgency())
                 handshakeAgent.sendNextMessage();
             try {
@@ -332,8 +333,18 @@ class Session implements Disposable {
             }
         }
 
+        requireAppOnlyConnection();
+        if (handshakeAgent.isAppOnly() && !handshakeAgent.isHandshakeSuccessful()) {
+            throw new IllegalStateException("App-only handshake was refused or invalid");
+        }
         if (log.isDebugEnabled())
             log.debug("Handshake successful");
+    }
+
+    private void requireAppOnlyConnection() {
+        if (handshakeAgent.isAppOnly() && !handshakeAgent.isChannelActive()) {
+            throw new IllegalStateException("App-only connection closed before successful handshake");
+        }
     }
 
     private boolean showConnectionLog() {

@@ -6,6 +6,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 public class N2NVersionTableConstant {
     public final static long PROTOCOL_V4 = 4;
@@ -21,6 +22,21 @@ public class N2NVersionTableConstant {
     public final static long PROTOCOL_V14 = 14;
     public final static long PROTOCOL_V15 = 15; //srv support
     public final static long PROTOCOL_V100 = 100;
+    /** App-only sessions: no Cardano chain-sync, block-fetch or transaction submission. */
+    public static final long PROTOCOL_V101 = 101;
+
+    /** Exclusive app-only capability; intentionally has no Cardano/hybrid fallback. */
+    public static VersionTable appOnly(long networkMagic, boolean initiatorOnly) {
+        if (networkMagic < 0 || networkMagic > 0xffff_ffffL) {
+            throw new IllegalArgumentException("Network magic must be an unsigned 32-bit value");
+        }
+        return new VersionTable(Map.of(PROTOCOL_V101,
+                new N2NVersionData(networkMagic, initiatorOnly, 0, false)));
+    }
+
+    public static boolean isAppOnly(VersionTable table) {
+        return table != null && table.getVersionDataMap().keySet().equals(Set.of(PROTOCOL_V101));
+    }
 
     /**
      * Check if the negotiated version supports app-layer protocols (Protocol 100+).

@@ -38,6 +38,10 @@ public class MiniProtoServerInboundHandler extends SimpleChannelInboundHandler<S
                 if (!session.getHandshakeAgent().isDone() && session.getHandshakeAgent().hasAgency())
                     session.getHandshakeAgent().sendNextMessage();
             } else {
+                if (!session.isReadyForProtocolMessages()) {
+                    ctx.close();
+                    return;
+                }
                 log.debug("Routing message for protocol {} to agents", segment.getProtocol());
                 boolean messageHandled = false;
                 for (Agent agent : session.getAgents()) {
@@ -88,8 +92,10 @@ public class MiniProtoServerInboundHandler extends SimpleChannelInboundHandler<S
 
     @Override
     public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
-        for (Agent agent : session.getAgents()) {
-            agent.onChannelWritabilityChanged(ctx.channel());
+        if (session.isReadyForProtocolMessages()) {
+            for (Agent agent : session.getAgents()) {
+                agent.onChannelWritabilityChanged(ctx.channel());
+            }
         }
         super.channelWritabilityChanged(ctx);
     }

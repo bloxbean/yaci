@@ -3,6 +3,7 @@ package com.bloxbean.cardano.yaci.core.network.handlers;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
 import com.bloxbean.cardano.yaci.core.protocol.Segment;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.ReferenceCountUtil;
@@ -56,6 +57,12 @@ public class MiniProtoClientInboundHandler extends ChannelInboundHandlerAdapter 
                 Message message = handshakeAgent.deserializeResponse(segment.getPayload());
                 handshakeAgent.receiveResponse(message);
             } else {
+                if (handshakeAgent instanceof HandshakeAgent handshake && handshake.isAppOnly()
+                        && (!handshake.isHandshakeSuccessful() || !ctx.channel().isActive())) {
+                    isActive = false;
+                    ctx.close();
+                    return;
+                }
                 for (Agent agent : agents) {
                     if (!agent.isDone() && agent.getProtocolId() == segment.getProtocol()) {
                         // Validate channel before processing

@@ -23,9 +23,15 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.Objects;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 
 @Slf4j
 public class NodeServerSession {
+    private final boolean appOnly;
+    private volatile boolean handshakeComplete;
     private final Channel clientChannel;
     private final HandshakeAgent handshakeAgent;
     private final Agent[] agents;
@@ -51,6 +57,19 @@ public class NodeServerSession {
     public NodeServerSession(Channel clientChannel, VersionTable versionTable, ChainState chainState,
                            TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig,
                            List<AgentFactory> agentFactories, ServerConnectionListener connectionListener) {
+        this(clientChannel, versionTable, chainState, txSubmissionListener, txSubmissionConfig,
+                agentFactories, connectionListener, false);
+    }
+
+    /** Explicit app-only composition; old constructors retain the Cardano agent set. */
+    public NodeServerSession(Channel clientChannel, VersionTable versionTable, ChainState chainState,
+                             TxSubmissionListener txSubmissionListener, TxSubmissionConfig txSubmissionConfig,
+                             List<AgentFactory> agentFactories, ServerConnectionListener connectionListener,
+                             boolean appOnly) {
+        if (appOnly && !N2NVersionTableConstant.isAppOnly(versionTable)) {
+            throw new IllegalArgumentException("App-only sessions require an exclusive V101 version table");
+        }
+        this.appOnly = appOnly;
         this.clientChannel = clientChannel;
         this.handshakeAgent = new HandshakeAgent(versionTable, false);
         this.chainState = chainState;
@@ -65,18 +84,30 @@ public class NodeServerSession {
     }
 
     private void attachConnectionListener() {
-        if (connectionListener == null) {
+        if (connectionListener == null && !appOnly) {
             return;
         }
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
-                connectionListener.onHandshakeComplete(clientChannel, handshakeAgent.getProtocolVersion());
+                handshakeComplete = true;
+                if (connectionListener != null) {
+                    connectionListener.onHandshakeComplete(clientChannel, handshakeAgent.getProtocolVersion());
+                }
             }
 
             @Override
             public void handshakeError(Reason reason) {
-                connectionListener.onHandshakeFailed(clientChannel, new IllegalStateException(String.valueOf(reason)));
+                handshakeComplete = false;
+                try {
+                    if (connectionListener != null) {
+                        connectionListener.onHandshakeFailed(clientChannel, new IllegalStateException(String.valueOf(reason)));
+                    }
+                } finally {
+                    if (appOnly) {
+                        close();
+                    }
+                }
             }
         });
     }
@@ -88,6 +119,11 @@ public class NodeServerSession {
         pipeline.addLast(new MiniProtoRequestDataEncoder());
         pipeline.addLast(new MiniProtoStreamingByteToMessageDecoder(agents));
         pipeline.addLast(new MiniProtoServerInboundHandler(this));
+    }
+
+    /** Legacy Cardano dispatch is unchanged; app-only traffic requires successful negotiation. */
+    public boolean isReadyForProtocolMessages() {
+        return !appOnly || (handshakeComplete && clientChannel.isActive());
     }
 
     public HandshakeAgent getHandshakeAgent() {
@@ -103,7 +139,29 @@ public class NodeServerSession {
         clientChannel.close();
     }
 
+    private Agent[] createAppOnlyAgents() {
+        List<Agent<?>> result = new ArrayList<>();
+        KeepAliveServerAgent keepAlive = new KeepAliveServerAgent();
+        keepAlive.setChannel(clientChannel);
+        result.add(keepAlive);
+        Set<Integer> protocols = new HashSet<>();
+        protocols.add(keepAlive.getProtocolId());
+        for (AgentFactory factory : agentFactories) {
+            Agent<?> agent = Objects.requireNonNull(factory.createAgent(), "App-only agent factory returned null");
+            int protocol = agent.getProtocolId();
+            if (protocol < 100 || !protocols.add(protocol)) {
+                throw new IllegalArgumentException("Invalid or duplicate app-only protocol: " + protocol);
+            }
+            agent.setChannel(clientChannel);
+            result.add(agent);
+        }
+        return result.toArray(new Agent[0]);
+    }
+
     private Agent[] createAgents() {
+        if (appOnly) {
+            return createAppOnlyAgents();
+        }
         // Initialize L1 mini-protocol handlers
         ChainSyncServerAgent chainSyncAgent = new ChainSyncServerAgent(chainState);
         BlockFetchServerAgent blockFetchAgent = new BlockFetchServerAgent(chainState);

@@ -17,6 +17,27 @@ import java.util.Map;
 @Slf4j
 public class HandshakeSerializers {
 
+    // V101 has a fixed N2N wire shape. Check it before the legacy decoder can
+    // default absent fields, normalize non-booleans, or narrow unsigned values.
+    private static N2NVersionData decodeAppOnlyVersionData(DataItem data) {
+        if (!(data instanceof Array array) || array.getDataItems().size() != 4) {
+            throw new CborRuntimeException("V101 version data must contain exactly four items");
+        }
+        List<DataItem> items = array.getDataItems();
+        if (!(items.get(0) instanceof UnsignedInteger magic)
+                || !(items.get(2) instanceof UnsignedInteger peerSharing)
+                || (items.get(1) != SimpleValue.TRUE && items.get(1) != SimpleValue.FALSE)
+                || (items.get(3) != SimpleValue.TRUE && items.get(3) != SimpleValue.FALSE)) {
+            throw new CborRuntimeException("Invalid V101 version data field types");
+        }
+        long networkMagic = magic.getValue().longValueExact();
+        if (networkMagic > 0xffff_ffffL) {
+            throw new CborRuntimeException("V101 network magic must be an unsigned 32-bit integer");
+        }
+        return new N2NVersionData(networkMagic, items.get(1) == SimpleValue.TRUE,
+                peerSharing.getValue().intValueExact(), items.get(3) == SimpleValue.TRUE);
+    }
+
     public enum ProposedVersionSerializer implements Serializer<ProposedVersions> {
         INSTANCE;
 
@@ -36,12 +57,16 @@ public class HandshakeSerializers {
             Array array = (Array) di;
             var dataItems = array.getDataItems();
             var label = ((UnsignedInteger)dataItems.get(0)).getValue();
-            if (label != BigInteger.ZERO)
+            if (!BigInteger.ZERO.equals(label))
                 throw new RuntimeException("Expected label : " + 0 + ", found : " + label); //TODO should we throw here or return null
 
             var versionTableDI = dataItems.get(1);
             var versionTable = VersionTableSerializer.INSTANCE.deserializeDI(versionTableDI);
 
+            if (versionTable.getVersionDataMap().containsKey(N2NVersionTableConstant.PROTOCOL_V101)
+                    && dataItems.size() != 2) {
+                throw new CborRuntimeException("V101 proposal must contain exactly two items");
+            }
             return new ProposedVersions(versionTable);
         }
     }
@@ -88,28 +113,33 @@ public class HandshakeSerializers {
             cborMap.getKeys()
                     .forEach(key -> {
                         DataItem value = cborMap.get(key);
+                        if (((UnsignedInteger) key).getValue().equals(
+                                BigInteger.valueOf(N2NVersionTableConstant.PROTOCOL_V101))) {
+                            versionDataMap.put(N2NVersionTableConstant.PROTOCOL_V101, decodeAppOnlyVersionData(value));
+                            return;
+                        }
                         if (value.getMajorType() == MajorType.UNSIGNED_INTEGER) { //Old N2C
-                            versionDataMap.put(((UnsignedInteger) key).getValue().longValue(),
-                                    new OldN2CVersionData(((UnsignedInteger) value).getValue().intValue()));
+                            versionDataMap.put(((UnsignedInteger) key).getValue().longValueExact(),
+                                    new OldN2CVersionData(((UnsignedInteger) value).getValue().longValueExact()));
                         } else if (value.getMajorType() == MajorType.ARRAY) {
-                            long versionNumber = ((UnsignedInteger) key).getValue().longValue();
+                            long versionNumber = ((UnsignedInteger) key).getValue().longValueExact();
                             if (versionNumber > 32000) { //N2C
                                 Array versionDataArray = (Array) value;
-                                long networkMagic = ((UnsignedInteger) versionDataArray.getDataItems().get(0)).getValue().intValue();
+                                long networkMagic = ((UnsignedInteger) versionDataArray.getDataItems().get(0)).getValue().longValueExact();
                                 Boolean query = versionDataArray.getDataItems().get(1) == SimpleValue.TRUE ? Boolean.TRUE : Boolean.FALSE;
 
                                 versionDataMap.put(versionNumber, new N2CVersionData(networkMagic, query));
                             } else { //N2N
                                 Array versionDataArray = (Array) value;
                                 if (versionDataArray.getDataItems().size() == 2) { //N2N 1,2,3,4,5,6,7,8,9,10
-                                    long networkMagic = ((UnsignedInteger) versionDataArray.getDataItems().get(0)).getValue().intValue();
+                                    long networkMagic = ((UnsignedInteger) versionDataArray.getDataItems().get(0)).getValue().longValueExact();
 
                                     DataItem initiatorOnlyDiffusionModeDI = versionDataArray.getDataItems().get(1);
                                     boolean iodm = initiatorOnlyDiffusionModeDI == SimpleValue.TRUE ? true : false;
 
                                     versionDataMap.put(versionNumber, new N2NVersionData(networkMagic, iodm));
                                 } else if (versionDataArray.getDataItems().size() == 4) { //N2N 11,12
-                                    long networkMagic = ((UnsignedInteger) versionDataArray.getDataItems().get(0)).getValue().intValue();
+                                    long networkMagic = ((UnsignedInteger) versionDataArray.getDataItems().get(0)).getValue().longValueExact();
 
                                     DataItem initiatorOnlyDiffusionModeDI = versionDataArray.getDataItems().get(1);
                                     boolean iodm = initiatorOnlyDiffusionModeDI == SimpleValue.TRUE ? true : false;
@@ -134,17 +164,23 @@ public class HandshakeSerializers {
         public AcceptVersion deserializeDI(DataItem di) {
             Array array = (Array) di;
             List<DataItem> dataItems = array.getDataItems();
-            int label = ((UnsignedInteger) dataItems.get(0)).getValue().intValue();
+            BigInteger label = ((UnsignedInteger) dataItems.get(0)).getValue();
 
-            if (label != 1)
+            if (!BigInteger.ONE.equals(label))
                 throw new CborRuntimeException("Invalid label : " + di);
 
-            long versionNumber = ((UnsignedInteger) dataItems.get(1)).getValue().intValue();
+            long versionNumber = ((UnsignedInteger) dataItems.get(1)).getValue().longValueExact();
 
             DataItem versionDataDI = dataItems.get(2);
+            if (versionNumber == N2NVersionTableConstant.PROTOCOL_V101) {
+                if (dataItems.size() != 3) {
+                    throw new CborRuntimeException("V101 acceptance must contain exactly three items");
+                }
+                return new AcceptVersion(versionNumber, decodeAppOnlyVersionData(versionDataDI));
+            }
             if (versionDataDI.getMajorType() == MajorType.ARRAY) { //N2N
                 Array versionDataArr = (Array) dataItems.get(2);
-                long networkMagic = ((UnsignedInteger) versionDataArr.getDataItems().get(0)).getValue().intValue();
+                long networkMagic = ((UnsignedInteger) versionDataArr.getDataItems().get(0)).getValue().longValueExact();
                 DataItem initiatorAndResponderDiffusionModeDI = versionDataArr.getDataItems().get(1);
                 boolean iardm = initiatorAndResponderDiffusionModeDI == SimpleValue.TRUE ? true : false;
 
@@ -190,6 +226,25 @@ public class HandshakeSerializers {
             array.add(versionData);
 
             return array;
+        }
+    }
+
+    public enum RefuseSerializer implements Serializer<Refuse> {
+        INSTANCE;
+
+        @Override
+        public DataItem serializeDI(Refuse refuse) {
+            DataItem reason;
+            if (refuse.getReason() instanceof ReasonVersionMismatch mismatch) {
+                reason = ReasonVersionMismatchSerializer.INSTANCE.serializeDI(mismatch);
+            } else if (refuse.getReason() instanceof ReasonHandshakeDecodeError decodeError) {
+                reason = ReasonHandshakeDecodeErrorSerializer.INSTANCE.serializeDI(decodeError);
+            } else if (refuse.getReason() instanceof ReasonRefused refused) {
+                reason = ReasonRefusedSerializer.INSTANCE.serializeDI(refused);
+            } else {
+                throw new IllegalArgumentException("Unsupported handshake refusal reason: " + refuse.getReason());
+            }
+            return new Array().add(new UnsignedInteger(2)).add(reason);
         }
     }
 
