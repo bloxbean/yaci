@@ -75,8 +75,8 @@ A hash is of the bytes, as the ledger takes it; Yaci does not check them against
 chain has passed. A reference script that is not `[type, script]` of a known type has no hash, logged, and the output
 and its block are kept. A native script's hash and the metadata labels need the source bytes, so a decoded tree passed
 to a deprecated `deserializeDI` gives none. Plutus script, inline datum and reference script hashes cover bytes that a
-re-encoding keeps, so they are given there too. The helper's `Utxo` carries the output hashes, and `UtxoByAddressQuery` sets CCL's `referenceScriptHash` to the
-hash (it held the script's bytes before).
+re-encoding keeps, so they are given there too. The helper's `Utxo` carries the output hashes, and
+`UtxoByAddressQuery` sets CCL's `referenceScriptHash` to the hash (it held the script's bytes before).
 
 ## Raw witness correction
 

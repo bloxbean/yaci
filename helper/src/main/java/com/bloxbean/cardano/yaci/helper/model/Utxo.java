@@ -24,7 +24,7 @@ public class Utxo {
     /** Blake2b-256 of the inline datum's bytes; null without an inline datum. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String inlineDatumHash;
-    /** Hash of the reference script, from the bytes received; null without one or when its bytes are not a script. */
+    /** Hash of the reference script, from the bytes received; see TransactionOutput.referenceScriptHash. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String referenceScriptHash;
 
