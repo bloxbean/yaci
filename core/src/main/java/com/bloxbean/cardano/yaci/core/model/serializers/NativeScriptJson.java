@@ -9,6 +9,7 @@ import com.bloxbean.cardano.client.exception.CborRuntimeException;
 import com.bloxbean.cardano.client.transaction.spec.script.RequireTimeAfter;
 import com.bloxbean.cardano.client.transaction.spec.script.RequireTimeBefore;
 import com.bloxbean.cardano.client.transaction.spec.script.ScriptPubkey;
+import com.bloxbean.cardano.yaci.core.model.Credential;
 import com.bloxbean.cardano.yaci.core.model.NativeScript;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
@@ -35,7 +36,10 @@ import static com.bloxbean.cardano.yaci.core.model.NativeScriptType.*;
  * A bounded iterative size estimate selects legacy pretty printing for small scripts and
  * compact JSON for large scripts, avoiding excessive indentation before allocating the output.
  *
- * <p>JSON I/O failures produce a {@code parseError}; malformed script structure still throws.
+ * <p>Dijkstra's {@code script_require_guard} (6) is written as {@code {"type": "guard", "credential": {...}}}, with the
+ * credential as Yaci's {@link Credential} writes it, in any era (ADR 0003 D4b; experimental, as Dijkstra is not
+ * final). JSON I/O failures produce a {@code parseError}, as does a script of a type this writer does not know, or
+ * with a child of one: leaving it out would change the tree or the list. Malformed script structure still throws.
  */
 final class NativeScriptJson {
     private static final int TYPE_INDEX = 0;
@@ -43,6 +47,8 @@ final class NativeScriptJson {
     private static final int KEY_HASH_INDEX = 1;
     private static final int REQUIRED_COUNT_INDEX = 1;
     private static final int M_OF_CHILDREN_INDEX = 2;
+    private static final int CREDENTIAL_INDEX = 1;
+    private static final int CREDENTIAL_HASH_INDEX = 1;
     // Estimated character budget for pretty printing, not a script size or nesting limit.
     private static final int MAX_PRETTY_JSON_SIZE = 64 * 1024;
 
@@ -55,10 +61,10 @@ final class NativeScriptJson {
     private NativeScriptJson() {}
 
     /**
-     * Converts one script, preserving the existing omission behavior for unknown types.
+     * Converts one script.
      *
      * @param script decoded CBOR array beginning with a native-script discriminator
-     * @return JSON or an explicit representation failure; null for an unknown script type
+     * @return JSON, or no JSON and a parse error for a representation failure or an unknown type in the tree
      * @throws CborRuntimeException if the script structure cannot be interpreted
      */
     static NativeScript parse(Array script) {
@@ -68,10 +74,8 @@ final class NativeScriptJson {
     /** Allows tests to exercise JSON failure handling with a constrained, local factory. */
     static NativeScript parse(Array script, JsonFactory factory) {
         int type = type(script);
-        if (type > REQUIRE_TIME_BEFORE) {
-            return null; // Preserve the existing behavior for unknown native-script types.
-        }
         StringWriter output = new StringWriter();
+        Integer unknownType = null;
         try (JsonGenerator json = factory.createGenerator(output)) {
             if (shouldPrettyPrint(script)) {
                 json.setPrettyPrinter(new DefaultPrettyPrinter());
@@ -79,7 +83,9 @@ final class NativeScriptJson {
             Deque<Iterator<DataItem>> parents = new ArrayDeque<>();
             Array next = script;
             while (true) {
-                writeScript(next, json, parents);
+                if (!writeScript(next, json, parents) && unknownType == null) {
+                    unknownType = type(next);
+                }
                 next = null;
                 while (!parents.isEmpty()) {
                     Iterator<DataItem> children = parents.peek();
@@ -109,6 +115,11 @@ final class NativeScriptJson {
             return new NativeScript(type, null, "Native script JSON conversion failed: "
                     + e.getClass().getSimpleName());
         }
+        if (unknownType != null) {
+            // Every known node was still validated, so a malformed one throws as it always did.
+            return new NativeScript(type, null, "Native script JSON conversion failed: unknown native script type "
+                    + unknownType);
+        }
         return new NativeScript(type, output.toString());
     }
 
@@ -125,13 +136,17 @@ final class NativeScriptJson {
         try {
             while (true) {
                 int type = type(next);
-                if (type <= REQUIRE_TIME_BEFORE) {
+                if (type <= REQUIRE_GUARD) {
                     List<DataItem> items = next.getDataItems();
                     int depth = parents.size();
                     // Two spaces per indentation level on each of the object's lines.
                     estimatedSize += 64L + 6L * depth;
                     if (type == REQUIRE_SIGNATURE) {
                         estimatedSize += 2L * ((ByteString) items.get(KEY_HASH_INDEX)).getBytes().length;
+                    } else if (type == REQUIRE_GUARD) {
+                        // The credential is an object of its own, of two fields.
+                        estimatedSize += 64L + 6L * depth + 2L * ((ByteString) ((Array) items.get(CREDENTIAL_INDEX))
+                                .getDataItems().get(CREDENTIAL_HASH_INDEX)).getBytes().length;
                     } else if (type == REQUIRE_M_OF) {
                         estimatedSize += 24L + 2L * depth
                                 + ((co.nstant.in.cbor.model.Number) items.get(REQUIRED_COUNT_INDEX))
@@ -172,22 +187,33 @@ final class NativeScriptJson {
     /**
      * Writes a leaf completely, or opens a composite and pushes its children for the main loop.
      * This method never calls itself; the caller closes each composite after its children finish.
+     *
+     * @return false, writing nothing, for a script of a type this writer cannot represent
      */
-    private static void writeScript(Array script, JsonGenerator json, Deque<Iterator<DataItem>> parents)
+    private static boolean writeScript(Array script, JsonGenerator json, Deque<Iterator<DataItem>> parents)
             throws IOException {
         int type = type(script);
-        if (type > REQUIRE_TIME_BEFORE) {
-            return;
+        if (type > REQUIRE_GUARD) {
+            return false;
         }
         List<DataItem> items = script.getDataItems();
         try {
+            if (type == REQUIRE_GUARD) {
+                Credential credential = Credential.deserialize((Array) items.get(CREDENTIAL_INDEX));
+                json.writeStartObject();
+                json.writeStringField("type", "guard");
+                json.writeFieldName("credential");
+                LEAF_MAPPER.writeValue(json, credential);
+                json.writeEndObject();
+                return true;
+            }
             if (type == REQUIRE_SIGNATURE || type == REQUIRE_TIME_AFTER || type == REQUIRE_TIME_BEFORE) {
                 // Leaf parsers retain the client library's existing field and numeric semantics.
                 Object leaf = type == REQUIRE_SIGNATURE ? ScriptPubkey.deserialize(script)
                         : type == REQUIRE_TIME_AFTER ? RequireTimeAfter.deserialize(script)
                         : RequireTimeBefore.deserialize(script);
                 LEAF_MAPPER.writeValue(json, leaf);
-                return;
+                return true;
             }
             DataItem children = items.get(type == REQUIRE_M_OF ? M_OF_CHILDREN_INDEX : CHILDREN_INDEX);
             if (!(children instanceof Array)) {
@@ -201,6 +227,7 @@ final class NativeScriptJson {
             }
             json.writeArrayFieldStart("scripts");
             parents.push(((Array) children).getDataItems().iterator());
+            return true;
         } catch (IOException e) {
             throw e;
         } catch (Exception e) {

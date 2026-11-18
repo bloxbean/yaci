@@ -1,6 +1,5 @@
 package com.bloxbean.cardano.yaci.core.network.handlers;
 
-import com.bloxbean.cardano.yaci.core.util.ArrayCborDecoder;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.MajorType;
 import com.bloxbean.cardano.client.crypto.bip32.util.BytesUtil;
@@ -59,7 +58,7 @@ public class MiniProtoStreamingByteToMessageDecoder
             bytes = BytesUtil.merge(bytes, payload);
             try {
                 while (true && bytes.length != 0) {
-                    List<DataItem> diList = ArrayCborDecoder.decode(bytes);
+                    DataItem[] diList = CborSerializationUtil.deserialize(bytes);
                     //To handle. When multiple dataitems and non array data items which are part of message
                     //Exp. Local State Query : Current Protocol Param's maxCollateralInputs always comes as a separate
                     //DataItem.
@@ -67,7 +66,7 @@ public class MiniProtoStreamingByteToMessageDecoder
                     //iteration.
                     byte[] segmentBytes;
                     List<DataItem> finalDIs = null;
-                    if (diList.size() > 1) {
+                    if (diList.length > 1) {
                         //ArrayList with initialSize is used instead of LinkedList to save time in .size() call later.
                         //This is critical for BlockFetch usecase
                         finalDIs = new ArrayList<>(3);
@@ -76,7 +75,7 @@ public class MiniProtoStreamingByteToMessageDecoder
                         //check for array
                         for (DataItem di: diList) {
                             if (i == 0) {
-                                finalDIs.add(diList.get(0));
+                                finalDIs.add(diList[0]);
                                 i++;
                                 continue;
                             }
@@ -92,7 +91,7 @@ public class MiniProtoStreamingByteToMessageDecoder
                     if (finalDIs != null && finalDIs.size() > 1) //These items are considered part of the same message.
                         segmentBytes = CborSerializationUtil.serialize(finalDIs.toArray(new DataItem[0]), false);
                     else
-                        segmentBytes = CborSerializationUtil.serialize(diList.get(0), false);
+                        segmentBytes = CborSerializationUtil.serialize(diList[0], false);
 
                     Segment segment = Segment.builder()
                             .timestamp(timestamp)

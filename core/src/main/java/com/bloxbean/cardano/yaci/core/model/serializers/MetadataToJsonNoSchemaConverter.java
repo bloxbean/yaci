@@ -1,11 +1,9 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.CborDecoder;
-import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.*;
-import com.bloxbean.cardano.client.exception.CborDeserializationException;
 import com.bloxbean.cardano.client.metadata.exception.MetadataDeSerializationException;
 import com.bloxbean.cardano.client.util.HexUtil;
+import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
@@ -47,20 +45,15 @@ class MetadataToJsonNoSchemaConverter {
         }
     }
 
-    private static java.util.Map cborHexToJavaMap(String hex) throws CborDeserializationException {
-        byte[] cborBytes = HexUtil.decodeHexString(hex);
-        List<DataItem> dataItemList = null;
-        try {
-            dataItemList = CborDecoder.decode(cborBytes);
-        } catch (CborException e) {
-            throw new CborDeserializationException("Cbor deserialization failed", e);
-        }
+    private static java.util.Map cborHexToJavaMap(String hex) {
+        DataItem[] dataItems = CborSerializationUtil.deserialize(HexUtil.decodeHexString(hex));
 
-        if(dataItemList != null && dataItemList.size() > 1)
-            throw new MetadataDeSerializationException("Multiple DataItems found at top level. Should be zero : " + dataItemList.size());
+        if(dataItems.length > 1)
+            throw new MetadataDeSerializationException(
+                    "Multiple DataItems found at top level. Should be zero : " + dataItems.length);
 
         java.util.Map result = new HashMap();
-        DataItem dataItem = dataItemList.get(0);
+        DataItem dataItem = dataItems[0];
         if(dataItem instanceof Map) {
             result = processMap((Map)dataItem);
         } else {
@@ -121,6 +114,11 @@ class MetadataToJsonNoSchemaConverter {
     }
 
     private static Object processArray(Array array) {
+        // Metadata with an indefinite array has never converted, and this is not the change that decides otherwise:
+        // cbor-java's decoder, used here until ADR 0003 M2, ended such an array with a BREAK, an unsupported value.
+        if (array.isChunked())
+            throw new MetadataDeSerializationException("Unsupported type : " + SPECIAL);
+
         List<DataItem> dataItems = array.getDataItems();
         List resultList = new ArrayList();
         for(DataItem valueItem: dataItems) {

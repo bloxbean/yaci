@@ -29,6 +29,18 @@ class TxCborUtilTest {
         assertThat(HexUtil.encodeHexString(txCbor)).isEqualTo("84a0a0f4a10102");
     }
 
+    /** Dijkstra is submitted as [body, witnesses, aux / null], whatever the block's flag (ADR 0003 D4a). */
+    @Test
+    void assembleTxCbor_dijkstraEnvelopeHasNoFlag() {
+        byte[] txCbor = TxCborUtil.assembleTxCbor(Era.Dijkstra,
+                HexUtil.decodeHexString("a0"),
+                HexUtil.decodeHexString("a0"),
+                HexUtil.decodeHexString("a10102"),
+                false);
+
+        assertThat(HexUtil.encodeHexString(txCbor)).isEqualTo("83a0a0a10102");
+    }
+
     @Test
     void assembleTxCbor_returnsNullForMissingRequiredSegments() {
         assertThat(TxCborUtil.assembleTxCbor(Era.Conway, null, HexUtil.decodeHexString("a0"), null, true))

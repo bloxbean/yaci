@@ -25,12 +25,14 @@ public class TxCborUtil {
      * The outer 3/4-element definite array is convention: blocks store transaction
      * bodies, witness sets, validity flags, and auxiliary data as separate segments,
      * so the submitter's original outer transaction framing is not recoverable.
+     * A Dijkstra transaction is written as it is submitted and relayed, {@code [body, witnesses, aux / null]}, the
+     * bytes of CCL's {@code RawBlock.txBytes(i)}: its block form's flag is not part of it (ADR 0003 D4a).
      *
      * @param era transaction era
      * @param body raw transaction body bytes
      * @param witnessSet raw transaction witness-set bytes
      * @param auxData raw auxiliary data bytes, or null when absent
-     * @param isValid transaction validity flag for Alonzo and later
+     * @param isValid transaction validity flag for Alonzo to Conway
      * @return assembled transaction CBOR, or null when required data is missing
      */
     public static byte[] assembleTxCbor(Era era,
@@ -50,7 +52,7 @@ public class TxCborUtil {
 
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            if (era == Era.Shelley || era == Era.Allegra || era == Era.Mary) {
+            if (era == Era.Shelley || era == Era.Allegra || era == Era.Mary || era == Era.Dijkstra) {
                 baos.write(ARRAY_3);
                 baos.write(body);
                 baos.write(witnessSet);

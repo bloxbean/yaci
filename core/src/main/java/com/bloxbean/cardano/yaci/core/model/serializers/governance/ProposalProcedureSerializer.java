@@ -1,43 +1,45 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 
-import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
-import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
+import com.bloxbean.cardano.client.spec.Era;
+import com.bloxbean.cardano.client.transaction.raw.RawProposal;
 import com.bloxbean.cardano.yaci.core.model.governance.ProposalProcedure;
-import com.bloxbean.cardano.yaci.core.model.governance.actions.GovAction;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
-import lombok.extern.slf4j.Slf4j;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
-import java.math.BigInteger;
-import java.util.List;
-
-@Slf4j
+/** Maps proposal procedures read by {@link RawProposal} to Yaci's model (ADR 0003 D8). */
 public enum ProposalProcedureSerializer implements Serializer<ProposalProcedure> {
     INSTANCE;
 
     /**
-     * proposal_procedure =
-     *   [ deposit : coin
-     *   , reward_account
-     *   , gov_action
-     *   , anchor
-     *   ]
-     * @param di
-     * @return
+     * @param bytes a proposal procedure, exactly one CBOR item
+     * @return the proposal, read as Conway; null for empty input
      */
     @Override
+    public ProposalProcedure deserialize(byte[] bytes) {
+        if (bytes.length == 0)
+            return null;
+        return read(RawProposal.lenient(CborSerializationUtil.span(bytes), Era.Conway));
+    }
+
+    /**
+     * @deprecated A decoded proposal procedure has lost its source encoding. Use {@link #deserialize(byte[])} with its
+     * bytes, or {@link #read(RawProposal)}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
+    @Override
     public ProposalProcedure deserializeDI(DataItem di) {
-        log.trace("ProposalProcedureSerializer.deserializeDI ------");
+        return read(RawProposal.lenient(CborSerializationUtil.span(di), Era.Conway));
+    }
 
-        Array proposalProcedureArray = (Array) di;
-        List<DataItem> diList = proposalProcedureArray.getDataItems();
-
-        BigInteger deposit = CborSerializationUtil.toBigInteger(diList.get(0));
-        String rewardAccount = CborSerializationUtil.toHex(diList.get(1));
-        GovAction govAction = GovActionSerializer.INSTANCE.deserializeDI(diList.get(2));
-        Anchor anchor = AnchorSerializer.INSTANCE.deserializeDI(diList.get(3));
-
-        return new ProposalProcedure(deposit, rewardAccount, govAction, anchor);
+    /**
+     * @param proposal a proposal procedure as received
+     * @return the proposal
+     */
+    public ProposalProcedure read(RawProposal proposal) {
+        return new ProposalProcedure(proposal.deposit(), HexUtil.encodeHexString(proposal.rewardAccount()),
+                GovActionSerializer.INSTANCE.read(proposal.govAction()),
+                AnchorSerializer.INSTANCE.read(proposal.anchor()));
     }
 }

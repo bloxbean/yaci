@@ -155,6 +155,8 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
                     .datumHash(txOutput.getDatumHash())
                     .inlineDatum(txOutput.getInlineDatum())
                     .scriptRef(txOutput.getScriptRef())
+                    .inlineDatumHash(txOutput.getInlineDatumHash())
+                    .referenceScriptHash(txOutput.getReferenceScriptHash())
                     .build();
 
             utxos.add(utxo);
@@ -175,6 +177,8 @@ public class BlockFetchAgentListenerAdapter implements BlockfetchAgentListener {
                     .datumHash(txOutput.getDatumHash())
                     .inlineDatum(txOutput.getInlineDatum())
                     .scriptRef(txOutput.getScriptRef())
+                    .inlineDatumHash(txOutput.getInlineDatumHash())
+                    .referenceScriptHash(txOutput.getReferenceScriptHash())
                     .build();
 
             return Optional.of(utxo);

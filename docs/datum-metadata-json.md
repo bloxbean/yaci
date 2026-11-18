@@ -40,8 +40,10 @@ when handling untrusted nesting.
 
 ## Compatibility
 
-Ordinary datum JSON keeps the existing pretty format, and ordinary metadata keeps its existing
-canonical CBOR representation. JSON conversion no longer falls back to recursive `toString()`.
+Ordinary datum JSON keeps the existing pretty format. `AuxData.metadataCbor` is the metadata value's
+original encoding, so map key order and duplicate keys are kept (yaci-store#1215); a decoded tree passed to
+`deserializeDI` has no source bytes, so its own encoding is kept. The metadata JSON is still converted from the
+canonical value. JSON conversion no longer falls back to recursive `toString()`.
 Healthy Conway map-form redeemers retain their existing re-encoded four-element CBOR representation,
 even if another value triggers recovery. Their data CBOR and datum hashes still use source bytes.
 Empty witness/auxiliary byte buffers continue to return null. Block recovery, like the normal parser,
@@ -53,6 +55,28 @@ encoding, without canonicalization; metadata CBOR is only the metadata value, no
 auxiliary-data structure used for its transaction hash.
 
 Inline datums already expose their embedded CBOR directly.
+
+## Hashes and labels from the bytes received
+
+A consumer should not decode a value and re-encode it to hash or store it: a re-encoding can change integer
+widths, chunked strings, repeated map keys and map order. Yaci gives the bytes and their hashes as received, read
+through CCL's reader:
+
+| Field | Value |
+| --- | --- |
+| `Datum.cbor`, `Datum.hash` (witness datums, redeemer data) | source bytes; Blake2b-256 of them |
+| `TransactionOutput.inlineDatum`, `inlineDatumHash` | bytes inside the tag 24; Blake2b-256 of them |
+| `TransactionOutput.scriptRef`, `referenceScriptHash` | bytes inside the tag 24; the script's hash |
+| `NativeScript.scriptHash`, `PlutusScript.scriptHash` (witness set, aux data) | Blake2b-224 of the language byte and the native script's CBOR or the Plutus script's bytes |
+| `AuxData.metadataCbor` | the metadata map's source bytes |
+| `AuxData.metadataLabels` | per entry, in order: the label, and `a1` + the key's and the value's source bytes |
+
+A hash is of the bytes, as the ledger takes it; Yaci does not check them against the ledger's rules, which a block on
+chain has passed. A reference script that is not `[type, script]` of a known type has no hash, logged, and the output
+and its block are kept. A native script's hash and the metadata labels need the source bytes, so a decoded tree passed
+to a deprecated `deserializeDI` gives none. Plutus script, inline datum and reference script hashes cover bytes that a
+re-encoding keeps, so they are given there too. The helper's `Utxo` carries the output hashes, and
+`UtxoByAddressQuery` sets CCL's `referenceScriptHash` to the hash (it held the script's bytes before).
 
 ## Raw witness correction
 

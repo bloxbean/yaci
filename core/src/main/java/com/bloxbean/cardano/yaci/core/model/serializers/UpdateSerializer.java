@@ -1,9 +1,18 @@
 package com.bloxbean.cardano.yaci.core.model.serializers;
 
-import co.nstant.in.cbor.CborDecoder;
-import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.*;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
+import com.bloxbean.cardano.client.spec.Era;
+import com.bloxbean.cardano.client.transaction.raw.RawCostModels;
+import com.bloxbean.cardano.client.transaction.raw.RawExUnitPrices;
+import com.bloxbean.cardano.client.transaction.raw.RawExUnits;
+import com.bloxbean.cardano.client.transaction.raw.RawProtocolParamUpdate;
+import com.bloxbean.cardano.client.transaction.raw.RawProtocolVersion;
+import com.bloxbean.cardano.client.transaction.raw.RawUpdate;
+import com.bloxbean.cardano.client.transaction.raw.RawVotingThresholds;
+import com.bloxbean.cardano.client.transaction.raw.RawVotingThresholds.DRep;
+import com.bloxbean.cardano.client.transaction.raw.RawVotingThresholds.Pool;
+import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.DrepVoteThresholds;
 import com.bloxbean.cardano.yaci.core.model.PoolVotingThresholds;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
@@ -16,352 +25,218 @@ import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.util.Tuple;
 
 import java.math.BigInteger;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.List;
+import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 
 import static com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.*;
 
+/**
+ * Maps updates and parameter updates read by {@link RawUpdate} and {@link RawProtocolParamUpdate} to Yaci's models (ADR
+ * 0003 D8). Key 17 is kept in {@code adaPerUtxoByte} whatever the era. The cost models and their hash are the bytes
+ * received (I8). Dijkstra's keys 34 to 56 come from the view, which reads them only in Dijkstra (D4b; experimental, as
+ * Dijkstra is not final).
+ */
 public enum UpdateSerializer implements Serializer<Update> {
     INSTANCE;
 
-    //    update = [ proposed_protocol_parameter_updates
-//         , epoch
-//         ]
+    /**
+     * @param bytes an update, exactly one CBOR item
+     * @return the update, read as Conway; null for empty input
+     */
+    @Override
+    public Update deserialize(byte[] bytes) {
+        if (bytes.length == 0)
+            return null;
+        return read(RawUpdate.lenient(CborSerializationUtil.span(bytes), Era.Conway));
+    }
+
+    /**
+     * @deprecated A decoded update has lost its source encoding. Use {@link #deserialize(byte[])} with its bytes, or
+     * {@link #read(RawUpdate)}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     @Override
     public Update deserializeDI(DataItem di) {
-        Array array = (Array) di;
-        List<DataItem> dataItemList = array.getDataItems();
-
-        long epoch = toInt(dataItemList.get(1));
-
-        Map protoParamUpdateMap = (Map) dataItemList.get(0);
-
-        java.util.Map<String, ProtocolParamUpdate> deProtocolParamUpdateMap = new HashMap<>();
-        Collection<DataItem> genesisHashDIKeys = protoParamUpdateMap.getKeys();
-
-        if (genesisHashDIKeys != null && genesisHashDIKeys.size() > 0) {
-            for (DataItem gensisHashDI : genesisHashDIKeys) {
-                Map genesisProtocolParamsMap = (Map) protoParamUpdateMap.get(gensisHashDI);
-
-                ProtocolParamUpdate protocolParamUpdate = getProtocolParams(genesisProtocolParamsMap);
-
-                String genHashKey = HexUtil.encodeHexString(toBytes(gensisHashDI));
-                deProtocolParamUpdateMap.put(genHashKey, protocolParamUpdate);
-            }
-        }
-
-        return new Update(deProtocolParamUpdateMap, epoch);
+        return read(RawUpdate.lenient(CborSerializationUtil.span(di), Era.Conway));
     }
 
+    /**
+     * @param update an update as received
+     * @return the update, each genesis key's proposal under its hash in hex. The epoch keeps only its low 32 bits, as
+     * it always has
+     */
+    public Update read(RawUpdate update) {
+        java.util.Map<String, ProtocolParamUpdate> updates = new HashMap<>();
+        for (java.util.Map.Entry<byte[], RawProtocolParamUpdate> proposal : update.proposals())
+            updates.put(HexUtil.encodeHexString(proposal.getKey()), read(proposal.getValue()));
+        return new Update(updates, (int) update.epoch());
+    }
+
+    /**
+     * @param genesisProtocolParamsMap a parameter update, decoded
+     * @return the parameter update, read as Conway
+     * @deprecated A decoded parameter update has lost its source encoding, which its cost models hash. Use
+     * {@link #read(RawProtocolParamUpdate)}.
+     */
+    @Deprecated(since = "0.5.0", forRemoval = true)
     public ProtocolParamUpdate getProtocolParams(Map genesisProtocolParamsMap) {
-        DataItem itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(0));
-        Integer minFeeA = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(1));
-        Integer minFeeB = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(2));
-        Integer maxBlockSize = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(3));
-        Integer maxTxSize = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(4));
-        Integer maxBlockHeaderSize = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(5));
-        BigInteger keyDeposit = itemDI != null ? toBigInteger(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(6));
-        BigInteger poolDeposit = itemDI != null ? toBigInteger(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(7));
-        Integer maxEpoch = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(8));
-        Integer nOpt = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(9));
-        NonNegativeInterval poolPledgeInfluence = itemDI != null ? toNonNegativeInterval(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(10));
-        UnitInterval expansionRate = itemDI != null ? toUnitInterval(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(11));
-        UnitInterval treasuryGrowthRate = itemDI != null ? toUnitInterval(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(12));
-        UnitInterval decentralizationParam = itemDI != null ? toUnitInterval(itemDI) : null;
-
-        Tuple<Integer, String> extraEntropy = null;
-//                $nonce /= [ 0 // 1, bytes .size 32 ]
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(13)); //Removed
-        if (itemDI != null) {
-            List<DataItem> extraEntropyDIList = ((Array) itemDI).getDataItems();
-            int extraEntropy_1 = toInt(extraEntropyDIList.get(0));
-            String extraEntropy_2 = "";
-            if (extraEntropyDIList.size() == 2) {
-                extraEntropy_2 = HexUtil.encodeHexString(toBytes(extraEntropyDIList.get(1)));
-            }
-            extraEntropy = new Tuple<>(extraEntropy_1, extraEntropy_2);
-        }
-
-        Integer protocolMajorVersion = null;
-        Integer protocolMinorVersion = null;
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(14));
-        if (itemDI != null) {
-            List<DataItem> protocolVersionDIList = ((Array) itemDI).getDataItems();
-            protocolMajorVersion = toInt(protocolVersionDIList.get(0));
-            protocolMinorVersion = toInt(protocolVersionDIList.get(1));
-        }
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(15)); //Removed
-        BigInteger minUtxo = itemDI != null ? toBigInteger(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(16));
-        BigInteger minPoolCost = itemDI != null ? toBigInteger(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(17));
-        BigInteger adaPerUtxoBytes = itemDI != null ? toBigInteger(itemDI) : null;
-
-        //CostModels
-        java.util.Map<Integer, String> costModelMap = null;
-        String costModelsHash = null;
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(18));
-        if (itemDI != null) {
-            costModelMap = new LinkedHashMap<>();
-            Map itemDIMap = (Map) itemDI;
-            for (DataItem key : itemDIMap.getKeys()) {
-                Integer version = toInt(key);
-                String costModel = HexUtil.encodeHexString(CborSerializationUtil.serialize(itemDIMap.get(key)));
-                costModelMap.put(version, costModel);
-            }
-
-            var cbor = CborSerializationUtil.serialize(itemDI);
-            costModelsHash = HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(cbor));
-        }
-
-        //exUnits prices
-        NonNegativeInterval priceMem = null;
-        NonNegativeInterval priceSteps = null;
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(19));
-        if (itemDI != null) {
-            List<DataItem> exUnitPriceList = ((Array) itemDI).getDataItems();
-            Tuple<NonNegativeInterval, NonNegativeInterval> tuple = getExUnitPrices(exUnitPriceList);
-            priceMem = tuple._1;
-            priceSteps = tuple._2;
-        }
-
-        //max tx exunits
-        BigInteger maxTxExMem = null;
-        BigInteger maxTxExSteps = null;
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(20));
-        if (itemDI != null) {
-            List<DataItem> exUnits = ((Array) itemDI).getDataItems();
-            Tuple<BigInteger, BigInteger> tuple = getExUnits(exUnits);
-            maxTxExMem = tuple._1;
-            maxTxExSteps = tuple._2;
-        }
-
-        //max block exunits
-        BigInteger maxBlockExMem = null;
-        BigInteger maxBlockExSteps = null;
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(21));
-        if (itemDI != null) {
-            List<DataItem> exUnits = ((Array) itemDI).getDataItems();
-            Tuple<BigInteger, BigInteger> tuple = getExUnits(exUnits);
-            maxBlockExMem = tuple._1;
-            maxBlockExSteps = tuple._2;
-        }
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(22));
-        Long maxValueSize = itemDI != null ? toLong(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(23));
-        Integer collateralPercent = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(24));
-        Integer maxCollateralPercent = itemDI != null ? toInt(itemDI) : null;
-
-        //Conway era protocol parameters
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(25));
-        PoolVotingThresholds poolVotingThresholds = deserializePoolVotingThresholds(itemDI);
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(26));
-        DrepVoteThresholds drepVoteThresholds = deserializeDrepVoteThresholds(itemDI);
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(27));
-        Integer minCommitteeSize = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(28));
-        Integer committeeTermLimit = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(29));
-        Integer goveranceActionValidityPeriod = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(30));
-        BigInteger governanceActionDeposit = itemDI != null ? toBigInteger(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(31));
-        BigInteger drepDeposit = itemDI != null ? toBigInteger(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(32));
-        Integer drepInactivityPeriod = itemDI != null ? toInt(itemDI) : null;
-
-        itemDI = genesisProtocolParamsMap.get(new UnsignedInteger(33));
-        NonNegativeInterval minFeeRefScriptCostPerByte = itemDI != null ? toNonNegativeInterval(itemDI) : null;
-
-        ProtocolParamUpdate protocolParamUpdate = ProtocolParamUpdate.builder()
-                .minFeeA(minFeeA)
-                .minFeeB(minFeeB)
-                .maxBlockSize(maxBlockSize)
-                .maxTxSize(maxTxSize)
-                .maxBlockHeaderSize(maxBlockHeaderSize)
-                .keyDeposit(keyDeposit)
-                .poolDeposit(poolDeposit)
-                .maxEpoch(maxEpoch)
-                .nOpt(nOpt)
-                .poolPledgeInfluence(poolPledgeInfluence)
-                .expansionRate(expansionRate)
-                .treasuryGrowthRate(treasuryGrowthRate)
-                .decentralisationParam(decentralizationParam)
-                .extraEntropy(extraEntropy)
-                .protocolMajorVer(protocolMajorVersion)
-                .protocolMinorVer(protocolMinorVersion)
-                .minUtxo(minUtxo)
-                .minPoolCost(minPoolCost)
-                .adaPerUtxoByte(adaPerUtxoBytes)
-                .costModels(costModelMap)
-                .costModelsHash(costModelsHash)
-                .priceMem(priceMem)
-                .priceStep(priceSteps)
-                .maxTxExMem(maxTxExMem)
-                .maxTxExSteps(maxTxExSteps)
-                .maxBlockExMem(maxBlockExMem)
-                .maxBlockExSteps(maxBlockExSteps)
-                .maxValSize(maxValueSize)
-                .collateralPercent(collateralPercent)
-                .maxCollateralInputs(maxCollateralPercent)
-                .poolVotingThresholds(poolVotingThresholds)
-                .drepVotingThresholds(drepVoteThresholds)
-                .committeeMinSize(minCommitteeSize)
-                .committeeMaxTermLength(committeeTermLimit)
-                .govActionLifetime(goveranceActionValidityPeriod)
-                .govActionDeposit(governanceActionDeposit)
-                .drepDeposit(drepDeposit)
-                .drepActivity(drepInactivityPeriod)
-                .minFeeRefScriptCostPerByte(minFeeRefScriptCostPerByte)
-                .build();
-        return protocolParamUpdate;
-    }
-
-    private Tuple<BigInteger, BigInteger> getExUnits(List<DataItem> exunits) {
-        BigInteger mem = toBigInteger(exunits.get(0));
-
-        BigInteger steps = null;
-        if (exunits.size() > 1)
-            steps = toBigInteger(exunits.get(1));
-
-        return new Tuple<>(mem, steps);
-    }
-
-    private Tuple<NonNegativeInterval, NonNegativeInterval> getExUnitPrices(List<DataItem> exunits) {
-        RationalNumber memPriceRN = (RationalNumber) exunits.get(0);
-        RationalNumber stepPriceRN = (RationalNumber) exunits.get(1);
-
-        var memPrice = toNonNegativeInterval(memPriceRN);
-        var stepPrice = toNonNegativeInterval(stepPriceRN);
-
-        return new Tuple<>(memPrice, stepPrice);
+        return read(RawProtocolParamUpdate.lenient(CborSerializationUtil.span(genesisProtocolParamsMap), Era.Conway));
     }
 
     /**
-     * pool_voting_thresholds =
-     *   [ unit_interval ; motion no confidence
-     *   , unit_interval ; committee normal
-     *   , unit_interval ; committee no confidence
-     *   , unit_interval ; hard fork initiation
-     *   ]
-     * @param itemDI
-     * @return
+     * @param update a parameter update as received
+     * @return the parameter update. A field of 32 bits before Dijkstra, such as the maximum block size, keeps only the
+     * low 32 bits of its value in an {@code Integer}, as it always has; Dijkstra's are whole, in a {@code Long}
      */
-    private PoolVotingThresholds deserializePoolVotingThresholds(DataItem itemDI) {
-        if (itemDI == null)
-            return null;
+    public ProtocolParamUpdate read(RawProtocolParamUpdate update) {
+        ProtocolParamUpdate.ProtocolParamUpdateBuilder builder = ProtocolParamUpdate.builder()
+                .minFeeA(update.minFeeA().map(BigInteger::intValue).orElse(null))
+                .minFeeB(update.minFeeB().map(BigInteger::intValue).orElse(null))
+                .maxBlockSize(low32(update.maxBlockBodySize()))
+                .maxTxSize(low32(update.maxTxSize()))
+                .maxBlockHeaderSize(orNull(update.maxBlockHeaderSize()))
+                .keyDeposit(update.keyDeposit().orElse(null))
+                .poolDeposit(update.poolDeposit().orElse(null))
+                .maxEpoch(low32(update.maxEpoch()))
+                .nOpt(orNull(update.nOpt()))
+                .poolPledgeInfluence(update.poolPledgeInfluence().map(UpdateSerializer::nonNegative).orElse(null))
+                .expansionRate(update.expansionRate().map(UpdateSerializer::unit).orElse(null))
+                .treasuryGrowthRate(update.treasuryGrowthRate().map(UpdateSerializer::unit).orElse(null))
+                .decentralisationParam(update.decentralization().map(UpdateSerializer::unit).orElse(null))
+                .extraEntropy(update.extraEntropy().map(nonce -> nonce.hash()
+                        .map(hash -> new Tuple<>(1, HexUtil.encodeHexString(hash)))
+                        .orElse(new Tuple<>(0, ""))).orElse(null))
+                .minUtxo(update.minUtxoValue().orElse(null))
+                .minPoolCost(update.minPoolCost().orElse(null))
+                .adaPerUtxoByte(update.coinsPerUtxoByte().orElse(null))
+                .maxValSize(orNull(update.maxValueSize()))
+                .collateralPercent(orNull(update.collateralPercentage()))
+                .maxCollateralInputs(orNull(update.maxCollateralInputs()))
+                .poolVotingThresholds(update.poolVotingThresholds().map(UpdateSerializer::pool).orElse(null))
+                .drepVotingThresholds(update.drepVotingThresholds().map(UpdateSerializer::drep).orElse(null))
+                .committeeMinSize(orNull(update.minCommitteeSize()))
+                .committeeMaxTermLength(low32(update.committeeTermLimit()))
+                .govActionLifetime(low32(update.govActionLifetime()))
+                .govActionDeposit(update.govActionDeposit().orElse(null))
+                .drepDeposit(update.drepDeposit().orElse(null))
+                .drepActivity(low32(update.drepInactivity()))
+                .minFeeRefScriptCostPerByte(update.minFeeRefScriptCostPerByte().map(UpdateSerializer::nonNegative)
+                        .orElse(null));
 
-        List<DataItem> poolVotingThresholds = ((Array) itemDI).getDataItems();
-        UnitInterval motionNoConfidence = toUnitInterval(poolVotingThresholds.get(0));
-        UnitInterval committeeNormal = toUnitInterval(poolVotingThresholds.get(1));
-        UnitInterval committeeNoConfidence = toUnitInterval(poolVotingThresholds.get(2));
-        UnitInterval hardForkInitiation = toUnitInterval(poolVotingThresholds.get(3));
-        UnitInterval ppSecurityGroup = toUnitInterval(poolVotingThresholds.get(4));
+        Optional<RawProtocolVersion> version = update.protocolVersion();
+        if (version.isPresent()) {
+            BigInteger minor = version.get().minor();
+            builder.protocolMajorVer(version.get().major()).protocolMinorVer(minor == null ? null : minor.intValue());
+        }
+        Optional<RawCostModels> costModels = update.costModels();
+        if (costModels.isPresent()) {
+            java.util.Map<Integer, String> models = new LinkedHashMap<>();
+            for (RawCostModels.Model model : costModels.get().models())
+                models.put(model.language(), HexUtil.encodeHexString(model.span().bytes()));
+            builder.costModels(models).costModelsHash(
+                    HexUtil.encodeHexString(Blake2bUtil.blake2bHash256(costModels.get().span().bytes())));
+        }
+        Optional<RawExUnitPrices> prices = update.executionCosts();
+        if (prices.isPresent())
+            builder.priceMem(nonNegative(prices.get().memory())).priceStep(nonNegative(prices.get().steps()));
+        Optional<RawExUnits> maxTx = update.maxTxExUnits();
+        if (maxTx.isPresent())
+            builder.maxTxExMem(maxTx.get().mem()).maxTxExSteps(maxTx.get().steps());
+        Optional<RawExUnits> maxBlock = update.maxBlockExUnits();
+        if (maxBlock.isPresent())
+            builder.maxBlockExMem(maxBlock.get().mem()).maxBlockExSteps(maxBlock.get().steps());
 
+        builder.maxRefScriptSizePerBlock(orNull(update.maxRefScriptSizePerBlock()))
+                .maxRefScriptSizePerTx(orNull(update.maxRefScriptSizePerTx()))
+                .refScriptCostStride(orNull(update.refScriptCostStride()))
+                .refScriptCostMultiplier(update.refScriptCostMultiplier().map(UpdateSerializer::nonNegative)
+                        .orElse(null))
+                .maxPledgeLeverage(update.maxPledgeLeverage().map(value -> value.map(UpdateSerializer::nonNegative))
+                        .orElse(null))
+                .minPoolMargin(update.minPoolMargin().map(UpdateSerializer::unit).orElse(null))
+                .leiosAnnouncementPeriodLength(orNull(update.leiosAnnouncementPeriodLength()))
+                .leiosVotePeriodLength(orNull(update.leiosVotePeriodLength()))
+                .leiosDiffusionPeriodLength(orNull(update.leiosDiffusionPeriodLength()))
+                .leiosCommitteeSize(orNull(update.leiosCommitteeSize()))
+                .leiosQuorumStakeThreshold(update.leiosQuorumStakeThreshold().map(UpdateSerializer::unit)
+                        .orElse(null))
+                .maxEndorserBlockReferencesSize(orNull(update.maxEndorserBlockReferencesSize()))
+                .maxEndorserBlockTxsSize(orNull(update.maxEndorserBlockTxsSize()))
+                .maxRefScriptSizePerEndorserBlock(orNull(update.maxRefScriptSizePerEndorserBlock()))
+                .perasMinCandidateBlockAge(orNull(update.perasMinCandidateBlockAge()))
+                .perasHealingFactor(update.perasHealingFactor().map(UpdateSerializer::nonNegative).orElse(null))
+                .perasCertBoost(orNull(update.perasCertBoost()))
+                .perasTargetCommitteeSize(orNull(update.perasTargetCommitteeSize()))
+                .perasBootstrapRound(update.perasBootstrapRound()
+                        .map(round -> round.isPresent() ? Optional.of(round.getAsLong()) : Optional.<Long>empty())
+                        .orElse(null))
+                .perasQuorumThresholdSafetyMargin(update.perasQuorumThresholdSafetyMargin()
+                        .map(UpdateSerializer::unit).orElse(null))
+                .refInputsCostPerMultiAssetPolicy(update.refInputsCostPerMultiAssetPolicy().orElse(null))
+                .refInputsCostPerDatumByte(update.refInputsCostPerDatumByte().orElse(null));
+        Optional<RawExUnits> maxEndorserBlock = update.maxEndorserBlockExUnits();
+        if (maxEndorserBlock.isPresent())
+            builder.maxEndorserBlockExMem(maxEndorserBlock.get().mem())
+                    .maxEndorserBlockExSteps(maxEndorserBlock.get().steps());
+        return builder.build();
+    }
+
+    private static Integer low32(OptionalLong value) {
+        return value.isPresent() ? (int) value.getAsLong() : null;
+    }
+
+    private static Integer orNull(OptionalInt value) {
+        return value.isPresent() ? value.getAsInt() : null;
+    }
+
+    private static Long orNull(OptionalLong value) {
+        return value.isPresent() ? value.getAsLong() : null;
+    }
+
+    private static UnitInterval unit(com.bloxbean.cardano.client.spec.UnitInterval interval) {
+        return new UnitInterval(interval.getNumerator(), interval.getDenominator());
+    }
+
+    private static NonNegativeInterval nonNegative(com.bloxbean.cardano.client.spec.UnitInterval interval) {
+        return new NonNegativeInterval(interval.getNumerator(), interval.getDenominator());
+    }
+
+    private static PoolVotingThresholds pool(RawVotingThresholds thresholds) {
         return PoolVotingThresholds.builder()
-                .pvtMotionNoConfidence(motionNoConfidence)
-                .pvtCommitteeNormal(committeeNormal)
-                .pvtCommitteeNoConfidence(committeeNoConfidence)
-                .pvtHardForkInitiation(hardForkInitiation)
-                .pvtPPSecurityGroup(ppSecurityGroup)
+                .pvtMotionNoConfidence(unit(thresholds.get(Pool.MOTION_NO_CONFIDENCE)))
+                .pvtCommitteeNormal(unit(thresholds.get(Pool.COMMITTEE_NORMAL)))
+                .pvtCommitteeNoConfidence(unit(thresholds.get(Pool.COMMITTEE_NO_CONFIDENCE)))
+                .pvtHardForkInitiation(unit(thresholds.get(Pool.HARD_FORK_INITIATION)))
+                .pvtPPSecurityGroup(unit(thresholds.get(Pool.SECURITY_GROUP)))
                 .build();
-
     }
 
-    /**
-     * drep_voting_thresholds =
-     *   [ unit_interval ; motion no confidence
-     *   , unit_interval ; committee normal
-     *   , unit_interval ; committee no confidence
-     *   , unit_interval ; update constitution
-     *   , unit_interval ; hard fork initiation
-     *   , unit_interval ; PP network group
-     *   , unit_interval ; PP economic group
-     *   , unit_interval ; PP technical group
-     *   , unit_interval ; PP governance group
-     *   , unit_interval ; treasury withdrawal
-     *   ]
-     * @param itemDI
-     * @return
-     */
-    private DrepVoteThresholds deserializeDrepVoteThresholds(DataItem itemDI) {
-        if (itemDI == null)
-            return null;
-
-        List<DataItem> drepVotingThresholds = ((Array) itemDI).getDataItems();
-        UnitInterval motionNoConfidence = toUnitInterval(drepVotingThresholds.get(0));
-        UnitInterval committeeNormal = toUnitInterval(drepVotingThresholds.get(1));
-        UnitInterval committeeNoConfidence = toUnitInterval(drepVotingThresholds.get(2));
-        UnitInterval updateConstitution = toUnitInterval(drepVotingThresholds.get(3));
-        UnitInterval hardForkInitiation = toUnitInterval(drepVotingThresholds.get(4));
-        UnitInterval ppNetworkGroup = toUnitInterval(drepVotingThresholds.get(5));
-        UnitInterval ppEconomicGroup = toUnitInterval(drepVotingThresholds.get(6));
-        UnitInterval ppTechnicalGroup = toUnitInterval(drepVotingThresholds.get(7));
-        UnitInterval ppGovernanceGroup = toUnitInterval(drepVotingThresholds.get(8));
-        UnitInterval treasuryWithdrawal = toUnitInterval(drepVotingThresholds.get(9));
-
+    private static DrepVoteThresholds drep(RawVotingThresholds thresholds) {
         return DrepVoteThresholds.builder()
-                .dvtMotionNoConfidence(motionNoConfidence)
-                .dvtCommitteeNormal(committeeNormal)
-                .dvtCommitteeNoConfidence(committeeNoConfidence)
-                .dvtUpdateToConstitution(updateConstitution)
-                .dvtHardForkInitiation(hardForkInitiation)
-                .dvtPPNetworkGroup(ppNetworkGroup)
-                .dvtPPEconomicGroup(ppEconomicGroup)
-                .dvtPPTechnicalGroup(ppTechnicalGroup)
-                .dvtPPGovGroup(ppGovernanceGroup)
-                .dvtTreasuryWithdrawal(treasuryWithdrawal)
+                .dvtMotionNoConfidence(unit(thresholds.get(DRep.MOTION_NO_CONFIDENCE)))
+                .dvtCommitteeNormal(unit(thresholds.get(DRep.COMMITTEE_NORMAL)))
+                .dvtCommitteeNoConfidence(unit(thresholds.get(DRep.COMMITTEE_NO_CONFIDENCE)))
+                .dvtUpdateToConstitution(unit(thresholds.get(DRep.UPDATE_CONSTITUTION)))
+                .dvtHardForkInitiation(unit(thresholds.get(DRep.HARD_FORK_INITIATION)))
+                .dvtPPNetworkGroup(unit(thresholds.get(DRep.NETWORK_GROUP)))
+                .dvtPPEconomicGroup(unit(thresholds.get(DRep.ECONOMIC_GROUP)))
+                .dvtPPTechnicalGroup(unit(thresholds.get(DRep.TECHNICAL_GROUP)))
+                .dvtPPGovGroup(unit(thresholds.get(DRep.GOVERNANCE_GROUP)))
+                .dvtTreasuryWithdrawal(unit(thresholds.get(DRep.TREASURY_WITHDRAWAL)))
                 .build();
     }
 
     // =====================================================================
     // Serialization: ProtocolParamUpdate → CBOR Map
-    // Inverse of getProtocolParams(). Sparse map — only non-null fields.
+    // Inverse of read(RawProtocolParamUpdate). Sparse map — only non-null fields.
     // =====================================================================
 
     /**
      * Serialize a ProtocolParamUpdate to a CBOR Map.
-     * Field indices match the CDDL protocol_param_update spec and {@link #getProtocolParams(Map)} deserialization.
+     * Field indices match the CDDL protocol_param_update spec and {@link #read(RawProtocolParamUpdate)}.
      */
     public static DataItem serializePPUpdate(ProtocolParamUpdate ppu) {
         if (ppu == null) return SimpleValue.NULL;
@@ -415,9 +290,8 @@ public enum UpdateSerializer implements Serializer<Update> {
             for (var entry : ppu.getCostModels().entrySet()) {
                 try {
                     byte[] costModelBytes = HexUtil.decodeHexString(entry.getValue());
-                    DataItem costModelDI = CborDecoder.decode(costModelBytes).get(0);
-                    cmMap.put(cborUInt(entry.getKey()), costModelDI);
-                } catch (CborException e) {
+                    cmMap.put(cborUInt(entry.getKey()), CborSerializationUtil.deserializeOne(costModelBytes));
+                } catch (CborRuntimeException e) {
                     throw new RuntimeException("Failed to decode cost model CBOR for version " + entry.getKey(), e);
                 }
             }
@@ -432,21 +306,9 @@ public enum UpdateSerializer implements Serializer<Update> {
             map.put(cborUInt(19), prices);
         }
 
-        // 20: max_tx_ex_units [mem, steps] — BigInteger values
-        if (ppu.getMaxTxExMem() != null || ppu.getMaxTxExSteps() != null) {
-            Array exUnits = new Array();
-            exUnits.add(ppu.getMaxTxExMem() != null ? cborUInt(ppu.getMaxTxExMem()) : cborUInt(0));
-            exUnits.add(ppu.getMaxTxExSteps() != null ? cborUInt(ppu.getMaxTxExSteps()) : cborUInt(0));
-            map.put(cborUInt(20), exUnits);
-        }
-
-        // 21: max_block_ex_units [mem, steps] — BigInteger values
-        if (ppu.getMaxBlockExMem() != null || ppu.getMaxBlockExSteps() != null) {
-            Array exUnits = new Array();
-            exUnits.add(ppu.getMaxBlockExMem() != null ? cborUInt(ppu.getMaxBlockExMem()) : cborUInt(0));
-            exUnits.add(ppu.getMaxBlockExSteps() != null ? cborUInt(ppu.getMaxBlockExSteps()) : cborUInt(0));
-            map.put(cborUInt(21), exUnits);
-        }
+        // 20: max_tx_ex_units, 21: max_block_ex_units
+        putExUnits(map, 20, ppu.getMaxTxExMem(), ppu.getMaxTxExSteps());
+        putExUnits(map, 21, ppu.getMaxBlockExMem(), ppu.getMaxBlockExSteps());
 
         // 22-24: maxValSize, collateralPercent, maxCollateralInputs
         if (ppu.getMaxValSize() != null) map.put(cborUInt(22), cborUInt(ppu.getMaxValSize()));
@@ -468,7 +330,57 @@ public enum UpdateSerializer implements Serializer<Update> {
         // 33: minFeeRefScriptCostPerByte
         if (ppu.getMinFeeRefScriptCostPerByte() != null) map.put(cborUInt(33), serializeRational(ppu.getMinFeeRefScriptCostPerByte()));
 
+        // 34-56: Dijkstra (experimental, as Dijkstra is not final). Words of 32 bits are written whole.
+        putUInt(map, 34, ppu.getMaxRefScriptSizePerBlock());
+        putUInt(map, 35, ppu.getMaxRefScriptSizePerTx());
+        putUInt(map, 36, ppu.getRefScriptCostStride());
+        putRational(map, 37, ppu.getRefScriptCostMultiplier());
+        if (ppu.getMaxPledgeLeverage() != null)
+            map.put(cborUInt(38), ppu.getMaxPledgeLeverage().map(CborSerializationUtil::serializeRational)
+                    .orElse(SimpleValue.NULL));
+        putRational(map, 39, ppu.getMinPoolMargin());
+        putUInt(map, 40, ppu.getLeiosAnnouncementPeriodLength());
+        putUInt(map, 41, ppu.getLeiosVotePeriodLength());
+        putUInt(map, 42, ppu.getLeiosDiffusionPeriodLength());
+        putUInt(map, 43, ppu.getLeiosCommitteeSize());
+        putRational(map, 44, ppu.getLeiosQuorumStakeThreshold());
+        putUInt(map, 45, ppu.getMaxEndorserBlockReferencesSize());
+        putUInt(map, 46, ppu.getMaxEndorserBlockTxsSize());
+        putExUnits(map, 47, ppu.getMaxEndorserBlockExMem(), ppu.getMaxEndorserBlockExSteps());
+        putUInt(map, 48, ppu.getMaxRefScriptSizePerEndorserBlock());
+        putUInt(map, 49, ppu.getPerasMinCandidateBlockAge());
+        putRational(map, 50, ppu.getPerasHealingFactor());
+        putUInt(map, 51, ppu.getPerasCertBoost());
+        putUInt(map, 52, ppu.getPerasTargetCommitteeSize());
+        if (ppu.getPerasBootstrapRound() != null)
+            map.put(cborUInt(53), ppu.getPerasBootstrapRound().<DataItem>map(CborSerializationUtil::cborUInt)
+                    .orElse(SimpleValue.NULL));
+        putRational(map, 54, ppu.getPerasQuorumThresholdSafetyMargin());
+        if (ppu.getRefInputsCostPerMultiAssetPolicy() != null)
+            cborMapPutBigUInt(map, 55, ppu.getRefInputsCostPerMultiAssetPolicy());
+        if (ppu.getRefInputsCostPerDatumByte() != null) cborMapPutBigUInt(map, 56, ppu.getRefInputsCostPerDatumByte());
+
         return map;
+    }
+
+    /** Ex-units, [mem, steps], when either is set; the other is then written as 0. */
+    private static void putExUnits(Map map, int key, BigInteger mem, BigInteger steps) {
+        if (mem == null && steps == null)
+            return;
+        Array exUnits = new Array();
+        exUnits.add(cborUInt(mem != null ? mem : BigInteger.ZERO));
+        exUnits.add(cborUInt(steps != null ? steps : BigInteger.ZERO));
+        map.put(cborUInt(key), exUnits);
+    }
+
+    private static void putUInt(Map map, int key, java.lang.Number value) {
+        if (value != null)
+            map.put(cborUInt(key), cborUInt(value.longValue()));
+    }
+
+    private static void putRational(Map map, int key, UnitInterval value) {
+        if (value != null)
+            map.put(cborUInt(key), serializeRational(value));
     }
 
     private static DataItem serializePoolVotingThresholds(PoolVotingThresholds pvt) {

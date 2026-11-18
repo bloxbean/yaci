@@ -1,7 +1,6 @@
 package com.bloxbean.cardano.yaci.core.model.serializers.util;
 
 import co.nstant.in.cbor.CborException;
-import co.nstant.in.cbor.model.AdditionalInformation;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.MajorType;
 import co.nstant.in.cbor.model.UnsignedInteger;
@@ -14,7 +13,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Extract original witness encodings without decoding or re-encoding their nested data. */
+/**
+ * Extract original witness encodings without decoding or re-encoding their nested data.
+ *
+ * @deprecated {@link com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer} reads witness sets through CCL's
+ * reader and keeps their source bytes; CCL's {@code RawBlock} and {@code RawWitnessSet} give each item's source bytes.
+ */
+@Deprecated(since = "0.5.0", forRemoval = true)
 public final class WitnessUtil {
     private WitnessUtil() {}
 
@@ -85,28 +90,6 @@ public final class WitnessUtil {
      */
     public static List<byte[]> getRedeemerFields(byte[] redeemer) throws CborException {
         return getArrayBytes(redeemer);
-    }
-
-    /** Return the argument width used by the transaction-body and auxiliary-data extractors. */
-    static int skipBytes(int initialByte) throws CborException {
-         switch (AdditionalInformation.ofByte(initialByte)) {
-             case DIRECT:
-                return 0;
-             case ONE_BYTE:
-                 return 1;
-             case TWO_BYTES:
-                 return  2;
-             case FOUR_BYTES:
-                 return 4;
-             case EIGHT_BYTES:
-                 return 8;
-             case RESERVED:
-                 throw new CborException("Reserved additional information");
-             case INDEFINITE:
-                 return -1;
-             default:
-                 throw new CborException("Invalid initialByte");
-        }
     }
 
     /** Copy immediate array children, retaining each child's tags and nested container encoding. */

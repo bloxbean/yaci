@@ -3,8 +3,10 @@ package com.bloxbean.cardano.yaci.core.model.serializers.governance;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.SimpleValue;
+import com.bloxbean.cardano.client.transaction.raw.RawAnchor;
 import com.bloxbean.cardano.yaci.core.model.governance.Anchor;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
 import java.util.List;
 
@@ -20,6 +22,14 @@ public enum AnchorSerializer implements Serializer<Anchor> {
             return null;
 
         return deserializeAnchor((Array) di);
+    }
+
+    /**
+     * @param anchor an anchor as received
+     * @return the anchor
+     */
+    public Anchor read(RawAnchor anchor) {
+        return new Anchor(anchor.url(), HexUtil.encodeHexString(anchor.dataHash()));
     }
 
     /**
