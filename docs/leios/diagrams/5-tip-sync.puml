@@ -1,0 +1,29 @@
+@startuml 5-tip-sync
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+title Tip sync (BlockSync): a certifying block reaches the app only when complete
+participant "Node" as N
+participant "Main connection\n(ChainSync, BlockFetch)" as C
+participant "Complete-block\nassembler" as A
+participant "Leios connection\n(LeiosFetch)" as L
+participant "App" as P
+
+N -> C : header + block RB n
+C -> A : parsed RB n
+A -> A : record "RB n -> EB A"
+A -> P : onBlock(RB n)
+N -> C : header + block RB n+1 (certified)
+C -> A : parsed RB n+1
+A -> A : prevHash -> EB A; queue RB n+1 (waits)
+A -> L : fetch EB A, then all its transactions
+L -> N : MsgLeiosBlockRequest, MsgLeiosBlockTxsRequest
+N -> L : EB A + 5,255 transactions
+L -> A : checked against EB A
+A -> A : merge (EB transactions first)
+A -> P : onBlock(RB n+1 + 5,255 txs)
+note over A
+  If RB n was never seen (first block after a start),
+  the assembler fetches it once to learn its announcement.
+end note
+@enduml

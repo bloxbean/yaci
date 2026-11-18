@@ -1,0 +1,21 @@
+OBS main-conn disconnect 2026-10-19T04:39:42.510269Z
+OBS main-conn disconnect 2026-10-19T04:39:42.511673Z
+OBS txs offer 2026-10-19T04:46:26.154899Z LeiosPoint{slot=3645984, ebHash=[-111, -115, 120, -44, -13, 39, 74, -121, 56, 58, 120, -95, -89, -71, 16, 93, 93, -47, -124, -128, -94, 11
+OBS txs offer 2026-10-19T04:48:30.387701Z LeiosPoint{slot=3646108, ebHash=[123, -109, 6, 115, 50, -99, 48, 101, 126, 46, -94, -96, -118, 82, -40, -95, 106, 82, 77, -47, -99, -47, 1
+OBS txs offer 2026-10-19T04:48:35.969690Z LeiosPoint{slot=3646113, ebHash=[-66, 84, -95, -54, 33, 74, -108, 73, -84, 16, 12, 94, -22, -38, 118, -60, 105, -92, -43, 96, 51, 117, -12
+OBS txs offer 2026-10-19T04:48:52.597575Z LeiosPoint{slot=3646130, ebHash=[-17, -45, 85, -121, -61, -85, -22, -69, -19, 39, 111, 64, 44, 107, 48, 31, 73, 64, -64, 6, -52, -60, 70, 
+OBS txs offer 2026-10-19T04:49:22.727303Z LeiosPoint{slot=3646160, ebHash=[-76, -87, 21, -9, 64, 100, 74, -1, -51, 37, -13, 122, 84, 106, 86, -57, 108, 113, -82, -88, -22, 50, -18,
+OBS summary blocks=20 announcements=15 ebOffers=16 txsOffers=5 voteMsgs=259
+2026-10-19 12:49:43 | [nioEventLoopGroup-3-1] network.NodeClient$SessionListenerAdapter (NodeClient.java:247) - Connection closed !!!
+2026-10-19 12:49:43 | [nioEventLoopGroup-3-1] network.Session (Session.java:216) - Channel closed successfully
+OBS main-conn disconnect 2026-10-19T04:49:43.068966Z
+OBS main-conn disconnect 2026-10-19T04:49:43.069083Z
+2026-10-19 12:49:43 | [Test worker] network.Session (Session.java:216) - Channel closed successfully
+2026-10-19 12:49:45 | [nioEventLoopGroup-4-1] network.NodeClient$SessionListenerAdapter (NodeClient.java:247) - Connection closed !!!
+2026-10-19 12:49:45 | [nioEventLoopGroup-4-1] network.Session (Session.java:216) - Channel closed successfully
+2026-10-19 12:49:45 | [Test worker] network.Session (Session.java:216) - Channel closed successfully
+2026-10-19 12:49:47 | [nioEventLoopGroup-2-1] network.NodeClient$SessionListenerAdapter (NodeClient.java:247) - Connection closed !!!
+2026-10-19 12:49:47 | [nioEventLoopGroup-2-1] network.Session (Session.java:216) - Channel closed successfully
+2026-10-19 12:49:47 | [Test worker] network.Session (Session.java:216) - Channel closed successfully
+
+[exited with code 0]
