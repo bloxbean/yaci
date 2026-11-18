@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.yaci.core.util;
 
+import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.NegativeInteger;
@@ -73,6 +74,24 @@ class CborSerializationUtilPinTest {
     }
 
     /** Maps the first key to 0 and the second to 1, so the output shows the order they were written in. */
+    /**
+     * Deep nesting decodes without a stack frame per level, and an indefinite array decoded here is written back
+     * closed. This replaces ArrayCborDecoder's test (removed in 0.5.0).
+     */
+    @Test
+    void deepDefiniteAndIndefiniteArraysRoundTrip() {
+        for (boolean indefinite : new boolean[]{false, true}) {
+            String hex = (indefinite ? "9f" : "81").repeat(10000) + "00" + (indefinite ? "ff".repeat(10000) : "");
+            byte[] bytes = HexUtil.decodeHexString(hex);
+            DataItem[] decoded = CborSerializationUtil.deserialize(bytes);
+            assertThat(CborSerializationUtil.serialize(decoded, false)).isEqualTo(bytes);
+            DataItem leaf = decoded[0];
+            for (int i = 0; i < 10000; i++)
+                leaf = ((Array) leaf).getDataItems().get(0);
+            assertThat(leaf).isEqualTo(new UnsignedInteger(0));
+        }
+    }
+
     private static String canonical(DataItem first, DataItem second) {
         Map map = new Map().put(first, new UnsignedInteger(0)).put(second, new UnsignedInteger(1));
         return HexUtil.encodeHexString(CborSerializationUtil.serialize(map));

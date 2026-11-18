@@ -118,7 +118,13 @@ public class CborSerializationUtil {
     }
 
     /**
-     * Deserialize bytes to a DataItem. If multiple DataItem found at top level, return the first DataItem
+     * Deserialize bytes to a DataItem. If multiple DataItem found at top level, return the first DataItem.
+     * <p>
+     * The tree is a value, not the bytes: re-encoding it may not give them back (integer widths, chunked strings,
+     * repeated map keys, and map order when canonical). Where the bytes matter, for a hash or for the CBOR stored or
+     * served, take them with {@link #span(byte[])} instead. Encode a tree with {@link #serialize}: an indefinite
+     * array decoded here holds no BREAK item, which cbor-java's {@code CborEncoder} needs to close it.
+     *
      * @param bytes
      * @return DataItem
      */
@@ -150,7 +156,9 @@ public class CborSerializationUtil {
     }
 
     /**
-     * Deserialize bytes to list of DataItem.
+     * Deserialize bytes to list of DataItem. Iterative, so deep nesting does not exhaust the stack. See
+     * {@link #deserializeOne(byte[])} on re-encoding the result.
+     *
      * @param bytes
      * @return DataItem
      */
