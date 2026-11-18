@@ -64,13 +64,14 @@ public class StakeCredential {
         ByteString hashDI = (ByteString) dataItemList.get(1);
 
         BigInteger typeBI = typeDI.getValue();
-        if (typeBI.intValue() == 0) {
+        // Compared whole: intValue() keeps the low 32 bits, so 2^32 would read as a key hash.
+        if (typeBI.equals(BigInteger.ZERO)) {
             return StakeCredential.fromKeyHash(hashDI.getBytes());
-        } else if (typeBI.intValue() == 1) {
+        } else if (typeBI.equals(BigInteger.ONE)) {
             return StakeCredential.fromScriptHash(hashDI.getBytes());
         } else {
             throw new CborRuntimeException("StakeCredential deserialization failed. Invalid StakeCredType : "
-                    + typeBI.intValue());
+                    + typeBI);
         }
     }
 
