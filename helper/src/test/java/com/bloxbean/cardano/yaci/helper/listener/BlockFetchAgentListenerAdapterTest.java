@@ -3,6 +3,8 @@ package com.bloxbean.cardano.yaci.helper.listener;
 import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.DataItem;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
+import com.bloxbean.cardano.client.transaction.raw.RawOutput;
 import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.AuxData;
 import com.bloxbean.cardano.yaci.core.model.Block;
@@ -12,6 +14,7 @@ import com.bloxbean.cardano.yaci.core.model.HeaderBody;
 import com.bloxbean.cardano.yaci.core.model.TransactionBody;
 import com.bloxbean.cardano.yaci.core.model.Witnesses;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
+import com.bloxbean.cardano.yaci.core.model.serializers.TransactionOutputSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.AuxDataExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.TransactionBodyExtractor;
 import com.bloxbean.cardano.yaci.core.model.serializers.util.WitnessUtil;
@@ -37,6 +40,24 @@ class BlockFetchAgentListenerAdapterTest {
     @AfterEach
     void tearDown() {
         YaciConfig.INSTANCE.setReturnFullTxCbor(false);
+    }
+
+    @Test
+    void hashesReachNormalAndCollateralUtxos() {
+        // An output with an inline datum 00 and a Plutus V1 reference script h'010203'.
+        var output = TransactionOutputSerializer.INSTANCE.read(RawOutput.tolerant(CborSpan.of(HexUtil.decodeHexString(
+                "a4" + "00581d60" + "00".repeat(28) + "011a000f4240" + "028201d8184100" + "03d81846820143010203"))));
+        var body = txBody("tx1", null).toBuilder().outputs(List.of(output)).collateralReturn(output).build();
+        CapturingListener listener = new CapturingListener();
+        new BlockFetchAgentListenerAdapter(listener).blockFound(block(List.of(body), List.of(witness("a0")),
+                Collections.emptyMap(), Collections.emptyList()));
+        var tx = listener.transactions.get(0);
+        for (var utxo : List.of(tx.getUtxos().get(0), tx.getCollateralReturnUtxo())) {
+            assertThat(utxo.getReferenceScriptHash()).isEqualTo("bc8f82996834417a91ad5f5bbf06a35e1fdbfe42f21ff91485f443f1");
+            assertThat(utxo.getInlineDatumHash())
+                    .isEqualTo("03170a2e7597b7b7e3d84c05391d139a62b157e78786d8c082f29dcf4c111314");
+            assertThat(utxo.getScriptRef()).isEqualTo("820143010203");
+        }
     }
 
     @Test

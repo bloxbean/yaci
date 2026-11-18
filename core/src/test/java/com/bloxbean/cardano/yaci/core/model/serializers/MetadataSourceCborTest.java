@@ -5,6 +5,7 @@ import com.bloxbean.cardano.yaci.core.config.YaciConfig;
 import com.bloxbean.cardano.yaci.core.model.AuxData;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.Datum;
+import com.bloxbean.cardano.yaci.core.model.MetadataLabel;
 import com.bloxbean.cardano.yaci.core.model.TransactionBody;
 import com.bloxbean.cardano.yaci.core.util.CborLoader;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
@@ -30,6 +31,9 @@ class MetadataSourceCborTest {
                     "06967cfc62426d3dc23c1ba3b819db0359833cc0e7b741c368d449cc328af481", fullTx);
             assertThat(aux.getMetadataCbor()).startsWith("a11a034f6388a26b756e6c6f636b5f74696d65");
             assertThat(labelMapSize(aux, 55534472)).isEqualTo(231);
+            assertThat(label(aux, "55534472").getCbor()).hasSize(2 * 231)
+                    .startsWith("a11a034f6388a26b756e6c6f636b5f74696d65");
+            assertLabelsRebuildMetadata(aux);
         }
     }
 
@@ -40,7 +44,9 @@ class MetadataSourceCborTest {
             AuxData aux = auxData("block/preprod4221281.txt",
                     "81335676dd9190fa6bf8b3dedcca2921f145f2034e423fbd54c868cdd884a649", fullTx);
             assertThat(labelMapSize(aux, 721)).isEqualTo(1598);
+            assertThat(label(aux, "721").getCbor()).hasSize(2 * 1598);
             assertThat(aux.getMetadataJson()).isNotNull();
+            assertLabelsRebuildMetadata(aux);
         }
     }
 
@@ -51,9 +57,66 @@ class MetadataSourceCborTest {
         for (String aux : new String[]{metadata, "82" + metadata + "80", "d90103a100" + metadata}) {
             AuxData parsed = AuxDataSerializer.INSTANCE.deserialize(HexUtil.decodeHexString(aux));
             assertThat(parsed.getMetadataCbor()).isEqualTo(metadata);
+            assertThat(parsed.getMetadataLabels()).containsExactly(new MetadataLabel("1", metadata));
             assertThat(parsed.getMetadataJson()).isNotNull();
             assertThat(parsed.getMetadataParseError()).isNull();
         }
+    }
+
+    @Test
+    void labelsKeepEveryEncodingDetailOfTheirEntry() {
+        // A repeated label, an indefinite map value, a non-minimal key head, the largest label, and a re-encoding of
+        // the decoded value would change every one of them.
+        String metadata = "a5" + "01" + "00" + "01" + "01" + "02" + "bf6161f6ff" + "1803" + "9f00ff"
+                + "1bffffffffffffffff" + "7f6161ff";
+        AuxData aux = AuxDataSerializer.INSTANCE.deserialize(HexUtil.decodeHexString(metadata));
+        assertThat(aux.getMetadataLabels()).containsExactly(
+                new MetadataLabel("1", "a10100"),
+                new MetadataLabel("1", "a10101"),
+                new MetadataLabel("2", "a102bf6161f6ff"),
+                new MetadataLabel("3", "a118039f00ff"),
+                new MetadataLabel("18446744073709551615", "a11bffffffffffffffff7f6161ff"));
+        assertLabelsRebuildMetadata(aux);
+    }
+
+    @Test
+    void indefiniteMetadataMapHasItsLabels() {
+        AuxData aux = AuxDataSerializer.INSTANCE.deserialize(HexUtil.decodeHexString("bf" + "0100" + "0201" + "ff"));
+        assertThat(aux.getMetadataLabels()).containsExactly(new MetadataLabel("1", "a10100"),
+                new MetadataLabel("2", "a10201"));
+        assertLabelsRebuildMetadata(aux);
+    }
+
+    @Test
+    void auxDataWithoutMetadataHasNoLabels() {
+        // Alonzo form with only native scripts.
+        AuxData aux = AuxDataSerializer.INSTANCE.deserialize(HexUtil.decodeHexString("d90103a1" + "01" + "80"));
+        assertThat(aux.getMetadataCbor()).isNull();
+        assertThat(aux.getMetadataLabels()).isNull();
+    }
+
+    @Test
+    void emptyMetadataHasNoEntries() {
+        AuxData aux = AuxDataSerializer.INSTANCE.deserialize(HexUtil.decodeHexString("a0"));
+        assertThat(aux.getMetadataLabels()).isEmpty();
+    }
+
+    private static MetadataLabel label(AuxData aux, String label) {
+        return aux.getMetadataLabels().stream().filter(l -> label.equals(l.getLabel())).findFirst()
+                .orElseThrow(() -> new AssertionError("label not found: " + label));
+    }
+
+    /** The metadata's head, each label's bytes after its one-byte head, and a break if indefinite: the metadata. */
+    private static void assertLabelsRebuildMetadata(AuxData aux) {
+        CborSpan metadata = CborSpan.of(HexUtil.decodeHexString(aux.getMetadataCbor()));
+        StringBuilder rebuilt = new StringBuilder(aux.getMetadataCbor().substring(0, 2 * metadata.headerLength()));
+        for (MetadataLabel label : aux.getMetadataLabels()) {
+            assertThat(label.getCbor()).startsWith("a1");
+            rebuilt.append(label.getCbor().substring(2));
+        }
+        if (metadata.isIndefinite())
+            rebuilt.append("ff");
+        assertThat(rebuilt.toString()).isEqualTo(aux.getMetadataCbor());
     }
 
     private static AuxData auxData(String file, String txHash, boolean fullTx) {

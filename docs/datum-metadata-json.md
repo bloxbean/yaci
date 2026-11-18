@@ -56,6 +56,27 @@ auxiliary-data structure used for its transaction hash.
 
 Inline datums already expose their embedded CBOR directly.
 
+## Hashes and labels from the bytes received
+
+A consumer should not decode a value and re-encode it to hash or store it: a re-encoding can change integer
+widths, chunked strings, repeated map keys and map order. Yaci gives the bytes and their hashes as received, read
+through CCL's reader:
+
+| Field | Value |
+| --- | --- |
+| `Datum.cbor`, `Datum.hash` (witness datums, redeemer data) | source bytes; Blake2b-256 of them |
+| `TransactionOutput.inlineDatum`, `inlineDatumHash` | bytes inside the tag 24; Blake2b-256 of them |
+| `TransactionOutput.scriptRef`, `referenceScriptHash` | bytes inside the tag 24; the script's hash |
+| `NativeScript.scriptHash`, `PlutusScript.scriptHash` (witness set, aux data) | Blake2b-224 of the language byte and the native script's CBOR or the Plutus script's bytes |
+| `AuxData.metadataCbor` | the metadata map's source bytes |
+| `AuxData.metadataLabels` | per entry, in order: the label, and `a1` + the key's and the value's source bytes |
+
+A hash is null if its bytes are not a datum or script; the value and its block are kept, and the failure is logged.
+A native script's hash needs its source bytes, so a decoded tree passed to a deprecated `deserializeDI` gives none.
+Plutus script, inline datum and reference script hashes cover bytes that a re-encoding keeps, so they are given there
+too. The helper's `Utxo` carries the output hashes, and `UtxoByAddressQuery` sets CCL's `referenceScriptHash` to the
+hash (it held the script's bytes before).
+
 ## Raw witness correction
 
 The ordinary block path also uses the same boundary scanner to retain exact witness datum and

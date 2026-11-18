@@ -11,12 +11,14 @@ import com.bloxbean.cardano.client.transaction.raw.RawRedeemer;
 import com.bloxbean.cardano.yaci.core.model.AuxData;
 import com.bloxbean.cardano.yaci.core.model.Datum;
 import com.bloxbean.cardano.yaci.core.model.ExUnits;
+import com.bloxbean.cardano.yaci.core.model.MetadataLabel;
 import com.bloxbean.cardano.yaci.core.model.Redeemer;
 import com.bloxbean.cardano.yaci.core.model.RedeemerTag;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.SneakyThrows;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -102,7 +104,33 @@ final class DataItemIsolation {
         } catch (StackOverflowError e) {
             error = "Metadata decoding exceeded the available stack; JSON unavailable";
         }
-        return AuxData.builder().metadataCbor(hex(metadata)).metadataJson(json).metadataParseError(error).build();
+        return AuxData.builder().metadataCbor(hex(metadata)).metadataLabels(labels(metadata)).metadataJson(json)
+                .metadataParseError(error).build();
+    }
+
+    /**
+     * Each entry of the metadata map as a one-entry map: {@code a1}, then the key's and the value's bytes as received.
+     * Only the one-byte head is written; nothing else is re-encoded.
+     *
+     * @return the entries in order, a repeated label included; null if the metadata is not a map
+     */
+    static List<MetadataLabel> labels(CborSpan metadata) {
+        if (metadata.majorType() != 5)
+            return null;
+        List<java.util.Map.Entry<CborSpan, CborSpan>> entries = metadata.entries();
+        List<MetadataLabel> labels = new ArrayList<>(entries.size());
+        for (java.util.Map.Entry<CborSpan, CborSpan> entry : entries) {
+            CborSpan key = entry.getKey();
+            byte[] keyBytes = key.bytes();
+            byte[] valueBytes = entry.getValue().bytes();
+            byte[] cbor = new byte[1 + keyBytes.length + valueBytes.length];
+            cbor[0] = (byte) 0xa1;
+            System.arraycopy(keyBytes, 0, cbor, 1, keyBytes.length);
+            System.arraycopy(valueBytes, 0, cbor, 1 + keyBytes.length, valueBytes.length);
+            String label = key.majorType() == 0 ? key.asBigInteger().toString() : null;
+            labels.add(new MetadataLabel(label, HexUtil.encodeHexString(cbor)));
+        }
+        return labels;
     }
 
     private static DataItem decode(CborSpan item) {

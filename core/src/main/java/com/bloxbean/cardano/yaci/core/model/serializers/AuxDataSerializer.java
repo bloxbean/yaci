@@ -68,11 +68,12 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
         return builder.build();
     }
 
-    /** A script's content is its bytes, which a script in a witness set does not share. */
+    /** A script's content is its bytes, which a script in a witness set does not share; its hash is the same. */
     private static List<PlutusScript> plutusScripts(PlutusScriptType type, List<RawScript> scripts) {
         List<PlutusScript> parsed = new ArrayList<>(scripts.size());
         for (RawScript script : scripts)
-            parsed.add(new PlutusScript(type, HexUtil.encodeHexString(RawItems.bytes(script.span()))));
+            parsed.add(new PlutusScript(type, HexUtil.encodeHexString(RawItems.bytes(script.span())),
+                    WitnessesSerializer.hash(script)));
         return parsed;
     }
 }

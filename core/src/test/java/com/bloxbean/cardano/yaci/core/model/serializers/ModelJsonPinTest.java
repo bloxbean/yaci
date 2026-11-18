@@ -27,6 +27,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * One listed change since: {@code metadataCbor} is the metadata's source bytes, not its canonical re-encoding
  * (yaci-store#1215). An entry that differs must match once each {@code metadataCbor} is re-encoded canonically, as
  * Yaci wrote it at the pin; three fixture blocks have metadata whose source is not canonical.
+ * <p>
+ * And fields added since, each taken from the source bytes and checked by SourceHashesTest and MetadataSourceCborTest:
+ * a Plutus script's {@code scriptHash}, an output's {@code inlineDatumHash} and {@code referenceScriptHash}, and aux
+ * data's {@code metadataLabels}. Every entry must match once they are taken out.
  */
 class ModelJsonPinTest {
     /** The JSON names of D4b's fields, which no model had before M7c. */
@@ -41,6 +45,10 @@ class ModelJsonPinTest {
             "perasHealingFactor", "perasCertBoost", "perasTargetCommitteeSize", "perasBootstrapRound",
             "perasQuorumThresholdSafetyMargin", "refInputsCostPerMultiAssetPolicy", "refInputsCostPerDatumByte");
 
+    /** The JSON names of the fields taken from the source bytes since M7a, besides a Plutus script's scriptHash. */
+    private static final Set<String> SOURCE_FIELDS = Set.of("inlineDatumHash", "referenceScriptHash",
+            "metadataLabels");
+
     @Test
     void everyFixtureMapsToTheJsonOfM7a() throws Exception {
         List<String> pins = ModelJsonPin.lines("/compat/m7c-json-pin.txt");
@@ -48,6 +56,7 @@ class ModelJsonPinTest {
         List<String> metadataSource = new ArrayList<>();
         int dijkstra = 0;
         int dijkstraFields = 0;
+        int sourceFields = 0;
         for (String pin : pins) {
             String[] parts = pin.split(" ");
             String json = ModelJsonPin.json(parts[0]);
@@ -55,6 +64,9 @@ class ModelJsonPinTest {
                 if (sha256(json).equals(parts[1]))
                     continue;
                 JsonNode tree = ModelJsonPin.JSON.readTree(json);
+                sourceFields += stripSource(tree);
+                if (sha256(ModelJsonPin.JSON.writeValueAsString(tree)).equals(parts[2]))
+                    continue;
                 canonicalMetadata(tree);
                 if (sha256(ModelJsonPin.JSON.writeValueAsString(tree)).equals(parts[2]))
                     metadataSource.add(parts[0]);
@@ -65,6 +77,7 @@ class ModelJsonPinTest {
             dijkstra++;
             JsonNode tree = ModelJsonPin.JSON.readTree(json);
             dijkstraFields += strip(tree);
+            sourceFields += stripSource(tree);
             if (!sha256(ModelJsonPin.JSON.writeValueAsString(tree)).equals(parts[2]))
                 changed.add(parts[0]);
         }
@@ -72,6 +85,7 @@ class ModelJsonPinTest {
         assertThat(dijkstra).isEqualTo(10);
         // The Leios fields of the four Musashi blocks' 12-item headers, at least
         assertThat(dijkstraFields).isGreaterThanOrEqualTo(8);
+        assertThat(sourceFields).as("source fields taken out").isGreaterThan(100);
         assertThat(changed).as("entries whose JSON changed").isEmpty();
         assertThat(metadataSource).as("entries whose metadataCbor is now the source").containsExactlyInAnyOrder(
                 "plain:block/preprod292507.txt", "plain:block/preprod292683.txt", "plain:block/preprod4974662.txt",
@@ -100,6 +114,24 @@ class ModelJsonPinTest {
         }
         for (JsonNode child : node)
             removed += strip(child);
+        return removed;
+    }
+
+    /** Takes the fields added from the source bytes out of a tree, and counts them. */
+    private static int stripSource(JsonNode node) {
+        int removed = 0;
+        if (node instanceof ObjectNode object) {
+            for (String field : SOURCE_FIELDS)
+                if (object.remove(field) != null)
+                    removed++;
+            // A Plutus script's type is its name; a native script's, which had scriptHash at M7a, is a number.
+            if (object.has("scriptHash") && object.path("type").isTextual()) {
+                object.remove("scriptHash");
+                removed++;
+            }
+        }
+        for (JsonNode child : node)
+            removed += stripSource(child);
         return removed;
     }
 

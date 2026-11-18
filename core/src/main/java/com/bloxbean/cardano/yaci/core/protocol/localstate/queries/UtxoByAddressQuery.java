@@ -74,7 +74,7 @@ public class UtxoByAddressQuery implements EraQuery<UtxoByAddressQueryResult> {
                     .amount(amountList)
                     .dataHash(transactionOutput.getDatumHash())
                     .inlineDatum(transactionOutput.getInlineDatum())
-                    .referenceScriptHash(transactionOutput.getScriptRef())
+                    .referenceScriptHash(transactionOutput.getReferenceScriptHash())
                     .build();
             utxoList.add(utxo);
         }

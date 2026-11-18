@@ -34,12 +34,19 @@ public class AuxData {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private List<PlutusScript> plutusV4Scripts;
 
-    /** Kept for source and binary compatibility: the Plutus V4 scripts are null. Use the builder for them. */
+    /**
+     * The metadata's entries in the order received, a repeated label included, each with its bytes as received; null
+     * without metadata. Use these, not a re-encoding of {@link #metadataCbor}'s decoded value, for a label's CBOR.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private List<MetadataLabel> metadataLabels;
+
+    /** Kept for source and binary compatibility: the Plutus V4 scripts and the labels are null. Use the builder. */
     public AuxData(String cbor, String metadataCbor, String metadataJson, String metadataParseError,
                    List<NativeScript> nativeScripts, List<PlutusScript> plutusV1Scripts,
                    List<PlutusScript> plutusV2Scripts, List<PlutusScript> plutusV3Scripts) {
         this(cbor, metadataCbor, metadataJson, metadataParseError, nativeScripts, plutusV1Scripts, plutusV2Scripts,
-                plutusV3Scripts, null);
+                plutusV3Scripts, null, null);
     }
 
     public AuxData(String cbor, String metadataCbor, String metadataJson,

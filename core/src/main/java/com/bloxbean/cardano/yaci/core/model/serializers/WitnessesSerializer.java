@@ -21,6 +21,7 @@ import com.bloxbean.cardano.yaci.core.model.Witnesses;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +31,7 @@ import java.util.Optional;
  * Maps a witness set read by {@link RawWitnessSet} to Yaci's model (ADR 0003 D8). Datums and redeemers are converted
  * one at a time from their source bytes by {@link DataItemIsolation}.
  */
+@Slf4j
 public enum WitnessesSerializer implements Serializer<Witnesses> {
     INSTANCE;
 
@@ -90,17 +92,35 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
             NativeScript json = NativeScriptJson.parse(
                     (Array) CborSerializationUtil.deserializeOne(script.span().bytes()));
             parsed.add(hashed ? new NativeScript(json.getType(), json.getContent(), json.getParseError(),
-                    hex(script.hash())) : json);
+                    hash(script)) : json);
         }
         return parsed;
     }
 
-    /** A script's content is its encoding, as received. */
+    /**
+     * A script's content is its encoding, as received. Its hash covers the payload of its byte string only, which a
+     * re-encoding keeps, so a decoded witness set gets it too.
+     */
     private static List<PlutusScript> plutusScripts(PlutusScriptType type, Optional<List<RawScript>> scripts) {
         List<PlutusScript> parsed = new ArrayList<>();
         for (RawScript script : scripts.orElse(List.of()))
-            parsed.add(new PlutusScript(type, hex(script.span().bytes())));
+            parsed.add(new PlutusScript(type, hex(script.span().bytes()), hash(script)));
         return parsed;
+    }
+
+    /**
+     * The script's hash as the ledger computes it from the bytes received: Blake2b-224 of the language byte and the
+     * native script's CBOR or the Plutus script's bytes.
+     *
+     * @return the hash, or null, logged, if the bytes are not a script of its type; the script and its block are kept
+     */
+    static String hash(RawScript script) {
+        try {
+            return hex(script.hash());
+        } catch (RuntimeException e) {
+            log.warn("Script of type {} is not hashed: {}", script.type(), e.getMessage());
+            return null;
+        }
     }
 
     private static String hex(byte[] bytes) {

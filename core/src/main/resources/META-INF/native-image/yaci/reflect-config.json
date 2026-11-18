@@ -30,6 +30,12 @@
     "allDeclaredMethods":true
   },
   {
+    "name":"com.bloxbean.cardano.yaci.core.model.MetadataLabel",
+    "allDeclaredConstructors":true,
+    "allDeclaredFields":true,
+    "allDeclaredMethods":true
+  },
+  {
     "name":"com.bloxbean.cardano.yaci.core.model.SubTransaction",
     "allDeclaredConstructors":true,
     "allDeclaredFields":true,

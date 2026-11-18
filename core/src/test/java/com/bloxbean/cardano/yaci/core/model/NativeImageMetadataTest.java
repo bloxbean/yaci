@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * ADR 0003 D4b: the types Jackson serializes reflectively for D4b's fields are registered in Yaci's native-image
  * metadata, with their constructors, fields and methods: the six new models, and {@link Credential}, which the guard
- * native script's JSON writes.
+ * native script's JSON writes. So is {@link MetadataLabel}, added since for aux data's labels.
  */
 class NativeImageMetadataTest {
     private static final String METADATA = "/META-INF/native-image/yaci/reflect-config.json";
@@ -27,7 +27,8 @@ class NativeImageMetadataTest {
                 entries.put(entry.get("name").asText(), entry);
         }
         for (Class<?> type : List.of(Credential.class, SubTransaction.class, TopLevelGuard.class,
-                AccountBalanceInterval.class, BlsKey.class, LeiosCertificate.class, EbAnnouncement.class)) {
+                AccountBalanceInterval.class, BlsKey.class, LeiosCertificate.class, EbAnnouncement.class,
+                MetadataLabel.class)) {
             JsonNode entry = entries.get(type.getName());
             assertThat(entry).as(type.getName()).isNotNull();
             for (String flag : List.of("allDeclaredConstructors", "allDeclaredFields", "allDeclaredMethods"))
