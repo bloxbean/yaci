@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class StandaloneReaderTest {
     /** {0: [], 1: []}: a body with no inputs and no outputs */
     private static final String BODY = "a200800180";
-    /** {5: [h'01020304']}: one Plutus V4 witness script */
+    /** {8: [h'01020304']}: one Plutus V4 witness script (key 5 is redeemers in a witness set) */
     private static final String V4_WITNESSES = "a108814401020304";
     /** 259({5: [h'01020304']}): aux data with one Plutus V4 script */
     private static final String V4_AUX = "d90103a105814401020304";
@@ -58,7 +58,7 @@ class StandaloneReaderTest {
         assertThat(dijkstra.getPlutusV4Scripts().get(0).getContent()).isEqualTo("4401020304");
         assertThat(dijkstra.getPlutusV4Scripts().get(0).getScriptHash()).isNotNull();
 
-        // key 5 is not a field before Dijkstra; the single-argument reader stays Conway
+        // key 8 is not a field before Dijkstra; the single-argument reader stays Conway
         assertThat(WitnessesSerializer.INSTANCE.deserialize(bytes, Era.Conway).getPlutusV4Scripts()).isEmpty();
         assertThat(WitnessesSerializer.INSTANCE.deserialize(bytes).getPlutusV4Scripts()).isEmpty();
         assertThat(WitnessesSerializer.INSTANCE.deserialize(new byte[0], Era.Dijkstra)).isNull();

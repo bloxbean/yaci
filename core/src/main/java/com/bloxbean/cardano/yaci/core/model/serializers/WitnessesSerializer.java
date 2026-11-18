@@ -46,7 +46,7 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
     }
 
     /**
-     * Reads a witness set in the era of its block: Plutus V4 scripts (key 5) are read only in Dijkstra (D4b; experimental, as
+     * Reads a witness set in the era of its block: Plutus V4 scripts (key 8) are read only in Dijkstra (D4b; experimental, as
      * Dijkstra is not final).
      *
      * @param bytes a witness set, exactly one CBOR item
