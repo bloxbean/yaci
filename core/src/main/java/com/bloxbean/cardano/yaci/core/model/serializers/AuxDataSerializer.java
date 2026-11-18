@@ -14,6 +14,8 @@ import com.bloxbean.cardano.yaci.core.model.PlutusScriptType;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
+import lombok.NonNull;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,7 +33,19 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
      */
     @Override
     public AuxData deserialize(byte[] bytes) {
-        return bytes.length == 0 ? null : read(CborSpan.of(bytes), Era.Conway, true);
+        return deserialize(bytes, Era.Conway);
+    }
+
+    /**
+     * Reads aux data in the era of its block: Plutus V4 scripts (key 5) are read only in Dijkstra (D4b; experimental, as
+     * Dijkstra is not final).
+     *
+     * @param bytes aux data, exactly one CBOR item
+     * @param era   the era of its block
+     * @return the aux data; null for empty input
+     */
+    public AuxData deserialize(byte[] bytes, @NonNull Era era) {
+        return bytes.length == 0 ? null : read(CborSpan.of(bytes), era, true);
     }
 
     /**

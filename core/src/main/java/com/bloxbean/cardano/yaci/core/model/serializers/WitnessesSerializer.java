@@ -21,6 +21,7 @@ import com.bloxbean.cardano.yaci.core.model.Witnesses;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -41,7 +42,19 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
      */
     @Override
     public Witnesses deserialize(byte[] bytes) {
-        return bytes.length == 0 ? null : read(CborSpan.of(bytes), Era.Conway, true);
+        return deserialize(bytes, Era.Conway);
+    }
+
+    /**
+     * Reads a witness set in the era of its block: Plutus V4 scripts (key 5) are read only in Dijkstra (D4b; experimental, as
+     * Dijkstra is not final).
+     *
+     * @param bytes a witness set, exactly one CBOR item
+     * @param era   the era of its block
+     * @return the witness set; null for empty input
+     */
+    public Witnesses deserialize(byte[] bytes, @NonNull Era era) {
+        return bytes.length == 0 ? null : read(CborSpan.of(bytes), era, true);
     }
 
     /**

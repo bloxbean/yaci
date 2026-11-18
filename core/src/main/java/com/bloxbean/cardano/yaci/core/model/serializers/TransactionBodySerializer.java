@@ -51,22 +51,23 @@ public enum TransactionBodySerializer implements Serializer<TransactionBody> {
 
     /**
      * @param di      the body decoded from {@code txBytes}; the fields are read from {@code txBytes}
-     * @param txBytes the body as encoded
+     * @param txBytes the body as encoded; as before 0.5.0, bytes after the body are not read but are hashed into the id
      * @return the body, read as Conway: in any other era, only a key that has changed meaning reads differently
      * @deprecated {@code di} is not used. Use {@link #read(byte[], Era)}, or {@link BlockSerializer} for a block.
      */
     @Deprecated(since = "0.5.0", forRemoval = true)
     public TransactionBody deserializeDI(DataItem di, byte[] txBytes) {
-        return read(txBytes, Era.Conway);
+        return read(RawTxBody.tolerant(CborSpan.at(txBytes, 0), Era.Conway), txBytes);
     }
 
     /**
-     * @param txBytes the body as encoded
+     * @param txBytes the body as encoded, exactly one CBOR item: its hash is the transaction id, so trailing bytes are
+     *                rejected rather than hashed into it
      * @param era     the era of its block
      * @return the body
      */
     public TransactionBody read(byte[] txBytes, Era era) {
-        return read(RawTxBody.tolerant(CborSpan.at(txBytes, 0), era), txBytes);
+        return read(RawTxBody.tolerant(CborSpan.of(txBytes), era), txBytes);
     }
 
     /**
