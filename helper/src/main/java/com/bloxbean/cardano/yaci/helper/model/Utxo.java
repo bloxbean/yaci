@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.helper.model;
 
 import com.bloxbean.cardano.yaci.core.model.Amount;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -21,8 +22,10 @@ public class Utxo {
     private String inlineDatum;
     private String scriptRef;
     /** Blake2b-256 of the inline datum's bytes; null without an inline datum. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String inlineDatumHash;
     /** Hash of the reference script, from the bytes received; null without one or when its bytes are not a script. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String referenceScriptHash;
 
     /** Kept for source and binary compatibility: the hashes are null. Use the builder for them. */

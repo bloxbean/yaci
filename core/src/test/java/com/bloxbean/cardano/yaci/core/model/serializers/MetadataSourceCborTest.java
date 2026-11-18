@@ -80,6 +80,26 @@ class MetadataSourceCborTest {
     }
 
     @Test
+    void aTaggedKeyHasNoLabelButKeepsItsBytes() {
+        // {100(1): 0}: not a label the ledger accepts, but the aux data is read as before.
+        AuxData aux = AuxDataSerializer.INSTANCE.deserialize(HexUtil.decodeHexString("a1d8640100"));
+        assertThat(aux.getMetadataLabels()).containsExactly(new MetadataLabel(null, "a1d8640100"));
+    }
+
+    @SuppressWarnings("removal")
+    @Test
+    void aDecodedTreeHasNoLabels() {
+        // Its encoding is not the bytes received: 1801 would come back as 01.
+        AuxData aux = AuxDataSerializer.INSTANCE.deserializeDI(
+                com.bloxbean.cardano.yaci.core.util.CborSerializationUtil.deserializeOne(
+                        HexUtil.decodeHexString("a1180100")));
+        assertThat(aux.getMetadataCbor()).isNotNull();
+        assertThat(aux.getMetadataLabels()).isNull();
+        assertThat(AuxDataSerializer.INSTANCE.deserialize(HexUtil.decodeHexString("a1180100")).getMetadataLabels())
+                .containsExactly(new MetadataLabel("1", "a1180100"));
+    }
+
+    @Test
     void indefiniteMetadataMapHasItsLabels() {
         AuxData aux = AuxDataSerializer.INSTANCE.deserialize(HexUtil.decodeHexString("bf" + "0100" + "0201" + "ff"));
         assertThat(aux.getMetadataLabels()).containsExactly(new MetadataLabel("1", "a10100"),

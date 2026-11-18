@@ -71,10 +71,11 @@ through CCL's reader:
 | `AuxData.metadataCbor` | the metadata map's source bytes |
 | `AuxData.metadataLabels` | per entry, in order: the label, and `a1` + the key's and the value's source bytes |
 
-A hash is null if its bytes are not a datum or script; the value and its block are kept, and the failure is logged.
-A native script's hash needs its source bytes, so a decoded tree passed to a deprecated `deserializeDI` gives none.
-Plutus script, inline datum and reference script hashes cover bytes that a re-encoding keeps, so they are given there
-too. The helper's `Utxo` carries the output hashes, and `UtxoByAddressQuery` sets CCL's `referenceScriptHash` to the
+A hash is of the bytes, as the ledger takes it; Yaci does not check them against the ledger's rules, which a block on
+chain has passed. A reference script that is not `[type, script]` of a known type has no hash, logged, and the output
+and its block are kept. A native script's hash and the metadata labels need the source bytes, so a decoded tree passed
+to a deprecated `deserializeDI` gives none. Plutus script, inline datum and reference script hashes cover bytes that a
+re-encoding keeps, so they are given there too. The helper's `Utxo` carries the output hashes, and `UtxoByAddressQuery` sets CCL's `referenceScriptHash` to the
 hash (it held the script's bytes before).
 
 ## Raw witness correction

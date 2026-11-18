@@ -61,6 +61,13 @@ class BlockFetchAgentListenerAdapterTest {
     }
 
     @Test
+    void utxoWithoutHashesKeepsItsJson() throws Exception {
+        var utxo = new com.bloxbean.cardano.yaci.helper.model.Utxo("tx", 0, "addr", List.of(), null, null, null);
+        assertThat(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(utxo))
+                .doesNotContain("inlineDatumHash").doesNotContain("referenceScriptHash");
+    }
+
+    @Test
     void blockFound_populatesTxCborWhenRawSegmentsExist() {
         YaciConfig.INSTANCE.setReturnFullTxCbor(true);
         CapturingListener listener = new CapturingListener();

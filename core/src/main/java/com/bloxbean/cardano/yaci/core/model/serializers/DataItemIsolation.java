@@ -112,11 +112,10 @@ final class DataItemIsolation {
      * Each entry of the metadata map as a one-entry map: {@code a1}, then the key's and the value's bytes as received.
      * Only the one-byte head is written; nothing else is re-encoded.
      *
-     * @return the entries in order, a repeated label included; null if the metadata is not a map
+     * @param metadata the metadata, a map: CCL's reader rejects aux data whose metadata is not
+     * @return the entries in order, a repeated label included
      */
     static List<MetadataLabel> labels(CborSpan metadata) {
-        if (metadata.majorType() != 5)
-            return null;
         List<java.util.Map.Entry<CborSpan, CborSpan>> entries = metadata.entries();
         List<MetadataLabel> labels = new ArrayList<>(entries.size());
         for (java.util.Map.Entry<CborSpan, CborSpan> entry : entries) {
@@ -127,7 +126,7 @@ final class DataItemIsolation {
             cbor[0] = (byte) 0xa1;
             System.arraycopy(keyBytes, 0, cbor, 1, keyBytes.length);
             System.arraycopy(valueBytes, 0, cbor, 1 + keyBytes.length, valueBytes.length);
-            String label = key.majorType() == 0 ? key.asBigInteger().toString() : null;
+            String label = key.majorType() == 0 && !key.isTagged() ? key.asBigInteger().toString() : null;
             labels.add(new MetadataLabel(label, HexUtil.encodeHexString(cbor)));
         }
         return labels;

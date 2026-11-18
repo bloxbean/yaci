@@ -112,9 +112,15 @@ public enum WitnessesSerializer implements Serializer<Witnesses> {
      * The script's hash as the ledger computes it from the bytes received: Blake2b-224 of the language byte and the
      * native script's CBOR or the Plutus script's bytes.
      *
-     * @return the hash, or null, logged, if the bytes are not a script of its type; the script and its block are kept
+     * @return the hash, or null, logged, if the bytes are not a script of its type: a native script that is not an
+     * array (CCL hashes any item of type 0), or a Plutus script that is not a byte string; the script and its block are
+     * kept
      */
     static String hash(RawScript script) {
+        if (script.type() == 0 && (script.span().isTagged() || script.span().majorType() != 4)) {
+            log.warn("Native script is not an array, so it is not hashed");
+            return null;
+        }
         try {
             return hex(script.hash());
         } catch (RuntimeException e) {

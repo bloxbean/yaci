@@ -36,7 +36,8 @@ public class AuxData {
 
     /**
      * The metadata's entries in the order received, a repeated label included, each with its bytes as received; null
-     * without metadata. Use these, not a re-encoding of {@link #metadataCbor}'s decoded value, for a label's CBOR.
+     * without metadata, and for a decoded tree given to the deprecated {@code deserializeDI}, which has no source bytes.
+     * Use these, not a re-encoding of {@link #metadataCbor}'s decoded value, for a label's CBOR.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private List<MetadataLabel> metadataLabels;

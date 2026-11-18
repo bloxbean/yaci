@@ -12,7 +12,7 @@ import lombok.*;
 @EqualsAndHashCode
 @Builder
 public class MetadataLabel {
-    /** The label in decimal (an unsigned 64-bit integer); null if the key is not an unsigned integer. */
+    /** The label in decimal (an unsigned 64-bit integer); null if the key is not an untagged unsigned integer. */
     private String label;
     /**
      * The entry as a one-entry map, {@code a1} followed by the key's and the value's bytes as received. Nothing in it is

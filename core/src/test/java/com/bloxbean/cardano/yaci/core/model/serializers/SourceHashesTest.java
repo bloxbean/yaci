@@ -100,15 +100,21 @@ class SourceHashesTest {
         assertThat(checked).isEqualTo(7);
     }
 
+    /**
+     * The inline datum bytes are pinned by ModelJsonPinTest (unchanged since M7a); their hash is taken here with Bouncy
+     * Castle. The counts pin which fixtures parse, so a block that stops parsing fails this test.
+     */
     @Test
     void everyInlineDatumInTheBlockFixturesHasTheHashOfItsBytes() throws IOException {
         int checked = 0;
+        List<String> unread = new ArrayList<>();
         for (String file : blockFixtures()) {
             Block block;
             try {
                 block = BlockSerializer.INSTANCE.deserialize(CborLoader.getHexBytes(file));
             } catch (RuntimeException e) {
-                continue; // fixtures of other tests: Byron, Dijkstra or deliberately broken blocks
+                unread.add(file); // a Byron block, and a witness set that is not a block
+                continue;
             }
             for (TransactionBody body : block.getTransactionBodies()) {
                 List<TransactionOutput> outputs = new ArrayList<>(body.getOutputs());
@@ -125,7 +131,8 @@ class SourceHashesTest {
                 }
             }
         }
-        assertThat(checked).isPositive();
+        assertThat(unread).as("block fixtures this serializer does not read").isEqualTo(List.of("block/byron-main.txt", "block/witness-preprod-f90dce57.txt"));
+        assertThat(checked).isEqualTo(70);
     }
 
     @Test
@@ -191,12 +198,66 @@ class SourceHashesTest {
     }
 
     @Test
+    void plutusV3ReferenceScriptIsHashed() {
+        TransactionOutput output = output("a3" + ADDRESS + COIN + "03" + "d818" + "46" + "820343010203");
+        assertThat(output.getReferenceScriptHash()).isEqualTo(blake2b(28, h("03010203")));
+    }
+
+    @Test
+    void deeplyNestedNativeReferenceScriptIsHashedOnASmallStack() throws Exception {
+        // all of [all of [ ... all of [] ]], 5000 deep: [1, [s]] is 820181 s, and the innermost is [1, []], 820180.
+        String script = "820181".repeat(5000) + "820180";
+        String payload = "8200" + script;
+        int length = payload.length() / 2;
+        String output = "a3" + ADDRESS + COIN + "03" + "d818" + "59" + String.format("%04x", length) + payload;
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicReference<String> hash = new AtomicReference<>();
+        Thread thread = new Thread(null, () -> {
+            try {
+                hash.set(output(output).getReferenceScriptHash());
+            } catch (Throwable t) {
+                failure.set(t);
+            }
+        }, "small-stack", 256 * 1024);
+        thread.start();
+        thread.join();
+        if (failure.get() != null)
+            throw new AssertionError(failure.get());
+        assertThat(hash.get()).isEqualTo(blake2b(28, h("00" + script)));
+    }
+
+    @Test
     void referenceBytesThatAreNotAScriptKeepTheOutputWithoutAHash() {
-        // [9, h'00']: no script type 9. The bytes are kept as received; only the hash is missing.
-        TransactionOutput output = output("a3" + ADDRESS + COIN + "03" + "d818" + "44" + "82094100");
-        assertThat(output.getScriptRef()).isEqualTo("82094100");
-        assertThat(output.getReferenceScriptHash()).isNull();
-        assertThat(output.getAmounts()).isNotEmpty();
+        // [9, h'00']: no script type 9; [0, h'00']: a native script that is not an array; [1, 0]: a Plutus script that
+        // is not bytes. The bytes are kept as received; only the hash is missing.
+        for (String ref : new String[]{"82094100", "82004100", "820100"}) {
+            String length = String.format("%02x", 0x40 + ref.length() / 2);
+            TransactionOutput output = output("a3" + ADDRESS + COIN + "03" + "d818" + length + ref);
+            assertThat(output.getScriptRef()).as(ref).isEqualTo(ref);
+            assertThat(output.getReferenceScriptHash()).as(ref).isNull();
+            assertThat(output.getAmounts()).as(ref).isNotEmpty();
+        }
+    }
+
+    @Test
+    void collateralReturnReadFromItsBodyFieldIsHashed() {
+        // A body with no inputs, outputs or fee to speak of, and field 16 an output with an inline datum and a
+        // reference script.
+        String collateral = "a4" + ADDRESS + COIN + "02" + "8201" + "d818" + "42" + "1800"
+                + "03" + "d818" + "46" + "820243010203";
+        TransactionBody body = TransactionBodySerializer.INSTANCE.read(
+                h("a4" + "0080" + "0180" + "0200" + "10" + collateral), Era.Conway);
+        assertThat(body.getCollateralReturn().getInlineDatumHash()).isEqualTo(blake2b(32, h("1800")));
+        assertThat(body.getCollateralReturn().getReferenceScriptHash()).isEqualTo(blake2b(28, h("02010203")));
+    }
+
+    @SuppressWarnings("removal")
+    @Test
+    void aDecodedWitnessSetsPlutusScriptsAreHashedAndItsNativeScriptsAreNot() {
+        Witnesses witnesses = WitnessesSerializer.INSTANCE.deserializeDI(CborSerializationUtil.deserializeOne(
+                h("a2" + "01" + "81" + "820180" + "07" + "815f4201024103ff")));
+        assertThat(witnesses.getPlutusV3Scripts().get(0).getScriptHash()).isEqualTo(blake2b(28, h("03010203")));
+        assertThat(witnesses.getNativeScripts().get(0).getScriptHash()).isNull();
     }
 
     @SuppressWarnings("removal")

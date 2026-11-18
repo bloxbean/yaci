@@ -13,7 +13,7 @@ public class PlutusScript {
     private String content;
     /**
      * Blake2b-224 of the language byte and the script's bytes (the payload of its byte string), as the ledger hashes
-     * it. Null for objects built by hand and for a type without a language byte.
+     * it. Null for objects built by hand and for a type without a language byte. The bytes are hashed, not checked.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String scriptHash;

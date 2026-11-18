@@ -23,12 +23,16 @@ public class TransactionOutput {
     private String inlineDatum;
     /** The reference script as received: the bytes inside its tag 24. */
     private String scriptRef;
-    /** Blake2b-256 of {@link #inlineDatum}'s bytes; null without an inline datum. */
+    /**
+     * Blake2b-256 of {@link #inlineDatum}'s bytes, as the ledger hashes them; null without an inline datum. The bytes are
+     * not checked to be Plutus data: a block on chain has passed the ledger's rules.
+     */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String inlineDatumHash;
     /**
      * Hash of the reference script, as the ledger computes it from the bytes received; null without a reference script
-     * or when its bytes are not a script.
+     * or when they are not {@code [type, script]} of a known type. The script itself is not checked against the ledger's
+     * rules, which a block on chain has passed.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String referenceScriptHash;

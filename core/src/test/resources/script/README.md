@@ -71,5 +71,6 @@ hash; the other two outputs were discovered in the same fetched transactions.
 The offline regression parses the saved transaction bodies through Yaci and checks output
 counts, indexes, script hashes, unchanged reference bytes, and null fields on ordinary outputs.
 Actual reference-output coverage here is native, Plutus V1 and V2. Plutus V3 reference scripts
-and deeply nested native references remain synthetic tests; the earlier preprod Plutus V3
-fixture is a real witness script, not a reference output.
+and a deeply nested native reference (read on a 256 KiB stack) are synthetic tests in
+`SourceHashesTest`; the earlier preprod Plutus V3 fixture is a real witness script, not a
+reference output.

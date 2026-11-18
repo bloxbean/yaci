@@ -35,7 +35,8 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
     }
 
     /**
-     * A decoded item is read from its encoding, which is not the source, so native scripts get no hash.
+     * A decoded item is read from its encoding, which is not the source, so native scripts get no hash and the
+     * metadata no labels.
      *
      * @deprecated Decoded aux data has lost its source encoding. Use {@link #deserialize(byte[])} with its bytes, or
      * {@link BlockSerializer} for a block.
@@ -53,6 +54,9 @@ public enum AuxDataSerializer implements Serializer<AuxData> {
         RawAuxData aux = RawAuxData.tolerant(span, era);
         AuxData.AuxDataBuilder builder = aux.metadata().map(DataItemIsolation::metadata).map(AuxData::toBuilder)
                 .orElseGet(AuxData::builder);
+        // A label's CBOR is the bytes received; a decoded tree's encoding is not them, so it gets no labels.
+        if (!hashed)
+            builder.metadataLabels(null);
         List<RawScript> nativeScripts = aux.nativeScripts();
         if (aux.has(AuxDataField.NATIVE_SCRIPTS) || !nativeScripts.isEmpty())
             builder.nativeScripts(WitnessesSerializer.nativeScripts(nativeScripts, hashed));

@@ -73,7 +73,6 @@ class CborSerializationUtilPinTest {
         assertThat(HexUtil.encodeHexString(CborSerializationUtil.serialize(map))).isEqualTo("a201010200");
     }
 
-    /** Maps the first key to 0 and the second to 1, so the output shows the order they were written in. */
     /**
      * Deep nesting decodes without a stack frame per level, and an indefinite array decoded here is written back
      * closed. This replaces ArrayCborDecoder's test (removed in 0.5.0).
@@ -92,6 +91,7 @@ class CborSerializationUtilPinTest {
         }
     }
 
+    /** Maps the first key to 0 and the second to 1, so the output shows the order they were written in. */
     private static String canonical(DataItem first, DataItem second) {
         Map map = new Map().put(first, new UnsignedInteger(0)).put(second, new UnsignedInteger(1));
         return HexUtil.encodeHexString(CborSerializationUtil.serialize(map));
