@@ -1,124 +1,72 @@
 # Leios complete blocks: design
 
-How Yaci turns Linear Leios blocks into complete blocks for applications, without changing Yaci's API.
-Decision record: `adr/0013-leios-complete-blocks.md`.
-
-The diagrams follow the C4 model, from the outside in. Images are generated from the PlantUML sources in
-`diagrams/` (see `diagrams/README.md`); PNG copies sit next to each SVG.
-
-1. System context: who talks to whom.
-2. Containers: the Yaci modules involved.
-3. Components: the parts of the new complete-block assembler.
-4. Dynamic views: what happens, step by step, for tip sync, range sync, failures and rollbacks.
-
----
+How `BlockSync` and `BlockRangeSync` turn a block that certifies an endorser block (EB) into one complete block.
+Decision record: [ADR 0016](../../adr/0016-leios-on-next-ccl-parsing-and-era-activation.md) (D3 to D5). It supersedes
+[ADR 0013a](../../adr/0013a-leios-complete-blocks.md) wherever they disagree; this page summarises the code at HEAD
+and does not repeat the ADR's rules.
 
 ## 0. Leios in one picture
 
 ![Leios in one picture](diagrams/0-leios-overview.svg)
 
 - RB n+1 certifies the EB announced by its **parent** RB n (found through `prevHash`).
-- Certification happens at least 14 slots after the announcement on Musashi's parameters
-  (CIP-0164: 3 × header diffusion + vote period + diffusion period = 3 × 1 + 4 + 7 slots).
+- What the application sees for RB n+1: one block, with EB A's transactions first.
 
-What an application must see for RB n+1: one block with the 5,255 EB A transactions. That is the default.
+## 1. Where it lives
 
----
+| Part | Class (helper module) | Job |
+| :--- | :--- | :--- |
+| Configuration | `LeiosConfig` | `inlineEndorserBlockTxs`, `skipUnavailableEndorserBlocks`; passed to `BlockSync` / `BlockRangeSync` only |
+| Start ownership | `SyncControl` | One start = one main client + one assembler + one resolver. Selects, retires and halts starts; wraps the listener only when `inlineEndorserBlockTxs` is true |
+| Assembler | `CompleteBlockAssembler` | The listener delegate of one start. Forwards every callback at once, on the calling thread; completes certifying blocks inside `onBlock` |
+| Announcement cache | `EbAnnouncementCache` | The last 4,096 `ebAnnouncement`s and slots by block hash; one per `BlockSync` / `BlockRangeSync`, kept across restarts and halts |
+| EB resolver | `EndorserBlockResolver` | The LeiosFetch side connection: fetch the EB and its transactions, check them, map them |
+| Parent lookup | `ParentBlockLookup` | A short-lived ChainSync + BlockFetch connection that fetches an unseen parent privately, searching windows of 1,000 slots |
+| Merge | `BlockSerializer.withEndorserBlockTxs` (core) | Maps the EB transactions with the block's own mappers and merges them |
+| Transaction list | `TransactionListBuilder` | Rebuilds the `onBlock` transaction list from the merged block |
 
-## 1. System context (C4 level 1)
+## 2. One certifying block, step by step
 
-![System context (C4 level 1)](diagrams/1-c4-context.svg)
+1. `onBlock` arrives on the main connection's event loop with `leiosCertInBody == true`. Any other block is forwarded
+   unchanged.
+2. The parent's announcement comes from the cache by `prevHash`, or from `ParentBlockLookup`.
+3. The resolver opens (or reuses) its side connection: handshake with `N2NVersionTableConstant.v11AndAbove(magic)`,
+   accepted only for an offered version, V15 or later, not app-layer, with the main connection's magic. It carries
+   `LeiosFetchAgent` only. It is replaced when older than 45 s or idle for 30 s; the handshake wait is capped at 10 s.
+4. It requests the EB and then all its transactions. CCL reads the EB references (`RawEbReferences`). The
+   references must hash to the announced hash and have the announced size; each transaction must match its entry's
+   hash and size.
+5. `BlockSerializer.withEndorserBlockTxs` slices each transaction `[body, witnesses, aux / null, is_valid]` with CCL
+   `CborSpan`, maps it with the block's own mappers, and builds the block with `toBuilder()`: EB transactions first,
+   aux data and invalid indexes shifted, `leiosEndorserBlock` set. Header, certificates and `Block.cbor` are kept as
+   received.
+6. The assembler forwards the complete block to the application's `onBlock`, on the same thread.
 
----
+All of this runs within one **45 s budget** per call: attempts follow each other after a 1 s pause, each with the
+time left as its deadline. Each failed attempt is reported through `onEndorserBlockUnavailable`.
 
-## 2. Containers (C4 level 2): Yaci modules involved
+## 3. When the budget runs out
 
-![Containers (C4 level 2)](diagrams/2-c4-container.svg)
+| `skipUnavailableEndorserBlocks` | Result |
+| :--- | :--- |
+| `false` (default) | `SYNC_HALTED`: the block is not forwarded, the start's delegate drops every later callback, a separate thread stops the main client, `isRunning()` is false. Yaci logs the block and EB at ERROR. The application restarts from its own cursor. |
+| `true` | `DELIVERED_WITHOUT_EB_TXS`: the block is forwarded as received, with its own transaction list. |
 
-The assembler and its Leios connection exist only when `LeiosConfig.shouldInlineEndorserBlockTxs(magic)` is
-true: inlining on and Leios active (`AUTO`: Musashi magic 164). On mainnet and preprod `BlockSync` and
-`BlockRangeSync` keep using the application's own listener object, and no second connection is opened.
-The main connection is unchanged in every case.
+Stopping or replacing a start (`stop`, `startSync`, `startSyncFromTip`, `start`, `restart`) cancels a certifying
+call in progress; that call returns without delivering, and the start's later callbacks are dropped. Without a call
+in progress, a plain `stop()` keeps forwarding the stopped start's callbacks as on `next`, while a start replaced by a
+newer one forwards nothing but its disconnects (`onDisconnect`, as on `next`). The full ownership rules are ADR 0016 D3c.
 
----
+## 4. What does not change
 
-## 3. Components (C4 level 3): inside the complete-block assembler
+- The main connection: same version table, agents and mux decoding as on `next`. No Leios agents on it.
+- Every block without `leiosCertInBody == true`: same objects, same thread, same error path.
+- `inlineEndorserBlockTxs = false`: no assembler and no side connection; certifying blocks arrive as received.
+- `N2NChainSyncFetcher`, `BlockFetcher`, `BlockStreamer` and `PeerClient` deliver blocks as received.
+- Over node-to-client, the node inlines the EB's transactions itself.
 
-![Components (C4 level 3)](diagrams/3-c4-component.svg)
+## 5. Rollbacks and duplicates
 
-| Part | Holds | Rule |
-|---|---|---|
-| Announcement memory | the last 4,096 announcements, by RB hash | look up by the certifying block's `prevHash`; if the parent was never seen, fetch it once (ChainSync `FindIntersect` for that hash over the 1,000 slots before the child, then BlockFetch; or the sync start point directly) |
-| EB resolver | requests in flight, by EB point | ask only for **certified** EBs; check the EB's hash; fetch all its transactions in one request; check `blake2b-256(tx bytes as received) == EB reference hash` for every one |
-| Ordered queue | up to 256 callbacks | deliver strictly in arrival order on one thread; a certifying block waits for its EB and holds every event behind it; a full queue makes the main connection's thread wait |
-| Merger | nothing | certifying block + EB transactions → complete block |
-
----
-
-## 4. The complete block (`inlineEndorserBlockTxs = true`, default)
-
-What changes in a certifying block (RB n+1 in the picture above) before it reaches the application:
-
-![A certifying block before and after](diagrams/4-complete-block.svg)
-
-With `inlineEndorserBlockTxs = false`, nothing is wrapped: the block is delivered exactly as today (left side;
-`leiosEndorserBlock` is null). The certified EB is the one announced in the parent block's header, and EB data
-arrives through the optional `onEndorserBlock(EndorserBlockEvent)` callback.
-
-Every block that certifies nothing is delivered exactly as before.
-
----
-
-## 5. Dynamic view: tip sync (BlockSync)
-
-![Tip sync](diagrams/5-tip-sync.svg)
-
-The EB fetch starts as soon as the certifying block arrives; it does not wait for the peer to offer anything.
-On the live network a 5,255-transaction EB takes about one second. The application receives RB n+1 only once it
-is complete.
-
----
-
-## 6. Dynamic view: range sync (BlockRangeSync)
-
-![Range sync](diagrams/6-range-sync.svg)
-
-- Memory stays bounded: at most 256 queued callbacks. When the queue is full, the main connection's thread
-  waits, so Yaci reads blocks more slowly, the same back-pressure a busy listener gives today. EB answers keep
-  arriving on the separate Leios connection. `stop()`, `restart()` and `startSync()` close the assembler before
-  the connection, which releases a network thread waiting for queue space, so stopping cannot deadlock either.
-- Yaci Store's batch of 100 blocks receives complete blocks in order, and `batchDone` arrives after the last
-  block of the range, through the same ordered queue. Its parallel pipeline is unchanged.
-
----
-
-## 7. Failures, retries and rollbacks
-
-| EB resolver result | `skipUnavailableEndorserBlocks = false` (default) | `= true` (opt-in) |
-|---|---|---|
-| resolved, every transaction checks | merge and release | merge and release |
-| not found, timeout or a transaction that does not match | report `onEndorserBlockUnavailable`, retry with a growing delay; delivery waits (a visible pause, no gap) | report `onEndorserBlockUnavailable`, release the block without the EB transactions |
-| peer has no Leios protocols | reported through `onEndorserBlockUnavailable` with that reason; retried | reported; released without EB transactions |
-
-A transaction that does not match the EB is never delivered: it is treated like "not found".
-
-Rollback: the node rolls back ranking blocks. EB transactions belong to the certifying block, so they roll back
-with it. A certifying block still waiting when a rollback arrives behind it stops waiting and is delivered as on
-the wire (as today), followed by `onRollback` through the ordered queue. Announcements are keyed by block hash, so
-blocks from an abandoned fork never match. Nothing new is needed in the application.
-
----
-
-## 8. What is pinned to which network version
-
-| Piece | Musashi `prototype-2026w40a` (until 2026-10-20) | Deployed Musashi (`rc-2026w42`) |
-|---|---|---|
-| RB body | `[txs, leios_cert, peras_cert]`, tx = `[body, wits, aux, is_valid]` | same; `peras_cert` must be nil |
-| LeiosFetch tags | BlockRequest 0, Block 1, TxsRequest 2, BlockTxs 3 | renumbered: 1, 2, 3, 4 |
-| EB transactions | `[point, bitmaps, [* bytes]]`, mempool encoding | `[* #6.24(block_transaction)]` |
-| EB entry | hash and size of the mempool encoding | hash and size of the block encoding (bytes inside `#6.24`) |
-| Old certified EBs served | yes (tested 4 weeks back, first 8 txs) | yes (range sync of blocks #9,099–#9,102, all txs) |
-| Request the node cannot answer | empty answer | connection is closed |
-
-The application-facing behaviour is the same for both. Only the codecs change; they are tracked in
-`adr/leios-todo.md`.
+EB transactions belong to the certifying block, so they roll back with it; no new rollback handling is needed.
+Announcements are keyed by block hash, so a block from an abandoned fork never matches. Delivery stays at least
+once, as on `next`.

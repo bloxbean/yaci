@@ -4,6 +4,7 @@ Date: 2026-07-07
 
 Status: Proposed
 
+Superseded by ADR 0016 (`0016-leios-on-next-ccl-parsing-and-era-activation.md`) wherever they disagree: CCL parses, Yaci maps.
 ## Context
 
 The ADR 0010 implementation (Dijkstra era continuity + Leios serialization +

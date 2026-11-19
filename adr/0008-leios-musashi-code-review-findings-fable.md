@@ -4,6 +4,7 @@ Date: 2026-07-02
 
 Status: Proposed
 
+Superseded in part by ADR 0016 (`0016-leios-on-next-ccl-parsing-and-era-activation.md`) wherever they disagree.
 > Authored by Claude (Fable 5). This ADR records the verified findings of a
 > multi-agent code review (xhigh effort: 6 finder agents across independent
 > correctness/cleanup angles, 44 candidate findings, each adversarially

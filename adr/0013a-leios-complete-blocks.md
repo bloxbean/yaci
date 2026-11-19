@@ -1,8 +1,10 @@
-# ADR 0013: Leios: complete blocks through the existing API
+# ADR 0013a: Leios: complete blocks through the existing API
 
 Date: 2026-10-19
 
 Status: Proposed
+
+Superseded by ADR 0016 (`0016-leios-on-next-ccl-parsing-and-era-activation.md`) wherever they disagree. Renamed from `0013-leios-complete-blocks.md`, whose number collides with `next`'s ADR 0013.
 
 Supersedes: the **Decision** part of ADR 0012 (the analysis in ADR 0012 still stands).
 

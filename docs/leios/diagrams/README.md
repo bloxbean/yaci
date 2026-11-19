@@ -14,9 +14,5 @@ java -jar plantuml-1.2026.8.jar -tpng -Sdpi=150 docs/leios/diagrams/*.puml
 | File | Shows |
 |---|---|
 | `0-leios-overview` | announce, certify, discard; ledger order |
-| `1-c4-context` | C4 level 1: application, Yaci, node |
-| `2-c4-container` | C4 level 2: Yaci modules involved |
-| `3-c4-component` | C4 level 3: inside the complete-block assembler |
-| `4-complete-block` | a certifying block before and after merging |
-| `5-tip-sync` | tip sync, step by step |
-| `6-range-sync` | range sync, step by step |
+
+The design is in ADR 0016 (`adr/0016-leios-on-next-ccl-parsing-and-era-activation.md`).

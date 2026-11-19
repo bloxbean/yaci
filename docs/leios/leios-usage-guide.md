@@ -1,29 +1,31 @@
-# Leios Usage Guide: Patterns for Application Developers
+# Leios usage guide for application developers
 
-Last verified: 2026-10-20 (Musashi `rc-2026w42`). Design: `adr/0013-leios-complete-blocks.md`.
+Design: [ADR 0016](../../adr/0016-leios-on-next-ccl-parsing-and-era-activation.md). Fixtures: Musashi `rc-2026w42`
+(`core/src/test/resources/leios/w42`).
 
-How to use Yaci's Linear Leios support in your application. Everything here targets the **Musashi** test
-network (network magic `164`, Dijkstra era) and works with the same jar, unchanged, on mainnet and preprod:
-Leios code paths never engage on non-Leios networks.
+> **Status:** experimental. Dijkstra is not final, and every Leios field and setting may change in any release.
+> Musashi is respun on breaking node releases; the current pin is in [leios-spec-tracking.md](leios-spec-tracking.md).
 
-> **Status:** experimental, pinned to the deployed Musashi build `rc-2026w42`. Musashi is respun on
-> breaking releases; the pin and how to re-check it are in `adr/leios-todo.md` and
-> [leios-musashi-source-tracking-guide.md](leios-musashi-source-tracking-guide.md).
+## The model in 30 seconds
 
-## The mental model in 30 seconds
+1. **Ranking blocks (RBs)** are the normal chain. A Dijkstra header may **announce** an endorser block (EB):
+   `HeaderBody.ebAnnouncement` (hash and size).
+2. **Endorser blocks** carry most of the transactions and travel separately. If voters approve one, the **next**
+   block **certifies** it: its header has `leiosCertInBody == true`, and its body carries the Leios certificate. The
+   EB's transactions enter the ledger at that block, before the block's own (in practice it has none).
+3. **Yaci puts them together.** `BlockSync` and `BlockRangeSync` deliver a certifying block to `onBlock` complete:
+   the EB's transactions first, in EB order, then the block's own. You use the same callback, `Block` and
+   `Transaction` objects as on any other network.
 
-1. **Ranking blocks (RBs)** are the normal chain. A ranking block may **announce** an endorser block (EB) in its
-   header.
-2. **Endorser blocks (EBs)** carry most of the transactions. They travel separately. If voters approve one, the
-   **next** ranking block **certifies** it, and the EB's transactions enter the ledger at that block's position,
-   before its own transactions (in practice a certifying block has none of its own).
-3. **Yaci puts them together for you.** By default a certifying block reaches `onBlock` **complete**: the EB's
-   transactions first, then the block's own. You use the same callback, `Block` and `Transaction` objects as on
-   any other network, and you see every ledger transaction.
+Leios activates by era: only a Dijkstra block with `leiosCertInBody == true` triggers it. On a network that has not
+reached Dijkstra (mainnet, preprod, preview today), the jar behaves exactly as `next`: no side connection, no extra
+callbacks, the same objects on the same thread.
 
 ---
 
-## Pattern 1: Follow Musashi like any other network (no Leios code)
+## Follow a Leios network with `BlockSync` or `BlockRangeSync`
+
+No Leios code is needed:
 
 ```java
 BlockSync blockSync = new BlockSync("leios-node.play.dev.cardano.org", 3001, 164L, wellKnownPoint);
@@ -31,207 +33,154 @@ BlockSync blockSync = new BlockSync("leios-node.play.dev.cardano.org", 3001, 164
 blockSync.startSync(point, new BlockChainDataListener() {
     @Override
     public void onBlock(Era era, Block block, List<Transaction> transactions) {
-        // era == Era.Dijkstra on Musashi. A certifying block already contains its EB's transactions:
-        // block #156614 arrives with 5,255 transactions although it is 169 bytes on chain.
+        // era == Era.Dijkstra. A certifying block already holds its EB's transactions:
+        // on Musashi w42, block 10,027 has no transactions of its own and arrives with the 237 of EB f951f865….
     }
-
-    @Override
-    public void onRollback(Point point) { /* unchanged: EB transactions roll back with their block */ }
 });
 ```
 
-The same works for `BlockRangeSync` (history), including old certifying blocks: Yaci fetches certified EBs
-on request (verified on Musashi for EBs four weeks old).
+`BlockRangeSync` works the same way for history.
 
-What happens underneath:
+What happens underneath, for a certifying block only:
 
-- Yaci opens a second, small node-to-node connection to the same peer for EBs only. The main connection is
-  unchanged.
-- A certifying block waits until its EB transactions are fetched and checked (each one against the EB's
-  reference hash). Blocks behind it wait too, so `onBlock`, `onRollback`, `batchDone` and the other callbacks
-  keep their order. All callbacks are delivered on one thread.
-- If an EB cannot be fetched, Yaci retries and reports it through `onEndorserBlockUnavailable`; it never
-  delivers the block with transactions missing (see the settings below).
-- Callbacks run on a Yaci worker thread (`yaci-leios-complete-blocks`), one at a time, in order. An exception
-  from `onBlock` reaches `onParsingError`, as before. `stop()` drops events still queued and never interrupts
-  your callback.
+- Inside the `onBlock` call, Yaci fetches the EB and its transactions over LeiosFetch on a **side connection** to
+  the same peer. The main connection (ChainSync, BlockFetch, KeepAlive) is unchanged.
+- The certified EB is the one the block's **parent** announced. Yaci remembers recent announcements; if the parent
+  was not seen (for example a range that starts on a certifying block), it looks the parent up on a short-lived
+  side connection.
+- The EB is checked against the parent's announcement (hash and size), and each transaction against its EB entry
+  (hash and size), before anything is mapped.
+- This takes at most **45 s** of Yaci time per certifying block, retried within that budget. Your own callbacks
+  are not bounded by it. Blocks behind it wait, because delivery is synchronous: callbacks keep their order and
+  their thread.
 
-### Where a transaction came from (optional)
+Every other block is delivered exactly as before. An exception from your `onBlock` takes the ordinary path to
+`onParsingError`, for a completed certifying block too.
+
+### Where a transaction came from
 
 ```java
-LeiosEndorserBlockRef eb = block.getLeiosEndorserBlock();  // null unless the block certifies an EB
+LeiosEndorserBlockRef eb = block.getLeiosEndorserBlock();  // null unless Yaci added EB transactions to this block
 if (eb != null) {
     eb.getEbHash();   // the certified EB
-    eb.getEbSlot();   // its slot (= the announcing block's slot)
+    eb.getEbSlot();   // the slot of the block that announced it (the parent)
+    eb.getEbSize();   // the announced size of the EB's references
     eb.getTxCount();  // the block's first txCount transactions came from the EB
 }
 ```
 
-### Leios fields available on every Dijkstra block
+`leiosEndorserBlock` is left out of JSON when null, so the JSON of every other block is unchanged. The header,
+both certificates and `Block.getCbor()` are kept as received, so `blockBodySize` and `blockBodyHash` describe the
+block as it is on chain, not the merged body.
+
+### Leios fields on every Dijkstra block
 
 ```java
 HeaderBody hb = block.getHeader().getHeaderBody();
-LeiosAnnouncement ann = hb.getLeiosAnnouncement();  // nullable: the EB this block announces
-Boolean certified = hb.getLeiosCertified();         // TRUE when this block certifies its parent's EB
+EbAnnouncement ann = hb.getEbAnnouncement();   // nullable: the EB this block announces (getHash(), getSize())
+Boolean certifies = hb.getLeiosCertInBody();   // TRUE when this block certifies its parent's EB; null before Dijkstra
 
-LeiosCertificate cert = block.getLeiosCertificate(); // nullable: parsed certificate
+LeiosCertificate cert = block.getLeiosCertificate(); // nullable
 if (cert != null) {
-    cert.getSigners();             // hex bitfield over the committee
-    cert.getAggregatedSignature(); // hex, 48-byte BLS signature
-    cert.getCbor();                // exact raw bytes (hex)
+    cert.getSigners();    // hex bit field over the committee
+    cert.getSignature();  // hex aggregate signature
 }
+String peras = block.getPerasCertificate();          // nullable, hex
 ```
-
-`blockBodySize` and `blockBodyHash` in the header always describe the block as it is on chain.
 
 ---
 
-## Pattern 2: Handle endorser blocks yourself (inlining off)
+## When the EB cannot be had
 
-If your application wants the block exactly as on the wire and to process EBs on its own, switch inlining off
-(globally, like `returnFullTxCbor`):
+Each failed attempt is reported through `BlockChainDataListener.onEndorserBlockUnavailable(EndorserBlockUnavailableEvent)`.
+The event carries the certifying block (slot, hash, number), the EB hash, the reason, the attempt number and an
+`outcome`:
 
-```java
-YaciConfig.INSTANCE.setInlineEndorserBlockTxs(false);
-```
+| `outcome` | Meaning |
+| :--- | :--- |
+| `RETRYING` | Budget is left; Yaci tries again after a 1 s pause. |
+| `DELIVERED_WITHOUT_EB_TXS` | Budget exhausted with `skipUnavailableEndorserBlocks = true`: the block is delivered as received, without the EB's transactions. |
+| `SYNC_HALTED` | Budget exhausted in strict mode (the default): the block is **not** delivered, nothing more comes from this start, the main connection is closed, and `isRunning()` returns false. |
 
-`onBlock` then receives certifying blocks as today (no EB transactions, `getLeiosEndorserBlock() == null`).
-The certified EB is the one announced in the parent block's header. EB data arrives through the optional
-callbacks below.
+An exception thrown from `onEndorserBlockUnavailable` is logged and changes nothing.
 
-## Pattern 3: Observe endorser blocks and votes as they appear (opt-in callbacks)
+**After `SYNC_HALTED`, restart from your own cursor**, as after any failed sync: `startSync` / `startSyncFromTip` for
+`BlockSync`, or `restart(listener)` then `fetch(from, to)` for `BlockRangeSync`. The certifying block comes again,
+with a fresh budget. Do not restart from inside a callback on the event loop; hand it to another thread.
 
-These callbacks report what the node announces near the tip. They work with inlining on or off.
+---
+
+## Settings: `LeiosConfig`
+
+Pass it to the `BlockSync` or `BlockRangeSync` constructor; the constructors without it use
+`LeiosConfig.defaultConfig()`.
 
 ```java
 LeiosConfig leiosConfig = LeiosConfig.builder()
-        .fetchTxs(true)                 // fetch EB transaction bytes (default true)
-        .maxTxsPerEndorserBlock(256)    // per-EB fetch cap (default 64)
-        .deliverVotes(true)             // votes off by default (high volume)
-        .build();                       // mode defaults to AUTO
-
-BlockSync blockSync = new BlockSync(host, port, 164L, wellKnownPoint, leiosConfig);
-
-blockSync.startSync(point, new BlockChainDataListener() {
-    @Override
-    public void onEndorserBlock(EndorserBlockEvent event) {
-        LeiosPoint point = event.getPoint();          // (slot, ebHash)
-        EndorserBlock eb = event.getEndorserBlock();
-        eb.getTxRefs();                               // ordered reference hash -> size
-        for (EndorserBlockTx tx : event.getTransactions()) {
-            tx.getTxHash();                           // EB reference hash (of the full tx bytes), not the tx id
-            tx.getTxCbor();                           // full tx CBOR (hex)
-        }
-        boolean complete = event.isTxsComplete();     // false if capped, failed or refs only
-    }
-
-    @Override
-    public void onLeiosVotes(LeiosVotesEvent event) {
-        for (LeiosVote vote : event.getVotes()) {
-            vote.getAnnouncingRbHash();               // vote: [announcing_rb_hash, voter_id, signature]
-        }
-    }
-});
+        .skipUnavailableEndorserBlocks(true)
+        .build();
+BlockRangeSync rangeSync = new BlockRangeSync(host, port, 164L, leiosConfig);
 ```
-
-Notes:
-
-- An EB seen here is **not** part of the ledger until a later block certifies it; uncertified EBs are
-  discarded by the network. With inlining on you do not need these events for ledger data.
-- Events depend on what the peer offers; they are not guaranteed for every EB.
-- Vote parsing runs only when `deliverVotes(true)` **and** your listener overrides `onLeiosVotes`.
-
----
-
-## Node-to-client (`N2CChainSyncFetcher`)
-
-Over node-to-client the node completes certifying blocks itself: it splices the certified EB's transactions into
-the block body, and Yaci parses that block like any other. Nothing to configure. If the node cannot read the EB,
-it sends the certifying block without them; Yaci logs a warning, and you can detect it as
-`header.getLeiosCertified() == TRUE` with no transactions. `Block.getLeiosEndorserBlock()` is set only for
-node-to-node (Yaci does the merge there). The header is kept but the body is replaced, so the header's body hash
-and size do not match the node-to-client body, and `Block.getCbor()` is the node's re-encoded block.
-
-## Pattern 4: Raw protocol access (`LeiosNetworkClient`)
-
-For tooling and diagnostics: opaque CBOR in, no policy.
-
-```java
-try (LeiosNetworkClient client = new LeiosNetworkClient(host, 3001)) { // magic 164 default
-    client.addDataListener(new LeiosDataListener() {
-        @Override public void onBlock(LeiosPoint requested, LeiosRawCbor endorserBlock) {
-            byte[] raw = endorserBlock.getCbor();
-        }
-    });
-    client.start();
-    client.requestBlock(point);   // after onLeiosActivated
-}
-```
-
----
-
-## Dijkstra transaction fields
-
-All Dijkstra-era structures of the deployed CDDL are parsed. New fields are null for earlier eras, so Conway
-objects and their JSON are unchanged.
-
-| CDDL | Yaci |
-| :--- | :--- |
-| tx body 14 `guards` | `TransactionBody.guards` (credentials, in order). Key-hash guards are also in `requiredSigners`, as before. |
-| tx body 23 `sub_transactions` | `TransactionBody.subTransactions`: each `SubTransaction` has its own `body` (with `txHash`), `witnesses` and `auxData`. |
-| tx body 24 `required_top_level_guards` | `TransactionBody.requiredTopLevelGuards` (credential, datum CBOR or null) |
-| tx body 25 `direct_deposits` | `TransactionBody.directDeposits` (reward account hex → coin, like `withdrawals`) |
-| tx body 26, 27 balance intervals | `accountBalanceIntervals`, `startingAccountBalanceIntervals` (`AccountBalanceInterval`; the plain `coin` form is an exact balance) |
-| native script 6 `require_guard` | `NativeScript` type 6, JSON `{"type":"requireGuard","keyHash"\|"scriptHash":…}` |
-| redeemer tag 6 | `RedeemerTag.Guarding` |
-| pool `bls_key` | `PoolParams.blsPublicKey`, `blsPossessionProof` |
-| protocol parameter update keys 34–48 | `ProtocolParamUpdate` (reference script limits, `maxPledgeLeverage`, `minPoolMargin`, Leios parameters) |
-| protocol parameter update keys 49–56 (w42) | `ProtocolParamUpdate` (`peras*` parameters, `refInputsCostPerMultiAssetPolicy`, `refInputsCostPerDatumByte`). Key 53 `nil` sets `perasBootstrapRoundNone = true`. |
-| Plutus V4 | `PlutusScriptType.PlutusScriptV4`; witness set key 8 (w42) `Witnesses.plutusV4Scripts`; aux data key 5 `AuxData.plutusV4Scripts`. Both are null when absent. |
-| hard-fork era index 7 | `localstate.api.Era.Dijkstra`, `TxBodyType.DIJKSTRA` (local state queries, transaction submission) |
-
-Notes:
-
-- **UTxO indexers:** a sub-transaction's inputs and outputs are only in `TransactionBody.subTransactions`, not in
-  the block's transaction list. To keep a complete UTxO set, walk the sub-transactions of each transaction.
-- A Dijkstra field Yaci cannot read is logged and left null; the transaction and block are still delivered.
-- `requireGuard` is Yaci's JSON name; cardano-api has no JSON form for guard scripts yet.
-
-The Haskell golden vectors used to test this are in `core/src/test/resources/leios/haskell-w42/` (and the w40a
-ones in `core/src/test/resources/leios/haskell/`).
-
----
-
-## Settings
 
 | Setting | Default | Meaning |
 | :--- | :--- | :--- |
-| `YaciConfig.inlineEndorserBlockTxs` | `true` | Deliver certifying blocks with their EB transactions. `false`: blocks as on the wire (Pattern 2). |
-| `LeiosConfig.skipUnavailableEndorserBlocks` | `false` | `false`: never deliver a certifying block without its EB transactions; wait and retry. `true`: after 3 failed attempts deliver it without them (reported through `onEndorserBlockUnavailable`). |
-| `LeiosConfig.mode` | `AUTO` | `AUTO`: Leios only on Musashi (magic 164). `ENABLED`: always. `DISABLED`: never. |
-| `LeiosConfig.fetchTxs` | `true` | Pattern 3 events: fetch EB transaction bytes. |
-| `LeiosConfig.maxTxsPerEndorserBlock` | `64` | Pattern 3 events: per-EB fetch cap. |
-| `LeiosConfig.txsOfferWaitMillis` | `2000` | Pattern 3 events: wait for a transactions offer before a refs-only event. |
-| `LeiosConfig.deliverVotes` | `false` | Parse and deliver votes. |
+| `inlineEndorserBlockTxs` | `true` | `false`: certifying blocks are delivered as received (no EB transactions, `leiosEndorserBlock == null`), and no side connection is opened. |
+| `skipUnavailableEndorserBlocks` | `false` | `false` (strict): halt the sync when the 45 s budget runs out. `true`: deliver the block without its EB transactions and report `DELIVERED_WITHOUT_EB_TXS`. |
 
-## Behavior on mainnet / preprod
+`BlockRangeSync.fetch` works as on `next`, including from inside `batchDone`. With inlining on it also throws
+`IllegalStateException` after a halt (call `restart(listener)` then `fetch`) and while a certifying block of the
+current range waits for its EB. Neither happens before Dijkstra.
 
-With `AUTO` (the default everywhere), your app runs on mainnet exactly as with a non-Leios Yaci: no second
-connection, no wrapping of your listener, no Leios callbacks, and the Shelley–Conway parsing path is unchanged.
-You do not need separate builds or feature flags.
+Each reply on the side connection (the EB, its transactions, a parent-lookup reply) must arrive within 15 s; an
+attempt that misses it is retried on a fresh connection within the 45 s budget. A link that cannot carry one EB's
+transactions in 15 s (about 1 MB/s for a 15 MB reply) therefore never gets them: the sync halts in strict mode.
+
+---
+
+## Other entry points deliver blocks as received
+
+`N2NChainSyncFetcher` (including `start(Consumer<Block>)`), `BlockFetcher`, `BlockStreamer` and `PeerClient` do not
+complete certifying blocks: such a block arrives without the EB's transactions. Use `BlockSync` or `BlockRangeSync`
+if you need every ledger transaction.
+
+**Node-to-client (`N2CChainSyncFetcher`):** the node itself inlines the EB's transactions into the certifying block
+it serves, so Yaci needs nothing. If the node could not read the EB, the block arrives without transactions and
+Yaci logs a warning. `Block.getLeiosEndorserBlock()` is never set over node-to-client.
+
+---
+
+## Dijkstra ledger fields
+
+CCL reads them, and Yaci maps them. They are null (or empty) for earlier eras, so Conway objects and their JSON are
+unchanged.
+
+| CDDL | Yaci |
+| :--- | :--- |
+| tx body 14 `guards` | `TransactionBody.guards` (`List<Credential>`) |
+| tx body 23 `sub_transactions` | `TransactionBody.subTransactions`: each `SubTransaction` has `body`, `witnesses`, `auxData` |
+| tx body 24 `required_top_level_guards` | `TransactionBody.requiredTopLevelGuards` (`TopLevelGuard`: `credential`, `datum`) |
+| tx body 25 `direct_deposits` | `TransactionBody.directDeposits` (reward account hex → coin) |
+| tx body 26, 27 | `accountBalanceIntervals`, `startingAccountBalanceIntervals` (`AccountBalanceInterval`) |
+| native script 6 | `NativeScriptType.REQUIRE_GUARD`; JSON `{"type": "guard", "credential": {...}}` |
+| redeemer tag 6 | `RedeemerTag.Guarding` |
+| pool BLS key | `PoolParams.blsKey` (`BlsKey`: `publicKey`, `proofOfPossession`) |
+| protocol parameter update keys 34–56 | `ProtocolParamUpdate`: reference script limits, `maxPledgeLeverage`, `minPoolMargin`, `leios*` and `peras*` parameters, `refInputsCostPerMultiAssetPolicy`, `refInputsCostPerDatumByte` |
+| Plutus V4 | `PlutusScriptType.PlutusScriptV4`; `Witnesses.plutusV4Scripts` (key 8, empty if absent); `AuxData.plutusV4Scripts` (key 5, null if absent) |
+| era | `Era.Dijkstra` (block tag 8); `localstate.api.Era.Dijkstra` and `TxBodyType.DIJKSTRA` (index 7) for local state queries and submission |
+
+**UTxO indexers:** a sub-transaction's inputs and outputs are only in `TransactionBody.subTransactions`; the
+`onBlock` transaction list does not flatten them. Walk the sub-transactions of each transaction.
+
+---
 
 ## Current limitations
 
-- Certificates are parsed and kept raw, **not** BLS-verified. Yaci trusts the node's chain selection.
-- Plutus V4 scripts are read everywhere the deployed CDDL allows them: the witness set (`Witnesses.plutusV4Scripts`),
-  reference scripts (raw `scriptRef`, as for other versions) and auxiliary data (`AuxData.plutusV4Scripts`).
-- Local state query results for the Dijkstra era (for example current protocol parameters, 55 fields in w42) are
-  not verified yet: no local Musashi node was available. The w42 queries `GetStakePoolState` (40) and
-  `GetLeiosCommittee` (41) are not implemented.
-- How long nodes keep old certified EBs is not specified yet; four weeks is verified on Musashi.
-- If the first block after a start certifies an EB and its parent is more than 1,000 slots older (a long block
-  gap), the parent search fails and the block waits; tip sync uses the intersection point and does not search.
-- With inlining on, the Leios connection also receives LeiosNotify traffic, and Pattern 3 (if enabled on the main
-  connection) fetches some EB transactions a second time. This costs bandwidth only.
-- Musashi is respun on breaking node releases; this guide and the code are pinned to `rc-2026w42`.
-  Check `adr/leios-todo.md` before assuming compatibility.
+- Certificates are mapped, **not** BLS-verified. Yaci trusts the node's chain selection.
+- Votes are not parsed. The LeiosNotify and LeiosFetch agents stay in core for applications that speak Leios
+  themselves, with payloads kept as the bytes received; there is no Leios event API in the helpers.
+- A strict halt stops the sync until the application restarts it. A Yaci Store release used on a Leios network must
+  handle `SYNC_HALTED` (ADR 0016, Consequences).
+- A parent more than one 45 s budget's search away (a slot gap of the order of a day) is not found by search; a
+  restart from an earlier point delivers the parent first.
+- Local state queries in the Dijkstra era are not verified against a Musashi node.
+- How long nodes keep old certified EBs is not specified.

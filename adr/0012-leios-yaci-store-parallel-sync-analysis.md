@@ -4,6 +4,7 @@ Date: 2026-07-07
 
 Status: Proposed
 
+Decision superseded by ADR 0016 (`0016-leios-on-next-ccl-parsing-and-era-activation.md`); the analysis still stands.
 Scope: cross-repo — Yaci (this repo: helper API guarantees, EB range resolution)
 and yaci-store (`/Users/satya/work/bloxbean/yaci-store`: pipeline, schema,
 processors). yaci-store implementation details here are design direction; the

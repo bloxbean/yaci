@@ -102,7 +102,7 @@ What changed since PRs #167/#171 were written (w27, July 2026):
 | 2a | Port `next`'s hardening to the Dijkstra block path (deep nesting, original bytes, full tx CBOR) | done | same branch | reviewed |
 | 2c | Re-pin #171 block format to the deployed w40a (3-item body, `block_transaction`, tx body keys, pool BLS key) | done | same branch; 18 live blocks parse | reviewed |
 | 2b | Check the rebased code against the live Musashi w40a network | done: PASS | `adr/leios-evidence/step2b-w40a-rebased-171.md` | |
-| 3 | Write ADR 0013 (complete blocks) and the design doc with C4 block diagrams. **Owner review checkpoint.** | done: approved by owner 2026-10-19, with an added inline flag | `adr/0013-leios-complete-blocks.md`, `docs/leios/leios-complete-blocks-design.md` | review agent running |
+| 3 | Write ADR 0013 (complete blocks) and the design doc with C4 block diagrams. **Owner review checkpoint.** | done: approved by owner 2026-10-19, with an added inline flag | `adr/0013a-leios-complete-blocks.md`, `docs/leios/leios-complete-blocks-design.md` | review agent running |
 | 4 | Build the complete-block assembler in the helper (announcement memory, EB resolver, reorder buffer, merger, ordered delivery) and `YaciConfig.inlineEndorserBlockTxs` (default true) | done | branch `feat/leios_complete_blocks` (PR stacked on #171) | reviewed; all findings addressed |
 | 5 | N2N range sync: fetch historical EBs over LeiosFetch so N2N gives full tx data through the same interface | done with step 4: live range test matches db-sync | `MusashiCompleteBlocksIT` | |
 | 6 | N2C: accept the node's inlined certifying blocks (secondary, most downstream uses N2N) | done: parses unchanged; gap logged | `N2CInlinedCertifyingBlockTest` | reviewed: approve; 4 small fixes applied |

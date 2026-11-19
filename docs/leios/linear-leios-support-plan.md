@@ -1,6 +1,29 @@
 # Linear Leios Support Plan for Yaci and Yaci Store
 
-Last reviewed: 2026-06-26
+Last reviewed: 2026-11-19 (status section). The plan below "Original plan" was written on 2026-06-26 and is kept as
+history.
+
+## Current status (2026-11-19, branch `feat/leios-on-next`)
+
+What Yaci does now is decided in [ADR 0016](../../adr/0016-leios-on-next-ccl-parsing-and-era-activation.md) and
+described in [leios-usage-guide.md](leios-usage-guide.md). Against the plan below:
+
+| Plan item | Status |
+| :--- | :--- |
+| `Era.Dijkstra`, Dijkstra header and block decoding (Phase 1, backlog 1–6) | **Done, by CCL.** CCL `0.8.0-pre8` parses all ledger CBOR; Yaci maps it to `Block`, `HeaderBody.ebAnnouncement`, `HeaderBody.leiosCertInBody`, `Block.leiosCertificate`, `Block.perasCertificate`, `SubTransaction`, `TopLevelGuard`. Yaci has no ledger parser of its own. |
+| A prototype feature flag (backlog 2) | **Dropped.** Leios activates by era (`leiosCertInBody == true`), not by flag or network magic. Pre-Dijkstra networks behave exactly as on `next`. |
+| Native EB and vote models (Phase 2) | **Not in Yaci.** EB references and EB transactions are read by CCL and used only to complete blocks. Votes are not parsed. |
+| Ledger-effective transaction view (Phase 2) | **Done.** `BlockSync` and `BlockRangeSync` deliver a certifying block through `onBlock` with the EB's transactions first, and set `Block.leiosEndorserBlock` (`LeiosEndorserBlockRef`). Other fetchers deliver blocks as received. |
+| LeiosNotify / LeiosFetch agents (Phase 4) | **Done** (ADR 0007), in core. The helpers use LeiosFetch only, on a side connection opened for a certifying block; the main connection carries no Leios agents. |
+| EB fetch policy and backpressure (Phase 4) | **Replaced** by synchronous delivery: the EB is fetched inside the `onBlock` call within a 45 s budget. When the budget runs out, the sync halts (`SYNC_HALTED`) or, with `LeiosConfig.skipUnavailableEndorserBlocks`, delivers the block without the EB's transactions. `onEndorserBlockUnavailable` reports each failed attempt. |
+| Running behind a local Leios node (Current Testnet Steps 1–3) | **Not needed for N2N.** Yaci syncs from the public relay. Over node-to-client the node inlines EB transactions itself. |
+| Yaci Store Leios module, schema, APIs (Phase 3) | **Not started.** An unmodified Yaci Store indexes Musashi through complete blocks (`adr/leios-todo.md`, step 7b, on the earlier stack). Before a release is used on a Leios network, Yaci Store must restart on `SYNC_HALTED` (ADR 0016, Consequences and Q3). |
+| Dijkstra local state queries | **Open.** Not verified against a Musashi node. |
+
+## Original plan (2026-06-26, history)
+
+The sections below are unchanged from the original plan. Names and steps in them are proposals
+from that time, not the current API.
 
 ## Scope
 

@@ -1,6 +1,6 @@
 # Leios / Musashi: Source Tracking & Change-Handling Guide
 
-Last verified: 2026-07-07
+Last updated: 2026-11-19 (branch `feat/leios-on-next`, ADR 0016)
 
 This is the operational guide for anyone maintaining Yaci's Linear Leios
 (CIP-0164) support against the **Musashi** prototype testnet: where the wire
@@ -12,8 +12,17 @@ Companion documents:
 - `docs/leios/leios-spec-tracking.md` — the current pin matrix (what Yaci
   implements right now, at which commit).
 - `docs/leios/linear-leios-support-plan.md` — the long-term Yaci / Yaci Store plan.
-- `adr/0007`, `adr/0010`, `adr/0011` — design records for the mini-protocols,
-  serialization/listener integration, and the w27 block restructure.
+- `adr/0016-leios-on-next-ccl-parsing-and-era-activation.md` — the current
+  design: CCL parses ledger CBOR, Yaci maps it; activation by era.
+- `adr/0007` — the mini-protocols (still stands). `adr/0010` and `adr/0011`
+  (Yaci-side serialization, the w27 restructure) are history, superseded by
+  ADR 0016.
+
+**Since ADR 0016, a ledger format change is a CCL change first.** Yaci has no
+Dijkstra or Leios ledger parser: CCL's ledger-cbor reads blocks, headers,
+transactions, EB references and EB transactions, and Yaci maps the result.
+Yaci itself owns only the LeiosNotify / LeiosFetch message framing in core and
+the complete-block logic in the helpers.
 
 ---
 
@@ -81,7 +90,9 @@ protocol major version 12), N2N handshake version **≥ 15**, mini-protocols
 | Yaci state | Blueprint pin | Node release | Notes |
 | :--- | :--- | :--- | :--- |
 | ADR 0007 (mini-protocols) + ADR 0010 (serialization) | `188183b` (2026-06-29) | w25/w26 | segmented Dijkstra body, placeholder certs, trailing `[eb_hash, eb_size]` header extension, 4-element votes |
-| ADR 0011 (current target) | `93276ab` sync / head `cb1de23` (2026-07-06) | **w27** | `block = [header, block_body]` with nested whole transactions, real `leios_certificate`, 12-item header (`leios_certified` bool + `leios_announcement/nil`), 3-element votes |
+| ADR 0011 | `93276ab` sync / head `cb1de23` (2026-07-06) | w27 | `block = [header, block_body]` with nested whole transactions, real `leios_certificate`, 12-item header (certified flag + announcement/nil), 3-element votes |
+| w40a re-pin | ledger `d93c6546` | `prototype-2026w40a` | 3-item body `[txs, leios_cert, peras_cert]`, `block_transaction` with `is_valid` |
+| w42 re-pin (**current**) | ledger `9df9f98c`, consensus `840e789b` | **`rc-2026w42`** | renumbered LeiosNotify/LeiosFetch tags, `MsgLeiosBlockTxs = [4, [* #6.24(block_transaction)]]`, witness key 8 (Plutus V4); on `feat/leios-on-next` the ledger part is read by CCL `0.8.0-pre8` |
 
 ---
 
@@ -89,8 +100,8 @@ protocol major version 12), N2N handshake version **≥ 15**, mini-protocols
 
 | Structure | File (blueprint `leios-prototype`) | Notes |
 | :--- | :--- | :--- |
-| leios-notify messages (tags 0–5), vote | `src/network/node-to-node/leios-notify/messages.cddl` | vote shape has already changed twice — decode arity-tolerantly |
-| leios-fetch messages (tags 0–3, 9), EB body map, bitmaps | `src/network/node-to-node/leios-fetch/messages.cddl` | bitmaps **must** encode as indefinite-length CBOR maps (peers reset on definite); range messages still commented out |
+| leios-notify messages (w42 tags 0–7), vote | `src/network/node-to-node/leios-notify/messages.cddl` | vote shape has already changed twice — decode arity-tolerantly |
+| leios-fetch messages (w42 tags 0–4), EB body, bitmaps | `src/network/node-to-node/leios-fetch/messages.cddl` | bitmaps **must** encode as indefinite-length CBOR maps (peers reset on definite); range messages still commented out |
 | Dijkstra block / header / tx / certificates | `src/ledger/eras/dijkstra.cddl` | auto-generated — never hand-read stale copies, re-fetch at the pin |
 | Era-wrapped tx (`tx_list` items) | `src/network/node-to-node/txsubmission2/tx.cddl` | ns8 telescope: **tx era index 7 = Dijkstra** (block wire tag is 8 — the two index spaces differ by one; see ADR 0010) |
 | Base scalar types | `src/codecs/base.cddl` | `slotno = word64`, `hash = bstr .size 32`, etc. |
@@ -115,29 +126,32 @@ non-breaking; a re-pin cycle for breaking):
    for the files in §4 (`git log --oneline <ourpin>..origin/leios-prototype
    -- src/ledger/eras/dijkstra.cddl src/network/node-to-node/leios-notify
    src/network/node-to-node/leios-fetch`). Record the new head/sync commits.
-3. **Classify the delta** against what Yaci implements (the delta table
-   pattern in ADR 0011 §"Delta vs. what the branch implements" is the
-   template): parse-failure / silently-dropped-field / already-tolerated /
-   not-implemented.
-4. **Capture fixtures from the respun network** *before* writing code:
-   run `LeiosNetworkClient` and `BlockSync` (with `returnBlockCbor`) against
-   the bootstrap relay; save hex fixtures (blocks with/without txs,
-   certified blocks, headers with/without announcement, ≥3 EBs, a votes
-   message, a tx-list response) under `core/src/test/resources/leios/wXX/`.
+3. **Classify the delta** by owner:
+   - **Ledger CBOR** (block, header, transaction, EB references, EB
+     transactions): needs a CCL ledger-cbor change and a CCL version bump,
+     then a Yaci mapping change if a field is new.
+   - **LeiosNotify / LeiosFetch messages**: Yaci core
+     (`protocol/leiosnotify`, `protocol/leiosfetch`).
+   - **Complete-block semantics** (how a certifying block finds its EB, EB
+     entry hashing): `EndorserBlockResolver` / `BlockSerializer.withEndorserBlockTxs`.
+4. **Capture fixtures from the respun network** *before* writing code, as
+   bytes exactly as served: blocks through BlockFetch (normal, announcing,
+   certifying), an EB and its transaction list through
+   `adr/leios-evidence/leios_fetch_probe.py`, and the db-sync transaction ids
+   of a certifying block. Save them under
+   `core/src/test/resources/leios/wXX/` with a README, as `w42/` does.
    Fixtures pin the *actual* wire truth — the CDDL has drifted from the wire
    before.
-5. **Implement behind the era/profile boundary**: Dijkstra-only code paths,
-   shape-guarded parsing (unknown shapes → ignore or raw-degrade, never
-   fatal on shared paths), raw-CBOR retention for anything still moving.
-   Mainnet paths must stay byte-identical — prove it with the Conway
-   regression fixtures.
-6. **Verify end-to-end**: `YACI_MUSASHI_E2E=true ./gradlew
-   :helper:integrationTest --tests '*MusashiBlockSyncE2EIT*'` — zero parse
-   errors, minimum Dijkstra RB / Endorser Block counts met.
+5. **Change the code.** Dijkstra-only paths; pre-Dijkstra behaviour must stay
+   exactly `next`'s (ADR 0016 I1). Leios payloads stay slices of the bytes
+   received, never re-encoded (ADR 0016 I4).
+6. **Verify**: unit tests on the new fixtures, then the live checks of ADR
+   0016 Verification 6 (Musashi range and tip sync, as many leading
+   transactions per certifying block as its EB has entries, no parse errors,
+   no gaps) and 7 (preview/preprod full range sync, unchanged output).
 7. **Update the paper trail**: pin table in `docs/leios/leios-spec-tracking.md`
-   (commit hashes + release tag + date), an ADR if the change is
-   architectural (new structures, new protocol semantics), and the table in
-   §3 above.
+   (commit hashes + release tag + date), `adr/leios-todo.md`, an ADR if the
+   change is architectural, and the table in §3 above.
 
 ### Design rules that keep changes cheap (learned, not aspirational)
 
@@ -145,19 +159,21 @@ non-breaking; a re-pin cycle for breaking):
   is coming; only a release makes it real on the wire.
 - **Fixtures before code.** Every format assumption gets settled by captured
   bytes, not by reading CDDL alone.
-- **Decode tolerantly, emit conservatively.** Arity-branch on shapes that
-  have already moved (votes), accept both dialects where cheap (EB map),
-  degrade to raw + `UNKNOWN` instead of throwing into protocol loops.
-- **Keep raw CBOR on every Leios model.** When the shape changes, consumers
-  that stored raw bytes survive; parsed-only consumers don't.
+- **One parser.** Ledger CBOR is read by CCL only; Yaci never adds a second
+  reader for a structure CCL reads (ADR 0016 I4). Votes are not parsed; they
+  stay raw bytes in `MsgLeiosVotes`.
+- **Implement only the deployed dialect.** No reader for shapes no deployed
+  network sends.
+- **Keep payloads as received.** EB hashes are checked against the bytes on
+  the wire, so Leios message payloads are never re-encoded.
 - **Never let prototype shapes leak into stable API contracts.** Event
-  carrier objects (not positional listener params), `Experimental` javadoc
-  marking, no schema guarantees downstream (yaci-store) based on a
-  prototype pin.
-- **One spec snapshot per Yaci release.** No runtime profile enum while the
-  protocol moves; if two live networks ever speak different dialects,
-  prefer lenient decoding + explicit network/capability flags (see
-  `docs/leios/leios-spec-tracking.md`).
+  carrier objects (`EndorserBlockUnavailableEvent`), "Experimental" javadoc
+  marking, nullable fields left out of JSON, no schema guarantees downstream
+  (yaci-store) based on a prototype pin.
+- **One spec snapshot per Yaci release, and no network list.** No runtime
+  profile switch; Leios activates by era (`leiosCertInBody`), never by
+  network magic. If two live networks ever speak different dialects, that is
+  a CCL decision first (see `docs/leios/leios-spec-tracking.md`).
 
 ---
 
