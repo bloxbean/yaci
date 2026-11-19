@@ -50,8 +50,13 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
     static final long MAX_AGE_MILLIS = 45_000;
     static final long MAX_IDLE_MILLIS = 30_000;
     static final long HANDSHAKE_CAP_MILLIS = 10_000;
-    /** The longest one attempt waits for an EB or transactions reply: a stuck connection is replaced, not waited out. */
+    /** The longest wait for one reply of the parent lookup (FindIntersect, BlockFetch). */
     static final long REPLY_CAP_MILLIS = 15_000;
+    /**
+     * The longest an EB or transactions reply may go with nothing received: a stuck connection is replaced, not waited
+     * out, while a slow reply that keeps arriving may use the rest of the attempt's deadline.
+     */
+    static final long STALL_MILLIS = 15_000;
 
     private final String host;
     private final int port;
@@ -60,16 +65,16 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
     private final ParentBlockLookup parentLookup;
     private final long maxAgeMillis;
     private final long maxIdleMillis;
-    private final long replyCapMillis;
+    private final long stallMillis;
     private volatile Side side;
 
     EndorserBlockResolver(String host, int port, LongSupplier mainMagic, EbAnnouncementCache cache,
                           ParentBlockLookup parentLookup) {
-        this(host, port, mainMagic, cache, parentLookup, MAX_AGE_MILLIS, MAX_IDLE_MILLIS, REPLY_CAP_MILLIS);
+        this(host, port, mainMagic, cache, parentLookup, MAX_AGE_MILLIS, MAX_IDLE_MILLIS, STALL_MILLIS);
     }
 
     EndorserBlockResolver(String host, int port, LongSupplier mainMagic, EbAnnouncementCache cache,
-                          ParentBlockLookup parentLookup, long maxAgeMillis, long maxIdleMillis, long replyCapMillis) {
+                          ParentBlockLookup parentLookup, long maxAgeMillis, long maxIdleMillis, long stallMillis) {
         this.host = host;
         this.port = port;
         this.mainMagic = mainMagic;
@@ -77,7 +82,7 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
         this.parentLookup = parentLookup;
         this.maxAgeMillis = maxAgeMillis;
         this.maxIdleMillis = maxIdleMillis;
-        this.replyCapMillis = replyCapMillis;
+        this.stallMillis = stallMillis;
     }
 
     /**
@@ -121,7 +126,8 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
         deadline.await(current.ready, current.closed, "handshake", HANDSHAKE_CAP_MILLIS);
         CompletableFuture<LeiosRawCbor> ebReply = current.expectBlock();
         current.fetchAgent.requestBlock(point);
-        byte[] references = deadline.await(ebReply, current.closed, "endorser block", replyCapMillis).getCbor();
+        byte[] references = deadline.awaitWhileReceiving(ebReply, current.closed, "endorser block", stallMillis,
+                current.fetchAgent::getLastSegmentNanos).getCbor();
         List<RawEbReferences.Entry> entries = checkEndorserBlock(references, announcement, deadline);
         current.clearReplies();
         if (entries.isEmpty())
@@ -129,8 +135,8 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
 
         CompletableFuture<LeiosRawCbor> txsReply = current.expectTransactions();
         current.fetchAgent.requestBlockTxs(point, LeiosTxBitmap.firstN(entries.size()));
-        LeiosRawCbor txList = deadline.await(txsReply, current.closed, "endorser block transactions",
-                replyCapMillis);
+        LeiosRawCbor txList = deadline.awaitWhileReceiving(txsReply, current.closed, "endorser block transactions",
+                stallMillis, current.fetchAgent::getLastSegmentNanos);
         current.clearReplies(); //an idle side connection holds no payload
         return checkTransactions(new MsgLeiosBlockTxs(txList).getTransactions(), entries);
     }

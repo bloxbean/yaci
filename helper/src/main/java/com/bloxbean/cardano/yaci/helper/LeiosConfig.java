@@ -15,10 +15,10 @@ import lombok.ToString;
  * successful fetch; it is reused or replaced at the next certifying block, and closed when the sync stops, restarts
  * or halts.
  * <p>
- * One attempt waits at most 15 s for each reply (the endorser block, then all its transactions): a stuck connection is
- * replaced rather than waited out. This also sets a throughput floor: a link that cannot carry one endorser block's
- * transactions within 15 s, about 1 MB/s for a 15 MB transactions reply, never gets them, and the block halts the
- * sync (or is delivered without them in skip mode).
+ * One attempt gives up on the endorser block or its transactions when nothing of the reply has arrived for 15 s: a
+ * stuck connection is replaced rather than waited out, while a slow reply that keeps arriving may use the rest of the
+ * 45 s. A link that cannot carry one endorser block's transactions within that budget, about 0.35 MB/s for a 15 MB
+ * transactions reply, never gets them, and the block halts the sync (or is delivered without them in skip mode).
  */
 @Getter
 @ToString

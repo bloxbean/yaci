@@ -131,9 +131,10 @@ BlockRangeSync rangeSync = new BlockRangeSync(host, port, 164L, leiosConfig);
 `IllegalStateException` after a halt (call `restart(listener)` then `fetch`) and while a certifying block of the
 current range waits for its EB. Neither happens before Dijkstra.
 
-Each reply on the side connection (the EB, its transactions, a parent-lookup reply) must arrive within 15 s; an
-attempt that misses it is retried on a fresh connection within the 45 s budget. A link that cannot carry one EB's
-transactions in 15 s (about 1 MB/s for a 15 MB reply) therefore never gets them: the sync halts in strict mode.
+An EB or transactions reply on the side connection fails its attempt when nothing of it arrives for 15 s; a reply that
+keeps arriving may take the rest of the 45 s budget. A parent-lookup reply must arrive whole within 15 s. A failed
+attempt is retried on a fresh connection within the budget. A link that cannot carry one EB's transactions within the
+budget (about 0.35 MB/s for a 15 MB reply) never gets them: the sync halts in strict mode.
 
 ---
 

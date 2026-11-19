@@ -77,6 +77,11 @@ final class FakeN2NPeer implements AutoCloseable {
     volatile boolean intersectNotFound;
     /** If set, LeiosFetch replies wait for it. */
     volatile java.util.concurrent.CountDownLatch holdLeiosFetch;
+    /** If above 0, LeiosFetch replies are sent in segments of this many bytes, {@link #leiosFetchSegmentDelayMillis} apart. */
+    volatile int leiosFetchSegmentBytes;
+    volatile long leiosFetchSegmentDelayMillis;
+    /** If above 0, only this many segments of a transactions reply are sent, then nothing, the connection left open. */
+    volatile int leiosFetchTxsSegmentsThenSilent;
 
     //bound to the loopback address the clients dial, never the wildcard: with a wildcard bind, another process (a
     //parallel test run) can bind 127.0.0.1 on the same port and take the clients' connections
@@ -199,7 +204,7 @@ final class FakeN2NPeer implements AutoCloseable {
                     hold.await();
                 byte[] reply = tag == 1 ? blockReply : txsReply;
                 if (reply != null)
-                    send(out, 19, reply);
+                    sendLeiosFetch(out, reply, tag == 3);
                 if (tag == 1 && closeAfterBlockReply)
                     return false;
             }
@@ -264,6 +269,21 @@ final class FakeN2NPeer implements AutoCloseable {
             return new Tip(new Point(0, "00".repeat(32)), 0);
         var header = chain.get(chain.size() - 1).getHeader().getHeaderBody();
         return new Tip(new Point(header.getSlot(), header.getBlockHash()), header.getBlockNumber());
+    }
+
+    /** A LeiosFetch reply, whole or in delayed segments as configured. */
+    private void sendLeiosFetch(OutputStream out, byte[] reply, boolean txs) throws Exception {
+        int size = leiosFetchSegmentBytes;
+        if (size <= 0) {
+            send(out, 19, reply);
+            return;
+        }
+        int limit = txs && leiosFetchTxsSegmentsThenSilent > 0 ? leiosFetchTxsSegmentsThenSilent : Integer.MAX_VALUE;
+        for (int offset = 0, n = 0; offset < reply.length && n < limit; offset += size, n++) {
+            if (n > 0)
+                Thread.sleep(leiosFetchSegmentDelayMillis);
+            send(out, 19, java.util.Arrays.copyOfRange(reply, offset, Math.min(reply.length, offset + size)));
+        }
     }
 
     /** One writer per connection at a time; never a lock shared between peers or tests. */

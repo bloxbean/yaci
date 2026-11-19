@@ -6,6 +6,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.LongSupplier;
 
 /**
  * The deadline of one attempt to get an endorser block's transactions (ADR 0016 D4a), and the cancellation of the
@@ -69,6 +70,36 @@ final class AttemptDeadline {
             return join(reply);
         join(closed); //the connection ended first: its reason
         throw new IllegalStateException("The connection was closed before the " + what);
+    }
+
+    /**
+     * As {@link #await(CompletableFuture, CompletableFuture, String)}, giving up when nothing has been received for
+     * {@code stallMillis}: a reply that keeps arriving may take until the deadline, a stuck one ends early.
+     *
+     * @param lastReceivedNanos the {@link System#nanoTime()} of the last bytes received on the connection; only times
+     *                          after this call count
+     * @throws TimeoutException if nothing was received for {@code stallMillis}, or the deadline passed
+     */
+    <T> T awaitWhileReceiving(CompletableFuture<T> reply, CompletableFuture<?> closed, String what, long stallMillis,
+                              LongSupplier lastReceivedNanos) throws Exception {
+        long stallNanos = TimeUnit.MILLISECONDS.toNanos(stallMillis);
+        long since = System.nanoTime();
+        while (true) {
+            long now = System.nanoTime(); //before the read: bytes recorded after it are never judged by an older time
+            long received = lastReceivedNanos.getAsLong();
+            if (received - since > 0)
+                since = received;
+            long quiet = now - since;
+            if (quiet >= stallNanos)
+                throw new TimeoutException("nothing received for the " + what + " within " + stallMillis + " ms");
+            try {
+                return await(reply, closed, what, TimeUnit.NANOSECONDS.toMillis(stallNanos - quiet) + 1);
+            } catch (TimeoutException e) {
+                if (isExpired())
+                    throw e;
+                //quiet for the rest of the window, unless bytes came meanwhile: look again
+            }
+        }
     }
 
     private static <T> T join(CompletableFuture<T> future) throws Exception {

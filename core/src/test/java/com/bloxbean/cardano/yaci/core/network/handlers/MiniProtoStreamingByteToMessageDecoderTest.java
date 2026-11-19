@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.network.handlers;
 
 import com.bloxbean.cardano.yaci.core.protocol.Segment;
+import com.bloxbean.cardano.yaci.core.protocol.leiosfetch.LeiosFetchAgent;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
@@ -76,6 +77,29 @@ class MiniProtoStreamingByteToMessageDecoderTest {
         receive(3 | direction, "8100");
         receive(19 | direction, "0102");
         assertThat(segmentsOf()).containsExactly("3:8100", "19:8202a10102");
+    }
+
+    @Test
+    void eachLeiosFetchFrameShowsProgressBeforeItsMessageIsComplete() throws Exception {
+        LeiosFetchAgent agent = new LeiosFetchAgent();
+        channel = new EmbeddedChannel(new MiniProtoStreamingByteToMessageDecoder(agent));
+        long created = agent.getLastSegmentNanos();
+
+        Thread.sleep(2);
+        receive(3 | 0x8000, "8100"); //another protocol: no LeiosFetch progress
+        receive(19, "8202a1"); //the initiator's direction: not a reply
+        receive(19 | 0x8000, ""); //an empty segment
+        assertThat(agent.getLastSegmentNanos()).isEqualTo(created);
+
+        receive(19 | 0x8000, "8204"); //part of a LeiosFetch reply
+        assertThat(segments()).containsExactly("8100");
+        long first = agent.getLastSegmentNanos();
+        assertThat(first - created).isPositive();
+
+        Thread.sleep(2);
+        receive(19 | 0x8000, "80");
+        assertThat(agent.getLastSegmentNanos() - first).isPositive();
+        assertThat(segments()).containsExactly("820480");
     }
 
     @Test

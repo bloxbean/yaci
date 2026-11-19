@@ -153,6 +153,37 @@ class EndorserBlockResolverTest {
     }
 
     @Test
+    void aReplyThatKeepsArrivingMayTakeLongerThanTheStallLimit() throws Exception {
+        resolver.close();
+        resolver = new EndorserBlockResolver("127.0.0.1", peer.port(), () -> FakeN2NPeer.MAGIC, cache, null,
+                EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 1_000);
+        peer.leiosFetchSegmentBytes = 6_000; //the transactions reply: 10 segments, 200 ms apart
+        peer.leiosFetchSegmentDelayMillis = 200;
+
+        long start = System.nanoTime();
+        assertThat(complete(announcement, deadline(30_000))).hasSize(237);
+        assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)).isGreaterThan(1_500); //> the limit
+        assertThat(peer.connections.get()).isEqualTo(1);
+    }
+
+    @Test
+    void aReplyThatStopsArrivingFailsAtTheStallLimit() throws Exception {
+        resolver.close();
+        resolver = new EndorserBlockResolver("127.0.0.1", peer.port(), () -> FakeN2NPeer.MAGIC, cache, null,
+                EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 1_000);
+        peer.leiosFetchSegmentBytes = 6_000;
+        peer.leiosFetchSegmentDelayMillis = 100;
+        peer.leiosFetchTxsSegmentsThenSilent = 3;
+
+        long start = System.nanoTime();
+        assertThatThrownBy(() -> complete(announcement, deadline(30_000)))
+                .isInstanceOf(TimeoutException.class)
+                .hasMessageContaining("nothing received for the endorser block transactions within 1000 ms");
+        long took = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(took).isGreaterThanOrEqualTo(1_000).isLessThan(3_500); //~1.2 s: 200 ms of segments, then the limit
+    }
+
+    @Test
     void anEndorserBlockListingATransactionTwiceIsRejectedBeforeAnyTransactionIsRequested() {
         byte[] tx = transactions.get(0);
         byte[] references = references(entry(Blake2bUtil.blake2bHash256(tx), tx.length),
@@ -363,7 +394,7 @@ class EndorserBlockResolverTest {
                 new ParentBlockLookup("127.0.0.1", peer.port(),
                         com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant
                                 .v4AndAbove(FakeN2NPeer.MAGIC)),
-                maxAgeMillis, maxIdleMillis, EndorserBlockResolver.REPLY_CAP_MILLIS);
+                maxAgeMillis, maxIdleMillis, EndorserBlockResolver.STALL_MILLIS);
     }
 
     /** Completes block 10027, whose parent announced {@code announced} at the parent's slot: the tx ids. */

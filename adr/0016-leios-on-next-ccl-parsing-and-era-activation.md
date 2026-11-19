@@ -347,10 +347,17 @@ request.
   (after RETRYING and the pause) uses a fresh connection. Found live on Musashi: a single silent reply used the whole
   45 s budget at `attempt=1`, and the same EB was served at once after a restart.
   - The parent lookup's FindIntersect and block waits use the same cap (r12).
-  - The cap bounds the whole reply, not silence: a link that cannot carry one EB's transactions in 15 s (about
-    1 MB/s for a 15 MB reply) never gets them. `LeiosConfig` documents this floor. A silence cap would need a Netty
-    handler on the side channel, which `helper` cannot reach without a new dependency; revisit if Musashi or a later
-    network shows it.
+  - (r13) For the EB and the transactions reply, the cap bounds silence, not the whole reply (`STALL_MILLIS`): the
+    attempt fails when nothing has arrived on LeiosFetch for 15 s, and a reply that keeps arriving may use the rest of
+    the budget. The side connection's decoder records the time of each LeiosFetch mux segment on its
+    `LeiosFetchAgent` (`segmentReceived`), before the message is complete; the main connection has no
+    `LeiosFetchAgent`, so nothing changes there. The floor drops from about 1 MB/s to about 0.35 MB/s for a 15 MB
+    reply (it must finish within the 45 s budget). The budget itself stays: the call runs on the main connection's
+    event loop, which must answer the peer's KeepAlive within about 97 s (D3b).
+  - Only non-empty segments from the responder count. A segment counts once whole (at most 64 KiB), so a link under
+    about 4 KiB/s still fails as before. A peer that trickles bytes can hold an attempt until the 45 s budget; the
+    outcome is the same RETRYING / halt as a stuck reply, only later.
+  - The parent lookup's replies (one block or one intersection each) keep the whole-reply cap (`REPLY_CAP_MILLIS`).
 - **Failing fast.** Each side connection has a terminal state. Every wait (handshake, EB, transactions, each parent
   window) ends at once when the connection is lost.
   - At the deadline, the attempt's clients are shut down.
@@ -727,6 +734,9 @@ Against the unmerged stack, D1, D5 and D6 remove API that was never released.
   - Fail-fast waits and the 10 s handshake cap (D4a).
   - The `fetch` gate applies only with inlining on (rule 9).
   - The Compatibility section lists `TransactionListBuilder` and the payload `deserializeDI`.
+- r13 (2026-11-19, responds to the maintainer's question on raising the timeout):
+  - The EB and transactions waits fail on 15 s of silence instead of 15 s per whole reply; LeiosFetch segments
+    received mark progress (D4a). The 45 s budget is unchanged (D3b).
 - r12 (2026-11-19, responds to implementation review round 3 of `90f5bc78` by Fable, Opus and Codex):
   - Client shutdown holds no lock; the r11 monitor could deadlock a stop from a listener callback (rule 8; all three).
   - Re-checks continue while a retired client's `start()` has not returned (rule 8; Codex).

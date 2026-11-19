@@ -29,10 +29,28 @@ public class LeiosFetchAgent extends Agent<LeiosFetchAgentListener> {
     private volatile boolean writeInFlight;
     private volatile Throwable terminalFailure;
     private long writeGeneration;
+    private volatile long lastSegmentNanos = System.nanoTime();
 
     public LeiosFetchAgent() {
         super(true);
         this.currentState = LeiosFetchState.StIdle;
+    }
+
+    /**
+     * Called by the connection's decoder for each non-empty LeiosFetch mux segment it receives from the responder,
+     * before the segment completes a message: a reply arriving slowly still shows progress. A segment counts once it
+     * has arrived whole (at most 64 KiB).
+     */
+    public void segmentReceived() {
+        lastSegmentNanos = System.nanoTime();
+    }
+
+    /**
+     * @return the {@link System#nanoTime()} of the last LeiosFetch segment received, or of this agent's creation if
+     * none has been; compare it with another {@code nanoTime} by subtraction
+     */
+    public long getLastSegmentNanos() {
+        return lastSegmentNanos;
     }
 
     @Override

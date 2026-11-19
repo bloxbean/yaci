@@ -7,6 +7,7 @@ import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.yaci.core.protocol.Segment;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosProtocolConstants;
+import com.bloxbean.cardano.yaci.core.protocol.leiosfetch.LeiosFetchAgent;
 import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
@@ -22,6 +23,8 @@ public class MiniProtoStreamingByteToMessageDecoder
     private final Map<Integer, ProtocolChannel> protocolChannelMap;
     private final Map<Integer, LeiosStream> leiosStreams = new HashMap<>();
     private final int maxIncompleteLeiosBytes;
+    /** The connection's LeiosFetch agent, told of each LeiosFetch segment received; null on other connections. */
+    private final LeiosFetchAgent leiosFetchAgent;
 
     public MiniProtoStreamingByteToMessageDecoder(Agent... agents) {
         this(MAX_INCOMPLETE_LEIOS_BYTES, agents);
@@ -31,9 +34,13 @@ public class MiniProtoStreamingByteToMessageDecoder
         this.maxIncompleteLeiosBytes = maxIncompleteLeiosBytes;
         protocolChannelMap = new HashMap<>();
         protocolChannelMap.put(0, new ProtocolChannel()); //For handshake channel
+        LeiosFetchAgent fetchAgent = null;
         for (Agent agent: agents) {
             protocolChannelMap.put(agent.getProtocolId(), new ProtocolChannel());
+            if (agent instanceof LeiosFetchAgent leiosFetch)
+                fetchAgent = leiosFetch;
         }
+        this.leiosFetchAgent = fetchAgent;
     }
 
     /** A Leios protocol holding this many bytes without a complete CBOR item is malformed. */
@@ -74,6 +81,9 @@ public class MiniProtoStreamingByteToMessageDecoder
                 int streamKey = responder ? protocol | 0x8000 : protocol;
                 LeiosStream stream = leiosStreams.computeIfAbsent(streamKey, k -> new LeiosStream());
                 stream.append(payload);
+                if (protocol == LeiosProtocolConstants.LEIOS_FETCH_PROTOCOL_ID && responder && payloadLen > 0
+                        && leiosFetchAgent != null)
+                    leiosFetchAgent.segmentReceived(); //progress of a reply that may span many segments
                 stream.frame(protocol, timestamp, out);
                 if (stream.remaining() >= maxIncompleteLeiosBytes) {
                     // CCL cannot tell truncated from malformed CBOR: this much without a complete item is malformed.
