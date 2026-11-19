@@ -1,21 +1,24 @@
 package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.listener.BlockFetchAgentListenerAdapter;
 
 /**
  * A high level helper class to fetch blockchain data from point1 to point2. This class uses node-to-no mini protocol to fetch blocks.
  * Fetched blocks are received in an instance of {@link BlockChainDataListener}
+ * <p>
+ * Leios (experimental): a block that certifies an endorser block is delivered complete, with the endorser block's
+ * transactions first, as {@link LeiosConfig} describes. Every other block is delivered as received. After a halt,
+ * resume with {@link #restart(BlockChainDataListener)} then {@link #fetch(Point, Point)}.
  */
 public class BlockRangeSync {
     private String host;
     private int port;
     private long protocolMagic;
-    private LeiosConfig leiosConfig;
-
-    private BlockFetcher blockFetcher;
-    private CompleteBlockAssembler completeBlockAssembler;
+    private final SyncControl<BlockFetcher> control;
 
     /**
      * Construct a {@link BlockRangeSync} instance
@@ -28,15 +31,28 @@ public class BlockRangeSync {
     }
 
     /**
-     * Construct a range sync with optional Leios policy.
-     * In {@link LeiosConfig.Mode#AUTO}, Leios agents stay detached because notify/fetch events are near-tip and
-     * not scoped to the requested range. Use {@link LeiosConfig.Mode#ENABLED} to opt in explicitly.
+     * Construct a {@link BlockRangeSync} instance
+     * @param host Cardano node host
+     * @param port Cardano node port
+     * @param protocolMagic protocol magic
+     * @param leiosConfig Leios settings, see {@link LeiosConfig}
      */
     public BlockRangeSync(String host, int port, long protocolMagic, LeiosConfig leiosConfig) {
+        this(host, port, protocolMagic, leiosConfig, CompleteBlockAssembler.BUDGET_MILLIS,
+                CompleteBlockAssembler.PAUSE_MILLIS);
+    }
+
+    BlockRangeSync(String host, int port, long protocolMagic, LeiosConfig leiosConfig, long budgetMillis,
+                   long pauseMillis) {
         this.host = host;
         this.port = port;
         this.protocolMagic = protocolMagic;
-        this.leiosConfig = leiosConfig != null ? leiosConfig : LeiosConfig.defaultConfig();
+
+        EbAnnouncementCache cache = new EbAnnouncementCache();
+        this.control = new SyncControl<>(leiosConfig, cache,
+                owner -> new EndorserBlockResolver(host, port, () -> mainMagic(owner.get()), cache,
+                        new ParentBlockLookup(host, port, N2NVersionTableConstant.v4AndAbove(protocolMagic))),
+                budgetMillis, pauseMillis, SyncControl::runOnNewThread);
     }
 
     /**
@@ -44,35 +60,13 @@ public class BlockRangeSync {
      * @param blockChainDataListener
      */
     public void start(BlockChainDataListener blockChainDataListener) {
-        blockFetcher = new BlockFetcher(host, port, protocolMagic, leiosConfig);
+        control.startNew(blockChainDataListener, listener -> {
+            BlockFetcher fetcher = new BlockFetcher(host, port, protocolMagic);
 
-        BlockChainDataListener listener = completeBlocksListener(blockChainDataListener);
-        BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(listener);
-        blockFetcher.addBlockFetchListener(blockfetchAgentListener);
-        blockFetcher.addLeiosDataListener(listener);
-        blockFetcher.start();
-    }
-
-    /**
-     * Leios (ADR 0013): when endorser block transactions are inlined, wrap the listener so that certifying blocks
-     * arrive complete; their endorser blocks are fetched on a separate Leios connection. Otherwise the application's
-     * listener is used as is.
-     */
-    private BlockChainDataListener completeBlocksListener(BlockChainDataListener blockChainDataListener) {
-        closeCompleteBlockAssembler();
-        if (!leiosConfig.shouldInlineEndorserBlockTxs(protocolMagic)) {
-            return blockChainDataListener;
-        }
-        completeBlockAssembler = new CompleteBlockAssembler(blockChainDataListener, host, port, protocolMagic,
-                LeiosConfig.versionTableFor(protocolMagic, leiosConfig), leiosConfig.isSkipUnavailableEndorserBlocks());
-        return completeBlockAssembler;
-    }
-
-    private void closeCompleteBlockAssembler() {
-        if (completeBlockAssembler != null) {
-            completeBlockAssembler.close();
-            completeBlockAssembler = null;
-        }
+            BlockFetchAgentListenerAdapter blockfetchAgentListener = new BlockFetchAgentListenerAdapter(listener);
+            fetcher.addBlockFetchListener(blockfetchAgentListener);
+            return fetcher;
+        });
     }
 
     /**
@@ -80,23 +74,27 @@ public class BlockRangeSync {
      * @param blockChainDataListener
      */
     public void restart(BlockChainDataListener blockChainDataListener) {
-        //Close the assembler first: it releases a network thread that waits for queue space, which shutdown needs
-        closeCompleteBlockAssembler();
-        if (blockFetcher != null && blockFetcher.isRunning())
-            blockFetcher.shutdown();
         start(blockChainDataListener);
     }
 
     /**
      * Start to fetch block
+     * <p>
+     * As on {@link BlockFetcher#fetch}, including from inside {@code batchDone}. Leios (experimental): with
+     * {@code LeiosConfig.inlineEndorserBlockTxs} (the default), it throws {@link IllegalStateException}, before
+     * anything is sent, after a halt (call {@link #restart(BlockChainDataListener)} then fetch) and while a
+     * certifying block of this start waits for its endorser block. Neither happens before Dijkstra.
      * @param from  from point
      * @param to  to point
      */
     public void fetch(Point from, Point to) {
-        if (blockFetcher == null)
+        SyncControl.Start<BlockFetcher> start = control.current();
+        if (start == null)
             throw new IllegalStateException("Please call start before fetch");
 
-        blockFetcher.fetch(from, to);
+        if (start.delegate != null)
+            start.delegate.checkFetch();
+        start.client.fetch(from, to);
     }
 
     /**
@@ -104,7 +102,7 @@ public class BlockRangeSync {
      * @param cookie
      */
     public void sendKeepAliveMessage(int cookie) {
-        blockFetcher.sendKeepAliveMessage(cookie);
+        control.client().sendKeepAliveMessage(cookie);
     }
 
     /**
@@ -112,7 +110,7 @@ public class BlockRangeSync {
      * @return
      */
     public int getLastKeepAliveResponseCookie() {
-        return blockFetcher.getLastKeepAliveResponseCookie();
+        return control.client().getLastKeepAliveResponseCookie();
     }
 
     /**
@@ -120,22 +118,26 @@ public class BlockRangeSync {
      * @return
      */
     public long getLastKeepAliveResponseTime() {
-        return blockFetcher.getLastKeepAliveResponseTime();
+        return control.client().getLastKeepAliveResponseTime();
     }
 
     /**
      * Stop the fetcher
      */
     public void stop() {
-        //Close the assembler first: it releases a network thread that waits for queue space, which shutdown needs
-        closeCompleteBlockAssembler();
-        blockFetcher.shutdown();
+        control.stop();
     }
 
     /**
-     * Check if the connection is alive
+     * Check if the connection is alive. False once the sync halted (Leios, see {@link LeiosConfig}).
      */
     public boolean isRunning() {
-        return blockFetcher.isRunning();
+        return control.isRunning();
+    }
+
+    private long mainMagic(BlockFetcher fetcher) {
+        AcceptVersion accepted = fetcher != null ? fetcher.getAcceptedVersion() : null;
+        return accepted != null && accepted.getVersionData() != null
+                ? accepted.getVersionData().getNetworkMagic() : protocolMagic;
     }
 }

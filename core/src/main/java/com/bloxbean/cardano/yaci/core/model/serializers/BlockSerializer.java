@@ -11,6 +11,7 @@ import com.bloxbean.cardano.yaci.core.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.model.*;
 import com.bloxbean.cardano.yaci.core.protocol.Serializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -74,6 +75,84 @@ public enum BlockSerializer implements Serializer<Block> {
                 .perasCertificate(rawBlock.perasCertificate()
                         .map(certificate -> HexUtil.encodeHexString(RawItems.bytes(certificate))).orElse(null))
                 .build();
+    }
+
+    /**
+     * A certifying block completed with the transactions of the endorser block (EB) it certifies: the EB's transactions
+     * first, in EB order, then the block's own. Each EB transaction is mapped as a Dijkstra block's own transactions
+     * are, from its parts {@code [body, witnesses, aux / null, is_valid]}: its validity comes from {@code is_valid},
+     * and the block's own aux data keys and invalid indexes move up by the EB's count. The header, the certificates and
+     * {@code Block.cbor} stay the block's as received.
+     * <p>
+     * The caller checks the transactions against the EB first: this only maps them.
+     * <p>
+     * Experimental: Dijkstra is not final; this may change in any release.
+     *
+     * @param block         a block as read by this serializer
+     * @param endorserBlock the EB the block certifies; its {@code txCount} is set here
+     * @param transactions  each EB transaction's bytes, as inside its {@code #6.24} wrapper, in EB order
+     * @return the complete block
+     * @throws CborRuntimeException if a transaction is not an array of four items
+     */
+    public static Block withEndorserBlockTxs(@NonNull Block block, @NonNull LeiosEndorserBlockRef endorserBlock,
+                                             @NonNull List<byte[]> transactions) {
+        com.bloxbean.cardano.client.spec.Era era = cclEra(block.getEra());
+        int count = transactions.size();
+        long blockNumber = block.getHeader().getHeaderBody().getBlockNumber();
+        List<TransactionBody> bodies = new ArrayList<>(count + block.getTransactionBodies().size());
+        List<Witnesses> witnesses = new ArrayList<>(count + sizeOf(block.getTransactionWitness()));
+        java.util.Map<Integer, AuxData> auxDataMap = new LinkedHashMap<>();
+        List<Integer> invalid = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            CborSpan tx;
+            try {
+                tx = CborSpan.of(transactions.get(i));
+            } catch (com.bloxbean.cardano.client.exception.CborRuntimeException e) {
+                throw new CborRuntimeException("Endorser block transaction " + i + " is not one CBOR item", e);
+            }
+            if (tx.majorType() != 4 || tx.isTagged() || tx.size() != 4)
+                throw new CborRuntimeException("Endorser block transaction " + i
+                        + " is not [body, witnesses, aux / null, is_valid]");
+            TransactionBody body = TransactionBodySerializer.INSTANCE.read(tx.get(0).bytes(), era);
+            bodies.add(body);
+            witnesses.add(witnessSet(tx.get(1), era));
+            if (!tx.get(2).isNull()) {
+                int index = i;
+                auxDataMap.put(i, auxData(tx.get(2), era, raw -> {
+                    if (hashMatches(body.getAuxiliaryDataHash(), raw)) return true;
+                    log.debug("Auxiliary data hash mismatch : {} - endorser block tx {}", blockNumber, index);
+                    return false;
+                }));
+            }
+            if (!tx.get(3).asBoolean()) invalid.add(i);
+        }
+
+        bodies.addAll(block.getTransactionBodies());
+        if (block.getTransactionWitness() != null) witnesses.addAll(block.getTransactionWitness());
+        if (block.getAuxiliaryDataMap() != null)
+            block.getAuxiliaryDataMap().forEach((index, auxData) -> auxDataMap.put(index + count, auxData));
+        if (block.getInvalidTransactions() != null)
+            block.getInvalidTransactions().forEach(index -> invalid.add(index + count));
+
+        return block.toBuilder()
+                .transactionBodies(bodies)
+                .transactionWitness(witnesses)
+                .auxiliaryDataMap(auxDataMap)
+                .invalidTransactions(invalid)
+                .leiosEndorserBlock(endorserBlock.toBuilder().txCount(count).build())
+                .build();
+    }
+
+    private static int sizeOf(List<?> list) {
+        return list == null ? 0 : list.size();
+    }
+
+    /** The CCL era of a block's era; Dijkstra for a block whose era Yaci does not know, as {@link #read} reads it. */
+    private static com.bloxbean.cardano.client.spec.Era cclEra(Era era) {
+        if (era != null)
+            for (com.bloxbean.cardano.client.spec.Era value : com.bloxbean.cardano.client.spec.Era.values())
+                if (value.getValue() == era.getValue()) return value;
+        return com.bloxbean.cardano.client.spec.Era.Dijkstra;
     }
 
     private static Era era(long eraIndex) {

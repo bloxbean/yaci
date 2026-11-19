@@ -135,9 +135,36 @@ class LeiosNotifySerializersTest {
         MsgLeiosVotes votes = new MsgLeiosVotes(List.of(vote));
 
         MsgLeiosVotes decoded = LeiosNotifySerializers.MsgLeiosVotesSerializer.INSTANCE
-                .deserializeDI(CborSerializationUtil.deserializeOne(votes.serialize()));
+                .deserialize(votes.serialize());
 
         assertEquals(List.of(vote), decoded.getVotes());
+    }
+
+    @Test
+    void payloadMessagesAreNotDecodedFromADataItem() {
+        LeiosRawCbor vote = LeiosCborUtil.toRawCbor(voteArray(point(15).getEbHash(), 1));
+        var votes = CborSerializationUtil.deserializeOne(new MsgLeiosVotes(List.of(vote)).serialize());
+        var announcement = CborSerializationUtil.deserializeOne(
+                new MsgLeiosBlockAnnouncement(LeiosCborUtil.toRawCbor(rawArray(7, 8))).serialize());
+
+        assertThrows(UnsupportedOperationException.class,
+                () -> LeiosNotifySerializers.MsgLeiosVotesSerializer.INSTANCE.deserializeDI(votes));
+        assertThrows(UnsupportedOperationException.class,
+                () -> LeiosNotifySerializers.MsgLeiosBlockAnnouncementSerializer.INSTANCE.deserializeDI(announcement));
+    }
+
+    @Test
+    void aNonMinimalAnnouncementIsReceivedAndResentByteForByte() {
+        // [4, header] with the array and a uint written in longer forms than needed (ADR 0016 D2)
+        String announcement = "9802" + "190007" + "5a00000001" + "aa";
+        byte[] wire = com.bloxbean.cardano.yaci.core.util.HexUtil.decodeHexString("8204" + announcement);
+
+        Message decoded = LeiosNotifyStateBase.deserialize(wire);
+
+        MsgLeiosBlockAnnouncement received = assertInstanceOf(MsgLeiosBlockAnnouncement.class, decoded);
+        assertEquals(announcement,
+                com.bloxbean.cardano.yaci.core.util.HexUtil.encodeHexString(received.getAnnouncement().getCbor()));
+        assertArrayEquals(wire, received.serialize());
     }
 
     @Test
@@ -195,5 +222,23 @@ class LeiosNotifySerializersTest {
             hash[i] = (byte) (seed + i);
         }
         return new LeiosPoint(100 + seed, hash);
+    }
+
+    @org.junit.jupiter.api.Test
+    void votesAreResentByteForByte() {
+        // an indefinite vote list holding a vote with a non-minimal uint (ADR 0016 D2)
+        byte[] wire = com.bloxbean.cardano.yaci.core.util.HexUtil.decodeHexString("8207" + "9f" + "82190001" + "4101" + "ff");
+        var decoded = com.bloxbean.cardano.yaci.core.protocol.leiosnotify.serializers.LeiosNotifySerializers
+                .MsgLeiosVotesSerializer.INSTANCE.deserialize(wire);
+        org.junit.jupiter.api.Assertions.assertEquals(1, decoded.getVotes().size());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(wire, decoded.serialize());
+    }
+
+    @org.junit.jupiter.api.Test
+    void aMalformedMessageKeepsItsCause() {
+        var error = org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () ->
+                com.bloxbean.cardano.yaci.core.protocol.leiosnotify.serializers.LeiosNotifySerializers
+                        .MsgLeiosVotesSerializer.INSTANCE.deserialize(new byte[]{(byte) 0x82, 0x07}));
+        org.junit.jupiter.api.Assertions.assertNotNull(error.getCause());
     }
 }

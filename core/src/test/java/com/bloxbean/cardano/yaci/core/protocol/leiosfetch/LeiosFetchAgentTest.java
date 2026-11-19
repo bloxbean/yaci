@@ -273,6 +273,121 @@ class LeiosFetchAgentTest {
     }
 
     @Test
+    void shutdownFailsEveryRequestAndTheOneBeingWrittenIsDrainedWithoutACallback() {
+        LeiosFetchAgent agent = new LeiosFetchAgent();
+        PendingWriteHandler pendingWrites = new PendingWriteHandler();
+        EmbeddedChannel channel = new EmbeddedChannel(pendingWrites);
+        agent.setChannel(channel);
+        List<LeiosPoint> failed = new ArrayList<>();
+        List<LeiosPoint> answered = new ArrayList<>();
+        agent.addListener(new LeiosFetchAgentListener() {
+            @Override
+            public void onBlock(LeiosPoint requestedPoint, LeiosRawCbor endorserBlock) {
+                answered.add(requestedPoint);
+            }
+
+            @Override
+            public void onFetchError(LeiosPoint requestedPoint, Throwable error) {
+                failed.add(requestedPoint);
+            }
+        });
+
+        LeiosPoint writing = point(30);
+        LeiosPoint waiting = point(31);
+        agent.requestBlock(writing);
+        agent.requestBlock(waiting);
+        assertEquals(1, pendingWrites.writes.size());
+
+        agent.done();
+
+        assertEquals(List.of(writing, waiting), failed);
+        pendingWrites.succeed(0); //the write completes after the shutdown
+        agent.receiveResponse(new MsgLeiosBlock(LeiosCborUtil.toRawCbor(rawArray(30, 31)))); //and its reply comes
+
+        assertEquals(List.of(), answered); //never an answer after the failure
+        assertEquals(List.of(writing, waiting), failed);
+        assertEquals(2, pendingWrites.writes.size()); //then MsgClientDone
+        pendingWrites.succeed(1);
+        assertEquals(LeiosFetchState.StDone, agent.getCurrentState());
+    }
+
+    @Test
+    void aRequestAlreadyWrittenFailsAtShutdownAndItsReplyIsDrained() {
+        LeiosFetchAgent agent = new LeiosFetchAgent();
+        PendingWriteHandler pendingWrites = new PendingWriteHandler();
+        EmbeddedChannel channel = new EmbeddedChannel(pendingWrites);
+        agent.setChannel(channel);
+        List<LeiosPoint> failed = new ArrayList<>();
+        List<LeiosPoint> answered = new ArrayList<>();
+        agent.addListener(new LeiosFetchAgentListener() {
+            @Override
+            public void onBlock(LeiosPoint requestedPoint, LeiosRawCbor endorserBlock) {
+                answered.add(requestedPoint);
+            }
+
+            @Override
+            public void onFetchError(LeiosPoint requestedPoint, Throwable error) {
+                failed.add(requestedPoint);
+            }
+        });
+
+        LeiosPoint written = point(32);
+        agent.requestBlock(written);
+        pendingWrites.succeed(0); //written: now outstanding
+        assertInstanceOf(MsgLeiosBlockRequest.class, agent.getOutstandingRequest());
+
+        agent.shutdown();
+        agent.receiveResponse(new MsgLeiosBlock(LeiosCborUtil.toRawCbor(rawArray(32, 33))));
+
+        assertEquals(List.of(written), failed);
+        assertEquals(List.of(), answered);
+    }
+
+    @Test
+    void aRequestWhoseWriteCompletesAfterShutdownFailsOnlyOnceOnASecondShutdown() {
+        RecordingAgent recording = writtenThenShutDown(34);
+
+        recording.agent.shutdown(); //a second shutdown (or done())
+
+        assertEquals(List.of(recording.point), recording.failed);
+    }
+
+    @Test
+    void aRequestWhoseWriteCompletesAfterShutdownFailsOnlyOnceOnAnErrorReply() {
+        RecordingAgent recording = writtenThenShutDown(35);
+
+        recording.agent.receiveResponse(new MsgLeiosFetchError(new IllegalArgumentException("bad frame")));
+
+        assertEquals(List.of(recording.point), recording.failed);
+    }
+
+    /** A request being written, then shutdown(), then its write completes. */
+    private RecordingAgent writtenThenShutDown(int seed) {
+        LeiosFetchAgent agent = new LeiosFetchAgent();
+        PendingWriteHandler pendingWrites = new PendingWriteHandler();
+        agent.setChannel(new EmbeddedChannel(pendingWrites));
+        RecordingAgent recording = new RecordingAgent(agent, point(seed));
+        agent.addListener(new LeiosFetchAgentListener() {
+            @Override
+            public void onFetchError(LeiosPoint requestedPoint, Throwable error) {
+                recording.failed.add(requestedPoint);
+            }
+        });
+        agent.requestBlock(recording.point);
+        assertEquals(1, pendingWrites.writes.size());
+        agent.shutdown();
+        assertEquals(List.of(recording.point), recording.failed);
+        pendingWrites.succeed(0);
+        return recording;
+    }
+
+    private record RecordingAgent(LeiosFetchAgent agent, LeiosPoint point, List<LeiosPoint> failed) {
+        RecordingAgent(LeiosFetchAgent agent, LeiosPoint point) {
+            this(agent, point, new ArrayList<>());
+        }
+    }
+
+    @Test
     void doneSendsClientDoneAndTransitionsTerminal() {
         LeiosFetchAgent agent = new LeiosFetchAgent();
         EmbeddedChannel channel = new EmbeddedChannel();

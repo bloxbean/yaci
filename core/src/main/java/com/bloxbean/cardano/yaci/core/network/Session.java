@@ -23,6 +23,7 @@ class Session implements Disposable {
     private final Bootstrap clientBootstrap;
     private Channel activeChannel;
     private final AtomicBoolean shouldReconnect;
+    private final AtomicBoolean disposed = new AtomicBoolean();
     private final HandshakeAgent handshakeAgent;
     private final Agent[] agents;
     private final NodeClientConfig config;
@@ -200,6 +201,7 @@ class Session implements Disposable {
      */
     @Override
     public void dispose() {
+        disposed.set(true);
         if (showConnectionLog())
             log.info("Disposing the session !!!");
         try {
@@ -323,6 +325,10 @@ class Session implements Disposable {
     public void handshake() {
         //Handshake First
         while (!handshakeAgent.isDone()) {
+            // Only a deliberate end (shutdown or retire disable reconnection first) ends the wait: a session the peer
+            // closed is disposed on the way to a reconnect, whose handshake completes the shared agent.
+            if (disposed.get() && !shouldReconnect.get())
+                throw new IllegalStateException("Session disposed before the handshake completed");
             requireAppOnlyConnection();
             if (handshakeAgent.hasAgency())
                 handshakeAgent.sendNextMessage();

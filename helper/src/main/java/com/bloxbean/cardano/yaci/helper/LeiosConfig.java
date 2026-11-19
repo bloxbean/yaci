@@ -1,156 +1,49 @@
 package com.bloxbean.cardano.yaci.helper;
 
-import com.bloxbean.cardano.yaci.core.common.Constants;
-import com.bloxbean.cardano.yaci.core.config.YaciConfig;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionData;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
-import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import lombok.Builder;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
 
 /**
- * Controls helper-level Leios notify/fetch integration.
- *
- * <p>{@link Mode#AUTO} follows the currently-known Musashi network for tip-following sync. Range fetchers keep
- * Leios disabled in AUTO because notify/fetch events are near-tip and not scoped to the requested historical range;
- * use {@link Mode#ENABLED} to opt in explicitly for future Leios networks or diagnostics.</p>
+ * Leios settings of {@link BlockSync} and {@link BlockRangeSync} (experimental: Dijkstra is not final).
+ * <p>
+ * A block whose header has {@code leiosCertInBody} certifies an endorser block (EB). With the defaults, such a block
+ * reaches {@code BlockChainDataListener.onBlock} complete: the EB's transactions first, in EB order, then the block's
+ * own, and {@code Block.leiosEndorserBlock} set. Yaci fetches them over a separate node-to-node connection to the same
+ * peer, within the {@code onBlock} call, for at most 45 s. That side connection stays open, idle, after a
+ * successful fetch; it is reused or replaced at the next certifying block, and closed when the sync stops, restarts
+ * or halts.
+ * <p>
+ * One attempt waits at most 15 s for each reply (the endorser block, then all its transactions): a stuck connection is
+ * replaced rather than waited out. This also sets a throughput floor: a link that cannot carry one endorser block's
+ * transactions within 15 s, about 1 MB/s for a 15 MB transactions reply, never gets them, and the block halts the
+ * sync (or is delivered without them in skip mode).
  */
 @Getter
 @ToString
+@EqualsAndHashCode
 @Builder(toBuilder = true)
 public class LeiosConfig {
-    public static final int DEFAULT_MAX_TXS_PER_ENDORSER_BLOCK = 64;
-    public static final long DEFAULT_TXS_OFFER_WAIT_MILLIS = 2_000;
-
-    public enum Mode {
-        /**
-         * Attach Leios agents only where Yaci can infer Leios support safely from the configured network.
-         */
-        AUTO,
-        /**
-         * Always attach Leios agents; activation still requires a compatible node-to-node handshake.
-         */
-        ENABLED,
-        /**
-         * Never attach Leios agents.
-         */
-        DISABLED
-    }
-
-    @Builder.Default
-    private Mode mode = Mode.AUTO;
     /**
-     * Only used when endorser block transactions are inlined ({@code YaciConfig.isInlineEndorserBlockTxs()}).
-     * False (default): a certifying block is delivered only with its endorser block transactions; Yaci waits and
-     * retries. True: after a few failed attempts the block is delivered without them, and the gap is reported
-     * through {@code BlockChainDataListener.onEndorserBlockUnavailable}.
+     * True (default): deliver a certifying block with its EB's transactions. False: deliver it as received, and open
+     * no side connection.
+     */
+    @Builder.Default
+    private boolean inlineEndorserBlockTxs = true;
+
+    /**
+     * What to do when a certifying block's EB transactions cannot be had within 45 s. False (default): halt the sync
+     * ({@code SYNC_HALTED}); the block is not delivered and the application restarts from its own cursor. True:
+     * deliver the block as received, without the EB's transactions ({@code DELIVERED_WITHOUT_EB_TXS}).
      */
     @Builder.Default
     private boolean skipUnavailableEndorserBlocks = false;
-    /**
-     * When true, fetch EB transaction bytes after an Endorser Block and matching tx offer are seen.
-     */
-    @Builder.Default
-    private boolean fetchTxs = true;
-    /**
-     * Upper bound for EB transactions fetched from one Endorser Block.
-     */
-    @Builder.Default
-    private int maxTxsPerEndorserBlock = DEFAULT_MAX_TXS_PER_ENDORSER_BLOCK;
-    /**
-     * How long to wait for a matching tx offer before emitting a refs-only Endorser Block event.
-     */
-    @Builder.Default
-    private long txsOfferWaitMillis = DEFAULT_TXS_OFFER_WAIT_MILLIS;
-    /**
-     * Enables Leios vote parsing and delivery when the listener overrides onLeiosVotes.
-     */
-    @Builder.Default
-    private boolean deliverVotes = false;
 
+    /**
+     * @return the default settings: inline EB transactions, and halt when they cannot be had
+     */
     public static LeiosConfig defaultConfig() {
         return LeiosConfig.builder().build();
-    }
-
-    public static LeiosConfig disabled() {
-        return LeiosConfig.builder().mode(Mode.DISABLED).build();
-    }
-
-    /**
-     * True when certifying blocks should be completed with their endorser block transactions on this network:
-     * inlining is on ({@code YaciConfig}) and Leios is active (AUTO: Musashi magic; ENABLED: any network).
-     * Used by both tip sync and range sync.
-     */
-    public boolean shouldInlineEndorserBlockTxs(long protocolMagic) {
-        if (!YaciConfig.INSTANCE.isInlineEndorserBlockTxs()) {
-            return false;
-        }
-        return switch (mode) {
-            case DISABLED -> false;
-            case ENABLED -> true;
-            case AUTO -> protocolMagic == Constants.MUSASHI_PROTOCOL_MAGIC;
-        };
-    }
-
-    public boolean shouldAttach(long protocolMagic) {
-        return shouldAttach(protocolMagic, true);
-    }
-
-    boolean shouldAttachForRange(long protocolMagic) {
-        return shouldAttach(protocolMagic, false);
-    }
-
-    private boolean shouldAttach(long protocolMagic, boolean allowAuto) {
-        return switch (mode) {
-            case DISABLED -> false;
-            case ENABLED -> true;
-            case AUTO -> allowAuto && protocolMagic == Constants.MUSASHI_PROTOCOL_MAGIC;
-        };
-    }
-
-    public boolean isCompatible(AcceptVersion acceptVersion, long protocolMagic) {
-        if (mode == Mode.DISABLED || acceptVersion == null
-                || N2NVersionTableConstant.isAppLayerVersion(acceptVersion.getVersionNumber())
-                || acceptVersion.getVersionNumber() < N2NVersionTableConstant.PROTOCOL_V15) {
-            return false;
-        }
-
-        VersionData versionData = acceptVersion.getVersionData();
-        if (versionData == null) {
-            return false;
-        }
-
-        if (mode == Mode.AUTO) {
-            return protocolMagic == Constants.MUSASHI_PROTOCOL_MAGIC
-                    && versionData.getNetworkMagic() == Constants.MUSASHI_PROTOCOL_MAGIC;
-        }
-
-        return protocolMagic < 0 || versionData.getNetworkMagic() == protocolMagic;
-    }
-
-    public static long protocolMagic(VersionTable versionTable) {
-        if (versionTable == null || versionTable.getVersionDataMap() == null
-                || versionTable.getVersionDataMap().isEmpty()) {
-            return -1;
-        }
-        return versionTable.getVersionDataMap().values().iterator().next().getNetworkMagic();
-    }
-
-    public static VersionTable versionTableFor(long protocolMagic, LeiosConfig leiosConfig) {
-        return versionTableFor(protocolMagic, leiosConfig, true);
-    }
-
-    static VersionTable versionTableForRange(long protocolMagic, LeiosConfig leiosConfig) {
-        return versionTableFor(protocolMagic, leiosConfig, false);
-    }
-
-    private static VersionTable versionTableFor(long protocolMagic, LeiosConfig leiosConfig, boolean allowAuto) {
-        LeiosConfig effectiveConfig = leiosConfig != null ? leiosConfig : LeiosConfig.defaultConfig();
-        if (effectiveConfig.shouldAttach(protocolMagic, allowAuto)) {
-            return N2NVersionTableConstant.v11AndAbove(protocolMagic);
-        }
-        return N2NVersionTableConstant.v4AndAbove(protocolMagic);
     }
 }

@@ -2,22 +2,18 @@ package com.bloxbean.cardano.yaci.helper;
 
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.network.TCPNodeClient;
-import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgent;
 import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListener;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
-import com.bloxbean.cardano.yaci.core.protocol.leiosfetch.LeiosFetchAgent;
-import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.LeiosNotifyAgent;
 import com.bloxbean.cardano.yaci.helper.api.Fetcher;
-import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.function.Consumer;
 
 /**
@@ -30,6 +26,10 @@ import java.util.function.Consumer;
  * </p>
  * <br>
  * <b>Note:</b> This fetcher can only return Shelley / Post-Shelley era blocks for now
+ * <p>
+ * Blocks are delivered as received: a Leios block that certifies an endorser block comes without the endorser block's
+ * transactions. {@link BlockRangeSync} delivers such blocks complete.
+ * </p>
  * <p></p>
  * <p>
  * Example: Fetch block from point-1 to point-2 and receive blocks in a {@link Consumer} function
@@ -54,15 +54,10 @@ import java.util.function.Consumer;
 public class BlockFetcher implements Fetcher<Block> {
     private String host;
     private int port;
-    private long protocolMagic;
     private VersionTable versionTable;
-    private LeiosConfig leiosConfig;
     private HandshakeAgent handshakeAgent;
     private KeepAliveAgent keepAliveAgent;
     private BlockfetchAgent blockfetchAgent;
-    private LeiosNotifyAgent leiosNotifyAgent;
-    private LeiosFetchAgent leiosFetchAgent;
-    private final List<LeiosSyncCoordinator> leiosSyncCoordinators = new ArrayList<>();
     private TCPNodeClient n2nClient;
 
     private int lastKeepAliveResponseCookie = 0;
@@ -75,16 +70,7 @@ public class BlockFetcher implements Fetcher<Block> {
      * @param protocolMagic Protocol Magic
      */
     public BlockFetcher(String host, int port, long protocolMagic) {
-        this(host, port, protocolMagic, LeiosConfig.defaultConfig());
-    }
-
-    /**
-     * Construct a block fetcher with optional Leios integration.
-     * In {@link LeiosConfig.Mode#AUTO}, range-oriented fetchers do not attach Leios agents; use
-     * {@link LeiosConfig.Mode#ENABLED} when near-tip Endorser Block events are desired on this connection.
-     */
-    public BlockFetcher(String host, int port, long protocolMagic, LeiosConfig leiosConfig) {
-        this(host, port, LeiosConfig.versionTableForRange(protocolMagic, leiosConfig), protocolMagic, leiosConfig);
+        this(host, port, N2NVersionTableConstant.v4AndAbove(protocolMagic));
     }
 
     /**
@@ -94,23 +80,9 @@ public class BlockFetcher implements Fetcher<Block> {
      * @param versionTable VersionTable for N2N protocol
      */
     public BlockFetcher(String host, int port, VersionTable versionTable) {
-        this(host, port, versionTable, LeiosConfig.defaultConfig());
-    }
-
-    /**
-     * Construct a block fetcher with a caller-provided node-to-node version table and Leios policy.
-     */
-    public BlockFetcher(String host, int port, VersionTable versionTable, LeiosConfig leiosConfig) {
-        this(host, port, versionTable, LeiosConfig.protocolMagic(versionTable), leiosConfig);
-    }
-
-    private BlockFetcher(String host, int port, VersionTable versionTable, long protocolMagic,
-                         LeiosConfig leiosConfig) {
         this.host = host;
         this.port = port;
         this.versionTable = versionTable;
-        this.protocolMagic = protocolMagic;
-        this.leiosConfig = leiosConfig != null ? leiosConfig : LeiosConfig.defaultConfig();
         init();
     }
 
@@ -118,26 +90,13 @@ public class BlockFetcher implements Fetcher<Block> {
         handshakeAgent = new HandshakeAgent(versionTable);
         keepAliveAgent = new KeepAliveAgent();
         blockfetchAgent = new BlockfetchAgent();
-        if (leiosConfig.shouldAttachForRange(protocolMagic)) {
-            leiosNotifyAgent = new LeiosNotifyAgent();
-            leiosFetchAgent = new LeiosFetchAgent();
-        }
-
-        List<Agent> agents = new ArrayList<>();
-        agents.add(keepAliveAgent);
-        agents.add(blockfetchAgent);
-        if (leiosNotifyAgent != null && leiosFetchAgent != null) {
-            agents.add(leiosNotifyAgent);
-            agents.add(leiosFetchAgent);
-        }
-        n2nClient = new TCPNodeClient(host, port, handshakeAgent, agents.toArray(new Agent[0]));
+        n2nClient = new TCPNodeClient(host, port, handshakeAgent, keepAliveAgent, blockfetchAgent);
 
         handshakeAgent.addListener(new HandshakeAgentListener() {
             @Override
             public void handshakeOk() {
                 blockfetchAgent.sendNextMessage();
                 keepAliveAgent.sendKeepAlive(1234);
-                startLeiosIfCompatible();
             }
         });
 
@@ -195,22 +154,6 @@ public class BlockFetcher implements Fetcher<Block> {
     }
 
     /**
-     * Registers the same listener for Leios Endorser Block and vote callbacks when Leios agents are attached.
-     */
-    public void addLeiosDataListener(BlockChainDataListener listener) {
-        if (this.isRunning())
-            throw new IllegalStateException("Listener can be added only before start() call");
-
-        if (listener == null || leiosNotifyAgent == null || leiosFetchAgent == null)
-            return;
-
-        LeiosSyncCoordinator coordinator = new LeiosSyncCoordinator(listener, leiosFetchAgent, leiosConfig);
-        leiosSyncCoordinators.add(coordinator);
-        leiosNotifyAgent.addListener(coordinator);
-        leiosFetchAgent.addListener(coordinator);
-    }
-
-    /**
      * Check if the agent connection is still alive
      * @return true if alive, false if not
      */
@@ -220,19 +163,17 @@ public class BlockFetcher implements Fetcher<Block> {
     }
 
     /**
+     * The version the handshake of this fetcher's connection accepted, or null before a handshake succeeded.
+     */
+    AcceptVersion getAcceptedVersion() {
+        return handshakeAgent != null ? handshakeAgent.getProtocolVersion() : null;
+    }
+
+    /**
      * Invoke this method to close the socket connection to node
      */
     @Override
     public void shutdown() {
-        for (LeiosSyncCoordinator coordinator : leiosSyncCoordinators) {
-            coordinator.close();
-        }
-        if (leiosNotifyAgent != null) {
-            leiosNotifyAgent.shutdown();
-        }
-        if (leiosFetchAgent != null) {
-            leiosFetchAgent.done();
-        }
         n2nClient.shutdown();
     }
 
@@ -255,18 +196,6 @@ public class BlockFetcher implements Fetcher<Block> {
      */
     public long getLastKeepAliveResponseTime() {
         return lastKeepAliveResponseTime;
-    }
-
-    private void startLeiosIfCompatible() {
-        if (leiosNotifyAgent == null || leiosFetchAgent == null) {
-            return;
-        }
-
-        if (leiosConfig.isCompatible(handshakeAgent.getProtocolVersion(), protocolMagic)) {
-            leiosNotifyAgent.start();
-        } else {
-            leiosNotifyAgent.stopAutoRequestNext();
-        }
     }
 
 }

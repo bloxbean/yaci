@@ -57,8 +57,9 @@ class LeiosFetchSerializersTest {
         MsgLeiosBlockTxs decoded = assertInstanceOf(MsgLeiosBlockTxs.class, LeiosFetchStateBase.deserialize(wire));
 
         assertArrayEquals(wire, decoded.serialize());
-        assertEquals(2, com.bloxbean.cardano.yaci.core.model.serializers.leios.EndorserBlockTxListSerializer.INSTANCE
-                .deserialize(decoded.getTxList().getCbor()).size());
+        assertEquals(2, decoded.getTransactions().size());
+        assertEquals("80", HexUtil.encodeHexString(decoded.getTransactions().get(0)));
+        assertEquals("8101", HexUtil.encodeHexString(decoded.getTransactions().get(1)));
     }
 
     @Test
@@ -115,9 +116,22 @@ class LeiosFetchSerializersTest {
         MsgLeiosBlockTxs blockTxs = new MsgLeiosBlockTxs(txList);
 
         MsgLeiosBlockTxs decoded = LeiosFetchSerializers.MsgLeiosBlockTxsSerializer.INSTANCE
-                .deserializeDI(CborSerializationUtil.deserializeOne(blockTxs.serialize()));
+                .deserialize(blockTxs.serialize());
 
         assertEquals(txList, decoded.getTxList());
+    }
+
+    @Test
+    void payloadMessagesAreNotDecodedFromADataItem() {
+        var blockTxs = CborSerializationUtil.deserializeOne(
+                new MsgLeiosBlockTxs(LeiosCborUtil.toRawCbor(rawArray(20, 21))).serialize());
+        var block = CborSerializationUtil.deserializeOne(
+                new MsgLeiosBlock(LeiosCborUtil.toRawCbor(rawArray(22, 23))).serialize());
+
+        assertThrows(UnsupportedOperationException.class,
+                () -> LeiosFetchSerializers.MsgLeiosBlockTxsSerializer.INSTANCE.deserializeDI(blockTxs));
+        assertThrows(UnsupportedOperationException.class,
+                () -> LeiosFetchSerializers.MsgLeiosBlockSerializer.INSTANCE.deserializeDI(block));
     }
 
     @Test
@@ -185,5 +199,15 @@ class LeiosFetchSerializersTest {
             hash[i] = (byte) (seed + i);
         }
         return new LeiosPoint(100 + seed, hash);
+    }
+
+    @Test
+    void thePublicByteArrayDecoderKeepsANonMinimalEndorserBlock() {
+        // [2, {h'00..': 5}] with the map and the uint in longer forms than needed (ADR 0016 D2)
+        String eb = "b90001" + "5820" + "00".repeat(32) + "190005";
+        MsgLeiosBlock decoded = LeiosFetchSerializers.MsgLeiosBlockSerializer.INSTANCE
+                .deserialize(HexUtil.decodeHexString("8202" + eb));
+        assertEquals(eb, HexUtil.encodeHexString(decoded.getEndorserBlock().getCbor()));
+        assertArrayEquals(HexUtil.decodeHexString("8202" + eb), decoded.serialize());
     }
 }

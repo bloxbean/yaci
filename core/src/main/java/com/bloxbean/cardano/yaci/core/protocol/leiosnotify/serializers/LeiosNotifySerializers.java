@@ -1,5 +1,9 @@
 package com.bloxbean.cardano.yaci.core.protocol.leiosnotify.serializers;
 
+import com.bloxbean.cardano.yaci.core.protocol.Message;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.messages.MsgLeiosNotifyError;
+import com.bloxbean.cardano.yaci.core.protocol.leiosnotify.LeiosNotifyStateBase;
+
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
@@ -50,19 +54,25 @@ public class LeiosNotifySerializers {
     public enum MsgLeiosBlockAnnouncementSerializer implements Serializer<MsgLeiosBlockAnnouncement> {
         INSTANCE;
 
+        /** Decodes from the bytes as received: the payload is sliced, never re-encoded (ADR 0016 D2). */
         @Override
-        public byte[] serialize(MsgLeiosBlockAnnouncement object) {
-            Array array = new Array();
-            array.add(new UnsignedInteger(4));
-            array.add(LeiosCborUtil.fromRawCbor(object.getAnnouncement()));
-            return CborSerializationUtil.serialize(array, false);
+        public MsgLeiosBlockAnnouncement deserialize(byte[] bytes) {
+            Message message = LeiosNotifyStateBase.deserialize(bytes);
+            if (message instanceof MsgLeiosBlockAnnouncement decoded)
+                return decoded;
+            throw notA("MsgLeiosBlockAnnouncement", message);
         }
 
         @Override
+        public byte[] serialize(MsgLeiosBlockAnnouncement object) {
+            // the announcement goes out as it is held, never re-encoded
+            return LeiosCborUtil.concat(new byte[]{(byte) 0x82, 0x04}, object.getAnnouncement().getCbor());
+        }
+
+        /** Not supported: a decoded item has lost the payload's bytes as received. */
+        @Override
         public MsgLeiosBlockAnnouncement deserializeDI(DataItem di) {
-            List<DataItem> items = messageItems(di, 4, "MsgLeiosBlockAnnouncement");
-            requireArity(items, 2, "MsgLeiosBlockAnnouncement");
-            return new MsgLeiosBlockAnnouncement(LeiosCborUtil.toRawCbor(items.get(1)));
+            throw new UnsupportedOperationException("use deserialize(byte[]): the payload must keep its bytes");
         }
     }
 
@@ -110,19 +120,27 @@ public class LeiosNotifySerializers {
     public enum MsgLeiosVotesSerializer implements Serializer<MsgLeiosVotes> {
         INSTANCE;
 
+        /** Decodes from the bytes as received: the payload is sliced, never re-encoded (ADR 0016 D2). */
         @Override
-        public byte[] serialize(MsgLeiosVotes object) {
-            Array array = new Array();
-            array.add(new UnsignedInteger(7));
-            array.add(LeiosCborUtil.serializeRawCborArray(object.getVotes()));
-            return CborSerializationUtil.serialize(array, false);
+        public MsgLeiosVotes deserialize(byte[] bytes) {
+            Message message = LeiosNotifyStateBase.deserialize(bytes);
+            if (message instanceof MsgLeiosVotes decoded)
+                return decoded;
+            throw notA("MsgLeiosVotes", message);
         }
 
         @Override
+        public byte[] serialize(MsgLeiosVotes object) {
+            // the votes go out as they are held, never re-encoded
+            byte[] list = object.getVoteList() != null ? object.getVoteList().getCbor()
+                    : LeiosCborUtil.rawArray(object.getVotes());
+            return LeiosCborUtil.concat(new byte[]{(byte) 0x82, 0x07}, list);
+        }
+
+        /** Not supported: a decoded item has lost the payload's bytes as received. */
+        @Override
         public MsgLeiosVotes deserializeDI(DataItem di) {
-            List<DataItem> items = messageItems(di, 7, "MsgLeiosVotes");
-            requireArity(items, 2, "MsgLeiosVotes");
-            return new MsgLeiosVotes(LeiosCborUtil.deserializeRawCborArrayItems(items.get(1)));
+            throw new UnsupportedOperationException("use deserialize(byte[]): the payload must keep its bytes");
         }
     }
 
@@ -200,5 +218,10 @@ public class LeiosNotifySerializers {
             throw new IllegalArgumentException("value must fit in word32");
         }
         return bigint.longValue();
+    }
+
+    private static IllegalArgumentException notA(String expected, Message message) {
+        Throwable cause = message instanceof MsgLeiosNotifyError error ? error.getCause() : null;
+        return new IllegalArgumentException("Not a " + expected + ": " + message, cause);
     }
 }

@@ -40,11 +40,20 @@ public class Block {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String perasCertificate;
 
+    /**
+     * The endorser block this block certifies, when Yaci's sync helpers delivered the block with the EB's transactions
+     * first; null for every other block.
+     * <p>
+     * Experimental: Dijkstra is not final; this may change in any release.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private LeiosEndorserBlockRef leiosEndorserBlock;
+
     /** Kept for source and binary compatibility: the Dijkstra fields are null. Use the builder for them. */
     public Block(Era era, BlockHeader header, List<TransactionBody> transactionBodies,
                  List<Witnesses> transactionWitness, Map<Integer, AuxData> auxiliaryDataMap,
                  List<Integer> invalidTransactions, String cbor) {
         this(era, header, transactionBodies, transactionWitness, auxiliaryDataMap, invalidTransactions, cbor, null,
-                null);
+                null, null);
     }
 }

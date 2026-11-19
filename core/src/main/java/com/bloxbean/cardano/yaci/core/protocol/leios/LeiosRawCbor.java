@@ -1,6 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.leios;
 
-import com.bloxbean.cardano.yaci.core.util.CborSerializationUtil;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
 import java.util.Arrays;
@@ -11,8 +11,10 @@ public final class LeiosRawCbor {
 
     public LeiosRawCbor(byte[] cbor) {
         Objects.requireNonNull(cbor, "cbor");
-        if (CborSerializationUtil.deserialize(cbor).length != 1) {
-            throw new IllegalArgumentException("raw CBOR must contain exactly one top-level value");
+        try {
+            CborSpan.of(cbor);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("raw CBOR must contain exactly one top-level value", e);
         }
         this.cbor = Arrays.copyOf(cbor, cbor.length);
     }

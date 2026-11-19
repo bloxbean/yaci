@@ -68,7 +68,9 @@ public class LeiosFetchAgent extends Agent<LeiosFetchAgentListener> {
         if (oldState == LeiosFetchState.StIdle && currentState != oldState) {
             if (message instanceof MsgLeiosBlockRequest || message instanceof MsgLeiosBlockTxsRequest) {
                 requestQueue.remove(message);
-                outstandingRequest = message;
+                //a write that completes after shutdown() keeps the protocol in step, but its request already failed:
+                //it is not outstanding again, so nothing can fail it a second time
+                outstandingRequest = shutDown ? null : message;
             } else if (message instanceof MsgClientDone) {
                 requestQueue.clear();
                 outstandingRequest = null;
@@ -109,6 +111,8 @@ public class LeiosFetchAgent extends Agent<LeiosFetchAgentListener> {
         //request becomes the new outstanding request
         Message request = outstandingRequest;
         outstandingRequest = null;
+        if (shutDown)
+            return; //every request failed at the shutdown: drained
         if (message instanceof MsgLeiosBlock block) {
             handleBlock(request, block);
         } else if (message instanceof MsgLeiosBlockTxs blockTxs) {
@@ -118,10 +122,20 @@ public class LeiosFetchAgent extends Agent<LeiosFetchAgentListener> {
         }
     }
 
+    /**
+     * Every request still to be answered fails: the one already written, the one being written and those waiting.
+     * A write that completes afterwards keeps the protocol in step, and every reply after the shutdown is drained
+     * without a callback: no caller hears of a request twice.
+     */
     @Override
-    public void shutdown() {
+    public synchronized void shutdown() {
         this.shutDown = true;
-        failQueuedRequests(new IllegalStateException("LeiosFetchAgent is shutting down"));
+        Throwable error = new IllegalStateException("LeiosFetchAgent is shutting down");
+        Message outstanding = outstandingRequest;
+        outstandingRequest = null;
+        if (outstanding != null)
+            failRequest(outstanding, error);
+        failQueuedRequests(error);
     }
 
     @Override

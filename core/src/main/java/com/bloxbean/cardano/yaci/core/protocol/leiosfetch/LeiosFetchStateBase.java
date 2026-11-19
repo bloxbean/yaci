@@ -1,7 +1,11 @@
 package com.bloxbean.cardano.yaci.core.protocol.leiosfetch;
 
 import co.nstant.in.cbor.model.DataItem;
+import com.bloxbean.cardano.client.common.cbor.CborSpan;
 import com.bloxbean.cardano.yaci.core.protocol.Message;
+import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosRawCbor;
+import com.bloxbean.cardano.yaci.core.protocol.leiosfetch.messages.MsgLeiosBlock;
+import com.bloxbean.cardano.yaci.core.protocol.leiosfetch.messages.MsgLeiosBlockTxs;
 import com.bloxbean.cardano.yaci.core.protocol.State;
 import com.bloxbean.cardano.yaci.core.protocol.leios.serializers.LeiosCborUtil;
 import com.bloxbean.cardano.yaci.core.protocol.leiosfetch.messages.MsgLeiosFetchError;
@@ -22,6 +26,15 @@ public interface LeiosFetchStateBase extends State {
 
     static Message deserialize(byte[] bytes) {
         try {
+            // An endorser block and a transaction list are hashed by the receiver: keep their bytes as received.
+            CborSpan message = CborSpan.of(bytes);
+            long messageTag = message.majorType() == 4 && message.size() > 0 ? message.get(0).asLong() : -1;
+            if (messageTag == 2 || messageTag == 4) {
+                if (message.size() != 2)
+                    throw new IllegalArgumentException("LeiosFetch message " + messageTag + " must have 2 fields");
+                LeiosRawCbor payload = LeiosRawCbor.of(message.get(1).bytes());
+                return messageTag == 2 ? new MsgLeiosBlock(payload) : new MsgLeiosBlockTxs(payload);
+            }
             DataItem[] dataItems = CborSerializationUtil.deserialize(bytes);
             if (dataItems.length != 1) {
                 throw new IllegalArgumentException("LeiosFetch message must contain one top-level CBOR value");
@@ -33,12 +46,8 @@ public interface LeiosFetchStateBase extends State {
                     return MsgClientDoneSerializer.INSTANCE.deserializeDI(dataItem);
                 case 1:
                     return MsgLeiosBlockRequestSerializer.INSTANCE.deserializeDI(dataItem);
-                case 2:
-                    return MsgLeiosBlockSerializer.INSTANCE.deserializeDI(dataItem);
                 case 3:
                     return MsgLeiosBlockTxsRequestSerializer.INSTANCE.deserializeDI(dataItem);
-                case 4:
-                    return MsgLeiosBlockTxsSerializer.INSTANCE.deserializeDI(dataItem);
                 default:
                     throw new UnsupportedOperationException("LeiosFetch tag " + tag + " is not implemented");
             }

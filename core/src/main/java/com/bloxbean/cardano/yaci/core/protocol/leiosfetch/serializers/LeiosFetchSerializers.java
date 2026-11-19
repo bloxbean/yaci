@@ -1,5 +1,9 @@
 package com.bloxbean.cardano.yaci.core.protocol.leiosfetch.serializers;
 
+import com.bloxbean.cardano.yaci.core.protocol.Message;
+import com.bloxbean.cardano.yaci.core.protocol.leiosfetch.messages.MsgLeiosFetchError;
+import com.bloxbean.cardano.yaci.core.protocol.leiosfetch.LeiosFetchStateBase;
+
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.UnsignedInteger;
@@ -47,16 +51,24 @@ public class LeiosFetchSerializers {
     public enum MsgLeiosBlockSerializer implements Serializer<MsgLeiosBlock> {
         INSTANCE;
 
+        /** Decodes from the bytes as received: the payload is sliced, never re-encoded (ADR 0016 D2). */
+        @Override
+        public MsgLeiosBlock deserialize(byte[] bytes) {
+            Message message = LeiosFetchStateBase.deserialize(bytes);
+            if (message instanceof MsgLeiosBlock decoded)
+                return decoded;
+            throw notA("MsgLeiosBlock", message);
+        }
+
         @Override
         public byte[] serialize(MsgLeiosBlock object) {
             return serializeArray(unsigned(2), LeiosCborUtil.validatedRawCborBytes(object.getEndorserBlock()));
         }
 
+        /** Not supported: a decoded item has lost the payload's bytes as received. */
         @Override
         public MsgLeiosBlock deserializeDI(DataItem di) {
-            List<DataItem> items = messageItems(di, 2, "MsgLeiosBlock");
-            requireArity(items, 2, "MsgLeiosBlock");
-            return new MsgLeiosBlock(LeiosCborUtil.toRawCbor(items.get(1)));
+            throw new UnsupportedOperationException("use deserialize(byte[]): the payload must keep its bytes");
         }
     }
 
@@ -84,16 +96,24 @@ public class LeiosFetchSerializers {
     public enum MsgLeiosBlockTxsSerializer implements Serializer<MsgLeiosBlockTxs> {
         INSTANCE;
 
+        /** Decodes from the bytes as received: the payload is sliced, never re-encoded (ADR 0016 D2). */
+        @Override
+        public MsgLeiosBlockTxs deserialize(byte[] bytes) {
+            Message message = LeiosFetchStateBase.deserialize(bytes);
+            if (message instanceof MsgLeiosBlockTxs decoded)
+                return decoded;
+            throw notA("MsgLeiosBlockTxs", message);
+        }
+
         @Override
         public byte[] serialize(MsgLeiosBlockTxs object) {
             return serializeArray(unsigned(4), LeiosCborUtil.validatedRawCborBytes(object.getTxList()));
         }
 
+        /** Not supported: a decoded item has lost the payload's bytes as received. */
         @Override
         public MsgLeiosBlockTxs deserializeDI(DataItem di) {
-            List<DataItem> items = messageItems(di, 4, "MsgLeiosBlockTxs");
-            requireArity(items, 2, "MsgLeiosBlockTxs");
-            return new MsgLeiosBlockTxs(LeiosCborUtil.toRawCbor(items.get(1)));
+            throw new UnsupportedOperationException("use deserialize(byte[]): the payload must keep its bytes");
         }
     }
 
@@ -144,5 +164,10 @@ public class LeiosFetchSerializers {
 
     private static byte[] unsigned(long value) {
         return CborSerializationUtil.serialize(new UnsignedInteger(value), false);
+    }
+
+    private static IllegalArgumentException notA(String expected, Message message) {
+        Throwable cause = message instanceof MsgLeiosFetchError error ? error.getCause() : null;
+        return new IllegalArgumentException("Not a " + expected + ": " + message, cause);
     }
 }

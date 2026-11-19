@@ -30,25 +30,6 @@ public class Witnesses {
 
     private List<PlutusScript> plutusV2Scripts = new ArrayList<>();
     private List<PlutusScript> plutusV3Scripts = new ArrayList<>();
-    //Dijkstra era (witness set key 8, Musashi rc-2026w42 onwards); null when the witness set has none
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    private List<PlutusScript> plutusV4Scripts;
-
-    /**
-     * Pre-Dijkstra constructor, kept so existing callers compile and behave unchanged.
-     */
-    public Witnesses(String cbor,
-                     List<VkeyWitness> vkeyWitnesses,
-                     List<NativeScript> nativeScripts,
-                     List<BootstrapWitness> bootstrapWitnesses,
-                     List<PlutusScript> plutusV1Scripts,
-                     List<Datum> datums,
-                     List<Redeemer> redeemers,
-                     List<PlutusScript> plutusV2Scripts,
-                     List<PlutusScript> plutusV3Scripts) {
-        this(cbor, vkeyWitnesses, nativeScripts, bootstrapWitnesses, plutusV1Scripts,
-                datums, redeemers, plutusV2Scripts, plutusV3Scripts, null);
-    }
 
     /**
      * The Plutus V4 scripts (key 8); empty if absent, and then left out of JSON.

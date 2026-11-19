@@ -43,7 +43,7 @@ class N2CInlinedCertifyingBlockTest {
 
         assertEquals(Era.Dijkstra, block.getEra());
         assertEquals(156613, block.getHeader().getHeaderBody().getBlockNumber());
-        assertEquals(Boolean.TRUE, block.getHeader().getHeaderBody().getLeiosCertified());
+        assertEquals(Boolean.TRUE, block.getHeader().getHeaderBody().getLeiosCertInBody());
         assertNotNull(block.getLeiosCertificate());
         assertEquals(345, block.getTransactionBodies().size());
         assertEquals(345, block.getTransactionWitness().size());

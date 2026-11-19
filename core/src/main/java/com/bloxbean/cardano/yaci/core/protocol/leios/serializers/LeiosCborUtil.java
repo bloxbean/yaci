@@ -94,6 +94,41 @@ public final class LeiosCborUtil {
         return rawCbor.getCbor();
     }
 
+    /**
+     * A definite array of raw items, each spliced in as held.
+     *
+     * @param rawItems the items
+     * @return the array's encoding
+     */
+    public static byte[] rawArray(List<LeiosRawCbor> rawItems) {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        int n = rawItems.size();
+        if (n < 24) {
+            baos.write(0x80 | n);
+        } else if (n < 0x100) {
+            baos.write(0x98);
+            baos.write(n);
+        } else if (n < 0x10000) {
+            baos.write(0x99);
+            baos.write(n >> 8);
+            baos.write(n);
+        } else {
+            baos.write(0x9a);
+            baos.write(n >> 24);
+            baos.write(n >> 16);
+            baos.write(n >> 8);
+            baos.write(n);
+        }
+        for (LeiosRawCbor item : rawItems) writeBytes(baos, item.getCbor());
+        return baos.toByteArray();
+    }
+
+    public static byte[] concat(byte[]... parts) {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        for (byte[] part : parts) writeBytes(baos, part);
+        return baos.toByteArray();
+    }
+
     public static Array serializeRawCborArray(List<LeiosRawCbor> rawItems) {
         Array array = new Array();
         rawItems.forEach(raw -> array.add(fromRawCbor(raw)));
