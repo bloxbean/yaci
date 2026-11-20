@@ -57,6 +57,7 @@ class PoolDistributionQueriesTest {
     @Test
     void stakeSnapshotsTakeAMaybeSet() {
         assertThat(hex(new StakeSnapshotQuery(POOL_A), V23)).isEqualTo(wrapped("8214" + "81" + SET_A));
+        assertThat(hex(new StakeSnapshotQuery(null), V23)).isEqualTo(wrapped("8214" + "80")); //every pool
     }
 
     @Test

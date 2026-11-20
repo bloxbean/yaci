@@ -33,9 +33,10 @@ public class StakeSnapshotQuery implements EraQuery<StakeSnapshotQueryResult> {
         Array array = new Array();
         array.add(new UnsignedInteger(20));
 
-        // Maybe (Set PoolId): [set] for the pool given (cardano-binary encodeMaybe)
+        // Maybe (Set PoolId) (cardano-binary encodeMaybe): [] for every pool, [set] for the pool given
         Array maybePoolIds = new Array();
-        maybePoolIds.add(QuerySets.poolIds(List.of(poolId)));
+        if (poolId != null)
+            maybePoolIds.add(QuerySets.poolIds(List.of(poolId)));
 
         array.add(maybePoolIds);
 
