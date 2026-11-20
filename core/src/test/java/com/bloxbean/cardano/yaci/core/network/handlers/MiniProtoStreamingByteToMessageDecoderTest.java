@@ -52,6 +52,42 @@ class MiniProtoStreamingByteToMessageDecoderTest {
         }
     }
 
+    // Every protocol is framed by its encoding, not decoded and re-encoded: a message is the bytes received.
+
+    @Test
+    void aMessageKeepsANonMinimalEncoding() {
+        // block fetch [4, h'0102'] with the array, the uint and the string length written longer than needed
+        String message = "9802" + "1804" + "590002" + "0102";
+        receive(message);
+        assertThat(segments()).containsExactly(message);
+    }
+
+    @Test
+    void aValueAfterAnArrayArrivingInALaterFrameStillBelongsToItsMessage() {
+        receive("8100" + "19"); //a two-byte uint follows the array: wait for it
+        assertThat(segments()).isEmpty();
+        receive("0005" + "8101");
+        assertThat(segments()).containsExactly("8100190005", "8101");
+    }
+
+    @Test
+    void fragmentsOfBothDirectionsOfAProtocolNeverMix() {
+        receive(2, "8202a1");
+        receive(2 | 0x8000, "8204");
+        receive(2, "0102");
+        receive(2 | 0x8000, "80");
+        assertThat(segmentsOf()).containsExactly("2:8202a10102", "2:820480");
+    }
+
+    @Test
+    void aMessageArrivingOneByteAFrameIsOneSegmentOfTheSameBytes() {
+        // [4, 24(h'..')] with an indefinite map and a float inside the tagged bytes' neighbour
+        String message = "83" + "04" + "d8185820" + "ab".repeat(32) + "bf01f93c00ff";
+        for (int i = 0; i < message.length(); i += 2)
+            receive(message.substring(i, i + 2));
+        assertThat(segments()).containsExactly(message);
+    }
+
     // Leios (ADR 0016 D2): protocols 18 and 19 carry bytes the receiver hashes, so they are framed as received.
 
     @Test
@@ -113,7 +149,7 @@ class MiniProtoStreamingByteToMessageDecoderTest {
 
     @Test
     void aDrainedLeiosStreamDropsALargeBuffer() {
-        MiniProtoStreamingByteToMessageDecoder.LeiosStream stream = new MiniProtoStreamingByteToMessageDecoder.LeiosStream();
+        MiniProtoStreamingByteToMessageDecoder.CborFrameStream stream = new MiniProtoStreamingByteToMessageDecoder.CborFrameStream(false);
         byte[] big = new byte[2 * 1024 * 1024 + 5];
         big[0] = 0x5a; //a byte string of 2 MiB
         big[1] = 0x00;
