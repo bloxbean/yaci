@@ -29,8 +29,12 @@ public class UpdateCommittee implements GovAction {
     @Builder.Default
     private Set<Credential> membersForRemoval = new LinkedHashSet<>();
 
+    /**
+     * Each new member's cold credential and the epoch its term ends. An epoch is a Word64 in the ledger: the value is
+     * its 64 bits, so compare with {@link Long#compareUnsigned} and print with {@link Long#toUnsignedString}.
+     */
     @Builder.Default
-    private Map<Credential, Integer> newMembersAndTerms = new LinkedHashMap<>();
+    private Map<Credential, Long> newMembersAndTerms = new LinkedHashMap<>();
     private UnitInterval threshold; //TODO?? Check the correct name.
 
 }

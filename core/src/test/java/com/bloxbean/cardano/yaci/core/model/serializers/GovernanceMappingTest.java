@@ -6,6 +6,7 @@ import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
 import com.bloxbean.cardano.yaci.core.model.Update;
 import com.bloxbean.cardano.yaci.core.model.governance.ProposalProcedure;
 import com.bloxbean.cardano.yaci.core.model.governance.actions.HardForkInitiationAction;
+import com.bloxbean.cardano.yaci.core.model.governance.actions.UpdateCommittee;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.GovActionSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.ProposalProcedureSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.VotingProceduresSerializer;
@@ -76,6 +77,25 @@ class GovernanceMappingTest {
         HardForkInitiationAction action = (HardForkInitiationAction) GovActionSerializer.INSTANCE.deserialize(
                 bytes("83" + "01" + "f6" + "82" + "0a" + "1a80000000"));
         assertThat(action.getProtocolVersion().get_2()).isEqualTo(Integer.MIN_VALUE);
+    }
+
+    /**
+     * A committee member's term ends at an epoch, a Word64 in the ledger: its 64 bits are kept, so ratification sees
+     * the epoch transaction validation saw. Narrowed to an int, 2^32 + 1 read as 1, within any maximum term.
+     */
+    @Test
+    void committeeTermEpochsKeepTheir64Bits() {
+        String key = "8200" + H28;
+        String script = "8201" + H28;
+        byte[] action = bytes("85" + "04" + "f6" + "80"
+                + "a2" + key + "1b0000000100000001" + script + "1bffffffffffffffff" + "d81e820102");
+
+        UpdateCommittee read = (UpdateCommittee) GovActionSerializer.INSTANCE.deserialize(action);
+        assertThat(read.getNewMembersAndTerms().values()).containsExactly((1L << 32) + 1, -1L);
+
+        UpdateCommittee reread = (UpdateCommittee) GovActionSerializer.INSTANCE.deserialize(
+                GovActionSerializer.INSTANCE.serialize(read));
+        assertThat(reread.getNewMembersAndTerms()).isEqualTo(read.getNewMembersAndTerms());
     }
 
     /** Kept: bytes read with no tree still reject what decoding them to a tree rejects, as the block path does. */
