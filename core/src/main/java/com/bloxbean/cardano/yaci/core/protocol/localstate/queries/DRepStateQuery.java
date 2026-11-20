@@ -54,7 +54,7 @@ public class DRepStateQuery implements EraQuery<DRepStateQueryResult> {
 
         for (var dataItem : drepStateArray.getDataItems()) {
             var map = (Map)dataItem;
-            var keys = (List<DataItem>)map.getKeys();
+            var keys = map.getKeys();
 
             if (keys.isEmpty()) {
                 continue;

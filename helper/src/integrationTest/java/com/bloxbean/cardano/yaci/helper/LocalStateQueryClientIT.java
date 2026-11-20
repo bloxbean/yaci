@@ -118,7 +118,7 @@ class LocalStateQueryClientIT extends BaseTest {
                 .create(mono)
                 .expectNextMatches(protoParams -> protoParams.getProtocolParams().getCollateralPercent() == 150
                         && protoParams.getProtocolParams().getMaxCollateralInputs().equals(3)
-                        && protoParams.getProtocolParams().getMaxTxExMem().equals(BigInteger.valueOf(16500000))
+                        && protoParams.getProtocolParams().getMaxTxExMem().equals(BigInteger.valueOf(17500000)) //preprod since its raise
                 )
                 .expectComplete()
                 .verify();
@@ -205,6 +205,7 @@ class LocalStateQueryClientIT extends BaseTest {
 
         System.out.println(result);
         assertThat(result.getStakeDistributionMap()).hasSizeGreaterThan(0);
+        assertThat(result.getTotalActiveStake()).isPositive(); //GetStakeDistribution2 (N2C V21 and later)
     }
 
     @Test
@@ -213,6 +214,10 @@ class LocalStateQueryClientIT extends BaseTest {
         StakeSnapshotQueryResult result = mono.block(Duration.ofSeconds(5));
 
         System.out.println(result);
+        assertThat(result.getPoolStakeSnapshots()).containsOnlyKeys("032a04334a846fdf542fd5633c9b3928998691b8276e004facbc8af1");
+        assertThat(result.getMarkTotal()).isPositive();
+        assertThat(result.getSetTotal()).isPositive();
+        assertThat(result.getGoTotal()).isPositive();
     }
 
     @Test
@@ -240,6 +245,8 @@ class LocalStateQueryClientIT extends BaseTest {
 
         PoolDistrQueryResult result = mono.block();
         System.out.println(result);
+        assertThat(result.getPoolDistributionMap()).containsOnlyKeys("032a04334a846fdf542fd5633c9b3928998691b8276e004facbc8af1");
+        assertThat(result.getTotalActiveStake()).isPositive(); //GetPoolDistr2 (N2C V21 and later)
     }
 
     //    @Test
@@ -301,7 +308,7 @@ class LocalStateQueryClientIT extends BaseTest {
             System.out.println("Reward >> " + address.toBech32() + " : " + reward);
         });
 
-        assertThat(delegations).hasSizeGreaterThanOrEqualTo(5); //only 5 regular staking keys has delegations
+        assertThat(delegations).hasSizeGreaterThanOrEqualTo(3); //3 regular staking keys are delegated (2026-11)
         assertThat(rewards).hasSizeGreaterThanOrEqualTo(5); //only 5 regular staking keys has rewards
     }
 

@@ -17,4 +17,6 @@ public class IndividualPoolStake {
     private BigInteger denominator;
 
     private String vrfKeyHash;
+    /** The pool's total stake in lovelace, from N2C V21; null before. */
+    private BigInteger totalPoolStake;
 }

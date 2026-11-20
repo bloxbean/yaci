@@ -5,12 +5,16 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.ToString;
 
+import java.math.BigInteger;
 import java.util.Map;
 
 @Getter
 @AllArgsConstructor
 @ToString
 public class StakeDistributionQueryResult implements QueryResult {
+    /** Pools keyed by pool id (hex). */
     Map<String, IndividualPoolStake> stakeDistributionMap;
+    /** The total active stake in lovelace, from N2C V21; null before. */
+    BigInteger totalActiveStake;
 }
 

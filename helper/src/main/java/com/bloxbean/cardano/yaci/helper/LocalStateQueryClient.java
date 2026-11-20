@@ -98,8 +98,9 @@ public class LocalStateQueryClient extends QueryClient {
             if (log.isDebugEnabled())
                 log.debug("Release()");
             MsgRelease msgRelease = localStateQueryAgent.release();
+            // completes once MsgRelease is sent and the agent is Idle, so a query after it acquires first
+            storeMonoSinkReference(msgRelease, monoSink);
             localStateQueryAgent.sendNextMessage();
-            monoSink.success(null);
         });
     }
 

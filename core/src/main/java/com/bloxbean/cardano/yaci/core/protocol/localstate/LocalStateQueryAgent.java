@@ -89,15 +89,19 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
             if (log.isDebugEnabled())
                 log.debug("MsgAcquire : {}", message);
             onMessageAcquired();
-        } else if (message instanceof MsgRelease) {
-            if (log.isDebugEnabled())
-                log.debug("MsgRelease : {}", message);
-            onMessageReleased();
         } else if (message instanceof MsgResult) {
             if (log.isDebugEnabled())
                 log.debug("MsgResult : {}", message);
             onMsgResult((MsgResult) message);
         }
+    }
+
+    /** A sent MsgRelease has moved the state to Idle: only now may a query acquire again. */
+    @Override
+    public synchronized void sendRequest(Message message) {
+        super.sendRequest(message);
+        if (message instanceof MsgRelease)
+            onMessageReleased();
     }
 
     private void onMsgResult(MsgResult msgResult) {

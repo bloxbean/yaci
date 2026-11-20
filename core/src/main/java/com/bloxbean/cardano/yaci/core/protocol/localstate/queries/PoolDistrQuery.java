@@ -17,7 +17,7 @@ import java.util.List;
 @AllArgsConstructor
 public class PoolDistrQuery implements EraQuery<PoolDistrQueryResult> {
     private Era era;
-    //Pool id in hex
+    /** Pool ids in hex; null for every pool. */
     private List<String> poolIds;
 
     public PoolDistrQuery(List<String> poolIds) {
@@ -27,19 +27,26 @@ public class PoolDistrQuery implements EraQuery<PoolDistrQueryResult> {
     @Override
     public DataItem serialize(AcceptVersion protocolVersion) {
         Array array = new Array();
-        array.add(new UnsignedInteger(21));
+        // GetPoolDistr2 from N2C V21; GetPoolDistr is unsupported there
+        array.add(new UnsignedInteger(PoolDistributions.ledgerForm(protocolVersion) ? 36 : 21));
 
-        Array poolIdArray = new Array();
-        poolIds.forEach(poolId -> poolIdArray.add(new ByteString(HexUtil.decodeHexString(poolId))));
-        poolIdArray.setTag(258);
-
-        array.add(poolIdArray);
+        // Maybe (Set PoolId): [] for every pool, [set] for the pools given (cardano-binary encodeMaybe)
+        Array maybePoolIds = new Array();
+        if (poolIds != null) {
+            Array poolIdArray = new Array();
+            poolIds.forEach(poolId -> poolIdArray.add(new ByteString(HexUtil.decodeHexString(poolId))));
+            poolIdArray.setTag(258);
+            maybePoolIds.add(poolIdArray);
+        }
+        array.add(maybePoolIds);
 
         return wrapWithOuterArray(array);
     }
 
     @Override
     public PoolDistrQueryResult deserializeResult(AcceptVersion protocolVersion, DataItem[] di) {
-        throw new UnsupportedOperationException("Not implemented yet");
+        PoolDistributions.Distribution distribution =
+                PoolDistributions.read(protocolVersion, extractResultArray(di[0]).get(0));
+        return new PoolDistrQueryResult(distribution.pools(), distribution.totalActiveStake());
     }
 }
