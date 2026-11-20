@@ -2,19 +2,30 @@ package com.bloxbean.cardano.yaci.core.model.serializers;
 
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.client.spec.Era;
+import com.bloxbean.cardano.yaci.core.model.Credential;
 import com.bloxbean.cardano.yaci.core.model.ProtocolParamUpdate;
+import com.bloxbean.cardano.yaci.core.model.certs.StakeCredType;
 import com.bloxbean.cardano.yaci.core.model.Update;
 import com.bloxbean.cardano.yaci.core.model.governance.ProposalProcedure;
 import com.bloxbean.cardano.yaci.core.model.governance.actions.HardForkInitiationAction;
+import com.bloxbean.cardano.yaci.core.model.governance.actions.UpdateCommittee;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.GovActionSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.ProposalProcedureSerializer;
 import com.bloxbean.cardano.yaci.core.model.serializers.governance.VotingProceduresSerializer;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.core.types.UnitInterval;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.KeyDeserializer;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -76,6 +87,51 @@ class GovernanceMappingTest {
         HardForkInitiationAction action = (HardForkInitiationAction) GovActionSerializer.INSTANCE.deserialize(
                 bytes("83" + "01" + "f6" + "82" + "0a" + "1a80000000"));
         assertThat(action.getProtocolVersion().get_2()).isEqualTo(Integer.MIN_VALUE);
+    }
+
+    /**
+     * A committee member's term ends at an epoch, a Word64 in the ledger: its 64 bits are kept, so ratification sees
+     * the epoch transaction validation saw. Narrowed to an int, 2^32 + 1 read as 1, within any maximum term.
+     */
+    @Test
+    void committeeTermEpochsKeepTheir64Bits() throws Exception {
+        String key = "8200" + H28;
+        String script = "8201" + H28;
+        byte[] action = bytes("85" + "04" + "f6" + "80"
+                + "a2" + key + "1b0000000100000001" + script + "1bffffffffffffffff" + "d81e820102");
+
+        UpdateCommittee read = (UpdateCommittee) GovActionSerializer.INSTANCE.deserialize(action);
+        assertThat(read.getNewMembersAndTerms().values()).containsExactly((1L << 32) + 1, -1L);
+
+        UpdateCommittee reread = (UpdateCommittee) GovActionSerializer.INSTANCE.deserialize(
+                GovActionSerializer.INSTANCE.serialize(read));
+        assertThat(reread.getNewMembersAndTerms()).isEqualTo(read.getNewMembersAndTerms());
+
+        // JSON has the unsigned numbers, and reads back to the same 64 bits (keys read as Yaci Store reads them)
+        ObjectMapper json = new ObjectMapper().registerModule(new SimpleModule().addKeyDeserializer(Credential.class,
+                new KeyDeserializer() {
+                    @Override
+                    public Object deserializeKey(String key, DeserializationContext context) {
+                        Matcher m = Pattern.compile("Credential\\(type=(\\w+), hash=(\\w+)\\)").matcher(key);
+                        assertThat(m.matches()).as(key).isTrue();
+                        return new Credential(StakeCredType.valueOf(m.group(1)), m.group(2));
+                    }
+                }));
+        ObjectNode tree = json.valueToTree(read);
+        ObjectNode terms = (ObjectNode) tree.get("newMembersAndTerms");
+        assertThat(terms.properties()).extracting(e -> e.getValue().bigIntegerValue())
+                .containsExactly(BigInteger.valueOf((1L << 32) + 1), new BigInteger("18446744073709551615"));
+        assertThat(json.treeToValue(tree, UpdateCommittee.class).getNewMembersAndTerms())
+                .isEqualTo(read.getNewMembersAndTerms());
+
+        // JSON written with the signed value still reads the same; a value past 64 bits is refused
+        String last = terms.properties().stream().reduce((a, b) -> b).orElseThrow().getKey();
+        terms.put(last, -1L);
+        assertThat(json.treeToValue(tree, UpdateCommittee.class).getNewMembersAndTerms())
+                .isEqualTo(read.getNewMembersAndTerms());
+        terms.put(last, BigInteger.ONE.shiftLeft(64));
+        assertThatThrownBy(() -> json.treeToValue(tree, UpdateCommittee.class))
+                .isInstanceOf(JsonProcessingException.class);
     }
 
     /** Kept: bytes read with no tree still reject what decoding them to a tree rejects, as the block path does. */

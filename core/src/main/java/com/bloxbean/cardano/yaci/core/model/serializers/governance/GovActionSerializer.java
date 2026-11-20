@@ -26,6 +26,8 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+import static com.bloxbean.cardano.client.common.cbor.CborSerializationUtil.unsignedLongItem;
+
 /**
  * Maps governance actions read by {@link RawGovAction} to Yaci's models (ADR 0003 D8), and writes them.
  */
@@ -89,8 +91,7 @@ public enum GovActionSerializer implements Serializer<GovAction> {
                 Map newMembers = new Map();
                 if (uc.getNewMembersAndTerms() != null) {
                     for (var entry : uc.getNewMembersAndTerms().entrySet()) {
-                        newMembers.put(entry.getKey().serialize(),
-                                new co.nstant.in.cbor.model.UnsignedInteger(entry.getValue()));
+                        newMembers.put(entry.getKey().serialize(), unsignedLongItem(entry.getValue()));
                     }
                 }
                 array.add(newMembers);
@@ -210,9 +211,9 @@ public enum GovActionSerializer implements Serializer<GovAction> {
         Set<Credential> removed = new LinkedHashSet<>();
         for (RawCredential member : action.membersToRemove())
             removed.add(CertificateSerializer.credential(member));
-        java.util.Map<Credential, Integer> added = new LinkedHashMap<>();
+        java.util.Map<Credential, Long> added = new LinkedHashMap<>();
         for (java.util.Map.Entry<RawCredential, Long> member : action.membersToAdd())
-            added.put(CertificateSerializer.credential(member.getKey()), member.getValue().intValue());
+            added.put(CertificateSerializer.credential(member.getKey()), member.getValue());
         com.bloxbean.cardano.client.spec.UnitInterval quorum = action.quorum();
         return new UpdateCommittee(previous(action), removed, added,
                 new UnitInterval(quorum.getNumerator(), quorum.getDenominator()));
