@@ -1,6 +1,7 @@
 package com.bloxbean.cardano.yaci.core.network.handlers;
 
 import com.bloxbean.cardano.client.common.cbor.CborSpan;
+import com.bloxbean.cardano.client.exception.CborRuntimeException;
 import com.bloxbean.cardano.yaci.core.protocol.Agent;
 import com.bloxbean.cardano.yaci.core.protocol.Segment;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosProtocolConstants;
@@ -21,8 +22,11 @@ import java.util.*;
 public class MiniProtoStreamingByteToMessageDecoder
         extends ReplayingDecoder<Segment> {
     private static final int MAJOR_ARRAY = 4;
+    private static final int MAJOR_TAG = 6;
 
     private final Map<Integer, CborFrameStream> streams = new HashMap<>();
+    /** The protocols an agent handles, and the handshake: only their streams stay open once drained. */
+    private final Set<Integer> registeredProtocols = new HashSet<>();
     private final int maxIncompleteLeiosBytes;
     /** The connection's LeiosFetch agent, told of each LeiosFetch segment received; null on other connections. */
     private final LeiosFetchAgent leiosFetchAgent;
@@ -33,8 +37,10 @@ public class MiniProtoStreamingByteToMessageDecoder
 
     MiniProtoStreamingByteToMessageDecoder(int maxIncompleteLeiosBytes, Agent... agents) {
         this.maxIncompleteLeiosBytes = maxIncompleteLeiosBytes;
+        registeredProtocols.add(0); //handshake
         LeiosFetchAgent fetchAgent = null;
         for (Agent agent: agents) {
+            registeredProtocols.add(agent.getProtocolId());
             if (agent instanceof LeiosFetchAgent leiosFetch)
                 fetchAgent = leiosFetch;
         }
@@ -76,6 +82,8 @@ public class MiniProtoStreamingByteToMessageDecoder
                     && leiosFetchAgent != null)
                 leiosFetchAgent.segmentReceived(); //progress of a reply that may span many segments
             stream.frame(protocol, timestamp, out);
+            if (stream.remaining() == 0 && !registeredProtocols.contains(protocol))
+                streams.remove(streamKey); //no agent handles it: keep nothing for it
             if (leios && stream.remaining() >= maxIncompleteLeiosBytes) {
                 // CCL cannot tell truncated from malformed CBOR: this much without a complete item is malformed.
                 int incomplete = stream.remaining();
@@ -92,6 +100,11 @@ public class MiniProtoStreamingByteToMessageDecoder
         } catch (Exception e) {
             log.error("Decoding error", e);
         }
+    }
+
+    /** The streams held: one per protocol and direction with an agent, or with a message still arriving. */
+    int openStreams() {
+        return streams.size();
     }
 
     /**
@@ -155,7 +168,12 @@ public class MiniProtoStreamingByteToMessageDecoder
             int stop = skip(start);
             if (stop < 0 || !joinTrailingValues)
                 return stop;
-            while (stop < end && (buffer[stop] & 0xff) >>> 5 != MAJOR_ARRAY) {
+            while (stop < end) {
+                int major = majorTypeAt(stop);
+                if (major < 0)
+                    return -1; //a tag still arriving
+                if (major == MAJOR_ARRAY)
+                    break;
                 stop = skip(stop);
                 if (stop < 0)
                     return -1; //a trailing value still arriving: wait for it with its message
@@ -163,10 +181,25 @@ public class MiniProtoStreamingByteToMessageDecoder
             return stop;
         }
 
+        /**
+         * The major type of the item at {@code offset}, looking through its tags (cbor-java reads a tagged array as an
+         * array), or -1 while a tag's head is still arriving.
+         */
+        private int majorTypeAt(int offset) {
+            while (offset < end) {
+                int head = buffer[offset] & 0xff;
+                int info = head & 0x1f;
+                if (head >>> 5 != MAJOR_TAG || info > 27) //not a tag, or a malformed one that skip refuses
+                    return head >>> 5;
+                offset += info < 24 ? 1 : 1 + (1 << (info - 24));
+            }
+            return -1;
+        }
+
         private int skip(int offset) {
             try {
                 return CborSpan.skip(buffer, offset, end);
-            } catch (RuntimeException incomplete) {
+            } catch (CborRuntimeException incomplete) {
                 return -1;
             }
         }

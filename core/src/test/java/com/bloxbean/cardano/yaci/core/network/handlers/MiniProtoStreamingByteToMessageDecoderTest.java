@@ -71,6 +71,41 @@ class MiniProtoStreamingByteToMessageDecoderTest {
     }
 
     @Test
+    void aTaggedArrayAfterAMessageIsItsOwnMessage() {
+        // cbor-java read a tagged array as an array, so it never joined the message before it
+        receive("8100" + "d9d9f78101");
+        assertThat(segments()).containsExactly("8100", "d9d9f78101");
+        receive("8100" + "d9d9"); //a tag's head still arriving: wait for it
+        assertThat(segments()).isEmpty();
+        receive("f78101");
+        assertThat(segments()).containsExactly("8100", "d9d9f78101");
+    }
+
+    @Test
+    void aCompleteArrayThenAPartialArrayInOneFrame() {
+        receive("8100" + "8204");
+        assertThat(segments()).containsExactly("8100");
+        receive("80");
+        assertThat(segments()).containsExactly("820480");
+    }
+
+    @Test
+    void aDrainedStreamOfAProtocolNoAgentHandlesIsDropped() throws Exception {
+        LeiosFetchAgent agent = new LeiosFetchAgent();
+        MiniProtoStreamingByteToMessageDecoder decoder = new MiniProtoStreamingByteToMessageDecoder(agent);
+        channel = new EmbeddedChannel(decoder);
+        receive(19, "8202a1"); //LeiosFetch has an agent: its stream stays
+        receive(19, "0102");
+        receive(3, "8100"); //block fetch has none here
+        receive(7 | 0x8000, "8204");
+        assertThat(segmentsOf()).containsExactly("19:8202a10102", "3:8100");
+        assertThat(decoder.openStreams()).isEqualTo(2); //LeiosFetch, and the message still arriving on 7
+        receive(7 | 0x8000, "80");
+        assertThat(segmentsOf()).containsExactly("7:820480");
+        assertThat(decoder.openStreams()).isEqualTo(1);
+    }
+
+    @Test
     void fragmentsOfBothDirectionsOfAProtocolNeverMix() {
         receive(2, "8202a1");
         receive(2 | 0x8000, "8204");
@@ -148,7 +183,7 @@ class MiniProtoStreamingByteToMessageDecoderTest {
     }
 
     @Test
-    void aDrainedLeiosStreamDropsALargeBuffer() {
+    void aDrainedStreamDropsALargeBuffer() {
         MiniProtoStreamingByteToMessageDecoder.CborFrameStream stream = new MiniProtoStreamingByteToMessageDecoder.CborFrameStream(false);
         byte[] big = new byte[2 * 1024 * 1024 + 5];
         big[0] = 0x5a; //a byte string of 2 MiB
