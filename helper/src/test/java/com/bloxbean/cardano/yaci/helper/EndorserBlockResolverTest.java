@@ -5,6 +5,7 @@ import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.Tag;
 import co.nstant.in.cbor.model.UnsignedInteger;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
+import com.bloxbean.cardano.client.transaction.raw.RawEbReferences;
 import com.bloxbean.cardano.yaci.core.model.Block;
 import com.bloxbean.cardano.yaci.core.model.EbAnnouncement;
 import com.bloxbean.cardano.yaci.core.model.serializers.BlockSerializer;
@@ -77,6 +78,130 @@ class EndorserBlockResolverTest {
         assertThat(fetched).containsExactlyElementsOf(FakeN2NPeer.dbSyncIds());
         //one request for the EB, one for all its transactions
         assertThat(peer.received(19)).extracting(FakeN2NPeer.Received::tag).containsExactly(1, 3);
+    }
+
+    @Test
+    void transactionsAreRequestedInBatchesARelayEnforcingTheLimitAccepts() throws Exception {
+        long limit = 20_000; //the fixture's 237 transactions need several batches
+        peer.ebTransactions = transactions;
+        peer.txsRequestLimit = limit;
+        resolver.close();
+        resolver = resolver(EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, limit);
+
+        List<String> fetched = complete(announcement, deadline(10_000));
+
+        assertThat(fetched).containsExactlyElementsOf(FakeN2NPeer.dbSyncIds()); //all, in EB order
+        long total = transactions.stream().mapToLong(tx -> tx.length).sum();
+        assertThat(peer.txsRequestBytes).hasSizeGreaterThan(1).allMatch(bytes -> bytes <= limit);
+        assertThat(peer.txsRequestBytes.stream().mapToLong(Long::longValue).sum()).isEqualTo(total);
+        assertThat(peer.txsRequestBytes.size()).isGreaterThanOrEqualTo((int) ((total + limit - 1) / limit));
+        assertThat(peer.connections.get()).isEqualTo(1);
+    }
+
+    @Test
+    void aRelayEnforcingTheLimitRefusesOneRequestForTheWholeEndorserBlock() {
+        //the control for the batching test: the same relay refuses a request above its limit
+        peer.ebTransactions = transactions;
+        peer.txsRequestLimit = 20_000;
+
+        assertThatThrownBy(() -> complete(announcement, deadline(5_000))).isInstanceOf(Exception.class);
+        assertThat(peer.txsRequestBytes).hasSize(1).allMatch(bytes -> bytes > 20_000);
+    }
+
+    @Test
+    void aStallInALaterBatchFailsAtTheStallLimit() throws Exception {
+        peer.ebTransactions = transactions;
+        peer.txsRequestsAnswered = 1; //the first batch is answered, the second never
+        resolver.close();
+        cache = new EbAnnouncementCache();
+        resolver = new EndorserBlockResolver(() -> new PeerAddress("127.0.0.1", peer.port()), () -> FakeN2NPeer.MAGIC,
+                cache, null, EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 1_000,
+                20_000);
+
+        long start = System.nanoTime();
+        assertThatThrownBy(() -> complete(announcement, deadline(10_000)))
+                .isInstanceOf(TimeoutException.class).hasMessageContaining("within 1000 ms");
+        long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        assertThat(millis).isBetween(1_000L, 3_500L); //the stall, not the 10 s deadline
+        assertThat(peer.txsRequestBytes).hasSize(2); //no third request after the stalled one
+    }
+
+    @Test
+    void aWrongTransactionInALaterBatchIsReportedByItsIndexInTheEndorserBlock() throws Exception {
+        List<byte[]> served = new ArrayList<>(transactions);
+        byte[] wrong = served.get(200).clone();
+        wrong[wrong.length - 1] ^= 1;
+        served.set(200, wrong);
+        peer.ebTransactions = served;
+        resolver.close();
+        resolver = resolver(EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 20_000);
+
+        assertThatThrownBy(() -> complete(announcement, deadline(10_000)))
+                .hasMessageContaining("transaction 200 does not match");
+    }
+
+    @Test
+    void batchesAreConsecutiveAndWithinTheLimit() {
+        assertThat(EndorserBlockResolver.batches(List.of(), 500)).isEmpty();
+        List<RawEbReferences.Entry> entries = sizes(300, 200, 500, 400, 100, 100);
+        assertThat(EndorserBlockResolver.batches(entries, 500))
+                .containsExactly(new int[]{0, 2}, new int[]{2, 3}, new int[]{3, 5}, new int[]{5, 6});
+        assertThat(EndorserBlockResolver.batches(sizes(500), 500)).containsExactly(new int[]{0, 1}); //exactly the limit
+        assertThat(EndorserBlockResolver.batches(sizes(100, 100), 500_000)).containsExactly(new int[]{0, 2});
+        //an entry above the limit cannot be requested within it
+        assertThatThrownBy(() -> EndorserBlockResolver.batches(sizes(100, 501), 500))
+                .hasMessageContaining("transaction 1 declares 501 bytes");
+    }
+
+    @Test
+    void theRequestCeilingIsTheProtocols() {
+        //maxLeiosTxsRequestBytesSize = 500 * 1000 (ouroboros-consensus 840e789b, LeiosDemoOnlyTestFetch.hs)
+        assertThat(EndorserBlockResolver.MAX_TXS_REQUEST_BYTES).isEqualTo(500_000);
+    }
+
+    @Test
+    void anEntryAboveTheCeilingFailsTheAttemptBeforeAnyTransactionsRequest() throws Exception {
+        byte[] references = references(entry(new byte[32], 600));
+        peer.blockReply = new MsgLeiosBlock(LeiosRawCbor.of(references)).serialize();
+        resolver.close();
+        resolver = resolver(EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 500);
+
+        assertThatThrownBy(() -> complete(announce(references), deadline(5_000)))
+                .hasMessageContaining("above the 500-byte request ceiling");
+        assertThat(peer.received(19)).extracting(FakeN2NPeer.Received::tag).containsExactly(1); //the EB only
+    }
+
+    @Test
+    void aRangeBitmapSpansWindows() {
+        assertThat(EndorserBlockResolver.range(62, 66).getWindows())
+                .containsExactly(java.util.Map.entry(0, 0b11L), java.util.Map.entry(1, 0b11L << 62));
+        assertThat(EndorserBlockResolver.range(0, 237)).isEqualTo(
+                com.bloxbean.cardano.yaci.core.protocol.leios.LeiosTxBitmap.firstN(237));
+    }
+
+    @Test
+    void theSideConnectionFollowsTheMainConnectionsAddress() throws Exception {
+        try (FakeN2NPeer other = new FakeN2NPeer()) {
+            other.blockReply = peer.blockReply;
+            other.txsReply = peer.txsReply;
+            AtomicReference<PeerAddress> main = new AtomicReference<>(new PeerAddress("127.0.0.1", peer.port()));
+            resolver.close();
+            cache = new EbAnnouncementCache();
+            resolver = new EndorserBlockResolver(main::get, () -> FakeN2NPeer.MAGIC, cache, null,
+                    EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS,
+                    EndorserBlockResolver.STALL_MILLIS, EndorserBlockResolver.MAX_TXS_REQUEST_BYTES);
+
+            complete(announcement, deadline(5_000));
+            EndorserBlockResolver.Side first = resolver.currentSide();
+            main.set(new PeerAddress("127.0.0.1", other.port())); //the main connection reconnected elsewhere
+            complete(announcement, deadline(5_000));
+
+            assertThat(first.closed).isDone();
+            assertThat(resolver.currentSide()).isNotSameAs(first);
+            assertThat(peer.connections.get()).isEqualTo(1);
+            assertThat(other.connections.get()).isEqualTo(1);
+        }
     }
 
     @Test
@@ -389,12 +514,23 @@ class EndorserBlockResolverTest {
     }
 
     private EndorserBlockResolver resolver(long maxAgeMillis, long maxIdleMillis) {
+        return resolver(maxAgeMillis, maxIdleMillis, EndorserBlockResolver.MAX_TXS_REQUEST_BYTES);
+    }
+
+    private EndorserBlockResolver resolver(long maxAgeMillis, long maxIdleMillis, long maxTxsRequestBytes) {
         cache = new EbAnnouncementCache();
-        return new EndorserBlockResolver("127.0.0.1", peer.port(), () -> FakeN2NPeer.MAGIC, cache,
-                new ParentBlockLookup("127.0.0.1", peer.port(),
+        return new EndorserBlockResolver(() -> new PeerAddress("127.0.0.1", peer.port()), () -> FakeN2NPeer.MAGIC,
+                cache, new ParentBlockLookup("127.0.0.1", peer.port(),
                         com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant
                                 .v4AndAbove(FakeN2NPeer.MAGIC)),
-                maxAgeMillis, maxIdleMillis, EndorserBlockResolver.STALL_MILLIS);
+                maxAgeMillis, maxIdleMillis, EndorserBlockResolver.STALL_MILLIS, maxTxsRequestBytes);
+    }
+
+    private static List<RawEbReferences.Entry> sizes(long... sizes) {
+        List<RawEbReferences.Entry> entries = new ArrayList<>();
+        for (long size : sizes)
+            entries.add(new RawEbReferences.Entry(new byte[32], size));
+        return entries;
     }
 
     /** Completes block 10027, whose parent announced {@code announced} at the parent's slot: the tx ids. */

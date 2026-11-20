@@ -119,6 +119,13 @@ example.
   `[4, [* #6.24 bytes]]`, so the `MsgLeiosBlockTxs` serializer splits it into the byte strings inside each `#6.24`,
   using `CborSpan`.
 
+**Shutdown while a request is outstanding (r14).** `LeiosNotifyAgent.shutdown()` sends `MsgQuit` at once, also in
+`StBusy` (pipelined after the outstanding `RequestNext`), as the pinned Haskell client does. The server answers or
+cancels that request and then sends `MsgDone`; the agent moves to `StQuit` when the reply arrives. Waiting for the reply
+first, as before, could wait for ever on a quiet relay. At most one `MsgQuit` is sent, even when its write times out (the bytes
+may still reach the peer). A `MsgDone` that comes before the reply ends the protocol, with an error. After
+`shutdown()`, notifications are not passed to listeners, as the Haskell client drops them while draining.
+
 Alternatives rejected:
 - **Also remove `LeiosNotify` because nothing in this ADR uses it.** It is transport, not a parser; removing it would
   undo ADR 0007 for no gain in the sync path.
@@ -330,6 +337,12 @@ The resolver owns the side connection: a `TCPNodeClient` with its own event loop
   - its magic is the main connection's.
 
 **Ownership (r10).** Each start has its own side connection, so retiring or halting a start closes only its own.
+**Address (r14).** The side connection and the parent lookup (D4b) dial the address the main connection is connected
+to (IP and port, read when each connection is made), not the configured host name. A host name can resolve to several
+relays (`leios-node.play.dev.cardano.org` resolves to 8 addresses in 3 regions), and one that lags the main relay
+could fail a lookup the main relay would answer. While the main connection is reconnecting, the last address it was
+connected to is used, so a gap does not replace a side connection; before its first connection, the configured host
+and port. A side connection whose address is no longer the main connection's is replaced at the next attempt.
 **Reuse.** The connection is reused across attempts of the same start.
 - At the start of an attempt it is replaced when it is older than 45 s or was idle for 30 s. A connection's age plus
   an attempt's deadline (at most 45 s) stays under the peer's keep-alive limit, so no timer and no periodic KeepAlive
@@ -358,6 +371,21 @@ request.
     about 4 KiB/s still fails as before. A peer that trickles bytes can hold an attempt until the 45 s budget; the
     outcome is the same RETRYING / halt as a stuck reply, only later.
   - The parent lookup's replies (one block or one intersection each) keep the whole-reply cap (`REPLY_CAP_MILLIS`).
+- **Batched transactions requests (r14).** The transactions are requested in consecutive batches of EB entries
+  whose sizes add up to at most 500,000 bytes (`MAX_TXS_REQUEST_BYTES`), one request at a time, in EB order. Each
+  reply is checked against its own entries (D3a) and the batches are joined in order.
+  - The pinned prototype sets `maxLeiosTxsRequestBytesSize = 500 * 1000` as "the design ceiling on the transactions
+    one `MsgLeiosBlockTxs` carries, so on what a single request may fetch": "the client batches to exactly this ... and
+    the server can refuse anything above it without ever refusing an honest peer"
+    (ouroboros-consensus `840e789b`, `LeiosDemoOnlyTestFetch.hs` lines 217-229).
+  - Measured on Musashi (2026-11-20): early EBs (to block 10,005) carry at most 241 kB of transactions, but the three
+    EBs at the tip carried 1.02-1.20 MB (4,400-5,200 transactions) each and were served in one request. The relays
+    do not enforce the ceiling today; one that did would refuse every current certifying block's single request, and
+    a strict sync would halt.
+  - An entry that declares more than the ceiling fails the attempt before any transactions request is sent: it
+    cannot be fetched within the ceiling, and no honest transaction is that large.
+  - Each batch is its own wait with the stall rule above; the deadline covers them all and is checked before each
+    request. A 1.2 MB EB costs two more round trips (about 0.5 s at Musashi's 170-250 ms).
 - **Failing fast.** Each side connection has a terminal state. Every wait (handshake, EB, transactions, each parent
   window) ends at once when the connection is lost.
   - At the deadline, the attempt's clients are shut down.
@@ -734,6 +762,15 @@ Against the unmerged stack, D1, D5 and D6 remove API that was never released.
   - Fail-fast waits and the 10 s handshake cap (D4a).
   - The `fetch` gate applies only with inlining on (rule 9).
   - The Compatibility section lists `TransactionListBuilder` and the payload `deserializeDI`.
+- r14 (2026-11-20, responds to the review of `ed1e1a84` on PR 250):
+  - Transactions requests are batched to the protocol's 500,000-byte ceiling (D4a; P1).
+  - Side connections dial the main connection's address, remembered across its reconnect gaps, and are replaced when
+    it changes (D4a, D4b; P2).
+  - `LeiosNotifyAgent.shutdown()` sends `MsgQuit` while a `RequestNext` is outstanding; the reply to that request,
+    then `MsgDone`, end the protocol, as the pinned server's `busy`/`drain` expect (D2; P2).
+  - From the implementation reviews of these fixes (a Claude agent and Codex): one `MsgQuit` at most, even after a
+    write timeout; a `MsgDone` before the outstanding reply ends the protocol; notifications after shutdown are not
+    passed on; an entry above the ceiling is rejected before any request; the deadline is checked before each batch.
 - r13 (2026-11-19, responds to the maintainer's question on raising the timeout):
   - The EB and transactions waits fail on 15 s of silence instead of 15 s per whole reply; LeiosFetch segments
     received mark progress (D4a). The 45 s budget is unchanged (D3b).

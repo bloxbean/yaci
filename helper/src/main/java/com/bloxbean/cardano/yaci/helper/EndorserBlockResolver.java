@@ -24,6 +24,7 @@ import com.bloxbean.cardano.yaci.core.protocol.leiosfetch.LeiosFetchAgentListene
 import com.bloxbean.cardano.yaci.core.protocol.leiosfetch.messages.MsgLeiosBlockTxs;
 import com.bloxbean.cardano.yaci.core.util.HexUtil;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -33,11 +34,17 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
+import java.util.stream.IntStream;
 
 /**
  * Completes a certifying block with the transactions of the endorser block (EB) it certifies, fetched over
  * LeiosFetch on a side connection to the same peer (ADR 0016 D3a, D4a). One resolver belongs to one sync start.
  * <ul>
+ *   <li>The side connection dials the address the main connection is connected to, not the configured host name,
+ *       which may resolve to other relays. It is replaced when the main connection's address changes.</li>
+ *   <li>The transactions are requested in consecutive batches of at most {@link #MAX_TXS_REQUEST_BYTES} transaction
+ *       bytes, one request at a time, each reply checked against its own entries.</li>
  *   <li>The side connection carries the handshake and {@code LeiosFetchAgent} only. Its handshake is accepted only
  *       for a version this side offered, V15 or later, not app-layer, with the main connection's network magic.</li>
  *   <li>It is reused across attempts, and replaced at the start of an attempt when it is older than 45 s or has been
@@ -57,32 +64,46 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
      * out, while a slow reply that keeps arriving may use the rest of the attempt's deadline.
      */
     static final long STALL_MILLIS = 15_000;
+    /**
+     * The most transaction bytes one transactions request asks for: the protocol's
+     * {@code maxLeiosTxsRequestBytesSize}. A Haskell client batches to it, and a peer may refuse a request above it.
+     */
+    static final long MAX_TXS_REQUEST_BYTES = 500_000;
 
-    private final String host;
-    private final int port;
+    private final Supplier<PeerAddress> peer;
     private final LongSupplier mainMagic;
     private final EbAnnouncementCache cache;
     private final ParentBlockLookup parentLookup;
     private final long maxAgeMillis;
     private final long maxIdleMillis;
     private final long stallMillis;
+    private final long maxTxsRequestBytes;
     private volatile Side side;
 
-    EndorserBlockResolver(String host, int port, LongSupplier mainMagic, EbAnnouncementCache cache,
+    /** @param peer where the side connection dials, read for each new connection (the main connection's address) */
+    EndorserBlockResolver(Supplier<PeerAddress> peer, LongSupplier mainMagic, EbAnnouncementCache cache,
                           ParentBlockLookup parentLookup) {
-        this(host, port, mainMagic, cache, parentLookup, MAX_AGE_MILLIS, MAX_IDLE_MILLIS, STALL_MILLIS);
+        this(peer, mainMagic, cache, parentLookup, MAX_AGE_MILLIS, MAX_IDLE_MILLIS, STALL_MILLIS,
+                MAX_TXS_REQUEST_BYTES);
     }
 
     EndorserBlockResolver(String host, int port, LongSupplier mainMagic, EbAnnouncementCache cache,
                           ParentBlockLookup parentLookup, long maxAgeMillis, long maxIdleMillis, long stallMillis) {
-        this.host = host;
-        this.port = port;
+        this(() -> new PeerAddress(host, port), mainMagic, cache, parentLookup, maxAgeMillis, maxIdleMillis,
+                stallMillis, MAX_TXS_REQUEST_BYTES);
+    }
+
+    EndorserBlockResolver(Supplier<PeerAddress> peer, LongSupplier mainMagic, EbAnnouncementCache cache,
+                          ParentBlockLookup parentLookup, long maxAgeMillis, long maxIdleMillis, long stallMillis,
+                          long maxTxsRequestBytes) {
+        this.peer = peer;
         this.mainMagic = mainMagic;
         this.cache = cache;
         this.parentLookup = parentLookup;
         this.maxAgeMillis = maxAgeMillis;
         this.maxIdleMillis = maxIdleMillis;
         this.stallMillis = stallMillis;
+        this.maxTxsRequestBytes = maxTxsRequestBytes;
     }
 
     /**
@@ -133,12 +154,50 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
         if (entries.isEmpty())
             return List.of(); //an empty EB: nothing to request, the block is delivered with no EB transactions
 
-        CompletableFuture<LeiosRawCbor> txsReply = current.expectTransactions();
-        current.fetchAgent.requestBlockTxs(point, LeiosTxBitmap.firstN(entries.size()));
-        LeiosRawCbor txList = deadline.awaitWhileReceiving(txsReply, current.closed, "endorser block transactions",
-                stallMillis, current.fetchAgent::getLastSegmentNanos);
-        current.clearReplies(); //an idle side connection holds no payload
-        return checkTransactions(new MsgLeiosBlockTxs(txList).getTransactions(), entries);
+        //one request per batch, in EB order, each checked against its own entries
+        List<byte[]> transactions = new ArrayList<>(entries.size());
+        for (int[] batch : batches(entries, maxTxsRequestBytes)) {
+            deadline.check("before requesting endorser block transactions from index " + batch[0]);
+            CompletableFuture<LeiosRawCbor> txsReply = current.expectTransactions();
+            current.fetchAgent.requestBlockTxs(point, range(batch[0], batch[1]));
+            LeiosRawCbor txList = deadline.awaitWhileReceiving(txsReply, current.closed,
+                    "endorser block transactions", stallMillis, current.fetchAgent::getLastSegmentNanos);
+            current.clearReplies(); //an idle side connection holds no payload
+            transactions.addAll(checkTransactions(new MsgLeiosBlockTxs(txList).getTransactions(),
+                    entries.subList(batch[0], batch[1]), batch[0]));
+        }
+        return transactions;
+    }
+
+    /**
+     * The entries split into consecutive batches {@code [from, to)} whose transactions add up to at most
+     * {@code maxBytes}. An entry larger than {@code maxBytes} cannot be requested within the ceiling: the EB is
+     * rejected before anything is requested.
+     */
+    static List<int[]> batches(List<RawEbReferences.Entry> entries, long maxBytes) {
+        List<int[]> batches = new ArrayList<>();
+        int from = 0;
+        long bytes = 0;
+        for (int i = 0; i < entries.size(); i++) {
+            long size = entries.get(i).size();
+            if (size > maxBytes)
+                throw new IllegalStateException("Endorser block transaction " + i + " declares " + size
+                        + " bytes, above the " + maxBytes + "-byte request ceiling");
+            if (i > from && bytes + size > maxBytes) {
+                batches.add(new int[]{from, i});
+                from = i;
+                bytes = 0;
+            }
+            bytes += size;
+        }
+        if (from < entries.size())
+            batches.add(new int[]{from, entries.size()});
+        return batches;
+    }
+
+    /** The bitmap of the transactions {@code [from, to)}. */
+    static LeiosTxBitmap range(int from, int to) {
+        return LeiosTxBitmap.fromIndices(IntStream.range(from, to).toArray());
     }
 
     /** Closes the side connection, if any, without waiting. */
@@ -156,10 +215,11 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
 
     private Side sideFor(AttemptDeadline deadline) {
         long magic = mainMagic.getAsLong();
+        PeerAddress address = peer.get();
         Side current = side;
         if (current != null) {
             long now = System.nanoTime();
-            if (current.closed.isDone() || current.magic != magic
+            if (current.closed.isDone() || current.magic != magic || !current.address.equals(address)
                     || now - current.createdNanos > TimeUnit.MILLISECONDS.toNanos(maxAgeMillis)
                     || now - current.lastUsedNanos >= TimeUnit.MILLISECONDS.toNanos(maxIdleMillis)) {
                 close(current, new IllegalStateException("The side connection was replaced"));
@@ -167,7 +227,7 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
             }
         }
         if (current == null) {
-            current = new Side(magic, deadline.remainingMillis());
+            current = new Side(address, magic, deadline.remainingMillis());
             side = current;
             current.start();
         }
@@ -205,14 +265,20 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
 
     /** D3a: one transaction per entry, in entry order, each hashing to its entry with its entry's length. */
     static List<byte[]> checkTransactions(List<byte[]> transactions, List<RawEbReferences.Entry> entries) {
+        return checkTransactions(transactions, entries, 0);
+    }
+
+    /** As {@link #checkTransactions(List, List)}, for the batch of entries that starts at EB index {@code first}. */
+    static List<byte[]> checkTransactions(List<byte[]> transactions, List<RawEbReferences.Entry> entries, int first) {
         if (transactions.size() != entries.size())
-            throw new IllegalStateException("Expected " + entries.size() + " endorser block transactions, received "
-                    + transactions.size());
+            throw new IllegalStateException("Expected " + entries.size() + " endorser block transactions from index "
+                    + first + ", received " + transactions.size());
         for (int i = 0; i < transactions.size(); i++) {
             byte[] tx = transactions.get(i);
             RawEbReferences.Entry entry = entries.get(i);
             if (tx.length != entry.size() || !Arrays.equals(Blake2bUtil.blake2bHash256(tx), entry.txHash()))
-                throw new IllegalStateException("Endorser block transaction " + i + " does not match its entry");
+                throw new IllegalStateException("Endorser block transaction " + (first + i)
+                        + " does not match its entry");
         }
         return transactions;
     }
@@ -223,6 +289,7 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
      * reason: the first reason wins.
      */
     final class Side {
+        final PeerAddress address;
         final long magic;
         final long createdNanos = System.nanoTime();
         volatile long lastUsedNanos = createdNanos;
@@ -238,7 +305,8 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
         private volatile CompletableFuture<LeiosRawCbor> blockReply = new CompletableFuture<>();
         private volatile CompletableFuture<LeiosRawCbor> txsReply = new CompletableFuture<>();
 
-        private Side(long magic, long connectTimeoutMillis) {
+        private Side(PeerAddress address, long magic, long connectTimeoutMillis) {
+            this.address = address;
             this.magic = magic;
             this.offered = N2NVersionTableConstant.v11AndAbove(magic);
             this.handshakeAgent = new HandshakeAgent(offered);
@@ -250,7 +318,7 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
                     .connectionTimeoutMs((int) Math.max(1, Math.min(Integer.MAX_VALUE, connectTimeoutMillis)))
                     .enableConnectionLogging(false)
                     .build();
-            this.client = new TCPNodeClient(host, port, config, handshakeAgent, fetchAgent);
+            this.client = new TCPNodeClient(address.host(), address.port(), config, handshakeAgent, fetchAgent);
 
             handshakeAgent.addListener(new HandshakeAgentListener() {
                 @Override

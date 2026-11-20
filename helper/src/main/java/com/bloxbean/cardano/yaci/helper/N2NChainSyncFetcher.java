@@ -43,6 +43,7 @@ import java.util.function.Consumer;
 public class N2NChainSyncFetcher implements Fetcher<Block> {
     private String host;
     private int port;
+    private final PeerAddress.Tracker mainPeer;
     private VersionTable versionTable;
     private Point wellKnownPoint;
     private boolean syncFromLatest;
@@ -104,6 +105,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
     public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable, boolean syncFromLatest) {
         this.host = host;
         this.port = port;
+        this.mainPeer = new PeerAddress.Tracker(host, port);
         this.versionTable = versionTable;
         this.wellKnownPoint = wellKnownPoint;
         this.syncFromLatest = syncFromLatest;
@@ -342,6 +344,14 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
      */
     AcceptVersion getAcceptedVersion() {
         return handshakeAgent != null ? handshakeAgent.getProtocolVersion() : null;
+    }
+
+    /**
+     * The address this fetcher's connection is connected to, else its configured host and port: side connections dial
+     * it so they reach the same relay (ADR 0016 D4a).
+     */
+    PeerAddress mainPeer() {
+        return mainPeer.current(handshakeAgent);
     }
 
     /**

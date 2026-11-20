@@ -151,7 +151,8 @@ class LeiosNotifyAgentTest {
     }
 
     @Test
-    void canceledAfterShutdownIsFollowedByQuitAndDone() {
+    void shutdownWhileARequestIsOutstandingSendsQuitAtOnce() {
+        //a quiet relay: nothing answers the RequestNext until it receives MsgQuit, then MsgCanceled and MsgDone
         LeiosNotifyAgent agent = new LeiosNotifyAgent();
         EmbeddedChannel channel = new EmbeddedChannel();
         agent.setChannel(channel);
@@ -165,16 +166,144 @@ class LeiosNotifyAgentTest {
 
         agent.start();
         channel.readOutbound();
-        agent.shutdown();                                   //RequestNext outstanding: Quit must wait for agency
-        assertNull(channel.readOutbound());
-        agent.receiveResponse(new MsgCanceled());
+        assertEquals(LeiosNotifyState.StBusy, agent.getCurrentState());
+        agent.shutdown();
 
         Segment quit = channel.readOutbound();
         assertInstanceOf(MsgQuit.class, LeiosNotifyStateBase.deserialize(quit.getPayload()));
+        assertEquals(LeiosNotifyState.StBusy, agent.getCurrentState()); //the request is still outstanding
+        assertNull(channel.readOutbound(), "one MsgQuit only");
+
+        agent.receiveResponse(new MsgCanceled());
         assertEquals(LeiosNotifyState.StQuit, agent.getCurrentState());
+        assertNull(channel.readOutbound(), "nothing after MsgQuit");
         agent.receiveResponse(new MsgDone());
         assertTrue(agent.isDone());
         assertNull(error.get());
+    }
+
+    @Test
+    void aNotificationAnsweringTheRequestAfterAPipelinedQuitLeadsToDone() {
+        LeiosNotifyAgent agent = new LeiosNotifyAgent();
+        EmbeddedChannel channel = new EmbeddedChannel();
+        agent.setChannel(channel);
+
+        agent.start();
+        channel.readOutbound();
+        agent.shutdown();
+        channel.readOutbound(); //MsgQuit
+
+        agent.receiveResponse(new MsgLeiosBlockTxsOffer(point(7))); //the server answered before it saw MsgQuit
+        assertEquals(LeiosNotifyState.StQuit, agent.getCurrentState());
+        assertNull(channel.readOutbound(), "no RequestNext after a quit");
+        agent.receiveResponse(new MsgDone());
+        assertTrue(agent.isDone());
+    }
+
+    @Test
+    void aQuitWriteThatTimesOutIsNotSentAgain() {
+        LeiosNotifyAgent agent = new LeiosNotifyAgent();
+        PendingWriteHandler pendingWrites = new PendingWriteHandler();
+        EmbeddedChannel channel = new EmbeddedChannel(pendingWrites);
+        agent.setChannel(channel);
+
+        agent.start();
+        pendingWrites.succeed(0);                           //RequestNext out, StBusy
+        agent.shutdown();
+        assertEquals(2, pendingWrites.writes.size());       //MsgQuit, its write still pending
+
+        channel.advanceTimeBy(31, java.util.concurrent.TimeUnit.SECONDS);
+        channel.runScheduledPendingTasks();                 //the write-timeout recovery runs
+
+        assertEquals(2, pendingWrites.writes.size(), "the slow MsgQuit may still reach the peer: never a second");
+        agent.receiveResponse(new MsgCanceled());
+        assertEquals(LeiosNotifyState.StQuit, agent.getCurrentState());
+        agent.receiveResponse(new MsgDone());
+        assertTrue(agent.isDone());
+    }
+
+    @Test
+    void bothRepliesBeforeThePipelinedQuitWriteCompletesEndTheProtocol() {
+        LeiosNotifyAgent agent = new LeiosNotifyAgent();
+        PendingWriteHandler pendingWrites = new PendingWriteHandler();
+        EmbeddedChannel channel = new EmbeddedChannel(pendingWrites);
+        agent.setChannel(channel);
+
+        agent.start();
+        pendingWrites.succeed(0);
+        agent.shutdown();
+        agent.receiveResponse(new MsgCanceled());
+        agent.receiveResponse(new MsgDone());
+        assertTrue(agent.isDone());
+
+        pendingWrites.succeed(1);                           //the MsgQuit write completes late
+        assertTrue(agent.isDone());
+        assertEquals(2, pendingWrites.writes.size());
+    }
+
+    @Test
+    void aMsgDoneBeforeTheOutstandingReplyEndsTheProtocolWithAnError() {
+        LeiosNotifyAgent agent = new LeiosNotifyAgent();
+        EmbeddedChannel channel = new EmbeddedChannel();
+        agent.setChannel(channel);
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        agent.addListener(new LeiosNotifyAgentListener() {
+            @Override
+            public void onNotifyError(Throwable observed) {
+                error.set(observed);
+            }
+        });
+
+        agent.start();
+        channel.readOutbound();
+        agent.shutdown();
+        channel.readOutbound();                             //MsgQuit
+        agent.receiveResponse(new MsgDone());
+
+        assertTrue(agent.isDone());
+        assertInstanceOf(IllegalStateException.class, error.get());
+        assertNull(channel.readOutbound());
+    }
+
+    @Test
+    void anUnreadableReplyAfterAPipelinedQuitStillLeadsToDone() {
+        LeiosNotifyAgent agent = new LeiosNotifyAgent();
+        EmbeddedChannel channel = new EmbeddedChannel();
+        agent.setChannel(channel);
+
+        agent.start();
+        channel.readOutbound();
+        agent.shutdown();
+        channel.readOutbound();                             //MsgQuit
+        agent.receiveResponse(LeiosNotifyStateBase.deserialize(HexUtil.decodeHexString("8109")));
+
+        assertEquals(LeiosNotifyState.StQuit, agent.getCurrentState());
+        assertNull(channel.readOutbound(), "no second MsgQuit");
+        agent.receiveResponse(new MsgDone());
+        assertTrue(agent.isDone());
+    }
+
+    @Test
+    void aNotificationAfterShutdownIsNotPassedOn() {
+        LeiosNotifyAgent agent = new LeiosNotifyAgent();
+        EmbeddedChannel channel = new EmbeddedChannel();
+        agent.setChannel(channel);
+        AtomicReference<LeiosPoint> offered = new AtomicReference<>();
+        agent.addListener(new LeiosNotifyAgentListener() {
+            @Override
+            public void onBlockTxsOffer(LeiosPoint point) {
+                offered.set(point);
+            }
+        });
+
+        agent.start();
+        channel.readOutbound();
+        agent.shutdown();
+        channel.readOutbound();
+        agent.receiveResponse(new MsgLeiosBlockTxsOffer(point(9)));
+
+        assertNull(offered.get());
+        assertEquals(LeiosNotifyState.StQuit, agent.getCurrentState());
     }
 
     @Test
@@ -310,7 +439,7 @@ class LeiosNotifyAgentTest {
     }
 
     @Test
-    void shutdownWaitsForRequestNextWriteBeforeQuit() {
+    void shutdownDuringTheRequestNextWriteSendsQuitOnceTheWriteCompletes() {
         LeiosNotifyAgent agent = new LeiosNotifyAgent();
         PendingWriteHandler pendingWrites = new PendingWriteHandler();
         EmbeddedChannel channel = new EmbeddedChannel(pendingWrites);
@@ -319,19 +448,19 @@ class LeiosNotifyAgentTest {
         agent.start();
         agent.shutdown();
 
-        assertEquals(1, pendingWrites.writes.size());
+        assertEquals(1, pendingWrites.writes.size()); //one write at a time
 
         pendingWrites.succeed(0);
 
         assertEquals(LeiosNotifyState.StBusy, agent.getCurrentState());
-        assertEquals(1, pendingWrites.writes.size());
+        assertEquals(2, pendingWrites.writes.size()); //MsgQuit, without waiting for the reply
+        pendingWrites.succeed(1);
+        assertEquals(LeiosNotifyState.StBusy, agent.getCurrentState());
 
         agent.receiveResponse(new MsgLeiosBlockTxsOffer(point(15)));
 
-        assertEquals(2, pendingWrites.writes.size());
-        pendingWrites.succeed(1);
-
         assertEquals(LeiosNotifyState.StQuit, agent.getCurrentState());
+        assertEquals(2, pendingWrites.writes.size());
         agent.receiveResponse(new MsgDone());
         assertTrue(agent.isDone());
     }

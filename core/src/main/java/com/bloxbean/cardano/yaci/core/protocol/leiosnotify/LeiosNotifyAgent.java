@@ -27,6 +27,11 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
     private volatile boolean shutDown;
     private volatile boolean autoRequestNext;
     private volatile boolean writeInFlight;
+    /**
+     * A MsgQuit write has started: no second one is ever sent (a write that times out may still reach the peer). If it
+     * went out while a request was outstanding, that request's reply leads to StQuit, then MsgDone ends the protocol.
+     */
+    private volatile boolean quitSent;
     private long writeGeneration;
 
     public LeiosNotifyAgent() {
@@ -51,19 +56,37 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
 
     @Override
     public Message buildNextMessage() {
-        if (currentState != LeiosNotifyState.StIdle || writeInFlight) {
+        if (writeInFlight) {
             return null;
         }
-        if (shutDown) {
+        //MsgQuit may follow an outstanding RequestNext (pipelined): the server then answers that request (or cancels
+        //it) and sends MsgDone, so a quiet relay does not hold up the shutdown
+        if (shutDown && !quitSent && (currentState == LeiosNotifyState.StIdle || canPipelineQuit())) {
             return new MsgQuit();
+        }
+        if (quitSent || currentState != LeiosNotifyState.StIdle) {
+            return null;
         }
         return new MsgLeiosNotificationRequestNext();
     }
 
+    private boolean canPipelineQuit() {
+        return currentState == LeiosNotifyState.StBusy && !quitSent;
+    }
+
     @Override
     public synchronized void sendRequest(Message message) {
-        super.sendRequest(message);
+        //a MsgQuit pipelined in StBusy moves the state when the outstanding reply arrives (which may already have
+        //happened); only one sent in StIdle moves it now
+        if (!(message instanceof MsgQuit) || currentState == LeiosNotifyState.StIdle)
+            super.sendRequest(message);
         writeInFlight = false;
+    }
+
+    /** After a pipelined MsgQuit, the reply to the outstanding request leads to StQuit, not StIdle. */
+    private void afterBusyReply() {
+        if (quitSent && currentState == LeiosNotifyState.StIdle)
+            currentState = LeiosNotifyState.StQuit;
     }
 
     @Override
@@ -73,6 +96,7 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
             //An unreadable reply ends the exchange it answers: after MsgQuit the protocol is over
             if (currentState == LeiosNotifyState.StBusy) {
                 this.currentState = LeiosNotifyState.StIdle;
+                afterBusyReply();
             } else if (currentState == LeiosNotifyState.StQuit) {
                 this.currentState = LeiosNotifyState.StDone;
             }
@@ -84,8 +108,12 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
         if (!isAllowedInbound(state, message)) {
             notifyError(new IllegalStateException("Invalid LeiosNotify inbound message " +
                     messageName(message) + " in state " + state));
-            if (state == LeiosNotifyState.StBusy) {
+            if (state == LeiosNotifyState.StBusy && quitSent && message instanceof MsgDone) {
+                //MsgDone before the reply to the outstanding request: the peer has ended the protocol
+                this.currentState = LeiosNotifyState.StDone;
+            } else if (state == LeiosNotifyState.StBusy) {
                 this.currentState = LeiosNotifyState.StIdle;
+                afterBusyReply();
             } else if (state == LeiosNotifyState.StQuit) {
                 this.currentState = LeiosNotifyState.StDone;
             }
@@ -95,6 +123,7 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
 
         State oldState = currentState;
         currentState = currentState.nextState(message);
+        afterBusyReply();
         processResponse(message);
         notifyStateUpdate(oldState, currentState);
         writeNextMessageIfReady();
@@ -102,6 +131,8 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
 
     @Override
     protected void processResponse(Message message) {
+        if (shutDown && !(message instanceof MsgCanceled))
+            return; //after shutdown, notifications are not passed on (as the Haskell client drops them)
         if (message instanceof MsgLeiosBlockAnnouncement announcement) {
             dispatchListener(listener -> listener.onBlockAnnouncement(announcement.getAnnouncement()),
                     "onBlockAnnouncement", true);
@@ -140,6 +171,7 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
         this.shutDown = false;
         this.autoRequestNext = false;
         this.writeInFlight = false;
+        this.quitSent = false;
         this.writeGeneration++;
     }
 
@@ -171,7 +203,10 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
             writeInFlight = false;
             writeGeneration++;
         }
-        if (currentState != LeiosNotifyState.StIdle || writeInFlight || !isChannelActive()) {
+        if (writeInFlight || !isChannelActive()) {
+            return;
+        }
+        if (currentState != LeiosNotifyState.StIdle && !(shutDown && canPipelineQuit())) {
             return;
         }
         if (!shutDown && !autoRequestNext) {
@@ -183,6 +218,8 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
             return;
         }
 
+        if (message instanceof MsgQuit)
+            quitSent = true;
         writeInFlight = true;
         long generation = ++writeGeneration;
         writeMessage(message, () -> completeWrite(message, generation));
@@ -195,6 +232,8 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
             return;
         }
         sendRequest(message);
+        if (shutDown)
+            writeNextMessageIfReady(); //a shutdown that came during this write sends its MsgQuit now
     }
 
     private void scheduleWriteTimeout(long generation) {

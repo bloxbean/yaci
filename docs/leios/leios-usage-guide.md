@@ -136,6 +136,10 @@ keeps arriving may take the rest of the 45 s budget. A parent-lookup reply must 
 attempt is retried on a fresh connection within the budget. A link that cannot carry one EB's transactions within the
 budget (about 0.35 MB/s for a 15 MB reply) never gets them: the sync halts in strict mode.
 
+The side connections dial the address the main connection is connected to, not the configured host name, so they
+reach the relay that served the block. The EB's transactions are requested in batches of at most 500,000 bytes, the
+protocol's per-request ceiling, one after another; each batch's reply counts as a reply for the 15 s rule.
+
 ---
 
 ## Other entry points deliver blocks as received

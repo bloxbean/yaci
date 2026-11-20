@@ -6,6 +6,8 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableCon
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.listener.BlockFetchAgentListenerAdapter;
 
+import java.util.function.Supplier;
+
 /**
  * A high level helper class to fetch blockchain data from point1 to point2. This class uses node-to-no mini protocol to fetch blocks.
  * Fetched blocks are received in an instance of {@link BlockChainDataListener}
@@ -50,8 +52,14 @@ public class BlockRangeSync {
 
         EbAnnouncementCache cache = new EbAnnouncementCache();
         this.control = new SyncControl<>(leiosConfig, cache,
-                owner -> new EndorserBlockResolver(host, port, () -> mainMagic(owner.get()), cache,
-                        new ParentBlockLookup(host, port, N2NVersionTableConstant.v4AndAbove(protocolMagic))),
+                owner -> {
+                    Supplier<PeerAddress> peer = () -> {
+                        BlockFetcher fetcher = owner.get();
+                        return fetcher != null ? fetcher.mainPeer() : new PeerAddress(host, port);
+                    };
+                    return new EndorserBlockResolver(peer, () -> mainMagic(owner.get()), cache,
+                            new ParentBlockLookup(peer, N2NVersionTableConstant.v4AndAbove(protocolMagic)));
+                },
                 budgetMillis, pauseMillis, SyncControl::runOnNewThread);
     }
 

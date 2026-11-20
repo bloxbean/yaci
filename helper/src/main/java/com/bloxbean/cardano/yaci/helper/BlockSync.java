@@ -9,6 +9,8 @@ import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.listener.BlockFetchAgentListenerAdapter;
 import com.bloxbean.cardano.yaci.helper.listener.ChainSyncListenerAdapter;
 
+import java.util.function.Supplier;
+
 /**
  * A high level helper class to sync blockchain data from tip or from a particular point using node-to-node miniprotocol
  * and receive in a {@link BlockChainDataListener} instance.
@@ -74,8 +76,11 @@ public class BlockSync {
         EbAnnouncementCache cache = new EbAnnouncementCache();
         long fallbackMagic = magicOf(versionTable);
         this.control = new SyncControl<>(leiosConfig, cache,
-                owner -> new EndorserBlockResolver(host, port, () -> mainMagic(owner.get(), fallbackMagic), cache,
-                        new ParentBlockLookup(host, port, versionTable)),
+                owner -> {
+                    Supplier<PeerAddress> peer = () -> mainPeer(owner.get(), host, port);
+                    return new EndorserBlockResolver(peer, () -> mainMagic(owner.get(), fallbackMagic), cache,
+                            new ParentBlockLookup(peer, versionTable));
+                },
                 CompleteBlockAssembler.BUDGET_MILLIS, CompleteBlockAssembler.PAUSE_MILLIS, SyncControl::runOnNewThread);
     }
 
@@ -146,6 +151,10 @@ public class BlockSync {
      */
     public boolean isRunning() {
         return control.isRunning();
+    }
+
+    private static PeerAddress mainPeer(N2NChainSyncFetcher fetcher, String host, int port) {
+        return fetcher != null ? fetcher.mainPeer() : new PeerAddress(host, port);
     }
 
     private static long mainMagic(N2NChainSyncFetcher fetcher, long fallbackMagic) {

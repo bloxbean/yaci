@@ -54,6 +54,7 @@ import java.util.function.Consumer;
 public class BlockFetcher implements Fetcher<Block> {
     private String host;
     private int port;
+    private final PeerAddress.Tracker mainPeer;
     private VersionTable versionTable;
     private HandshakeAgent handshakeAgent;
     private KeepAliveAgent keepAliveAgent;
@@ -82,6 +83,7 @@ public class BlockFetcher implements Fetcher<Block> {
     public BlockFetcher(String host, int port, VersionTable versionTable) {
         this.host = host;
         this.port = port;
+        this.mainPeer = new PeerAddress.Tracker(host, port);
         this.versionTable = versionTable;
         init();
     }
@@ -167,6 +169,14 @@ public class BlockFetcher implements Fetcher<Block> {
      */
     AcceptVersion getAcceptedVersion() {
         return handshakeAgent != null ? handshakeAgent.getProtocolVersion() : null;
+    }
+
+    /**
+     * The address this fetcher's connection is connected to, else its configured host and port: side connections dial
+     * it so they reach the same relay (ADR 0016 D4a).
+     */
+    PeerAddress mainPeer() {
+        return mainPeer.current(handshakeAgent);
     }
 
     /**

@@ -82,6 +82,14 @@ final class FakeN2NPeer implements AutoCloseable {
     volatile long leiosFetchSegmentDelayMillis;
     /** If above 0, only this many segments of a transactions reply are sent, then nothing, the connection left open. */
     volatile int leiosFetchTxsSegmentsThenSilent;
+    /** If set, a transactions request is answered with the requested ones of these, in order, instead of txsReply. */
+    volatile List<byte[]> ebTransactions;
+    /** If above 0, a transactions request for more transaction bytes than this closes the connection (a refusal). */
+    volatile long txsRequestLimit;
+    /** The transaction bytes each transactions request asked for, when {@link #ebTransactions} is set. */
+    final List<Long> txsRequestBytes = new CopyOnWriteArrayList<>();
+    /** If above 0, transactions requests after the first this many get no reply (a stall in a later batch). */
+    volatile int txsRequestsAnswered;
 
     //bound to the loopback address the clients dial, never the wildcard: with a wildcard bind, another process (a
     //parallel test run) can bind 127.0.0.1 on the same port and take the clients' connections
@@ -203,6 +211,16 @@ final class FakeN2NPeer implements AutoCloseable {
                 if (hold != null)
                     hold.await();
                 byte[] reply = tag == 1 ? blockReply : txsReply;
+                if (tag == 3 && ebTransactions != null) {
+                    List<byte[]> requested = requested(message.payload(), ebTransactions);
+                    long bytes = requested.stream().mapToLong(tx -> tx.length).sum();
+                    txsRequestBytes.add(bytes);
+                    if (txsRequestLimit > 0 && bytes > txsRequestLimit)
+                        return false; //refused: the peer drops the connection
+                    if (txsRequestsAnswered > 0 && txsRequestBytes.size() > txsRequestsAnswered)
+                        return true; //silent, the connection left open
+                    reply = EndorserBlockResolverTest.txsMessage(requested);
+                }
                 if (reply != null)
                     sendLeiosFetch(out, reply, tag == 3);
                 if (tag == 1 && closeAfterBlockReply)
@@ -212,6 +230,25 @@ final class FakeN2NPeer implements AutoCloseable {
             }
         }
         return true;
+    }
+
+    /** The transactions a transactions request's bitmap selects, in index order. */
+    private static List<byte[]> requested(byte[] payload, List<byte[]> transactions) {
+        var request = (com.bloxbean.cardano.yaci.core.protocol.leiosfetch.messages.MsgLeiosBlockTxsRequest)
+                com.bloxbean.cardano.yaci.core.protocol.leiosfetch.LeiosFetchStateBase.deserialize(payload);
+        List<byte[]> selected = new ArrayList<>();
+        request.getBitmap().getWindows().forEach((window, mask) -> {
+            for (int bit = 0; bit < 64; bit++) {
+                int index = window * 64 + bit;
+                if ((mask & (1L << (63 - bit))) != 0) {
+                    if (index >= transactions.size())
+                        throw new IllegalStateException("Requested transaction " + index + " of "
+                                + transactions.size()); //fails the test peer's connection, so the test fails fast
+                    selected.add(transactions.get(index));
+                }
+            }
+        });
+        return selected;
     }
 
     /** True if the message's connection is one of the first {@code count} that sent this kind of message. */

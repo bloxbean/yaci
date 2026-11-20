@@ -19,6 +19,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -35,19 +36,26 @@ import java.util.concurrent.CompletableFuture;
 class ParentBlockLookup {
     static final int WINDOW = 1_000;
 
-    private final String host;
-    private final int port;
+    private final Supplier<PeerAddress> peer;
     private final VersionTable versionTable;
     private final long replyCapMillis;
 
     ParentBlockLookup(String host, int port, VersionTable versionTable) {
-        this(host, port, versionTable, EndorserBlockResolver.REPLY_CAP_MILLIS);
+        this(() -> new PeerAddress(host, port), versionTable, EndorserBlockResolver.REPLY_CAP_MILLIS);
+    }
+
+    /** @param peer where each lookup dials, read per lookup (the main connection's address) */
+    ParentBlockLookup(Supplier<PeerAddress> peer, VersionTable versionTable) {
+        this(peer, versionTable, EndorserBlockResolver.REPLY_CAP_MILLIS);
+    }
+
+    ParentBlockLookup(String host, int port, VersionTable versionTable, long replyCapMillis) {
+        this(() -> new PeerAddress(host, port), versionTable, replyCapMillis);
     }
 
     /** @param replyCapMillis the longest wait for one FindIntersect or block reply */
-    ParentBlockLookup(String host, int port, VersionTable versionTable, long replyCapMillis) {
-        this.host = host;
-        this.port = port;
+    ParentBlockLookup(Supplier<PeerAddress> peer, VersionTable versionTable, long replyCapMillis) {
+        this.peer = peer;
         this.versionTable = versionTable;
         this.replyCapMillis = replyCapMillis;
     }
@@ -117,7 +125,9 @@ class ParentBlockLookup {
                     .connectionTimeoutMs((int) Math.max(1, Math.min(Integer.MAX_VALUE, connectTimeoutMillis)))
                     .enableConnectionLogging(false)
                     .build();
-            client = new TCPNodeClient(host, port, config, handshakeAgent, chainSyncAgent, blockfetchAgent);
+            PeerAddress address = peer.get();
+            client = new TCPNodeClient(address.host(), address.port(), config, handshakeAgent, chainSyncAgent,
+                    blockfetchAgent);
 
             handshakeAgent.addListener(new HandshakeAgentListener() {
                 @Override
