@@ -123,7 +123,9 @@ example.
 `StBusy` (pipelined after the outstanding `RequestNext`), as the pinned Haskell client does. The server answers or
 cancels that request and then sends `MsgDone`; the agent moves to `StQuit` when the reply arrives. Waiting for the reply
 first, as before, could wait for ever on a quiet relay. At most one `MsgQuit` is sent, even when its write times out (the bytes
-may still reach the peer). A `MsgDone` that comes before the reply ends the protocol, with an error. After
+may still reach the peer). A `MsgDone` that comes before the reply ends the protocol, with an error. A `MsgQuit` sent from `StIdle` moves the
+agent to `StQuit` when it is written, not when the write completes (r15), so a `MsgDone` that arrives before the write
+callback, or after a write timeout, ends the protocol. After
 `shutdown()`, notifications are not passed to listeners, as the Haskell client drops them while draining.
 
 Alternatives rejected:
@@ -762,6 +764,10 @@ Against the unmerged stack, D1, D5 and D6 remove API that was never released.
   - Fail-fast waits and the 10 s handshake cap (D4a).
   - The `fetch` gate applies only with inlining on (rule 9).
   - The Compatibility section lists `TransactionListBuilder` and the payload `deserializeDI`.
+- r15 (2026-11-20, responds to reviewer1's follow-up on `4cce82d8`):
+  - A `MsgQuit` from `StIdle` awaits `MsgDone` from the moment it is written (D2). Checked live on Musashi: shutdown
+    from idle and from busy on a quiet relay end in `StDone` (344 ms, 195 ms); on `ed1e1a84` the busy case was still
+    `StBusy` after 60 s.
 - r14 (2026-11-20, responds to the review of `ed1e1a84` on PR 250):
   - Transactions requests are batched to the protocol's 500,000-byte ceiling (D4a; P1).
   - Side connections dial the main connection's address, remembered across its reconnect gaps, and are replaced when

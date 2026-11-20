@@ -76,8 +76,8 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
 
     @Override
     public synchronized void sendRequest(Message message) {
-        //a MsgQuit pipelined in StBusy moves the state when the outstanding reply arrives (which may already have
-        //happened); only one sent in StIdle moves it now
+        //a MsgQuit written by this agent has already moved the state (StIdle) or moves it with the outstanding reply
+        //(StBusy); only one sent directly, without a write, moves it here
         if (!(message instanceof MsgQuit) || currentState == LeiosNotifyState.StIdle)
             super.sendRequest(message);
         writeInFlight = false;
@@ -218,8 +218,13 @@ public class LeiosNotifyAgent extends Agent<LeiosNotifyAgentListener> {
             return;
         }
 
-        if (message instanceof MsgQuit)
+        if (message instanceof MsgQuit) {
             quitSent = true;
+            //awaiting MsgDone from the moment the quit is written: the reply, or a write timeout, may come before the
+            //write's callback, which then changes nothing (a pipelined quit moves on with the outstanding reply)
+            if (currentState == LeiosNotifyState.StIdle)
+                currentState = LeiosNotifyState.StQuit;
+        }
         writeInFlight = true;
         long generation = ++writeGeneration;
         writeMessage(message, () -> completeWrite(message, generation));

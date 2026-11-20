@@ -201,6 +201,49 @@ class LeiosNotifyAgentTest {
     }
 
     @Test
+    void anIdleQuitWhoseDoneArrivesBeforeTheWriteCallbackEndsTheProtocol() {
+        LeiosNotifyAgent agent = new LeiosNotifyAgent();
+        PendingWriteHandler pendingWrites = new PendingWriteHandler();
+        EmbeddedChannel channel = new EmbeddedChannel(pendingWrites);
+        agent.setChannel(channel);
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        agent.addListener(new LeiosNotifyAgentListener() {
+            @Override
+            public void onNotifyError(Throwable observed) {
+                error.set(observed);
+            }
+        });
+
+        agent.shutdown();                                   //idle: MsgQuit, its write pending
+        assertEquals(1, pendingWrites.writes.size());
+        assertEquals(LeiosNotifyState.StQuit, agent.getCurrentState());
+
+        agent.receiveResponse(new MsgDone());               //the relay's MsgDone before the write callback
+        assertTrue(agent.isDone());
+        pendingWrites.succeed(0);                           //the late callback leaves it done
+        assertTrue(agent.isDone());
+        assertEquals(1, pendingWrites.writes.size());
+        assertNull(error.get());
+    }
+
+    @Test
+    void anIdleQuitWhoseWriteTimesOutThenSucceedsStillEndsOnDone() {
+        LeiosNotifyAgent agent = new LeiosNotifyAgent();
+        PendingWriteHandler pendingWrites = new PendingWriteHandler();
+        EmbeddedChannel channel = new EmbeddedChannel(pendingWrites);
+        agent.setChannel(channel);
+
+        agent.shutdown();
+        channel.advanceTimeBy(31, java.util.concurrent.TimeUnit.SECONDS);
+        channel.runScheduledPendingTasks();                 //the write-timeout recovery runs
+        pendingWrites.succeed(0);                           //then the write succeeds: a stale callback
+        assertEquals(1, pendingWrites.writes.size(), "never a second MsgQuit");
+
+        agent.receiveResponse(new MsgDone());
+        assertTrue(agent.isDone());
+    }
+
+    @Test
     void aQuitWriteThatTimesOutIsNotSentAgain() {
         LeiosNotifyAgent agent = new LeiosNotifyAgent();
         PendingWriteHandler pendingWrites = new PendingWriteHandler();
