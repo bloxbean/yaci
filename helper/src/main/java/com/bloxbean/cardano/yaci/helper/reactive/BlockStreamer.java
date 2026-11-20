@@ -31,6 +31,10 @@ import static com.bloxbean.cardano.yaci.core.common.Constants.*;
  * 1. from tip of the chain <br>
  * 2. from a given point <br>
  * 3. for a range from Point-1 to Point-2 <br>
+ * <p>
+ * Blocks are streamed as received: a Leios block that certifies an endorser block comes without the endorser block's
+ * transactions. {@link com.bloxbean.cardano.yaci.helper.BlockSync} and
+ * {@link com.bloxbean.cardano.yaci.helper.BlockRangeSync} deliver such blocks complete.
  */
 @Slf4j
 public class BlockStreamer {

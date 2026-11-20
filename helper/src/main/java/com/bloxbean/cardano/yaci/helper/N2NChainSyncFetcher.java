@@ -17,6 +17,7 @@ import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainSyncAgentListe
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.n2n.ChainsyncAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
@@ -34,11 +35,15 @@ import java.util.function.Consumer;
  * The following listeners can be added to receive various events from the agents
  * 1. {@link BlockfetchAgentListener} - To listen to events published by {@link BlockfetchAgent}
  * 2. {@link ChainSyncAgentListener} - To listen to events published by {@link ChainsyncAgent}
+ * <p>
+ * Blocks are delivered as received, including through {@link #start(Consumer)}: a Leios block that certifies an
+ * endorser block comes without the endorser block's transactions. {@link BlockSync} delivers such blocks complete.
  */
 @Slf4j
 public class N2NChainSyncFetcher implements Fetcher<Block> {
     private String host;
     private int port;
+    private final PeerAddress.Tracker mainPeer;
     private VersionTable versionTable;
     private Point wellKnownPoint;
     private boolean syncFromLatest;
@@ -100,6 +105,7 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
     public N2NChainSyncFetcher(String host, int port, Point wellKnownPoint, VersionTable versionTable, boolean syncFromLatest) {
         this.host = host;
         this.port = port;
+        this.mainPeer = new PeerAddress.Tracker(host, port);
         this.versionTable = versionTable;
         this.wellKnownPoint = wellKnownPoint;
         this.syncFromLatest = syncFromLatest;
@@ -331,6 +337,21 @@ public class N2NChainSyncFetcher implements Fetcher<Block> {
     @Override
     public boolean isRunning() {
         return n2nClient.isRunning();
+    }
+
+    /**
+     * The version the handshake of this fetcher's connection accepted, or null before a handshake succeeded.
+     */
+    AcceptVersion getAcceptedVersion() {
+        return handshakeAgent != null ? handshakeAgent.getProtocolVersion() : null;
+    }
+
+    /**
+     * The address this fetcher's connection is connected to, else its configured host and port: side connections dial
+     * it so they reach the same relay (ADR 0016 D4a).
+     */
+    PeerAddress mainPeer() {
+        return mainPeer.current(handshakeAgent);
     }
 
     /**

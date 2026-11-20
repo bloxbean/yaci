@@ -7,6 +7,7 @@ import com.bloxbean.cardano.yaci.core.protocol.blockfetch.BlockfetchAgentListene
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgent;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.HandshakeAgentListener;
+import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
 import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
@@ -25,6 +26,10 @@ import java.util.function.Consumer;
  * </p>
  * <br>
  * <b>Note:</b> This fetcher can only return Shelley / Post-Shelley era blocks for now
+ * <p>
+ * Blocks are delivered as received: a Leios block that certifies an endorser block comes without the endorser block's
+ * transactions. {@link BlockRangeSync} delivers such blocks complete.
+ * </p>
  * <p></p>
  * <p>
  * Example: Fetch block from point-1 to point-2 and receive blocks in a {@link Consumer} function
@@ -49,6 +54,7 @@ import java.util.function.Consumer;
 public class BlockFetcher implements Fetcher<Block> {
     private String host;
     private int port;
+    private final PeerAddress.Tracker mainPeer;
     private VersionTable versionTable;
     private HandshakeAgent handshakeAgent;
     private KeepAliveAgent keepAliveAgent;
@@ -77,6 +83,7 @@ public class BlockFetcher implements Fetcher<Block> {
     public BlockFetcher(String host, int port, VersionTable versionTable) {
         this.host = host;
         this.port = port;
+        this.mainPeer = new PeerAddress.Tracker(host, port);
         this.versionTable = versionTable;
         init();
     }
@@ -155,6 +162,21 @@ public class BlockFetcher implements Fetcher<Block> {
     @Override
     public boolean isRunning() {
         return n2nClient.isRunning();
+    }
+
+    /**
+     * The version the handshake of this fetcher's connection accepted, or null before a handshake succeeded.
+     */
+    AcceptVersion getAcceptedVersion() {
+        return handshakeAgent != null ? handshakeAgent.getProtocolVersion() : null;
+    }
+
+    /**
+     * The address this fetcher's connection is connected to, else its configured host and port: side connections dial
+     * it so they reach the same relay (ADR 0016 D4a).
+     */
+    PeerAddress mainPeer() {
+        return mainPeer.current(handshakeAgent);
     }
 
     /**

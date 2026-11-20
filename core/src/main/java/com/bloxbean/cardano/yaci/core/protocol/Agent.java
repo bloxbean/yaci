@@ -248,6 +248,14 @@ public abstract class Agent<T extends AgentListener> {
     }
 
     /**
+     * The remote address of this agent's connection while it is active, else null.
+     */
+    public java.net.SocketAddress getRemoteAddress() {
+        Channel ch = this.channel;
+        return ch != null && ch.isActive() ? ch.remoteAddress() : null;
+    }
+
+    /**
      * Returns true if the underlying Netty channel is non-null and currently active.
      */
     public boolean isChannelActive() {
