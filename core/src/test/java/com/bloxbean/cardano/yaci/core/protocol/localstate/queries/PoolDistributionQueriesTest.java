@@ -59,6 +59,31 @@ class PoolDistributionQueriesTest {
         assertThat(hex(new StakeSnapshotQuery(POOL_A), V23)).isEqualTo(wrapped("8214" + "81" + SET_A));
     }
 
+    @Test
+    void setArgumentsAreSortedAndWithoutDuplicates() {
+        String setAB = "d90102" + "82" + "581c" + POOL_A + "581c" + POOL_B;
+        assertThat(hex(new PoolDistrQuery(List.of(POOL_B, POOL_A, POOL_B)), V23))
+                .isEqualTo(wrapped("821824" + "81" + setAB));
+        assertThat(hex(new StakePoolParamsQuery(List.of(POOL_B, POOL_A, POOL_A)), V23))
+                .isEqualTo(wrapped("8211" + setAB));
+
+        // a credential's Ord: scripts before key hashes, then the bytes
+        Credential keyA = Credential.builder().type(StakeCredType.ADDR_KEYHASH).hash(POOL_A).build();
+        Credential keyB = Credential.builder().type(StakeCredType.ADDR_KEYHASH).hash(POOL_B).build();
+        Credential scriptB = Credential.builder().type(StakeCredType.SCRIPTHASH).hash(POOL_B).build();
+        assertThat(hex(new DRepStateQuery(Era.Conway, List.of(keyB, keyA, scriptB, keyA)), V23))
+                .isEqualTo(wrapped("82" + "1819" + "d90102" + "83" + "8201581c" + POOL_B + "8200581c" + POOL_A
+                        + "8200581c" + POOL_B));
+    }
+
+    @Test
+    void oldResultConstructorsAreKept() {
+        assertThat(new IndividualPoolStake(POOL_A, BigInteger.ONE, BigInteger.TWO, VRF).getTotalPoolStake()).isNull();
+        assertThat(new StakeDistributionQueryResult(java.util.Map.of()).getTotalActiveStake()).isNull();
+        assertThat(new PoolDistrQueryResult().getPoolDistributionMap()).isNull();
+        assertThat(new StakeSnapshotQueryResult().getPoolStakeSnapshots()).isNull();
+    }
+
     /** [4, [result]]: MsgResult with the era wrapper of a matching era. */
     private static co.nstant.in.cbor.model.DataItem[] msgResult(String result) {
         return CborSerializationUtil.deserialize(HexUtil.decodeHexString("8204" + "81" + result));

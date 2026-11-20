@@ -1,7 +1,6 @@
 package com.bloxbean.cardano.yaci.core.protocol.localstate.queries;
 
 import co.nstant.in.cbor.model.Array;
-import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.UnsignedInteger;
@@ -9,7 +8,6 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.Era;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.api.EraQuery;
 import com.bloxbean.cardano.yaci.core.protocol.localstate.queries.model.PoolStakeSnapshot;
-import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
@@ -36,11 +34,8 @@ public class StakeSnapshotQuery implements EraQuery<StakeSnapshotQueryResult> {
         array.add(new UnsignedInteger(20));
 
         // Maybe (Set PoolId): [set] for the pool given (cardano-binary encodeMaybe)
-        Array poolIdArray = new Array();
-        poolIdArray.add(new ByteString(HexUtil.decodeHexString(poolId)));
-        poolIdArray.setTag(258);
         Array maybePoolIds = new Array();
-        maybePoolIds.add(poolIdArray);
+        maybePoolIds.add(QuerySets.poolIds(List.of(poolId)));
 
         array.add(maybePoolIds);
 

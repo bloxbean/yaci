@@ -16,5 +16,10 @@ public class StakeDistributionQueryResult implements QueryResult {
     Map<String, IndividualPoolStake> stakeDistributionMap;
     /** The total active stake in lovelace, from N2C V21; null before. */
     BigInteger totalActiveStake;
+
+    /** Kept for existing callers: no total active stake (N2C V20 and earlier). */
+    public StakeDistributionQueryResult(Map<String, IndividualPoolStake> stakeDistributionMap) {
+        this(stakeDistributionMap, null);
+    }
 }
 

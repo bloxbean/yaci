@@ -169,6 +169,11 @@ public class LocalStateQueryClient extends QueryClient {
      * @return Mono with instance of {@link QueryResult}
      */
     public <T extends QueryResult> Mono<T> executeQuery(Query query) {
+        // decided at subscription, not when the chain is built: a release().then(executeQuery(..)) runs in Idle
+        return Mono.defer(() -> dispatch(query));
+    }
+
+    private <T extends QueryResult> Mono<T> dispatch(Query query) {
         if (localStateQueryAgent.getCurrentState() == LocalStateQueryState.Idle) {
             //Auto acquire
             return Mono.create(monoSink -> {

@@ -249,6 +249,36 @@ class LocalStateQueryClientIT extends BaseTest {
         assertThat(result.getTotalActiveStake()).isPositive(); //GetPoolDistr2 (N2C V21 and later)
     }
 
+    @Test
+    void setArgumentsInAnyOrderAndWithDuplicates() {
+        String a = "032a04334a846fdf542fd5633c9b3928998691b8276e004facbc8af1";
+        String b = "7facad662e180ce45e5c504957cd1341940c72a708728f7ecfc6e349";
+        PoolDistrQueryResult pools = (PoolDistrQueryResult) localStateQueryClient
+                .executeQuery(new PoolDistrQuery(List.of(b, a, b))).block(Duration.ofSeconds(10));
+        assertThat(pools.getPoolDistributionMap()).containsOnlyKeys(a, b);
+
+        // a key hash before a script hash, and two key hashes in reverse: the node wants scripts first, then bytes
+        DRepStateQueryResult dReps = (DRepStateQueryResult) localStateQueryClient.executeQuery(new DRepStateQuery(
+                Era.Conway, List.of(
+                        Credential.builder().type(StakeCredType.ADDR_KEYHASH)
+                                .hash("fa6a8dc2635dddcf9af495cb144f7eb4ff845866fe48695ad7cb65d3").build(),
+                        Credential.builder().type(StakeCredType.ADDR_KEYHASH)
+                                .hash("23bc63ced4e40b22dd4e6051c258ba38d5679d81e33f34fe5e5cdb4d").build(),
+                        Credential.builder().type(StakeCredType.SCRIPTHASH)
+                                .hash("0c2e7a74937245a7b17bbd862f86d27de46282f6a00c3fefb88d995f").build())))
+                .block(Duration.ofSeconds(10));
+        assertThat(dReps.getDRepStates()).hasSize(3);
+    }
+
+    @Test
+    void aQueryChainedAfterReleaseAcquiresAgain() {
+        localStateQueryClient.acquire().block(Duration.ofSeconds(15));
+        BlockHeightQueryResult result = localStateQueryClient.release()
+                .then(localStateQueryClient.<BlockHeightQueryResult>executeQuery(new BlockHeightQuery()))
+                .block(Duration.ofSeconds(15));
+        assertThat(result.getBlockHeight()).isPositive();
+    }
+
     //    @Test
     void epochStateQuery() {
         Mono<EpochStateQueryResult> mono = localStateQueryClient.executeQuery(new EpochStateQuery());

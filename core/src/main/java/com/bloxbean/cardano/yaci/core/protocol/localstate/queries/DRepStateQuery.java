@@ -35,13 +35,7 @@ public class DRepStateQuery implements EraQuery<DRepStateQueryResult> {
         Array array = new Array();
         array.add(new UnsignedInteger(25));
 
-        Array dRepCredArray = new Array();
-
-        dRepCreds.forEach(dRepCred -> dRepCredArray.add(dRepCred.serialize()));
-
-        dRepCredArray.setTag(258);
-
-        array.add(dRepCredArray);
+        array.add(QuerySets.credentials(dRepCreds));
 
         return wrapWithOuterArray(array);
     }

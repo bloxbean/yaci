@@ -59,6 +59,25 @@ class AgentWriteLockTest {
         channel.finishAndReleaseAll();
     }
 
+    /** A failed write closes the connection: whatever waits on that message then fails with the disconnect. */
+    @Test
+    void aFailedWriteClosesTheConnection() {
+        EmbeddedChannel channel = new EmbeddedChannel(new io.netty.channel.ChannelOutboundHandlerAdapter() {
+            @Override
+            public void write(io.netty.channel.ChannelHandlerContext ctx, Object msg,
+                              io.netty.channel.ChannelPromise promise) {
+                promise.setFailure(new java.io.IOException("write refused"));
+            }
+        });
+        KeepAliveAgent agent = new KeepAliveAgent();
+        agent.setChannel(channel);
+
+        agent.sendNextMessage();
+        channel.runPendingTasks();
+
+        assertThat(channel.isOpen()).isFalse();
+    }
+
     // A write the socket cannot take yet stays pending; a later write's flush completes it and runs its callback
     // on the thread of that later write.
 
