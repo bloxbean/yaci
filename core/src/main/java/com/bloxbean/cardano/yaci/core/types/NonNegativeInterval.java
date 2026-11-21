@@ -7,7 +7,7 @@ import java.math.BigInteger;
 
 @Getter
 @EqualsAndHashCode(callSuper = true)
-@ToString
+@ToString(callSuper = true)
 @Slf4j
 public class NonNegativeInterval extends UnitInterval {
 

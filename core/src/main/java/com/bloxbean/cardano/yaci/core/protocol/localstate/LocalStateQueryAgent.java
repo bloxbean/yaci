@@ -92,12 +92,20 @@ public class LocalStateQueryAgent extends Agent<LocalStateQueryListener> {
         } else if (message instanceof MsgRelease) {
             if (log.isDebugEnabled())
                 log.debug("MsgRelease : {}", message);
-            onMessageReleased();
+            onMessageReleased(); //a responder received the client's release
         } else if (message instanceof MsgResult) {
             if (log.isDebugEnabled())
                 log.debug("MsgResult : {}", message);
             onMsgResult((MsgResult) message);
         }
+    }
+
+    /** A client's MsgRelease, once sent, has moved the state to Idle: only now may a query acquire again. */
+    @Override
+    public synchronized void sendRequest(Message message) {
+        super.sendRequest(message);
+        if (message instanceof MsgRelease)
+            onMessageReleased();
     }
 
     private void onMsgResult(MsgResult msgResult) {

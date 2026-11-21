@@ -36,9 +36,7 @@ public class StakePoolParamsQuery implements EraQuery<StakePoolParamQueryResult>
         Array array = new Array();
         array.add(new UnsignedInteger(17));
 
-        Array poolIdArray = new Array();
-        poolIds.forEach(poolId -> poolIdArray.add(new ByteString(HexUtil.decodeHexString(poolId))));
-        poolIdArray.setTag(258);
+        Array poolIdArray = QuerySets.poolIds(poolIds);
 
         array.add(poolIdArray);
 
