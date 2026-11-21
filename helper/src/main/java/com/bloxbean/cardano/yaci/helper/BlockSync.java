@@ -81,7 +81,8 @@ public class BlockSync {
                     return new EndorserBlockResolver(peer, () -> mainMagic(owner.get(), fallbackMagic), cache,
                             new ParentBlockLookup(peer, versionTable));
                 },
-                CompleteBlockAssembler.BUDGET_MILLIS, CompleteBlockAssembler.PAUSE_MILLIS, SyncControl::runOnNewThread);
+                CompleteBlockAssembler.BUDGET_MILLIS, CompleteBlockAssembler.PAUSE_MILLIS, SyncControl::runOnNewThread,
+                0); //BlockSync keeps the synchronous path (ADR 0017 D4)
     }
 
     /**

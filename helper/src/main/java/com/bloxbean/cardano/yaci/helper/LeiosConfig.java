@@ -41,6 +41,14 @@ public class LeiosConfig {
     private boolean skipUnavailableEndorserBlocks = false;
 
     /**
+     * Experimental, being evaluated (ADR 0017 D4), {@link BlockRangeSync} only: the number of certifying blocks whose
+     * EB transactions are fetched ahead of delivery, each on its own side connection. Blocks are still delivered
+     * complete, in chain order, on the main connection's thread. 0 (default): one at a time, as before.
+     */
+    @Builder.Default
+    private int endorserBlockReadAhead = 0;
+
+    /**
      * @return the default settings: inline EB transactions, and halt when they cannot be had
      */
     public static LeiosConfig defaultConfig() {

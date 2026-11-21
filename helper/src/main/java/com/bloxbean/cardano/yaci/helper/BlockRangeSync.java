@@ -60,7 +60,8 @@ public class BlockRangeSync {
                     return new EndorserBlockResolver(peer, () -> mainMagic(owner.get()), cache,
                             new ParentBlockLookup(peer, N2NVersionTableConstant.v4AndAbove(protocolMagic)));
                 },
-                budgetMillis, pauseMillis, SyncControl::runOnNewThread);
+                budgetMillis, pauseMillis, SyncControl::runOnNewThread,
+                leiosConfig != null ? leiosConfig.getEndorserBlockReadAhead() : 0);
     }
 
     /**

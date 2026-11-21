@@ -5,8 +5,10 @@
     - Only a Dijkstra block that certifies an endorser block (EB) uses the side connection. Preview, preprod and
       mainnet never open one.
     - What reaches listeners, and when, does not change.
-  - **D4: being evaluated, design only, not built.** Risk medium.
-    - D4 changes when blocks are read. It is decided only after a prototype passes the D4 evaluation.
+  - **D4: being evaluated; a prototype is built and measured, off by default.** Risk medium.
+    - D4 changes when blocks are read. It is decided only after the prototype passes the D4 evaluation (see
+      "D4 prototype" and its results).
+    - The prototype is opt-in (`LeiosConfig.endorserBlockReadAhead`, default 0) and used by `BlockRangeSync` only.
 - Date: 2026-11-21
 - Amends ADR 0016:
   - D4a, reuse of the side connection, by D2;
@@ -199,6 +201,38 @@ bandwidth or its limit on outstanding requests caps it.
 - **Speed.** End to end on a fixed range and relay address, at a few values of `N`, with the listener's time
   reported separately.
 
+### D4 prototype (built for the evaluation)
+
+What is built, in `CompleteBlockAssembler` (read-ahead) and `PooledEndorserBlockSource`:
+- **Switch.** `LeiosConfig.endorserBlockReadAhead = N`, at most 8, `BlockRangeSync` only (`BlockSync` passes 0). With 0,
+  every callback takes today's path.
+- **Queue.** As D4: chain order, announcements indexed on read, delivery from the front only, on the thread of the
+  main connection's callbacks.
+  - An ordinary block with nothing waiting is delivered at once, as today.
+  - The queue is drained when the next callback arrives, and in full before `batchDone` and `onDisconnect`.
+- **Budget and failures.** As D4.
+  - A certifying block's 45 s budget starts at the front. A fetch ahead has no budget of its own: it ends on success,
+    failure, cancellation or the resolver's stall caps.
+  - Any failure of a fetch ahead is internal. The front then starts its attempts afresh, and only those report
+    `RETRYING`, skip or halt.
+- **Listener exceptions.**
+  - On the block being read, the exception propagates to `BlockfetchAgent`, as today.
+  - On a block delivered later, it becomes that block's `onParsingError` in its place. The exception carries the
+    block's bytes only when `YaciConfig.returnBlockCbor` is on.
+- **Stop, replace, halt.** Fetches ahead are cancelled and their threads stopped, and every side connection is closed.
+  A start that dropped queued blocks delivers nothing more.
+
+Where the prototype differs from the D4 text, on purpose, for the evaluation:
+- **Several fetches at once: a pool, not pipelining.** There are N + 1 side connections, each with one request in
+  flight, so the front's own attempts never wait for a free one.
+  - Pipelining on one connection (D4's first choice) needs a FIFO of outstanding requests in core's agent framework.
+  - The pool measures what overlapping the round trips is worth before that work is done.
+- **Backpressure: the main thread waits.** The queue is full at 2 × N certifying blocks or 512 callbacks. The main
+  connection's thread then waits for the front, as the synchronous path waits today.
+  - The relay's keep-alive limit is therefore no worse than today.
+  - D4 planned `autoRead` off instead.
+  - There is no byte cap yet; at 2 × 8 EBs of about 260 KB, the queue holds about 4 MB.
+
 ## Invariants
 
 - **I1.** Listeners see what they see today: the same blocks, order, thread and outcomes (ADR 0016 I1–I3).
@@ -230,6 +264,30 @@ bandwidth or its limit on outstanding requests caps it.
 - **A tick that throws** closes the side connection.
 - **A peer that closes the connection:** the next fetch succeeds on a new one (unchanged).
 
+## Tests (D4 prototype)
+
+All in `CompleteBlockAssemblerTest`, section "ADR 0017 D4":
+- **Fetch ahead:** later EBs are fetched while the front waits; delivery is in order, on the main thread.
+- **Same sequence:** one script gives identical callbacks at read-ahead 0, 1, 2 and 8 (I5).
+- **Unchanged without certificates:** an ordinary block with nothing waiting is delivered at once.
+- **Failures behind the front:**
+  - strict: block A is slow and the later block B fails first. A is delivered, then B's `RETRYING` and `SYNC_HALTED`;
+    nothing after B, and no `batchDone`;
+  - skip: B is delivered without its EB transactions, in its place;
+  - a fetch ahead that failed is retried at the front with no callback.
+- **Listener behaviour:**
+  - a listener exception on a queued block is that block's `onParsingError`, in its place;
+  - `fetch()` from inside `batchDone` is accepted.
+- **Backpressure:**
+  - a full queue (2 × N certifying blocks) holds the main thread until the front is delivered;
+  - at most 512 callbacks wait.
+- **Stop and disconnect:**
+  - stop cancels the fetches ahead, and delivers nothing more;
+  - stop with blocks queued and the main thread idle delivers nothing more from that start;
+  - a disconnect delivers the blocks received before it first.
+- **Pool:** each call gets its own source, and close closes them all.
+- **Mutation check:** the stop and disconnect tests fail without their fixes (review findings 1 and 2).
+
 ## Verification
 
 - The Musashi check of the Measurement section, with this branch.
@@ -255,3 +313,37 @@ bandwidth or its limit on outstanding requests caps it.
   address change.
 - **No side connection closed itself** for an unanswered keep-alive or for idling.
 - **Blocks/s are unchanged,** as expected.
+
+### D4 prototype result (2026-11-21)
+
+Musashi from genesis to block 14,000 (1,382 certifying blocks, 1.40 M EB transactions), with one range and one fixed
+relay address (`52.29.179.71:3001`, TCP connect 243 ms). The runs went one after another on the same branch:
+`run.sh <checkout> <out> musashi -- -Dsync.segments=1 -Dsync.host=52.29.179.71 -Dsync.stopAtBlock=14000
+-Dsync.readAhead=N -Dsync.trace=<file>`.
+
+| Read-ahead N | End to end | vs. the mean of the two N = 0 runs |
+|---|---|---|
+| 0 (today's path) | 16 m 53 s (one relay reconnect) | 1.0× |
+| 0 (repeated last) | 13 m 42 s | 1.0× |
+| 2 | 8 m 26 s | 1.8× |
+| 4 | 4 m 28 s | 3.4× |
+| 8 | 2 m 14 s | 6.9× |
+| 4, after the review fixes | 4 m 58 s | 3.1× |
+| 8, after the review fixes | 2 m 17 s | 6.7× |
+
+- **I5 (the full delivered sequence):** every run delivered the same 14,001 blocks up to block 14,000, in the same
+  order. Each block had the same hash, transaction count, transaction-hash digest and EB. The SHA-256 of the trace is
+  `7549bad0860936cc…` in all seven runs.
+  - There was no EB event in any run: no `RETRYING`, skip or halt.
+  - So this run checks the success path. The failure paths are checked by the unit tests.
+- **Every run passed the sync check:** 0 parsing errors, 0 gaps, 0 EBs missing.
+- **The listener's own time** was 0.3–0.6 s per run, so the speed difference is the fetch.
+- **The two N = 0 runs differ by 19%.** That is how much the public relay varies; the speedups are against their mean.
+- **Throughput grows about linearly up to N = 8.** The relay showed no limit on parallel side connections at 9.
+  - The whole-range time includes about 1 minute for blocks 0–9,300, which have no certificate. So within the
+    certifying range the gain at N = 8 is larger than 6.9×.
+- **What this does not show yet:**
+  - a run to the tip;
+  - behaviour under relay failures;
+  - pipelining on one connection instead of a pool;
+  - the memory cap by bytes.

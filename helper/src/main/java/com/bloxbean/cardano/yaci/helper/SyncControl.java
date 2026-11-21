@@ -5,6 +5,8 @@ import com.bloxbean.cardano.yaci.helper.api.Fetcher;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -60,15 +62,18 @@ final class SyncControl<C extends Fetcher<Block>> {
     private final long budgetMillis;
     private final long pauseMillis;
     private final Consumer<Runnable> haltRunner;
+    private final int readAhead;
     private volatile Start<C> current;
 
     /**
      * @param sourceFactory the endorser block source of a start, given that start's client
      * @param haltRunner    runs the halting task: a new thread ({@link #runOnNewThread}); tests can delay it
+     * @param readAhead     certifying blocks fetched ahead of delivery (ADR 0017 D4, BlockRangeSync); 0: none
      */
     SyncControl(LeiosConfig config, EbAnnouncementCache cache,
                 Function<Supplier<C>, CompleteBlockAssembler.EndorserBlockSource> sourceFactory,
-                long budgetMillis, long pauseMillis, Consumer<Runnable> haltRunner) {
+                long budgetMillis, long pauseMillis, Consumer<Runnable> haltRunner, int readAhead) {
+        this.readAhead = Math.clamp(readAhead, 0, CompleteBlockAssembler.MAX_READ_AHEAD);
         this.config = config != null ? config : LeiosConfig.defaultConfig();
         this.cache = cache;
         this.sourceFactory = sourceFactory;
@@ -93,9 +98,10 @@ final class SyncControl<C extends Fetcher<Block>> {
             AtomicReference<C> owner = new AtomicReference<>();
             AtomicBoolean retired = new AtomicBoolean();
             if (config.isInlineEndorserBlockTxs() && listener != null) {
-                source = sourceFactory.apply(owner::get);
+                source = readAhead > 0 ? pooledSource(owner) : sourceFactory.apply(owner::get);
                 delegate = new CompleteBlockAssembler(listener, cache, source,
-                        config.isSkipUnavailableEndorserBlocks(), retired, this::halted, budgetMillis, pauseMillis);
+                        config.isSkipUnavailableEndorserBlocks(), retired, this::halted, budgetMillis, pauseMillis,
+                        readAhead);
             }
             C client = clientFactory.apply(delegate != null ? delegate : listener);
             owner.set(client);
@@ -103,6 +109,14 @@ final class SyncControl<C extends Fetcher<Block>> {
             current = created;
             return new Swap<>(old, created);
         }
+    }
+
+    /** One source per fetch ahead, and one more: the front's own attempts never wait for a free one. */
+    private CompleteBlockAssembler.EndorserBlockSource pooledSource(AtomicReference<C> owner) {
+        List<CompleteBlockAssembler.EndorserBlockSource> sources = new ArrayList<>(readAhead + 1);
+        for (int i = 0; i <= readAhead; i++)
+            sources.add(sourceFactory.apply(owner::get));
+        return new PooledEndorserBlockSource(sources);
     }
 
     /**
