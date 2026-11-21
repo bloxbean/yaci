@@ -1,4 +1,4 @@
-# ADR 0017: Leios side connection: measure the endorser block fetch, keep one connection alive
+# ADR 0017: Leios sync speed: measure the endorser block fetch, keep one side connection, deliver in order while fetching ahead
 
 - Status: Proposed
 - Date: 2026-11-21
@@ -7,7 +7,12 @@
     mainnet never open one.
   - What reaches listeners, and when, does not change: the same blocks, in the same order, with the same outcomes
     (ADR 0016 D3).
-- Amends: ADR 0016 D4a (reuse of the side connection). Everything else in ADR 0016 stands.
+- Status of the parts: D1 and D2 are built and measured. D4 is being evaluated (design below, prototype to measure).
+- Amends ADR 0016:
+  - D4a, reuse of the side connection (D2 here);
+  - D3b, delivery of a certifying block before the next block is read (D4 here).
+
+  Everything else in ADR 0016 stands.
 - Issue: #255, and the review discussion there.
 
 ## Context
@@ -84,10 +89,71 @@ What the numbers show:
 - **Fetching on the parent's announcement:** withdrawn. Yaci only asks for certified EBs (ADR 0013a).
 - **Several transaction requests in flight:** not needed while EBs fit one batch. If larger EBs need several
   batches, the model is `leiosFetchClientPeerPipelined` in ouroboros-consensus `840e789b` (the w42 pin, #255).
-- **Overlapping the fetches of several certifying blocks** (bounded read-ahead in `BlockRangeSync`): this is the only
-  change that addresses the 89%. It changes the delivery contract of ADR 0016 D3b, so it needs its own ADR. That ADR
-  must cover the reconnect cursor, backpressure by blocks and bytes, `batchDone` order, `onParsingError` and listener
-  exceptions, `fetch()` admission while blocks are queued, and rollback and restart (#255).
+- **Overlapping the fetches of several certifying blocks** is D4 below.
+
+### D4. Deliver in order while fetching ahead (being evaluated)
+
+This is the only change that addresses the 89%. The requirement on it: what listeners receive does not change.
+- Listeners still get complete blocks, in chain order.
+- `onBlock` still runs on the same thread.
+- `batchDone`, rollbacks and parse errors arrive in the same positions as today.
+
+**Not read until delivered (today).** A certifying block stops the main connection until its EB and transactions
+have arrived (ADR 0016 D3b). So Yaci only ever knows of one EB to fetch.
+
+**Read ahead, deliver in order (D4).**
+- **The queue.** Every block BlockFetch delivers goes into a bounded queue in chain order:
+  - an ordinary block is *ready* at once;
+  - a certifying block is *waiting*, and its EB fetch starts at once.
+- **Fetching.** A bounded number of fetches (`N`, for example 4–8) run at a time, oldest first.
+  - When an EB arrives, its transactions request goes out while the other fetches are still in flight.
+  - On one side connection: several requests in flight, as `leiosFetchClientPeerPipelined` in ouroboros-consensus
+    `840e789b` (the w42 pin) does.
+  - If a relay refuses that: a few side connections, each kept alive as D2.
+  - Only certified EBs are asked for (`leiosCertInBody`, ADR 0013a).
+- **Delivery.**
+  - Blocks leave only from the front of the queue, and only when the front block is ready.
+  - A certifying block leaves complete, with its EB's transactions, exactly as today.
+  - Delivery runs on the main connection's event loop, the thread listeners run on today.
+- **Bounded memory.**
+  - The queue is capped by blocks and by bytes, for example 2,000 blocks or 64 MB.
+  - When it is full, Yaci stops reading from the main connection's socket (`autoRead` off) until the queue drains below
+    a low mark. TCP then slows the relay, with no protocol message needed.
+- **Unchanged before Leios.** With no certifying block, the queue stays empty and every block takes the path it takes
+  today. Preview, preprod and mainnet are unaffected. The queue starts with the first certifying block and is bypassed
+  again whenever it is empty.
+- **Markers.** `batchDone`, a rollback (in `BlockSync`) and `onParsingError` go through the queue as markers, so they
+  keep their place relative to blocks.
+  - A rollback cancels the queued fetches of blocks it removes.
+  - A listener exception propagates from delivery as it does today.
+- **Failures.** Each certifying block keeps its own 45 s budget and retries (ADR 0016 D3b, D3c).
+  - Strict mode: when a budget runs out, every block before it is delivered, then `SYNC_HALTED`. Nothing after it is
+    delivered, and the queued fetches are cancelled.
+  - Skip mode: the block is delivered without its EB's transactions, in its place.
+- **Reconnect.**
+  - The resume point is the last *delivered* block, not the last received one. Queued blocks that were not delivered
+    are fetched again.
+  - Fetched EBs stay in a small cache by EB hash (bounded), so a reconnect does not fetch them twice.
+- **`fetch()`.** A new range is accepted only once the queue has drained, as `checkFetch` refuses one today while a
+  certifying block waits.
+- **Tip sync (`BlockSync`).** The header says `leiosCertInBody` before the body arrives, so the fetch can start at the
+  header. That is still certified-only, and saves a round trip near the tip.
+
+**Expected effect (estimate, to be measured).** Today about 2 EBs/s are fetched, one at a time at about 0.5 s each.
+With `N` in flight the round trips overlap, so roughly `N` times more EBs per second. That holds until the relay's
+bandwidth or its limit on outstanding requests caps it.
+
+**Evaluation before it is decided.**
+- **Same output.** The same Musashi range, with and without D4, must give identical block hashes, transaction lists
+  and order to the listener.
+- **Tests:**
+  - strict-mode halt and skip-mode delivery;
+  - rollback;
+  - a disconnect with blocks queued;
+  - a full queue;
+  - `batchDone`, parse error and listener-exception order;
+  - `fetch()` while draining.
+- **Speed.** The Measurement-section check, at a few values of `N`.
 
 ## Invariants
 
@@ -96,6 +162,9 @@ What the numbers show:
 - **I3.** A closed side connection sends nothing, and its timer is cancelled.
 - **I4.** Within a start, a side connection is replaced only when it closes, an attempt on it fails, its keep-alive
   goes unanswered, it has been idle for 5 minutes, or the main connection's address or magic changes.
+- **I5 (D4).** A listener receives the same sequence of calls, with the same blocks and transactions, with or without
+  read-ahead.
+- **I6 (D4).** Memory is bounded: at most the configured blocks and bytes are queued, and reading pauses beyond that.
 
 ## Tests
 
