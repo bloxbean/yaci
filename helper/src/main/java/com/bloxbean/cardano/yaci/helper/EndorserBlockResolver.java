@@ -31,9 +31,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
@@ -48,7 +52,7 @@ import lombok.extern.slf4j.Slf4j;
  *       which may resolve to other relays. It is replaced when the main connection's address changes.</li>
  *   <li>The transactions are requested in consecutive batches of at most {@link #MAX_TXS_REQUEST_BYTES} transaction
  *       bytes, one request at a time, each reply checked against its own entries.</li>
- *   <li>The side connection carries the handshake and {@code LeiosFetchAgent} only. Its handshake is accepted only
+ *   <li>The side connection carries the handshake, {@code LeiosFetchAgent} and {@code KeepAliveAgent}. Its handshake is accepted only
  *       for a version this side offered, V15 or later, not app-layer, with the main connection's network magic.</li>
  *   <li>It is kept alive (a keep-alive every {@link #KEEP_ALIVE_MILLIS}, at most one in flight) and reused for the
  *       whole start (ADR 0017 D2). It closes when a keep-alive goes unanswered for two intervals, when it has been
@@ -77,7 +81,7 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
      */
     static final long MAX_TXS_REQUEST_BYTES = 500_000;
     /** Runs every side connection's keep-alive timer; a closed connection's timer is cancelled. */
-    private static final java.util.concurrent.ScheduledThreadPoolExecutor KEEP_ALIVES = keepAliveScheduler();
+    private static final ScheduledThreadPoolExecutor KEEP_ALIVES = keepAliveScheduler();
 
     private final Supplier<PeerAddress> peer;
     private final LongSupplier mainMagic;
@@ -87,9 +91,13 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
     private final long maxIdleMillis;
     private final long stallMillis;
     private final long maxTxsRequestBytes;
-    private volatile Side side;
+    /** The current side connection; detached by compare-and-set, so a late close cannot clear its replacement. */
+    private final AtomicReference<Side> side = new AtomicReference<>();
+    /** Runs at the start of each keep-alive tick, before its decision: a test seam, a no-op otherwise. */
+    volatile Runnable beforeKeepAliveTick = () -> {
+    };
     /** Side connections opened by this resolver (debug log and tests). */
-    private final java.util.concurrent.atomic.AtomicLong sidesOpened = new java.util.concurrent.atomic.AtomicLong();
+    private final AtomicLong sidesOpened = new AtomicLong();
 
     /** @param peer where the side connection dials, read for each new connection (the main connection's address) */
     EndorserBlockResolver(Supplier<PeerAddress> peer, LongSupplier mainMagic, EbAnnouncementCache cache,
@@ -161,7 +169,7 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
                         millis(timings.mapNanos));
             return complete;
         } catch (Exception e) {
-            close(current, e); //a failed attempt, a mapping failure included, never leaves its connection open
+            retire(current, e); //a failed attempt, a mapping failure included, never leaves its connection open
             throw e;
         }
     }
@@ -216,8 +224,8 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
         long txBytes;
     }
 
-    private static java.util.concurrent.ScheduledThreadPoolExecutor keepAliveScheduler() {
-        java.util.concurrent.ScheduledThreadPoolExecutor scheduler = new java.util.concurrent.ScheduledThreadPoolExecutor(1,
+    private static ScheduledThreadPoolExecutor keepAliveScheduler() {
+        ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1,
                 task -> {
                     Thread thread = new Thread(task, "yaci-leios-keepalive");
                     thread.setDaemon(true);
@@ -270,20 +278,20 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
     /** Closes the side connection, if any, without waiting. */
     @Override
     public void close() {
-        Side current = side;
+        Side current = side.get();
         if (current != null)
-            close(current, new IllegalStateException("The side connection was closed"));
+            retire(current, new IllegalStateException("The side connection was closed"));
     }
 
     /** The current side connection, for tests. */
     Side currentSide() {
-        return side;
+        return side.get();
     }
 
     private Side sideFor(AttemptDeadline deadline, Timings timings) {
         long magic = mainMagic.getAsLong();
         PeerAddress address = peer.get();
-        Side current = side;
+        Side current = side.get();
         if (current != null) {
             long now = System.nanoTime();
             String why = current.closed.isDone() ? "closed" : current.magic != magic ? "network magic changed"
@@ -292,13 +300,13 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
                     + maxIdleMillis + " ms" : null;
             if (why != null) {
                 log.debug("Side connection #{} replaced: {}", current.number, why);
-                close(current, new IllegalStateException("The side connection was replaced"));
+                retire(current, new IllegalStateException("The side connection was replaced"));
                 current = null;
             }
         }
         if (current == null) {
             current = new Side(address, magic, deadline.remainingMillis());
-            side = current;
+            side.set(current);
             current.start();
             timings.newSide = true;
             log.debug("Side connection #{} opened to {}", current.number, address);
@@ -307,9 +315,9 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
         return current;
     }
 
-    private void close(Side closing, Throwable reason) {
-        if (side == closing)
-            side = null;
+    /** Closes a side connection, and detaches it only if it is still the current one (I4). */
+    void retire(Side closing, Throwable reason) {
+        side.compareAndSet(closing, null);
         closing.close(reason);
     }
 
@@ -372,7 +380,9 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
         final LeiosFetchAgent fetchAgent;
         final KeepAliveAgent keepAliveAgent = new KeepAliveAgent();
         final TCPNodeClient client;
-        private volatile java.util.concurrent.ScheduledFuture<?> keepAliveTimer;
+        private volatile ScheduledFuture<?> keepAliveTimer;
+        /** Serializes a keep-alive tick with fail and close, so a closed connection sends nothing (I3). */
+        private final Object lifecycle = new Object();
         /** When the keep-alive in flight was sent, or 0 when none is (I2). */
         private volatile long keepAliveSentNanos;
         private int cookie;
@@ -497,49 +507,67 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
 
         /** The connection ended (refused, lost or failed): the first reason is kept. */
         private void fail(Throwable reason) {
-            closed.completeExceptionally(reason);
-            stopKeepAlive();
+            synchronized (lifecycle) {
+                closed.completeExceptionally(reason);
+                stopKeepAlive();
+            }
         }
 
         private void close(Throwable reason) {
-            closed.completeExceptionally(reason);
-            stopKeepAlive();
+            synchronized (lifecycle) {
+                closed.completeExceptionally(reason);
+                stopKeepAlive();
+            }
             if (retired.compareAndSet(false, true))
                 ClientRetirement.retireAsync(client, client::shutdown, client::isRunning, () -> starting);
         }
 
         private void startKeepAlive() {
-            keepAliveTimer = KEEP_ALIVES.scheduleWithFixedDelay(this::keepAlive, keepAliveMillis, keepAliveMillis,
-                    TimeUnit.MILLISECONDS);
-            if (closed.isDone()) //closed while the timer was being scheduled
-                stopKeepAlive();
+            synchronized (lifecycle) {
+                if (!closed.isDone())
+                    keepAliveTimer = KEEP_ALIVES.scheduleWithFixedDelay(this::keepAlive, keepAliveMillis,
+                            keepAliveMillis, TimeUnit.MILLISECONDS);
+            }
         }
 
         private void stopKeepAlive() {
-            java.util.concurrent.ScheduledFuture<?> timer = keepAliveTimer;
+            ScheduledFuture<?> timer = keepAliveTimer;
             if (timer != null)
                 timer.cancel(false);
         }
 
         /** One tick: close if unanswered for two intervals or idle too long, else send one if none is in flight. */
         private void keepAlive() {
-            if (closed.isDone()) {
-                stopKeepAlive();
-                return;
+            try {
+                tick();
+            } catch (Throwable e) {
+                //an exception would end the timer silently (scheduleWithFixedDelay): close instead of going quiet
+                log.warn("Side connection #{}: keep-alive tick failed, closing", number, e);
+                retire(this, new IllegalStateException("The keep-alive tick failed: " + e, e));
             }
-            long now = System.nanoTime();
-            long sent = keepAliveSentNanos;
-            if (sent != 0 && now - sent >= TimeUnit.MILLISECONDS.toNanos(2 * keepAliveMillis)) {
-                log.debug("Side connection #{}: keep-alive unanswered for {} ms, closing", number,
-                        millis(now - sent));
-                EndorserBlockResolver.this.close(this, new IllegalStateException("The keep-alive went unanswered"));
-            } else if (now - lastUsedNanos >= TimeUnit.MILLISECONDS.toNanos(maxIdleMillis)) {
-                log.debug("Side connection #{}: idle for {} ms, closing", number, millis(now - lastUsedNanos));
-                EndorserBlockResolver.this.close(this, new IllegalStateException("The side connection was idle"));
-            } else if (sent == 0) {
-                keepAliveSentNanos = now;
-                keepAliveAgent.sendKeepAlive(cookie);
-                cookie = (cookie + 1) & KeepAliveAgent.MAX_NUM;
+        }
+
+        private void tick() {
+            beforeKeepAliveTick.run();
+            synchronized (lifecycle) {
+                if (closed.isDone()) {
+                    stopKeepAlive();
+                    return;
+                }
+                long now = System.nanoTime();
+                long sent = keepAliveSentNanos;
+                if (sent != 0 && now - sent >= TimeUnit.MILLISECONDS.toNanos(2 * keepAliveMillis)) {
+                    log.debug("Side connection #{}: keep-alive unanswered for {} ms, closing", number,
+                            millis(now - sent));
+                    retire(this, new IllegalStateException("The keep-alive went unanswered"));
+                } else if (now - lastUsedNanos >= TimeUnit.MILLISECONDS.toNanos(maxIdleMillis)) {
+                    log.debug("Side connection #{}: idle for {} ms, closing", number, millis(now - lastUsedNanos));
+                    retire(this, new IllegalStateException("The side connection was idle"));
+                } else if (sent == 0) {
+                    keepAliveSentNanos = now;
+                    keepAliveAgent.sendKeepAlive(cookie);
+                    cookie = (cookie + 1) & KeepAliveAgent.MAX_NUM;
+                }
             }
         }
     }

@@ -1,27 +1,27 @@
 # ADR 0017: Leios sync speed: measure the endorser block fetch, keep one side connection, deliver in order while fetching ahead
 
-- Status: Proposed
+- Status, per decision:
+  - **D1, D2: Proposed, built and measured.** Risk low.
+    - Only a Dijkstra block that certifies an endorser block (EB) uses the side connection. Preview, preprod and
+      mainnet never open one.
+    - What reaches listeners, and when, does not change.
+  - **D4: being evaluated, design only, not built.** Risk medium.
+    - D4 changes when blocks are read. It is decided only after a prototype passes the D4 evaluation.
 - Date: 2026-11-21
-- Risk: low.
-  - Only a Dijkstra block that certifies an endorser block (EB) uses the side connection. Preview, preprod and
-    mainnet never open one.
-  - What reaches listeners, and when, does not change: the same blocks, in the same order, with the same outcomes
-    (ADR 0016 D3).
-- Status of the parts: D1 and D2 are built and measured. D4 is being evaluated (design below, prototype to measure).
 - Amends ADR 0016:
-  - D4a, reuse of the side connection (D2 here);
-  - D3b, delivery of a certifying block before the next block is read (D4 here).
+  - D4a, reuse of the side connection, by D2;
+  - D3b, delivery of a certifying block before the next block is read, by D4, once D4 is decided.
 
   Everything else in ADR 0016 stands.
-- Issue: #255, and the review discussion there.
+- Issue: #255, and the review discussion there. Review of this ADR: #256.
 
 ## Context
 
 To complete a certifying block, Yaci fetches the EB that the block certifies, and then the EB's transactions, over a
-side connection to the main connection's relay (ADR 0016 D4a). That connection carries only the handshake and
-LeiosFetch. It sends no keep-alive, and a relay drops a connection that sends no keep-alive for about 97 s. ADR 0016
-handled this by never keeping a side connection long enough to reach that limit: before a fetch, it replaces one that
-is older than 45 s, or that has been idle for 30 s.
+side connection to the main connection's relay (ADR 0016 D4a). That connection carried only the handshake and
+LeiosFetch. It sent no keep-alive, and a relay drops a connection that sends no keep-alive for about 97 s. ADR 0016
+handled this by never keeping a side connection long enough to reach that limit: before a fetch, it replaced one that
+was older than 45 s, or that had been idle for 30 s.
 
 A full Musashi sync check (#252) synced at about 150 blocks/s until certifying blocks start, then at 2–6 blocks/s,
 and logged about 150 side connections in 175 minutes. #255 proposed reusing the connection and fetching EBs ahead of
@@ -40,7 +40,7 @@ Musashi from genesis on 2026-11-21, against `leios-node.play.dev.cardano.org:300
 | Measured over blocks 9,092–14,180 | Value |
 |---|---|
 | Blocks that certify an EB | 1,458 of 5,089 (29%) |
-| Share of the wall time spent inside EB fetches | 89% (792 s of 889 s) |
+| Share of the wall time spent inside successful EB fetches | 89% (792 s of 889 s) |
 | Time per certifying block, median | 503 ms: EB request 242 ms, transactions 245 ms, mapping 16 ms |
 | Throughput | 5.7 blocks/s, 1.64 EBs/s, 1,619 transactions/s, 0.41 MB/s |
 | Transaction batches per EB | always 1 (about 1,035 transactions, 257 KB; the batch limit is 500 KB) |
@@ -48,13 +48,19 @@ Musashi from genesis on 2026-11-21, against `leios-node.play.dev.cardano.org:300
 | Fetches that waited for a new side connection | 23 of 1,458, about 477 ms each: 10.7 s, 1.2% of the wall time |
 | Round trip to the relay's 8 addresses (TCP connect) | 170–280 ms |
 
+**What the 89% is.** It is the elapsed time of *successful* resolver calls.
+- **Included:** each EB phase and transactions phase covers transfer, decoding and verification, not only waiting.
+- **Not included:** failed attempts, retry pauses, `TransactionListBuilder.build` and the listener.
+- **Measuring D4:** once fetches overlap, the per-call durations can add up to more than the wall time. So D4 is
+  measured end to end, on a fixed block range and relay address, with the listener's time reported separately.
+
 What the numbers show:
-- **The sync is bound by round trips.** Each certifying block costs two of them, one after the other (the EB, then its
-  transactions), while the main connection waits (ADR 0016 D3b). That is 89% of the time.
+- **Round trips are the plausible bottleneck.** Each certifying block costs two requests, one after the other (the
+  EB, then its transactions), at a measured 170–280 ms round trip, while the main connection waits (ADR 0016 D3b).
 - **Replacing the side connection costs about 1%.** Reusing it is worth doing for the relay's sake and for fewer
   handshakes, but it is not what makes Musashi slow.
 - **In this range every EB fits one transaction batch.** Sending batches without waiting for each reply would gain
-  nothing here. It is left out of this ADR (see D3).
+  nothing here (D3).
 
 ## Decisions
 
@@ -78,105 +84,151 @@ What the numbers show:
   The next fetch then opens a new connection.
 - **No replacement for age.** The 45 s rule is removed.
 - **An idle connection closes itself after 5 minutes** (`MAX_IDLE_MILLIS`, raised from 30 s). For example, a
-  `BlockRangeSync` left open after `batchDone` does not keep a side connection forever.
+  `BlockRangeSync` left open after `batchDone` does not keep a side connection forever. A connection is marked in use
+  when a fetch takes it, so the idle rule never closes one under an attempt.
 - **Unchanged from ADR 0016 D4a.** The connection is still replaced when it closes, when an attempt on it fails, or
   when the main connection's address or network magic changes.
-- **The timer.** One shared daemon scheduler (`yaci-leios-keepalive`) runs every side connection's timer. A
-  connection's timer is cancelled when it closes, for any reason, so a closed connection sends nothing.
+- **The timer.**
+  - One shared daemon scheduler (`yaci-leios-keepalive`) runs every side connection's timer.
+  - Each tick, and the connection's fail and close, run under the connection's own lifecycle lock. So a tick either
+    finishes before a close or sees the connection closed. A closed connection sends nothing, and its timer is
+    cancelled.
+  - A tick that throws closes the connection. Otherwise the scheduler would drop the timer silently, ending both the
+    keep-alive and the idle close.
+- **Detaching.** The resolver detaches a side connection by compare-and-set. So a late close of an old connection, from
+  its timer or a failed attempt, can never detach the connection that replaced it.
 
 ### D3. Not in this ADR
 
 - **Fetching on the parent's announcement:** withdrawn. Yaci only asks for certified EBs (ADR 0013a).
-- **Several transaction requests in flight:** not needed while EBs fit one batch. If larger EBs need several
-  batches, the model is `leiosFetchClientPeerPipelined` in ouroboros-consensus `840e789b` (the w42 pin, #255).
-- **Overlapping the fetches of several certifying blocks** is D4 below.
+- **Several transaction requests in flight for one EB:** not needed while EBs fit one batch, as in the measured range.
+  Larger EBs later in the chain may need several batches (not measured). If so, they are covered by the requests in
+  flight of D4.
 
 ### D4. Deliver in order while fetching ahead (being evaluated)
 
-This is the only change that addresses the 89%. The requirement on it: what listeners receive does not change.
-- Listeners still get complete blocks, in chain order.
-- `onBlock` still runs on the same thread.
-- `batchDone`, rollbacks and parse errors arrive in the same positions as today.
+This is the only change that addresses the measured round trips. The requirement on it (I5): a listener receives the
+**same sequence of callbacks** as today:
+- `onBlock` with complete blocks, in chain order, on the same thread;
+- `batchDone`, `onParsingError`, `onEndorserBlockUnavailable` and the halt, in the same positions.
 
-**Not read until delivered (today).** A certifying block stops the main connection until its EB and transactions
-have arrived (ADR 0016 D3b). So Yaci only ever knows of one EB to fetch.
+**Scope: `BlockRangeSync` only**, where initial sync spends its time.
+- **`BlockSync` keeps today's synchronous path.** Near the tip it fetches one block about every 20 s and needs no
+  queue. Its rollbacks, intersections and `confirmBlock` are therefore untouched.
+- **`BlockSync` may start a certifying block's EB fetch from its header,** which carries `leiosCertInBody` one round
+  trip before the body arrives. That is still certified-only.
 
-**Read ahead, deliver in order (D4).**
-- **The queue.** Every block BlockFetch delivers goes into a bounded queue in chain order:
+**Today.** A certifying block stops the main connection until its EB and transactions have arrived (ADR 0016 D3b).
+So Yaci only ever knows of one EB to fetch.
+
+**With D4:**
+- **Queue.** Every block BlockFetch delivers goes into a bounded queue in chain order, with its raw bytes kept:
   - an ordinary block is *ready* at once;
-  - a certifying block is *waiting*, and its EB fetch starts at once.
-- **Fetching.** A bounded number of fetches (`N`, for example 4–8) run at a time, oldest first.
-  - When an EB arrives, its transactions request goes out while the other fetches are still in flight.
-  - On one side connection: several requests in flight, as `leiosFetchClientPeerPipelined` in ouroboros-consensus
-    `840e789b` (the w42 pin) does.
-  - If a relay refuses that: a few side connections, each kept alive as D2.
-  - Only certified EBs are asked for (`leiosCertInBody`, ADR 0013a).
-- **Delivery.**
-  - Blocks leave only from the front of the queue, and only when the front block is ready.
-  - A certifying block leaves complete, with its EB's transactions, exactly as today.
-  - Delivery runs on the main connection's event loop, the thread listeners run on today.
-- **Bounded memory.**
-  - The queue is capped by blocks and by bytes, for example 2,000 blocks or 64 MB.
-  - When it is full, Yaci stops reading from the main connection's socket (`autoRead` off) until the queue drains below
-    a low mark. TCP then slows the relay, with no protocol message needed.
-- **Unchanged before Leios.** With no certifying block, the queue stays empty and every block takes the path it takes
-  today. Preview, preprod and mainnet are unaffected. The queue starts with the first certifying block and is bypassed
-  again whenever it is empty.
-- **Markers.** `batchDone`, a rollback (in `BlockSync`) and `onParsingError` go through the queue as markers, so they
-  keep their place relative to blocks.
-  - A rollback cancels the queued fetches of blocks it removes.
-  - A listener exception propagates from delivery as it does today.
-- **Failures.** Each certifying block keeps its own 45 s budget and retries (ADR 0016 D3b, D3c).
-  - Strict mode: when a budget runs out, every block before it is delivered, then `SYNC_HALTED`. Nothing after it is
-    delivered, and the queued fetches are cancelled.
-  - Skip mode: the block is delivered without its EB's transactions, in its place.
+  - a certifying block is *waiting*, and its EB fetch starts at once (certified only).
+- **Announcements are indexed when a block is read, not when it is delivered.** Otherwise a child queued behind its
+  parent would not find the parent's announcement (today `CompleteBlockAssembler` caches it at delivery).
+- **One ordered drain.** Fetches publish their results to a single drain on the main connection's event loop. The drain
+  delivers from the front of the queue only, and only when the front is ready. Every listener call happens in the drain.
+- **Errors.** The drain wraps each listener call as `BlockfetchAgent.onReceiveBlocks` does today: an exception
+  becomes `onParsingError`, with that block's raw bytes, at that block's position, and the drain continues as the
+  agent does today.
+- **Markers.** The wire `BatchDone` becomes a marker queued after the last block of the range. Listener `batchDone`
+  runs only once every block before it has been delivered. A listener may call `fetch()` from inside `batchDone`:
+  the next range starts then, and the old range's cleanup does not touch the new range's cursor.
+- **Budget.**
+  - A certifying block's 45 s budget (ADR 0016 D3b) starts when it reaches the front of the queue, not when it is
+    queued. A fetch that started earlier and is still running continues inside that budget.
+  - A failure while the block is behind the front is internal: no callback, and the fetch is retried.
+  - `RETRYING`, the skip event with its block, and the strict halt are emitted only at the front, on the event loop,
+    in order.
+  - **Strict halt** at block A: every block before A is delivered, then `SYNC_HALTED`. No callback for any block after
+    A, and no `batchDone`. All queued fetches are cancelled.
+- **Several fetches at once,** `N` at a time (for example 4–8), oldest first, the front block always first.
+  - **First choice:** one side connection with a bounded FIFO of requests in flight, as `leiosFetchClientPeerPipelined`
+    in ouroboros-consensus `840e789b` (the w42 pin) does. Each request carries its own expected point, reply type and
+    transaction bitmap, and replies are matched in FIFO order.
+  - **Cancelling a written request** (halt or stop) still drains its reply in order, or the side connection is
+    retired. The next block must never receive another block's reply.
+  - **A failure on the side connection settles every request in flight.** Each one is retried oldest first on a new
+    connection, within its block's budget.
+  - **A small pool of connections** is compared only if measurements of the single connection justify it, under the
+    same total limits on requests and bytes.
+- **Memory and backpressure.**
+  - **What the caps count:** queued raw blocks, completed EB transactions (including those completed out of order
+    behind a slow front), replies in flight, and the reconnect cache.
+  - **Small caps.** About `2 × N` certifying blocks of lead keeps `N` fetches busy. A cap of a few dozen blocks and a
+    byte cap sized from the largest measured EB is enough, and keeps any pause short.
+  - **Pausing.** When the queue is full, reading from the main socket pauses (`autoRead` off) until it drains below a
+    low mark.
+    - That pause stops *every* mini-protocol on the socket, including KeepAlive replies and frames already decoded
+      in the current read. So the caps must keep a pause well under the relay's keep-alive limit (~97 s) and any
+      application watchdog on `getLastKeepAliveResponseTime()`.
+    - Messages already decoded when the pause starts are still queued.
+  - **A single block larger than the byte cap** is admitted when the queue is empty, so it always makes progress.
 - **Reconnect.**
-  - The resume point is the last *delivered* block, not the last received one. Queued blocks that were not delivered
-    are fetched again.
-  - Fetched EBs stay in a small cache by EB hash (bounded), so a reconnect does not fetch them twice.
-- **`fetch()`.** A new range is accepted only once the queue has drained, as `checkFetch` refuses one today while a
-  certifying block waits.
-- **Tip sync (`BlockSync`).** The header says `leiosCertInBody` before the body arrives, so the fetch can start at the
-  header. That is still certified-only, and saves a round trip near the tip.
+  - Completions from the old channel are invalidated, by a generation number per connection.
+  - The resume point is the last *delivered* block. `BlockfetchAgent` today advances its `from` cursor when a block is
+    received, so D4 adds a delivery confirmation that moves the resume point instead.
+  - The range start is inclusive, so the first callback after a reconnect is the block after the last delivered one.
+  - The range end and the delivered cursor are kept until the listener has finished.
+  - Queued blocks not yet delivered are fetched again. Completed EBs stay in a small cache by EB hash, counted in the
+    byte cap, so they are not fetched twice.
+- **`fetch()` admission.** A new range is accepted only once the queue has drained, apart from from inside
+  `batchDone`. That matches how `checkFetch` refuses one today while a certifying block waits.
+- **Unchanged before Leios.** With no certifying block, the queue stays empty and every block takes the path it takes
+  today. Preview, preprod and mainnet are unaffected.
 
 **Expected effect (estimate, to be measured).** Today about 2 EBs/s are fetched, one at a time at about 0.5 s each.
 With `N` in flight the round trips overlap, so roughly `N` times more EBs per second. That holds until the relay's
 bandwidth or its limit on outstanding requests caps it.
 
-**Evaluation before it is decided.**
-- **Same output.** The same Musashi range, with and without D4, must give identical block hashes, transaction lists
-  and order to the listener.
+**Evaluation before D4 is decided.**
+- **Acceptance: the full listener callback trace.** The same Musashi range, with and without D4, must give the
+  identical sequence of listener calls. That is every `onBlock` with its block and transactions, `batchDone`,
+  `onParsingError`, `onEndorserBlockUnavailable` and halt, in order (I5). Comparing successful block hashes alone would
+  miss changes to I5.
 - **Tests:**
-  - strict-mode halt and skip-mode delivery;
-  - rollback;
-  - a disconnect with blocks queued;
-  - a full queue;
-  - `batchDone`, parse error and listener-exception order;
-  - `fetch()` while draining.
-- **Speed.** The Measurement-section check, at a few values of `N`.
+  - **Ordering:** a slow block A with a later block B failing first, in strict and skip mode;
+  - **Disconnects:** before the first delivery, and after the wire `BatchDone` but before listener `batchDone`;
+  - **Listener behaviour:** a listener that throws; a listener that calls `fetch()` from inside `batchDone`;
+  - **Backpressure:** a full queue with a slow front, messages already buffered, and a main-connection keep-alive
+    pending;
+  - **Large blocks:** a block larger than the byte cap;
+  - **Cancellation:** a cancelled request whose reply still arrives;
+  - **Side failure:** a side-connection failure with several requests in flight.
+- **Speed.** End to end on a fixed range and relay address, at a few values of `N`, with the listener's time
+  reported separately.
 
 ## Invariants
 
 - **I1.** Listeners see what they see today: the same blocks, order, thread and outcomes (ADR 0016 I1–I3).
 - **I2.** A side connection has at most one keep-alive in flight.
 - **I3.** A closed side connection sends nothing, and its timer is cancelled.
-- **I4.** Within a start, a side connection is replaced only when it closes, an attempt on it fails, its keep-alive
-  goes unanswered, it has been idle for 5 minutes, or the main connection's address or magic changes.
-- **I5 (D4).** A listener receives the same sequence of calls, with the same blocks and transactions, with or without
-  read-ahead.
-- **I6 (D4).** Memory is bounded: at most the configured blocks and bytes are queued, and reading pauses beyond that.
+- **I4.** Within a start, a side connection is replaced only in these cases:
+  - it closes, an attempt on it fails, or its keep-alive goes unanswered;
+  - it has been idle for 5 minutes;
+  - the main connection's address or magic changes.
 
-## Tests
+  Closing an old connection never detaches its replacement.
+- **I5 (D4).** A listener receives the same sequence of callbacks, with the same blocks and transactions, with or
+  without read-ahead.
+- **I6 (D4).** Memory is bounded: what the caps count stays within them, and reading pauses beyond that.
+
+## Tests (D1, D2)
 
 - **Reuse:**
   - two fetches further apart than the old age limit use one connection;
   - keep-alives are sent and answered in between (I2, I4).
-- **Unanswered keep-alive:** the peer stops answering. The side connection closes, and the next fetch succeeds on a
-  new one.
+- **Unanswered keep-alive:** the peer stops answering. After exactly one ping, the side connection closes, and the next
+  fetch succeeds on a new one.
 - **Close:** after close, no keep-alive is sent (I3).
+- **Idle:** a side connection idle for longer than the limit closes itself on its timer, and the next fetch opens a
+  new one (with a short limit in the test).
+- **Races:**
+  - a tick held across a close and a replacement sends nothing, and leaves the replacement current (I3, I4);
+  - retiring an old connection does not detach its replacement (I4).
+- **A tick that throws** closes the side connection.
 - **A peer that closes the connection:** the next fetch succeeds on a new one (unchanged).
-- **Idle:** a side connection idle for longer than the limit is replaced at the next fetch (with a short limit in the
-  test).
 
 ## Verification
 
@@ -199,6 +251,7 @@ bandwidth or its limit on outstanding requests caps it.
 | Fetches that waited for a new connection | 23 (10.7 s) | 6 (2.8 s) |
 | Main-connection reconnects (public relay) | 9 | 5 |
 
-- **The remaining side connections follow the main connection's reconnects**, each a new start, plus one relay address change.
+- **The remaining side connections follow the main connection's reconnects**, each a new start, plus one relay
+  address change.
 - **No side connection closed itself** for an unanswered keep-alive or for idling.
-- **Blocks/s are unchanged,** as expected (see D3).
+- **Blocks/s are unchanged,** as expected.

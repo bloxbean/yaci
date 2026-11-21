@@ -521,6 +521,75 @@ class EndorserBlockResolverTest {
     }
 
     @Test
+    void retiringAnOldSideConnectionDoesNotDetachItsReplacement() throws Exception {
+        complete(announcement, deadline(5_000));
+        EndorserBlockResolver.Side first = resolver.currentSide();
+        resolver.close();
+        complete(announcement, deadline(5_000));
+        EndorserBlockResolver.Side second = resolver.currentSide();
+
+        resolver.retire(first, new IllegalStateException("a late close of the old connection")); //I4
+
+        assertThat(resolver.currentSide()).isSameAs(second);
+        assertThat(second.closed).isNotDone();
+    }
+
+    @Test
+    void aKeepAliveTickHeldAcrossCloseAndReplacementSendsNothingAndLeavesTheReplacement() throws Exception {
+        resolver.close();
+        resolver = resolver(200, 600_000);
+        java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicBoolean held = new java.util.concurrent.atomic.AtomicBoolean();
+        resolver.beforeKeepAliveTick = () -> {
+            if (held.compareAndSet(false, true)) { //hold the first tick only: the old connection's
+                entered.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+        complete(announcement, deadline(5_000));
+        EndorserBlockResolver.Side first = resolver.currentSide();
+        assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+        long sentByFirst = keepAlivesReceivedOn(1);
+
+        resolver.close(); //the held tick has passed no check yet
+        complete(announcement, deadline(5_000));
+        EndorserBlockResolver.Side second = resolver.currentSide();
+        release.countDown();
+        Thread.sleep(600); //the held tick runs, then the replacement's ticks
+
+        assertThat(first.closed).isDone();
+        assertThat(keepAlivesReceivedOn(1)).isEqualTo(sentByFirst); //I3: the old connection wrote nothing more
+        assertThat(resolver.currentSide()).isSameAs(second); //I4
+        assertThat(second.closed).isNotDone();
+    }
+
+    @Test
+    void aKeepAliveTickThatThrowsClosesTheSideConnection() throws Exception {
+        resolver.close();
+        resolver = resolver(200, 600_000);
+        complete(announcement, deadline(5_000));
+        EndorserBlockResolver.Side side = resolver.currentSide();
+        resolver.beforeKeepAliveTick = () -> {
+            throw new IllegalStateException("a bug in the tick");
+        };
+
+        waitUntil(() -> side.closed.isDone(), 5_000);
+
+        assertThat(side.closed).isCompletedExceptionally();
+        assertThat(resolver.currentSide()).isNull();
+    }
+
+    private long keepAlivesReceivedOn(int connection) {
+        return peer.received.stream()
+                .filter(m -> m.connection() == connection && m.protocol() == 8 && m.tag() == 0).count();
+    }
+
+    @Test
     void anIdleSideConnectionClosesItself() throws Exception {
         resolver.close();
         resolver = resolver(200, 1_000);
