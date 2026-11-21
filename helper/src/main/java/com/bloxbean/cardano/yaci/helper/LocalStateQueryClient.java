@@ -13,7 +13,10 @@ import com.bloxbean.cardano.yaci.core.protocol.localstate.messages.MsgRelease;
 import com.bloxbean.cardano.yaci.helper.api.QueryClient;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.MonoSink;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -40,6 +43,8 @@ import java.util.Optional;
 @Slf4j
 public class LocalStateQueryClient extends QueryClient {
     private LocalStateQueryAgent localStateQueryAgent;
+    /** Callers waiting on the one MsgRelease in flight; guarded by itself. */
+    private final List<MonoSink<Void>> releaseWaiters = new ArrayList<>();
 
     /**
      * Construct a LocalStateQueryClient
@@ -78,11 +83,13 @@ public class LocalStateQueryClient extends QueryClient {
             public void released() {
                 if (log.isDebugEnabled())
                     log.debug("Released >>>");
-                applyMonoSuccess(new MsgRelease(), null);
+                for (MonoSink<Void> waiter : takeReleaseWaiters())
+                    waiter.success();
             }
 
             @Override
             public void onDisconnect() {
+                failReleases("Connection Error !!!");
                 applyError("Connection Error !!!");
             }
         });
@@ -94,13 +101,42 @@ public class LocalStateQueryClient extends QueryClient {
      * @return
      */
     public Mono<Void> release() {
+        // completes once MsgRelease is sent and the agent is Idle, so a query after it acquires first; calls while a
+        // release is in flight wait on that one, as a second MsgRelease would arrive in Idle
         return Mono.create(monoSink -> {
             if (log.isDebugEnabled())
                 log.debug("Release()");
-            MsgRelease msgRelease = localStateQueryAgent.release();
+            synchronized (releaseWaiters) {
+                releaseWaiters.add(monoSink);
+                if (releaseWaiters.size() > 1)
+                    return;
+            }
+            // registered first: a disconnect after this check still fails the waiters through onDisconnect
+            if (!localStateQueryAgent.isChannelActive()) {
+                failReleases("Not connected");
+                return;
+            }
+            try {
+                localStateQueryAgent.release();
+            } catch (RuntimeException e) {
+                failReleases(e.getMessage());
+                return;
+            }
             localStateQueryAgent.sendNextMessage();
-            monoSink.success(null);
         });
+    }
+
+    private List<MonoSink<Void>> takeReleaseWaiters() {
+        synchronized (releaseWaiters) {
+            List<MonoSink<Void>> waiters = new ArrayList<>(releaseWaiters);
+            releaseWaiters.clear();
+            return waiters;
+        }
+    }
+
+    private void failReleases(String reason) {
+        for (MonoSink<Void> waiter : takeReleaseWaiters())
+            waiter.error(new RuntimeException(reason));
     }
 
     /**
@@ -119,18 +155,20 @@ public class LocalStateQueryClient extends QueryClient {
      * @return Mono with acquired point
      */
     public Mono<Optional<Point>> acquire(Point point) {
-        if (localStateQueryAgent.getCurrentState() == LocalStateQueryState.Acquired) {
-            log.info("Already in acquired state. Ignoring the acquire call");
-            return Mono.just(Optional.empty());
-        }
+        // decided at subscription, as in executeQuery: release().then(acquire()) acquires again
+        return Mono.defer(() -> {
+            if (localStateQueryAgent.getCurrentState() == LocalStateQueryState.Acquired) {
+                log.info("Already in acquired state. Ignoring the acquire call");
+                return Mono.just(Optional.<Point>empty());
+            }
+            return Mono.create(monoSink -> {
+                if (log.isDebugEnabled())
+                    log.debug("Try to acquire again");
+                MsgAcquire msgAcquire = localStateQueryAgent.acquire(point);
+                storeMonoSinkReference(msgAcquire, monoSink);
 
-        return Mono.create(monoSink -> {
-            if (log.isDebugEnabled())
-                log.debug("Try to acquire again");
-            MsgAcquire msgAcquire = localStateQueryAgent.acquire(point);
-            storeMonoSinkReference(msgAcquire, monoSink);
-
-            localStateQueryAgent.sendNextMessage();
+                localStateQueryAgent.sendNextMessage();
+            });
         });
     }
 
@@ -168,6 +206,11 @@ public class LocalStateQueryClient extends QueryClient {
      * @return Mono with instance of {@link QueryResult}
      */
     public <T extends QueryResult> Mono<T> executeQuery(Query query) {
+        // decided at subscription, not when the chain is built: a release().then(executeQuery(..)) runs in Idle
+        return Mono.defer(() -> dispatch(query));
+    }
+
+    private <T extends QueryResult> Mono<T> dispatch(Query query) {
         if (localStateQueryAgent.getCurrentState() == LocalStateQueryState.Idle) {
             //Auto acquire
             return Mono.create(monoSink -> {

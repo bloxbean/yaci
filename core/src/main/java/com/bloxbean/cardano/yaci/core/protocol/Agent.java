@@ -169,8 +169,11 @@ public abstract class Agent<T extends AgentListener> {
                     }
                     log.debug("Segment {}/{} sent successfully", segmentIndex + 1, totalSegments);
                 } else {
-                    log.error("Failed to send segment {}/{} for protocol {}",
+                    log.error("Failed to send segment {}/{} for protocol {}, closing the connection",
                             segmentIndex + 1, totalSegments, getProtocolId(), future.cause());
+                    // the peer and this agent no longer agree on the protocol state; closing it lets the session's
+                    // disconnect handling fail whatever waits on this message
+                    ch.close();
                 }
             });
             promises.add(promise);
