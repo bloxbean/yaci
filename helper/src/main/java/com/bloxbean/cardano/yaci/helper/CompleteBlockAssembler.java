@@ -11,6 +11,7 @@ import com.bloxbean.cardano.yaci.core.model.byron.ByronEbHead;
 import com.bloxbean.cardano.yaci.core.model.byron.ByronMainBlock;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Point;
 import com.bloxbean.cardano.yaci.core.protocol.chainsync.messages.Tip;
+import com.bloxbean.cardano.yaci.core.util.HexUtil;
 import com.bloxbean.cardano.yaci.helper.listener.BlockChainDataListener;
 import com.bloxbean.cardano.yaci.helper.listener.TransactionListBuilder;
 import com.bloxbean.cardano.yaci.helper.model.Transaction;
@@ -18,9 +19,14 @@ import com.bloxbean.cardano.yaci.helper.model.leios.EndorserBlockUnavailableEven
 import com.bloxbean.cardano.yaci.helper.model.leios.EndorserBlockUnavailableEvent.Outcome;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -48,6 +54,10 @@ import java.util.function.Consumer;
 final class CompleteBlockAssembler implements BlockChainDataListener {
     static final long BUDGET_MILLIS = 45_000;
     static final long PAUSE_MILLIS = 1_000;
+    /** D4: at most this many callbacks wait in order behind a certifying block (with read-ahead). */
+    static final int MAX_PENDING = 512;
+    /** D4: at most this many certifying blocks are fetched ahead. */
+    static final int MAX_READ_AHEAD = 8;
 
     /** One attempt to complete a certifying block with its EB's transactions, checked (D3a) and mapped. */
     interface EndorserBlockSource {
@@ -84,14 +94,41 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
     private volatile boolean halted;
     private volatile Call current;
     private volatile Point knownParent;
+    /**
+     * D4 read-ahead (ADR 0017, being evaluated): the number of certifying blocks whose EB fetches run ahead of
+     * delivery; 0 is the synchronous path of ADR 0016 D3b (BlockSync, and BlockRangeSync unless enabled).
+     */
+    private final int readAhead;
+    /** Runs the fetches ahead of delivery (read-ahead only). */
+    private final ExecutorService prefetcher;
+    /** Completed when the start is retired or halts: fetches ahead stop. */
+    private final CompletableFuture<Void> prefetchCancelled = new CompletableFuture<>();
+    /** Callbacks waiting to be delivered in order (read-ahead only), guarded by itself. */
+    private final ArrayDeque<Pending> pending = new ArrayDeque<>();
+    private int pendingCertifying;
+    /** The block of the onBlock call in progress (read-ahead, main thread only): its listener exception propagates. */
+    private Block reading;
+
+    /** One callback in order: a block (a certifying one with its fetch ahead) or another callback (a marker). */
+    private record Pending(Era era, Block block, List<Transaction> transactions, CompletableFuture<Block> prefetch,
+                           Runnable marker) {
+    }
 
     /**
-     * @param retired the start's retirement flag, owned by {@link SyncControl}: once set, a certifying block's call
-     *                in progress, or any that comes later, is cancelled
+     * @param retired   the start's retirement flag, owned by {@link SyncControl}: once set, a certifying block's call
+     *                  in progress, or any that comes later, is cancelled
+     * @param readAhead certifying blocks fetched ahead of delivery (D4, at most {@link #MAX_READ_AHEAD}); 0 for the
+     *                  synchronous path
      */
     CompleteBlockAssembler(BlockChainDataListener listener, EbAnnouncementCache cache, EndorserBlockSource source,
                            boolean skipUnavailable, AtomicBoolean retired, Consumer<CompleteBlockAssembler> onHalt,
-                           long budgetMillis, long pauseMillis) {
+                           long budgetMillis, long pauseMillis, int readAhead) {
+        this.readAhead = Math.clamp(readAhead, 0, MAX_READ_AHEAD);
+        this.prefetcher = this.readAhead > 0 ? Executors.newFixedThreadPool(this.readAhead, task -> {
+            Thread thread = new Thread(task, "yaci-leios-prefetch");
+            thread.setDaemon(true);
+            return thread;
+        }) : null;
         this.listener = listener;
         this.cache = cache;
         this.source = source;
@@ -107,6 +144,8 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
         Call call = current;
         if (call != null)
             call.cancel();
+        if (stopReadAhead())
+            forwarding = false; //blocks were dropped: delivering later ones would leave a gap
     }
 
     /**
@@ -116,6 +155,7 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
     void replaced() {
         replaced = true;
         forwarding = false;
+        stopReadAhead();
     }
 
     /** True once this start halted (strict mode, budget exhausted). */
@@ -135,25 +175,205 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
                     "Call restart(listener) then fetch(from, to)");
         if (inCall)
             throw new IllegalStateException("A certifying block of the current range waits for its endorser block");
+        if (pendingCount() > 0)
+            throw new IllegalStateException("Blocks of the current range are still being delivered");
     }
 
     @Override
     public void onBlock(Era era, Block block, List<Transaction> transactions) {
         if (!forwarding)
             return;
+        if (readAhead > 0) {
+            readAhead(era, block, transactions);
+            return;
+        }
         if (!Boolean.TRUE.equals(block.getHeader().getHeaderBody().getLeiosCertInBody())) {
             deliver(era, block, transactions);
             return;
         }
 
+        complete(era, block, transactions, null);
+    }
+
+    /** One certifying block's call: cancelled at once if the start is already retired. */
+    private void complete(Era era, Block block, List<Transaction> transactions, CompletableFuture<Block> fetchedAhead) {
         Call call = new Call();
         current = call;
         try {
             if (retired.get())
                 call.cancel();
-            completeAndDeliver(call, era, block, transactions);
+            completeAndDeliver(call, era, block, transactions, fetchedAhead);
         } finally {
             current = null;
+        }
+    }
+
+    // ---- D4 read-ahead (ADR 0017, being evaluated) ----
+
+    /**
+     * A block with read-ahead: an ordinary one with nothing waiting is delivered at once, as without read-ahead;
+     * otherwise it waits in order, a certifying one with its EB fetch started. The calling thread then delivers what
+     * is ready, and waits for the front while the queue is full.
+     */
+    private void readAhead(Era era, Block block, List<Transaction> transactions) {
+        HeaderBody header = block.getHeader().getHeaderBody();
+        //on read, not on delivery: a certifying child waiting behind its parent finds the parent's announcement
+        cache.put(header.getBlockHash(), header.getSlot(), header.getEbAnnouncement());
+        boolean certifying = Boolean.TRUE.equals(header.getLeiosCertInBody());
+        if (!certifying && pendingCount() == 0) {
+            deliver(era, block, transactions);
+            return;
+        }
+        reading = block;
+        try {
+            enqueue(new Pending(era, block, transactions, certifying ? prefetch(block) : null, null));
+            drain(false);
+            while (forwarding && isFull())
+                drain(true);
+        } finally {
+            reading = null;
+        }
+    }
+
+    /** Another callback with read-ahead: in its place behind the blocks waiting, or at once when none waits. */
+    private void inOrder(Runnable call) {
+        if (readAhead > 0 && pendingCount() > 0) {
+            enqueue(new Pending(null, null, null, null, call));
+            drain(false);
+        } else {
+            call.run();
+        }
+    }
+
+    private CompletableFuture<Block> prefetch(Block block) {
+        Point parent = knownParent;
+        try {
+            return CompletableFuture.supplyAsync(() -> {
+                //no budget of its own: the block's budget starts at the front; the resolver's stall caps bound it
+                AttemptDeadline deadline = new AttemptDeadline(System.nanoTime() + TimeUnit.DAYS.toNanos(1),
+                        prefetchCancelled);
+                try {
+                    return source.complete(block, parent, deadline);
+                } catch (RuntimeException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new CompletionException(e);
+                }
+            }, prefetcher);
+        } catch (RejectedExecutionException e) { //stopped: the front attempt reports it
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    private void enqueue(Pending entry) {
+        synchronized (pending) {
+            pending.add(entry);
+            if (entry.prefetch() != null)
+                pendingCertifying++;
+        }
+    }
+
+    private int pendingCount() {
+        synchronized (pending) {
+            return pending.size();
+        }
+    }
+
+    /** Full: as many certifying blocks waiting as are fetched ahead, twice over, or {@link #MAX_PENDING} callbacks. */
+    private boolean isFull() {
+        synchronized (pending) {
+            return pendingCertifying >= 2 * readAhead || pending.size() >= MAX_PENDING;
+        }
+    }
+
+    /**
+     * Delivers from the front, in order, while the front is ready. With {@code waitForFront} it delivers the front
+     * even if its fetch is still running: that block's call (budget, RETRYING, skip, halt) starts here, at the front,
+     * exactly as without read-ahead; its fetch ahead is its first attempt.
+     */
+    private void drain(boolean waitForFront) {
+        while (forwarding) {
+            Pending front;
+            synchronized (pending) {
+                front = pending.peek();
+                if (front == null)
+                    return;
+                if (front.prefetch() != null && !front.prefetch().isDone() && !waitForFront)
+                    return;
+                pending.poll();
+                if (front.prefetch() != null)
+                    pendingCertifying--;
+            }
+            waitForFront = false; //one front at a time: then only what is ready
+            if (front.marker() != null)
+                runMarker(front.marker());
+            else if (front.prefetch() == null)
+                deliverInOrder(front.era(), front.block(), front.transactions());
+            else
+                completeInOrder(front);
+        }
+    }
+
+    /** batchDone and the like: every block before it is delivered first. */
+    private void drainAll() {
+        while (forwarding && pendingCount() > 0)
+            drain(true);
+    }
+
+    private void completeInOrder(Pending front) {
+        try {
+            complete(front.era(), front.block(), front.transactions(), front.prefetch());
+        } catch (RuntimeException e) {
+            listenerFailed(front.block(), e);
+        }
+        if (!forwarding)
+            stopReadAhead(); //halted or cancelled: nothing behind it is delivered
+    }
+
+    private void deliverInOrder(Era era, Block block, List<Transaction> transactions) {
+        try {
+            deliver(era, block, transactions);
+        } catch (RuntimeException e) {
+            listenerFailed(block, e);
+        }
+    }
+
+    /**
+     * A listener exception on the block being read propagates to BlockfetchAgent, as without read-ahead. On a block
+     * delivered later it becomes that block's onParsingError in its place, with the block's bytes only when
+     * YaciConfig.returnBlockCbor is on.
+     */
+    private void listenerFailed(Block block, RuntimeException e) {
+        if (block == reading)
+            throw e;
+
+        log.error("Error in delivering block {}", block.getHeader().getHeaderBody().getBlockNumber(), e);
+        if (!forwarding)
+            return;
+        String cbor = block.getCbor(); //the block's bytes when YaciConfig.returnBlockCbor is on
+        listener.onParsingError(new BlockParseRuntimeException(block.getHeader().getHeaderBody().getBlockNumber(),
+                cbor != null ? HexUtil.decodeHexString(cbor) : null, e));
+    }
+
+    private void runMarker(Runnable marker) {
+        try {
+            marker.run();
+        } catch (RuntimeException e) {
+            log.error("A listener callback delivered in order failed", e);
+        }
+    }
+
+    /** @return true if callbacks were waiting, and are now dropped */
+    private boolean stopReadAhead() {
+        if (readAhead == 0)
+            return false;
+        prefetchCancelled.complete(null);
+        prefetcher.shutdownNow();
+        synchronized (pending) {
+            boolean dropped = !pending.isEmpty();
+            pending.clear();
+            pendingCertifying = 0;
+            return dropped;
         }
     }
 
@@ -161,7 +381,8 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
      * Attempts while time is left; after a failure, RETRYING and a pause while time is left; otherwise exactly one
      * terminal outcome.
      */
-    private void completeAndDeliver(Call call, Era era, Block block, List<Transaction> transactions) {
+    private void completeAndDeliver(Call call, Era era, Block block, List<Transaction> transactions,
+                                    CompletableFuture<Block> fetchedAhead) {
         HeaderBody header = block.getHeader().getHeaderBody();
         AttemptDeadline deadline = new AttemptDeadline(
                 System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMillis), call.cancelled);
@@ -169,6 +390,7 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
         String lastLogged = null;
         boolean interrupted = false;
         int attempt = 0;
+        CompletableFuture<Block> ahead = fetchedAhead;
         while (!interrupted && deadline.remainingMillis() > 0) {
             if (call.state.get() != State.ACTIVE) {
                 cancelled();
@@ -178,7 +400,8 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
             Block complete;
             List<Transaction> completeTransactions;
             try {
-                complete = source.complete(block, knownParent, deadline);
+                complete = ahead != null ? deadline.await(ahead, null, "the endorser block fetched ahead")
+                        : source.complete(block, knownParent, deadline);
                 completeTransactions = TransactionListBuilder.build(complete);
                 deadline.check("before the block was complete");
             } catch (InterruptedException e) {
@@ -190,6 +413,11 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
                 if (e instanceof CancellationException && call.state.get() != State.ACTIVE) {
                     cancelled();
                     return;
+                }
+                if (ahead != null) { //the fetch ahead failed: internal, no callback; the front starts afresh
+                    ahead = null;
+                    attempt--;
+                    continue;
                 }
                 reason = e.getMessage() != null ? e.getMessage() : e.toString();
                 if (!reason.equals(lastLogged))
@@ -303,13 +531,13 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
     @Override
     public void onByronBlock(ByronMainBlock byronBlock) {
         if (forwarding)
-            listener.onByronBlock(byronBlock);
+            inOrder(() -> listener.onByronBlock(byronBlock));
     }
 
     @Override
     public void onByronEbBlock(ByronEbBlock byronEbBlock) {
         if (forwarding)
-            listener.onByronEbBlock(byronEbBlock);
+            inOrder(() -> listener.onByronEbBlock(byronEbBlock));
     }
 
     @Override
@@ -321,11 +549,13 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
     @Override
     public void batchStarted() {
         if (forwarding)
-            listener.batchStarted();
+            inOrder(listener::batchStarted);
     }
 
+    /** With read-ahead, after every block of the range: a listener may call fetch() from inside it, as today. */
     @Override
     public void batchDone() {
+        drainAll();
         if (forwarding)
             listener.batchDone();
     }
@@ -333,7 +563,7 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
     @Override
     public void noBlockFound(Point from, Point to) {
         if (forwarding)
-            listener.noBlockFound(from, to);
+            inOrder(() -> listener.noBlockFound(from, to));
     }
 
     @Override
@@ -350,8 +580,11 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
             listener.intersactNotFound(tip);
     }
 
+    /** With read-ahead, after every block received before it, as batchDone. */
     @Override
     public void onDisconnect() {
+        if (forwarding)
+            drainAll();
         if (forwarding || (replaced && !halted))
             listener.onDisconnect();
     }
@@ -359,7 +592,7 @@ final class CompleteBlockAssembler implements BlockChainDataListener {
     @Override
     public void onParsingError(BlockParseRuntimeException e) {
         if (forwarding)
-            listener.onParsingError(e);
+            inOrder(() -> listener.onParsingError(e));
     }
 
     @Override

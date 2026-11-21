@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -265,7 +266,7 @@ class CompleteBlockAssemblerTest {
         source.fallback = "fail";
         List<Runnable> haltTasks = new CopyOnWriteArrayList<>();
         SyncControl<FakeFetcher> control = new SyncControl<>(LeiosConfig.defaultConfig(), cache, owner -> source,
-                200, 50, haltTasks::add);
+                200, 50, haltTasks::add, 0);
         FakeFetcher old = start(control, new Recorder());
 
         //the old connection's thread halts and stays inside its agent's monitor (receiveResponse)
@@ -817,7 +818,7 @@ class CompleteBlockAssemblerTest {
                 });
         CompleteBlockAssembler assembler = new CompleteBlockAssembler(recording, cache, source, false,
                 new AtomicBoolean(), d -> {
-        }, 1_000, 100);
+        }, 1_000, 100, 0);
 
         List<String> expected = new ArrayList<>();
         for (Method method : BlockChainDataListener.class.getMethods()) {
@@ -836,6 +837,338 @@ class CompleteBlockAssemblerTest {
 
     // ---- helpers
 
+    // ---- ADR 0017 D4: read-ahead (BlockRangeSync, being evaluated)
+
+    @Test
+    void readAheadFetchesLaterEndorserBlocksWhileTheFrontWaitsAndDeliversInOrderOnTheMainThread() throws Exception {
+        Recorder recorder = tracing(new Recorder());
+        FakeFetcher client = start(readAheadControl(false, 5_000, 2), recorder);
+        CompletableFuture<Void> gate = gate(1);
+
+        Thread loop = range(client, block(1, true), block(2, false), block(3, true), block(4, false));
+        waitUntil(() -> source.calls.get() == 2, 5_000); //block 3's fetch runs while block 1's waits
+        assertThat(recorder.calls).isEmpty();
+        gate.complete(null);
+        loop.join(10_000);
+
+        assertThat(recorder.calls).containsExactly("b1", "b2", "b3", "b4", "batchDone");
+        assertThat(recorder.threads).containsOnly(loop);
+        assertThat(recorder.events).isEmpty();
+    }
+
+    @Test
+    void withReadAheadABlockWithoutACertificateAndNothingWaitingIsDeliveredAtOnce() {
+        Recorder recorder = tracing(new Recorder());
+        FakeFetcher client = start(readAheadControl(false, 5_000, 2), recorder);
+
+        client.wired.onBlock(Era.Dijkstra, block(1, false), List.of());
+
+        assertThat(recorder.calls).containsExactly("b1");
+        assertThat(recorder.threads).containsOnly(Thread.currentThread());
+        assertThat(source.calls.get()).isZero();
+    }
+
+    @Test
+    void aLaterBlockFailingFirstIsReportedOnlyAfterTheFrontIsDeliveredStrict() throws Exception {
+        Recorder recorder = tracing(new Recorder());
+        FakeFetcher client = start(readAheadControl(false, 1_500, 2), recorder);
+        CompletableFuture<Void> gate = gate(1);
+        source.fallback = "fail";
+
+        Thread loop = range(client, block(1, true), block(2, false), block(3, true), block(4, false));
+        waitUntil(() -> source.calls.get() >= 2, 5_000); //block 3 failed behind the front: nothing reported
+        Thread.sleep(100);
+        assertThat(recorder.calls).isEmpty();
+        gate.complete(null);
+        loop.join(10_000);
+
+        assertThat(recorder.calls.subList(0, 2)).containsExactly("b1", "b2");
+        assertThat(recorder.calls.get(recorder.calls.size() - 1)).isEqualTo("SYNC_HALTED");
+        assertThat(recorder.calls.subList(2, recorder.calls.size() - 1)).containsOnly("RETRYING");
+        assertThat(recorder.events).allMatch(e -> e.getCertifyingBlockNumber() == 3);
+        assertThat(recorder.calls).doesNotContain("b4", "batchDone");
+        assertThat(source.closes.get()).isPositive(); //the side connections are closed at the halt
+    }
+
+    @Test
+    void aLaterBlockFailingFirstIsDeliveredWithoutItsTransactionsInItsPlaceWhenSkipping() throws Exception {
+        Recorder recorder = tracing(new Recorder());
+        FakeFetcher client = start(readAheadControl(true, 1_500, 2), recorder);
+        CompletableFuture<Void> gate = gate(1);
+        source.fallback = "fail";
+
+        Thread loop = range(client, block(1, true), block(2, false), block(3, true), block(4, false));
+        waitUntil(() -> source.calls.get() >= 2, 5_000);
+        gate.complete(null);
+        loop.join(10_000);
+
+        List<String> calls = recorder.calls;
+        assertThat(calls.subList(0, 2)).containsExactly("b1", "b2");
+        assertThat(calls.subList(calls.size() - 4, calls.size()))
+                .containsExactly("DELIVERED_WITHOUT_EB_TXS", "b3", "b4", "batchDone");
+        assertThat(calls.subList(2, calls.size() - 4)).containsOnly("RETRYING");
+    }
+
+    @Test
+    void aFetchAheadThatFailedIsRetriedAtTheFrontWithoutACallback() throws Exception {
+        Recorder recorder = tracing(new Recorder());
+        FakeFetcher client = start(readAheadControl(false, 5_000, 2), recorder);
+        CompletableFuture<Void> gate = gate(1);
+        source.script(3, "fail", "ok");
+
+        Thread loop = range(client, block(1, true), block(3, true));
+        waitUntil(() -> source.calls.get() == 2, 5_000);
+        Thread.sleep(50); //block 3's fetch ahead has failed
+        gate.complete(null);
+        loop.join(10_000);
+
+        assertThat(recorder.calls).containsExactly("b1", "b3", "batchDone");
+        assertThat(recorder.events).isEmpty();
+        assertThat(source.calls.get()).isEqualTo(3);
+    }
+
+    @Test
+    void aListenerExceptionOnAQueuedBlockIsThatBlocksParsingErrorInItsPlace() throws Exception {
+        Recorder recorder = tracing(new Recorder());
+        Runnable trace = recorder.onBlockHook;
+        recorder.onBlockHook = () -> {
+            trace.run();
+            if (recorder.blocks.get(recorder.blocks.size() - 1).getHeader().getHeaderBody().getBlockNumber() == 2)
+                throw new IllegalStateException("listener");
+        };
+        FakeFetcher client = start(readAheadControl(false, 5_000, 2), recorder);
+        CompletableFuture<Void> gate = gate(1);
+
+        Thread loop = range(client, block(1, true), block(2, false), block(3, false));
+        waitUntil(() -> source.calls.get() == 1, 5_000);
+        gate.complete(null);
+        loop.join(10_000);
+
+        assertThat(recorder.calls).containsExactly("b1", "b2", "onParsingError", "b3", "batchDone");
+        assertThat(recorder.parsingErrors.get(0).getBlockNumber()).isEqualTo(2);
+    }
+
+    @Test
+    void withReadAheadAFetchFromInsideBatchDoneIsAccepted() throws Exception {
+        Recorder recorder = tracing(new Recorder());
+        SyncControl<FakeFetcher> control = readAheadControl(false, 5_000, 2);
+        AtomicReference<String> refusal = new AtomicReference<>("not called");
+        recorder.onBatchDone = () -> refusal.set(refusal(control));
+        FakeFetcher client = start(control, recorder);
+        CompletableFuture<Void> gate = gate(1);
+
+        Thread loop = range(client, block(1, true), block(2, false));
+        waitUntil(() -> source.calls.get() == 1, 5_000);
+        assertThat(refusal(control)).isNotNull(); //a range is still being delivered
+        gate.complete(null);
+        loop.join(10_000);
+
+        assertThat(recorder.calls).containsExactly("b1", "b2", "batchDone");
+        assertThat(refusal.get()).isNull();
+    }
+
+    @Test
+    void aFullQueueHoldsTheMainThreadUntilTheFrontIsDelivered() throws Exception {
+        Recorder recorder = tracing(new Recorder());
+        FakeFetcher client = start(readAheadControl(false, 5_000, 1), recorder); //at most 2 certifying blocks wait
+        CompletableFuture<Void> gate = gate(1);
+        AtomicInteger read = new AtomicInteger();
+
+        Thread loop = new Thread(() -> {
+            for (long n = 1; n <= 4; n++) {
+                client.wired.onBlock(Era.Dijkstra, block(n, true), List.of());
+                read.incrementAndGet();
+            }
+            client.blockFetch.batchDone();
+        });
+        loop.start();
+        waitUntil(() -> read.get() == 1, 5_000);
+        Thread.sleep(100);
+        assertThat(read.get()).isEqualTo(1); //block 2 filled the queue: its call waits for block 1
+        assertThat(source.calls.get()).isEqualTo(1); //one fetch ahead at a time
+        gate.complete(null);
+        loop.join(10_000);
+
+        assertThat(recorder.calls).containsExactly("b1", "b2", "b3", "b4", "batchDone");
+    }
+
+    @Test
+    void stopCancelsTheFetchesAheadAndDeliversNothingMore() throws Exception {
+        Recorder recorder = tracing(new Recorder());
+        SyncControl<FakeFetcher> control = readAheadControl(false, 5_000, 2);
+        FakeFetcher client = start(control, recorder);
+        source.fallback = "hang";
+
+        Thread loop = range(client, block(1, true), block(2, false), block(3, true));
+        waitUntil(() -> source.calls.get() == 2, 5_000);
+        stop(control);
+        loop.join(10_000);
+
+        assertThat(loop.isAlive()).isFalse();
+        assertThat(recorder.calls).isEmpty();
+        assertThat(recorder.events).isEmpty();
+        assertThat(source.closes.get()).isPositive();
+    }
+
+    @Test
+    void theCallbackSequenceIsTheSameWithAndWithoutReadAhead() throws Exception {
+        List<String> expected = null;
+        for (int readAhead : new int[]{0, 1, 2, 8}) {
+            Recorder recorder = tracing(new Recorder());
+            FakeFetcher client = start(readAheadControl(false, 5_000, readAhead), recorder);
+            Thread loop = new Thread(() -> {
+                client.blockFetch.batchStarted();
+                for (long n = 1; n <= 12; n++) {
+                    client.wired.onBlock(Era.Dijkstra, block(n, n % 3 != 2), List.of());
+                    if (n == 6)
+                        client.blockFetch.onParsingError(new BlockParseRuntimeException(7L, new byte[0],
+                                new RuntimeException("block 7")));
+                }
+                client.blockFetch.batchDone();
+            });
+            loop.start();
+            loop.join(10_000);
+            if (expected == null)
+                expected = List.copyOf(recorder.calls);
+            assertThat(recorder.calls).as("read-ahead %d", readAhead).isEqualTo(expected);
+        }
+        assertThat(expected).startsWith("batchStarted", "b1", "b2").endsWith("b12", "batchDone")
+                .contains("onParsingError");
+    }
+
+    @Test
+    void stopWithBlocksQueuedDeliversNothingMoreFromThatStart() throws Exception {
+        Recorder recorder = tracing(new Recorder());
+        SyncControl<FakeFetcher> control = readAheadControl(false, 5_000, 2);
+        FakeFetcher client = start(control, recorder);
+        gate(1);
+
+        client.wired.onBlock(Era.Dijkstra, block(1, true), List.of());
+        client.wired.onBlock(Era.Dijkstra, block(2, false), List.of()); //both queued; the main thread is idle
+        stop(control);
+        client.wired.onBlock(Era.Dijkstra, block(3, false), List.of()); //already decoded
+        client.blockFetch.batchDone();
+
+        assertThat(recorder.calls).isEmpty();
+    }
+
+    @Test
+    void aDisconnectDeliversTheBlocksReceivedBeforeItFirst() throws Exception {
+        Recorder recorder = tracing(new Recorder());
+        FakeFetcher client = start(readAheadControl(false, 5_000, 2), recorder);
+        CompletableFuture<Void> gate = gate(1);
+
+        client.wired.onBlock(Era.Dijkstra, block(1, true), List.of());
+        client.wired.onBlock(Era.Dijkstra, block(2, false), List.of());
+        Thread loop = new Thread(client.blockFetch::onDisconnect);
+        loop.start();
+        Thread.sleep(100);
+        assertThat(recorder.calls).isEmpty(); //it waits for block 1, as the synchronous path would have
+        gate.complete(null);
+        loop.join(10_000);
+
+        assertThat(recorder.calls).containsExactly("b1", "b2", "onDisconnect");
+    }
+
+    @Test
+    void atMostMaxPendingCallbacksWaitBehindTheFront() throws Exception {
+        Recorder recorder = tracing(new Recorder());
+        FakeFetcher client = start(readAheadControl(false, 5_000, 2), recorder);
+        CompletableFuture<Void> gate = gate(1);
+        AtomicInteger read = new AtomicInteger();
+        int total = CompleteBlockAssembler.MAX_PENDING + 50;
+
+        Thread loop = new Thread(() -> {
+            client.wired.onBlock(Era.Dijkstra, block(1, true), List.of());
+            for (long n = 2; n <= total; n++) {
+                client.wired.onBlock(Era.Dijkstra, block(n, false), List.of());
+                read.incrementAndGet();
+            }
+            client.blockFetch.batchDone();
+        });
+        loop.start();
+        waitUntil(() -> read.get() == CompleteBlockAssembler.MAX_PENDING - 2, 5_000);
+        Thread.sleep(100);
+        assertThat(read.get()).isEqualTo(CompleteBlockAssembler.MAX_PENDING - 2); //the queue is full
+        gate.complete(null);
+        loop.join(10_000);
+
+        assertThat(recorder.calls).hasSize(total + 1).endsWith("b" + total, "batchDone");
+    }
+
+    @Test
+    void aPooledSourceGivesEachCallItsOwnSourceAndClosesThemAll() throws Exception {
+        FakeSource second = new FakeSource();
+        PooledEndorserBlockSource pool = new PooledEndorserBlockSource(List.of(source, second));
+        CompletableFuture<Void> gate = gate(1);
+        AttemptDeadline deadline = new AttemptDeadline(System.nanoTime() + TimeUnit.SECONDS.toNanos(5),
+                new CompletableFuture<>());
+
+        CompletableFuture<Block> first = CompletableFuture.supplyAsync(() -> call(pool, block(1, true), deadline));
+        waitUntil(() -> source.calls.get() == 1, 5_000);
+        assertThat(pool.complete(block(2, true), null, deadline).getHeader().getHeaderBody().getBlockNumber())
+                .isEqualTo(2);
+        assertThat(second.calls.get()).isEqualTo(1); //the first source is busy
+        gate.complete(null);
+        assertThat(first.get(5, TimeUnit.SECONDS).getHeader().getHeaderBody().getBlockNumber()).isEqualTo(1);
+
+        pool.close();
+        assertThat(source.closes.get()).isEqualTo(1);
+        assertThat(second.closes.get()).isEqualTo(1);
+    }
+
+    private static Block call(PooledEndorserBlockSource pool, Block block, AttemptDeadline deadline) {
+        try {
+            return pool.complete(block, null, deadline);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private SyncControl<FakeFetcher> readAheadControl(boolean skip, long budgetMillis, int readAhead) {
+        LeiosConfig config = LeiosConfig.builder().skipUnavailableEndorserBlocks(skip).build();
+        return new SyncControl<>(config, cache, owner -> source, budgetMillis, 20, SyncControl::runOnNewThread,
+                readAhead);
+    }
+
+    /** Block {@code number}'s first attempt waits until the returned future completes. */
+    private CompletableFuture<Void> gate(long number) {
+        CompletableFuture<Void> gate = new CompletableFuture<>();
+        source.gates.put(number, gate);
+        source.script(number, "gate");
+        return gate;
+    }
+
+    /** Records "b&lt;number&gt;" for each block and each event's outcome, in {@code calls}. */
+    private static Recorder tracing(Recorder recorder) {
+        recorder.onBlockHook = () -> {
+            recorder.calls.remove(recorder.calls.size() - 1);
+            recorder.calls.add("b" + recorder.blocks.get(recorder.blocks.size() - 1).getHeader().getHeaderBody()
+                    .getBlockNumber());
+        };
+        recorder.onUnavailable = event -> recorder.calls.add(event.getOutcome().name());
+        return recorder;
+    }
+
+    /** A synthetic block: number, slot, hashes, and the certificate flag. */
+    private static Block block(long number, boolean certifying) {
+        HeaderBody body = HeaderBody.builder().blockNumber(number).slot(number * 10)
+                .blockHash(String.format("%064x", number)).prevHash(String.format("%064x", number - 1))
+                .leiosCertInBody(certifying ? Boolean.TRUE : null).build();
+        return Block.builder().era(Era.Dijkstra).header(BlockHeader.builder().headerBody(body).build()).build();
+    }
+
+    /** The main connection's thread: the blocks of one range, then the wire BatchDone. */
+    private static Thread range(FakeFetcher client, Block... blocks) {
+        Thread thread = new Thread(() -> {
+            for (Block block : blocks)
+                client.wired.onBlock(Era.Dijkstra, block, List.of());
+            client.blockFetch.batchDone();
+        });
+        thread.start();
+        return thread;
+    }
+
     private static final List<String> EVERY_CALLBACK = List.of("onDisconnect", "onDisconnect", "intersactFound",
             "intersactNotFound", "onRollback", "rollforward", "rollforward", "rollforwardByronEra",
             "rollforwardByronEra", "rollforwardByronEra", "rollforwardByronEra", "noBlockFound", "onParsingError",
@@ -849,7 +1182,7 @@ class CompleteBlockAssemblerTest {
     private SyncControl<FakeFetcher> control(boolean skip, long budgetMillis, long pauseMillis) {
         LeiosConfig config = LeiosConfig.builder().skipUnavailableEndorserBlocks(skip).build();
         return new SyncControl<>(config, cache, owner -> source, budgetMillis, pauseMillis,
-                SyncControl::runOnNewThread);
+                SyncControl::runOnNewThread, 0);
     }
 
     /** As {@code BlockSync.startSync}. */
@@ -956,6 +1289,7 @@ class CompleteBlockAssemblerTest {
      */
     final class FakeSource implements CompleteBlockAssembler.EndorserBlockSource {
         final Map<Long, Deque<String>> scripts = new ConcurrentHashMap<>();
+        final Map<Long, CompletableFuture<Void>> gates = new ConcurrentHashMap<>();
         final AtomicInteger calls = new AtomicInteger();
         final AtomicInteger closes = new AtomicInteger();
         final List<Thread> threads = new CopyOnWriteArrayList<>();
@@ -990,6 +1324,7 @@ class CompleteBlockAssemblerTest {
                     throw new IllegalStateException("no endorser block");
                 }
                 case "hang" -> deadline.await(new java.util.concurrent.CompletableFuture<>(), null, "endorser block");
+                case "gate" -> deadline.await(gates.get(header.getBlockNumber()), null, "the gate");
                 case "late" -> {
                     while (deadline.remainingMillis() > 0)
                         Thread.sleep(5);
