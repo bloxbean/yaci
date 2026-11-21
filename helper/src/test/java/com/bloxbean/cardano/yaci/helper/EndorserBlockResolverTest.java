@@ -59,7 +59,7 @@ class EndorserBlockResolverTest {
         point = new LeiosPoint(announcing.getHeader().getHeaderBody().getSlot(), HexUtil.decodeHexString(EB));
         transactions = ((MsgLeiosBlockTxs) LeiosFetchStateBase.deserialize(peer.txsReply)).getTransactions();
         certifying = BlockSerializer.INSTANCE.deserialize(FakeN2NPeer.fixture("block-10027.hex"));
-        resolver = resolver(EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS);
+        resolver = resolver(EndorserBlockResolver.KEEP_ALIVE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS);
     }
 
     @AfterEach
@@ -86,7 +86,7 @@ class EndorserBlockResolverTest {
         peer.ebTransactions = transactions;
         peer.txsRequestLimit = limit;
         resolver.close();
-        resolver = resolver(EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, limit);
+        resolver = resolver(EndorserBlockResolver.KEEP_ALIVE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, limit);
 
         List<String> fetched = complete(announcement, deadline(10_000));
 
@@ -115,7 +115,7 @@ class EndorserBlockResolverTest {
         resolver.close();
         cache = new EbAnnouncementCache();
         resolver = new EndorserBlockResolver(() -> new PeerAddress("127.0.0.1", peer.port()), () -> FakeN2NPeer.MAGIC,
-                cache, null, EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 1_000,
+                cache, null, EndorserBlockResolver.KEEP_ALIVE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 1_000,
                 20_000);
 
         long start = System.nanoTime();
@@ -135,7 +135,7 @@ class EndorserBlockResolverTest {
         served.set(200, wrong);
         peer.ebTransactions = served;
         resolver.close();
-        resolver = resolver(EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 20_000);
+        resolver = resolver(EndorserBlockResolver.KEEP_ALIVE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 20_000);
 
         assertThatThrownBy(() -> complete(announcement, deadline(10_000)))
                 .hasMessageContaining("transaction 200 does not match");
@@ -165,7 +165,7 @@ class EndorserBlockResolverTest {
         byte[] references = references(entry(new byte[32], 600));
         peer.blockReply = new MsgLeiosBlock(LeiosRawCbor.of(references)).serialize();
         resolver.close();
-        resolver = resolver(EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 500);
+        resolver = resolver(EndorserBlockResolver.KEEP_ALIVE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 500);
 
         assertThatThrownBy(() -> complete(announce(references), deadline(5_000)))
                 .hasMessageContaining("above the 500-byte request ceiling");
@@ -189,7 +189,7 @@ class EndorserBlockResolverTest {
             resolver.close();
             cache = new EbAnnouncementCache();
             resolver = new EndorserBlockResolver(main::get, () -> FakeN2NPeer.MAGIC, cache, null,
-                    EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS,
+                    EndorserBlockResolver.KEEP_ALIVE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS,
                     EndorserBlockResolver.STALL_MILLIS, EndorserBlockResolver.MAX_TXS_REQUEST_BYTES);
 
             complete(announcement, deadline(5_000));
@@ -265,7 +265,7 @@ class EndorserBlockResolverTest {
     void aReplyThatDoesNotComeWithinTheCapFailsTheAttemptAndTheNextUsesAFreshConnection() throws Exception {
         resolver.close();
         resolver = new EndorserBlockResolver("127.0.0.1", peer.port(), () -> FakeN2NPeer.MAGIC, cache, null,
-                EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 500);
+                EndorserBlockResolver.KEEP_ALIVE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 500);
         peer.silentLeiosFetchConnections = 1;
 
         long start = System.nanoTime();
@@ -281,7 +281,7 @@ class EndorserBlockResolverTest {
     void aReplyThatKeepsArrivingMayTakeLongerThanTheStallLimit() throws Exception {
         resolver.close();
         resolver = new EndorserBlockResolver("127.0.0.1", peer.port(), () -> FakeN2NPeer.MAGIC, cache, null,
-                EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 1_000);
+                EndorserBlockResolver.KEEP_ALIVE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 1_000);
         peer.leiosFetchSegmentBytes = 6_000; //the transactions reply: 10 segments, 200 ms apart
         peer.leiosFetchSegmentDelayMillis = 200;
 
@@ -295,7 +295,7 @@ class EndorserBlockResolverTest {
     void aReplyThatStopsArrivingFailsAtTheStallLimit() throws Exception {
         resolver.close();
         resolver = new EndorserBlockResolver("127.0.0.1", peer.port(), () -> FakeN2NPeer.MAGIC, cache, null,
-                EndorserBlockResolver.MAX_AGE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 1_000);
+                EndorserBlockResolver.KEEP_ALIVE_MILLIS, EndorserBlockResolver.MAX_IDLE_MILLIS, 1_000);
         peer.leiosFetchSegmentBytes = 6_000;
         peer.leiosFetchSegmentDelayMillis = 100;
         peer.leiosFetchTxsSegmentsThenSilent = 3;
@@ -472,13 +472,65 @@ class EndorserBlockResolverTest {
         assertThat(peer.connections.get()).isEqualTo(2);
     }
 
+    // ADR 0017 D2: the side connection is kept alive and reused for the whole start
+
+    private long keepAlivesReceived() {
+        return peer.received.stream().filter(m -> m.protocol() == 8 && m.tag() == 0).count();
+    }
+
     @Test
-    void theSideConnectionIsReplacedWhenOld() throws Exception {
+    void aKeptAliveSideConnectionIsReusedPastTheOldAgeLimit() throws Exception {
         resolver.close();
-        resolver = resolver(1_000, 600_000);
+        resolver = resolver(200, 600_000);
         complete(announcement, deadline(5_000));
-        Thread.sleep(1_500);
+        Thread.sleep(1_500); //ADR 0016 replaced a side connection this old (with its limits scaled down)
         complete(announcement, deadline(5_000));
+
+        assertThat(peer.connections.get()).isEqualTo(1);
+        assertThat(keepAlivesReceived()).isGreaterThanOrEqualTo(3); //each answered before the next (I2)
+    }
+
+    @Test
+    void anUnansweredKeepAliveClosesTheSideConnectionAndTheNextFetchOpensANewOne() throws Exception {
+        resolver.close();
+        resolver = resolver(200, 600_000);
+        peer.silentKeepAlive = true;
+        complete(announcement, deadline(5_000));
+        EndorserBlockResolver.Side side = resolver.currentSide();
+
+        waitUntil(() -> side.closed.isDone(), 5_000);
+        assertThat(side.closed).isCompletedExceptionally();
+        assertThat(keepAlivesReceived()).isEqualTo(1); //at most one in flight (I2)
+
+        peer.silentKeepAlive = false;
+        assertThat(complete(announcement, deadline(5_000))).hasSize(237);
+        assertThat(peer.connections.get()).isEqualTo(2);
+    }
+
+    @Test
+    void aClosedSideConnectionSendsNoKeepAlive() throws Exception {
+        resolver.close();
+        resolver = resolver(200, 600_000);
+        complete(announcement, deadline(5_000));
+        resolver.close();
+        long sent = keepAlivesReceived();
+
+        Thread.sleep(1_000);
+
+        assertThat(keepAlivesReceived()).isEqualTo(sent); //I3
+    }
+
+    @Test
+    void anIdleSideConnectionClosesItself() throws Exception {
+        resolver.close();
+        resolver = resolver(200, 1_000);
+        complete(announcement, deadline(5_000));
+        EndorserBlockResolver.Side side = resolver.currentSide();
+
+        waitUntil(() -> side.closed.isDone(), 5_000);
+
+        waitUntil(() -> peer.openConnections.get() == 0, 5_000);
+        assertThat(complete(announcement, deadline(5_000))).hasSize(237);
         assertThat(peer.connections.get()).isEqualTo(2);
     }
 
@@ -513,17 +565,17 @@ class EndorserBlockResolverTest {
             assertThat(group.awaitTermination(20, TimeUnit.SECONDS)).isTrue();
     }
 
-    private EndorserBlockResolver resolver(long maxAgeMillis, long maxIdleMillis) {
-        return resolver(maxAgeMillis, maxIdleMillis, EndorserBlockResolver.MAX_TXS_REQUEST_BYTES);
+    private EndorserBlockResolver resolver(long keepAliveMillis, long maxIdleMillis) {
+        return resolver(keepAliveMillis, maxIdleMillis, EndorserBlockResolver.MAX_TXS_REQUEST_BYTES);
     }
 
-    private EndorserBlockResolver resolver(long maxAgeMillis, long maxIdleMillis, long maxTxsRequestBytes) {
+    private EndorserBlockResolver resolver(long keepAliveMillis, long maxIdleMillis, long maxTxsRequestBytes) {
         cache = new EbAnnouncementCache();
         return new EndorserBlockResolver(() -> new PeerAddress("127.0.0.1", peer.port()), () -> FakeN2NPeer.MAGIC,
                 cache, new ParentBlockLookup("127.0.0.1", peer.port(),
                         com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant
                                 .v4AndAbove(FakeN2NPeer.MAGIC)),
-                maxAgeMillis, maxIdleMillis, EndorserBlockResolver.STALL_MILLIS, maxTxsRequestBytes);
+                keepAliveMillis, maxIdleMillis, EndorserBlockResolver.STALL_MILLIS, maxTxsRequestBytes);
     }
 
     private static List<RawEbReferences.Entry> sizes(long... sizes) {

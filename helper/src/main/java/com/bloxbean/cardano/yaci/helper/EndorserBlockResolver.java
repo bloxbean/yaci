@@ -16,6 +16,7 @@ import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.AcceptVersion;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.Reason;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.messages.VersionTable;
 import com.bloxbean.cardano.yaci.core.protocol.handshake.util.N2NVersionTableConstant;
+import com.bloxbean.cardano.yaci.core.protocol.keepalive.KeepAliveAgent;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosPoint;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosRawCbor;
 import com.bloxbean.cardano.yaci.core.protocol.leios.LeiosTxBitmap;
@@ -37,6 +38,8 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Completes a certifying block with the transactions of the endorser block (EB) it certifies, fetched over
  * LeiosFetch on a side connection to the same peer (ADR 0016 D3a, D4a). One resolver belongs to one sync start.
@@ -47,15 +50,19 @@ import java.util.stream.IntStream;
  *       bytes, one request at a time, each reply checked against its own entries.</li>
  *   <li>The side connection carries the handshake and {@code LeiosFetchAgent} only. Its handshake is accepted only
  *       for a version this side offered, V15 or later, not app-layer, with the main connection's network magic.</li>
- *   <li>It is reused across attempts, and replaced at the start of an attempt when it is older than 45 s or has been
- *       idle for 30 s. It is closed when an attempt on it fails.</li>
+ *   <li>It is kept alive (a keep-alive every {@link #KEEP_ALIVE_MILLIS}, at most one in flight) and reused for the
+ *       whole start (ADR 0017 D2). It closes when a keep-alive goes unanswered for two intervals, when it has been
+ *       idle for {@link #MAX_IDLE_MILLIS}, and when an attempt on it fails.</li>
  *   <li>The EB's references and every transaction are checked against the parent's announcement and the
  *       references before they are mapped.</li>
  * </ul>
  */
+@Slf4j
 class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSource {
-    static final long MAX_AGE_MILLIS = 45_000;
-    static final long MAX_IDLE_MILLIS = 30_000;
+    /** How often the side connection sends a keep-alive; one unanswered for two intervals closes it. */
+    static final long KEEP_ALIVE_MILLIS = 20_000;
+    /** A side connection idle this long closes itself. */
+    static final long MAX_IDLE_MILLIS = 300_000;
     static final long HANDSHAKE_CAP_MILLIS = 10_000;
     /** The longest wait for one reply of the parent lookup (FindIntersect, BlockFetch). */
     static final long REPLY_CAP_MILLIS = 15_000;
@@ -69,38 +76,42 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
      * {@code maxLeiosTxsRequestBytesSize}. A Haskell client batches to it, and a peer may refuse a request above it.
      */
     static final long MAX_TXS_REQUEST_BYTES = 500_000;
+    /** Runs every side connection's keep-alive timer; a closed connection's timer is cancelled. */
+    private static final java.util.concurrent.ScheduledThreadPoolExecutor KEEP_ALIVES = keepAliveScheduler();
 
     private final Supplier<PeerAddress> peer;
     private final LongSupplier mainMagic;
     private final EbAnnouncementCache cache;
     private final ParentBlockLookup parentLookup;
-    private final long maxAgeMillis;
+    private final long keepAliveMillis;
     private final long maxIdleMillis;
     private final long stallMillis;
     private final long maxTxsRequestBytes;
     private volatile Side side;
+    /** Side connections opened by this resolver (debug log and tests). */
+    private final java.util.concurrent.atomic.AtomicLong sidesOpened = new java.util.concurrent.atomic.AtomicLong();
 
     /** @param peer where the side connection dials, read for each new connection (the main connection's address) */
     EndorserBlockResolver(Supplier<PeerAddress> peer, LongSupplier mainMagic, EbAnnouncementCache cache,
                           ParentBlockLookup parentLookup) {
-        this(peer, mainMagic, cache, parentLookup, MAX_AGE_MILLIS, MAX_IDLE_MILLIS, STALL_MILLIS,
+        this(peer, mainMagic, cache, parentLookup, KEEP_ALIVE_MILLIS, MAX_IDLE_MILLIS, STALL_MILLIS,
                 MAX_TXS_REQUEST_BYTES);
     }
 
     EndorserBlockResolver(String host, int port, LongSupplier mainMagic, EbAnnouncementCache cache,
-                          ParentBlockLookup parentLookup, long maxAgeMillis, long maxIdleMillis, long stallMillis) {
-        this(() -> new PeerAddress(host, port), mainMagic, cache, parentLookup, maxAgeMillis, maxIdleMillis,
+                          ParentBlockLookup parentLookup, long keepAliveMillis, long maxIdleMillis, long stallMillis) {
+        this(() -> new PeerAddress(host, port), mainMagic, cache, parentLookup, keepAliveMillis, maxIdleMillis,
                 stallMillis, MAX_TXS_REQUEST_BYTES);
     }
 
     EndorserBlockResolver(Supplier<PeerAddress> peer, LongSupplier mainMagic, EbAnnouncementCache cache,
-                          ParentBlockLookup parentLookup, long maxAgeMillis, long maxIdleMillis, long stallMillis,
+                          ParentBlockLookup parentLookup, long keepAliveMillis, long maxIdleMillis, long stallMillis,
                           long maxTxsRequestBytes) {
         this.peer = peer;
         this.mainMagic = mainMagic;
         this.cache = cache;
         this.parentLookup = parentLookup;
-        this.maxAgeMillis = maxAgeMillis;
+        this.keepAliveMillis = keepAliveMillis;
         this.maxIdleMillis = maxIdleMillis;
         this.stallMillis = stallMillis;
         this.maxTxsRequestBytes = maxTxsRequestBytes;
@@ -114,19 +125,23 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
     public synchronized Block complete(Block certifying, Point knownParent, AttemptDeadline deadline)
             throws Exception {
         HeaderBody header = certifying.getHeader().getHeaderBody();
+        Timings timings = new Timings();
+        long started = System.nanoTime();
         EbAnnouncementCache.Announced parent = cache.get(header.getPrevHash());
         if (parent == null) {
             parent = parentLookup.find(header.getPrevHash(), header.getSlot(), knownParent, deadline);
             cache.put(header.getPrevHash(), parent.slot(), parent.announcement());
+            timings.parentLookupNanos = System.nanoTime() - started;
         }
         EbAnnouncement announcement = parent.announcement();
         if (announcement == null || announcement.getHash() == null)
             throw new IllegalStateException("The parent " + header.getPrevHash() + " announced no endorser block");
 
         LeiosPoint point = new LeiosPoint(parent.slot(), HexUtil.decodeHexString(announcement.getHash()));
-        Side current = sideFor(deadline);
+        Side current = sideFor(deadline, timings);
         try {
-            List<byte[]> transactions = fetch(current, point, announcement, deadline);
+            List<byte[]> transactions = fetch(current, point, announcement, deadline, timings);
+            long mapping = System.nanoTime();
             LeiosEndorserBlockRef ref = LeiosEndorserBlockRef.builder()
                     .ebHash(announcement.getHash())
                     .ebSlot(parent.slot())
@@ -135,6 +150,15 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
             Block complete = BlockSerializer.withEndorserBlockTxs(certifying, ref, transactions);
             deadline.check("while mapping the endorser block transactions");
             current.lastUsedNanos = System.nanoTime();
+            timings.mapNanos = current.lastUsedNanos - mapping;
+            if (log.isDebugEnabled())
+                log.debug("Block {} EB {}: {} txs in {} batches, {} bytes; {} ms in all: parent lookup {}, side "
+                                + "connection #{} {} ready {}, EB {}, txs {}, mapping {} (ms)",
+                        header.getBlockNumber(), announcement.getHash().substring(0, 8), transactions.size(),
+                        timings.batches, timings.txBytes, millis(current.lastUsedNanos - started),
+                        millis(timings.parentLookupNanos), current.number, timings.newSide ? "new" : "reused",
+                        millis(timings.readyNanos), millis(timings.ebNanos), millis(timings.txsNanos),
+                        millis(timings.mapNanos));
             return complete;
         } catch (Exception e) {
             close(current, e); //a failed attempt, a mapping failure included, never leaves its connection open
@@ -142,15 +166,22 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
         }
     }
 
-    private List<byte[]> fetch(Side current, LeiosPoint point, EbAnnouncement announcement, AttemptDeadline deadline)
-            throws Exception {
+    private List<byte[]> fetch(Side current, LeiosPoint point, EbAnnouncement announcement, AttemptDeadline deadline,
+                               Timings timings) throws Exception {
+        long phase = System.nanoTime();
         deadline.await(current.ready, current.closed, "handshake", HANDSHAKE_CAP_MILLIS);
+        long now = System.nanoTime();
+        timings.readyNanos = now - phase;
+        phase = now;
         CompletableFuture<LeiosRawCbor> ebReply = current.expectBlock();
         current.fetchAgent.requestBlock(point);
         byte[] references = deadline.awaitWhileReceiving(ebReply, current.closed, "endorser block", stallMillis,
                 current.fetchAgent::getLastSegmentNanos).getCbor();
         List<RawEbReferences.Entry> entries = checkEndorserBlock(references, announcement, deadline);
         current.clearReplies();
+        now = System.nanoTime();
+        timings.ebNanos = now - phase;
+        phase = now;
         if (entries.isEmpty())
             return List.of(); //an empty EB: nothing to request, the block is delivered with no EB transactions
 
@@ -165,8 +196,44 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
             current.clearReplies(); //an idle side connection holds no payload
             transactions.addAll(checkTransactions(new MsgLeiosBlockTxs(txList).getTransactions(),
                     entries.subList(batch[0], batch[1]), batch[0]));
+            timings.batches++;
         }
+        timings.txsNanos = System.nanoTime() - phase;
+        for (byte[] tx : transactions)
+            timings.txBytes += tx.length;
         return transactions;
+    }
+
+    /** Where one attempt's time went, for the debug log. */
+    private static final class Timings {
+        long parentLookupNanos;
+        boolean newSide;
+        long readyNanos;
+        long ebNanos;
+        long txsNanos;
+        long mapNanos;
+        int batches;
+        long txBytes;
+    }
+
+    private static java.util.concurrent.ScheduledThreadPoolExecutor keepAliveScheduler() {
+        java.util.concurrent.ScheduledThreadPoolExecutor scheduler = new java.util.concurrent.ScheduledThreadPoolExecutor(1,
+                task -> {
+                    Thread thread = new Thread(task, "yaci-leios-keepalive");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
+    }
+
+    private static long millis(long nanos) {
+        return TimeUnit.NANOSECONDS.toMillis(nanos);
+    }
+
+    /** The side connections this resolver has opened, for tests. */
+    long sidesOpened() {
+        return sidesOpened.get();
     }
 
     /**
@@ -213,15 +280,18 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
         return side;
     }
 
-    private Side sideFor(AttemptDeadline deadline) {
+    private Side sideFor(AttemptDeadline deadline, Timings timings) {
         long magic = mainMagic.getAsLong();
         PeerAddress address = peer.get();
         Side current = side;
         if (current != null) {
             long now = System.nanoTime();
-            if (current.closed.isDone() || current.magic != magic || !current.address.equals(address)
-                    || now - current.createdNanos > TimeUnit.MILLISECONDS.toNanos(maxAgeMillis)
-                    || now - current.lastUsedNanos >= TimeUnit.MILLISECONDS.toNanos(maxIdleMillis)) {
+            String why = current.closed.isDone() ? "closed" : current.magic != magic ? "network magic changed"
+                    : !current.address.equals(address) ? "relay address changed"
+                    : now - current.lastUsedNanos >= TimeUnit.MILLISECONDS.toNanos(maxIdleMillis) ? "idle for "
+                    + maxIdleMillis + " ms" : null;
+            if (why != null) {
+                log.debug("Side connection #{} replaced: {}", current.number, why);
                 close(current, new IllegalStateException("The side connection was replaced"));
                 current = null;
             }
@@ -230,7 +300,10 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
             current = new Side(address, magic, deadline.remainingMillis());
             side = current;
             current.start();
+            timings.newSide = true;
+            log.debug("Side connection #{} opened to {}", current.number, address);
         }
+        current.lastUsedNanos = System.nanoTime(); //in use: the idle timer does not close it under an attempt
         return current;
     }
 
@@ -291,12 +364,18 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
     final class Side {
         final PeerAddress address;
         final long magic;
+        final long number = sidesOpened.incrementAndGet();
         final long createdNanos = System.nanoTime();
         volatile long lastUsedNanos = createdNanos;
         final VersionTable offered;
         final HandshakeAgent handshakeAgent;
         final LeiosFetchAgent fetchAgent;
+        final KeepAliveAgent keepAliveAgent = new KeepAliveAgent();
         final TCPNodeClient client;
+        private volatile java.util.concurrent.ScheduledFuture<?> keepAliveTimer;
+        /** When the keep-alive in flight was sent, or 0 when none is (I2). */
+        private volatile long keepAliveSentNanos;
+        private int cookie;
         final CompletableFuture<AcceptVersion> ready = new CompletableFuture<>();
         final CompletableFuture<Void> closed = new CompletableFuture<>();
         private final AtomicBoolean retired = new AtomicBoolean();
@@ -318,7 +397,9 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
                     .connectionTimeoutMs((int) Math.max(1, Math.min(Integer.MAX_VALUE, connectTimeoutMillis)))
                     .enableConnectionLogging(false)
                     .build();
-            this.client = new TCPNodeClient(address.host(), address.port(), config, handshakeAgent, fetchAgent);
+            this.client = new TCPNodeClient(address.host(), address.port(), config, handshakeAgent, fetchAgent,
+                    keepAliveAgent);
+            keepAliveAgent.addListener(response -> keepAliveSentNanos = 0);
 
             handshakeAgent.addListener(new HandshakeAgentListener() {
                 @Override
@@ -330,6 +411,7 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
                     } else {
                         handshakeDone = true;
                         ready.complete(accepted);
+                        startKeepAlive();
                     }
                 }
 
@@ -416,12 +498,49 @@ class EndorserBlockResolver implements CompleteBlockAssembler.EndorserBlockSourc
         /** The connection ended (refused, lost or failed): the first reason is kept. */
         private void fail(Throwable reason) {
             closed.completeExceptionally(reason);
+            stopKeepAlive();
         }
 
         private void close(Throwable reason) {
             closed.completeExceptionally(reason);
+            stopKeepAlive();
             if (retired.compareAndSet(false, true))
                 ClientRetirement.retireAsync(client, client::shutdown, client::isRunning, () -> starting);
+        }
+
+        private void startKeepAlive() {
+            keepAliveTimer = KEEP_ALIVES.scheduleWithFixedDelay(this::keepAlive, keepAliveMillis, keepAliveMillis,
+                    TimeUnit.MILLISECONDS);
+            if (closed.isDone()) //closed while the timer was being scheduled
+                stopKeepAlive();
+        }
+
+        private void stopKeepAlive() {
+            java.util.concurrent.ScheduledFuture<?> timer = keepAliveTimer;
+            if (timer != null)
+                timer.cancel(false);
+        }
+
+        /** One tick: close if unanswered for two intervals or idle too long, else send one if none is in flight. */
+        private void keepAlive() {
+            if (closed.isDone()) {
+                stopKeepAlive();
+                return;
+            }
+            long now = System.nanoTime();
+            long sent = keepAliveSentNanos;
+            if (sent != 0 && now - sent >= TimeUnit.MILLISECONDS.toNanos(2 * keepAliveMillis)) {
+                log.debug("Side connection #{}: keep-alive unanswered for {} ms, closing", number,
+                        millis(now - sent));
+                EndorserBlockResolver.this.close(this, new IllegalStateException("The keep-alive went unanswered"));
+            } else if (now - lastUsedNanos >= TimeUnit.MILLISECONDS.toNanos(maxIdleMillis)) {
+                log.debug("Side connection #{}: idle for {} ms, closing", number, millis(now - lastUsedNanos));
+                EndorserBlockResolver.this.close(this, new IllegalStateException("The side connection was idle"));
+            } else if (sent == 0) {
+                keepAliveSentNanos = now;
+                keepAliveAgent.sendKeepAlive(cookie);
+                cookie = (cookie + 1) & KeepAliveAgent.MAX_NUM;
+            }
         }
     }
 }

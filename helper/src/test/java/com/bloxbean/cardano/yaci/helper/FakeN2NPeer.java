@@ -72,6 +72,8 @@ final class FakeN2NPeer implements AutoCloseable {
     volatile int silentLeiosFetchConnections;
     private final java.util.Set<Integer> leiosFetchConnections = java.util.concurrent.ConcurrentHashMap.newKeySet();
     /** If set, the connection is closed right after the endorser block reply. */
+    /** When set, KeepAlive requests get no reply. */
+    volatile boolean silentKeepAlive;
     volatile boolean closeAfterBlockReply;
     /** If set, every FindIntersect is answered IntersectNotFound: the peer cannot find a parent. */
     volatile boolean intersectNotFound;
@@ -193,7 +195,7 @@ final class FakeN2NPeer implements AutoCloseable {
             }
             case 8 -> {
                 Array items = (Array) CborDecoder.decode(message.payload()).get(0);
-                if (message.tag() == 0)
+                if (message.tag() == 0 && !silentKeepAlive)
                     send(out, 8, CborSerializationUtil.serialize(
                             new Array().add(new UnsignedInteger(1)).add(items.getDataItems().get(1))));
             }
