@@ -62,7 +62,7 @@ public class LeiosFetchSerializers {
 
         @Override
         public byte[] serialize(MsgLeiosBlock object) {
-            return serializeArray(unsigned(2), LeiosCborUtil.validatedRawCborBytes(object.getEndorserBlock()));
+            return serializeArray(unsigned(2), LeiosCborUtil.validatedRawCborBytes(object.getWirePayload()));
         }
 
         /** Not supported: a decoded item has lost the payload's bytes as received. */
