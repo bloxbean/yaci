@@ -120,8 +120,14 @@ New invariant **I-NoWait**: no code running on a connection's event loop blocks 
     (ADR 0016 D4a's rule), and not before that handshake completes (review: Fable 5).
 - **Requests.**
   - A FIFO of requests in flight, each with its own future; replies match in order.
-  - Caps: count (default 150) and expected reply bytes (default 5 MB), both configurable.
+  - Caps: count (default **150**) and expected reply bytes (default **5 MB**), Haskell's limits, both configurable in
+    `LeiosConfig`.
+    - Measured: at these limits, one connection fetched 200 EBs from the public relay at 29.2 EBs/s (8.5 MB/s, 141 in
+      flight), against 1.6 EBs/s one at a time.
+    - Removing the byte cap was no faster, and slower against a local node (Evidence).
   - One request is always allowed, so an oversized reply still makes progress.
+  - The maximum depth reached is logged at the end of each range and exposed for tests, so a sync that cannot keep the
+    pipeline full is visible.
 - **Per EB.**
   1. The EB request.
   2. When the EB arrives, *all* its transaction batches are requested at once.
@@ -218,6 +224,22 @@ Once D1–D7 are the default, remove:
 #253 is implemented as specified: per-protocol round robin, one 12,288-byte SDU per turn. It is needed for Yano's
 server side, and it is not a prerequisite for this ADR.
 
+### D10. Tip following (`BlockSync`) on the same connection, paced by delivery
+
+D8 removes the side connection that `BlockSync` uses today, so `BlockSync` gets the same treatment, on its own
+connection:
+- **Agent.** Its `N2NChainSyncFetcher` connection registers the `PipelinedLeiosFetchAgent` (D3).
+- **Queue.** Its blocks go through the same delivery queue (D2), with `onRollback`, `intersactFound` and
+  `intersactNotFound` as queued markers.
+- **Pacing.** `BlockSync` asks ChainSync for the next header only after the previous block has been *delivered*, not
+  just received, as today's synchronous path does. A certifying block waiting for its EB therefore holds back the next
+  `RequestNext` without blocking any thread.
+  - So a rollback can only be received after every earlier block was delivered. Its position in the callback stream
+    is the same as today by construction.
+  - The queue holds at most one block, so `BlockSync` needs no window or budget.
+- **At the tip** the peer only serves a certifying header after adopting it, which needs the EB's transactions, so the
+  EB is available on the same connection.
+
 ## Alternatives rejected
 
 - **A pool of side connections** (ADR 0017 D4 prototype). It breaks one connection per peer and multiplies relay load.
@@ -230,29 +252,37 @@ server side, and it is not a prerequisite for this ADR.
 - **Fetching on an EB announcement.** It requests EBs that may never be certified (withdrawn in #255).
 - **#253 alone.** It fixes sending, not the processing-side deadlock.
 
-## Evidence (POC, 2026-11-24)
+## Evidence (POC, 2026-11-24 and 2026-11-25)
 
 The POC is a local branch, `poc/leios-one-connection-pipelined`, on top of PR #256; it is not pushed. Its diff, the
 `LeiosFetchBench` source and every run's summary and callback trace are kept with the author and can be attached to
 #260 on request.
 
-- **Local node:** the Musashi `rc-2026w45` Haskell relay at `127.0.0.1:3101`.
-- **Public relay:** `52.29.179.71:3001`, about 250 ms TCP connect.
+Peers, all Musashi `rc-2026w45` Haskell nodes:
+- **Local:** a relay on the same machine as Yaci, `127.0.0.1:3101`.
+- **Public:** the relay `52.29.179.71:3001`, about 240 ms TCP connect from Yaci.
+- **Remote VM:** our own relay in a European data centre, reached through an SSH tunnel (155 ms RTT, about 11 MB/s
+  tunnel ceiling). The VM itself is 8.5 ms from the public relay.
 
-### LeiosFetch alone (64 certified EBs, 18.7 MB, from block 9,200; identical bytes in every run)
+### LeiosFetch alone (certified EBs from block 9,200; identical bytes in every run)
 
 | Peer | Config | EBs/s | MB/s |
 |---|---|---|---|
-| local | 1 connection, depth 1 | 81–105 | 24–31 |
-| local | 1 connection, depth 16 | 73–104 | 21–30 |
-| public | 1 connection, depth 1 (today's pattern) | 0.80 | 0.23 |
-| public | 1 connection, depth 5 | 7.0 | 2.05 |
-| public | **1 connection, depth 16, 1.2 MB cap** | **10.2–10.5** | **3.0–3.1** |
-| public | 8 connections, depth 1 | 4.5–12.1 | 1.3–3.6 |
+| local | depth 1 (today's pattern) | 81–105 | 24–31 |
+| local | **150 in flight, 5 MB cap (D3 defaults)**, 200 EBs | **103** | **30** |
+| local | 150 in flight, no byte cap, 200 EBs | 85 | 25 |
+| public | depth 1 (today's pattern) | 0.8–2.0 | 0.2–0.6 |
+| public | depth 16, 1.2 MB cap | 10.2–11.4 | 3.0–3.3 |
+| public | depth 16, 5 MB cap, 200 EBs | 23.7 | 6.9 |
+| public | **150 in flight, 5 MB cap (D3 defaults)**, 200 EBs, 141 reached | **29.2** | **8.5** |
+| public | 8 connections, depth 1 | 4.5–13.7 | 1.3–4.0 |
+| remote VM via tunnel | depth 1 / depth 16 uncapped / 8 connections | 2.1–2.3 / 13.8–15.8 / 12.5–13.9 | |
+| public, from the VM (8.5 ms) | depth 1 / depth 16 uncapped / 8 connections | 3.8 / 32.6 / 27.1 | 1.1 / 9.5 / 8.0 |
 
-- **Public runs vary a lot between runs.** Some collapse to about 0.5 EBs/s with 8–30 s waits, at any depth or
-  connection count.
-- **Locally they never do.** So the stalls lie on the public relay or the WAN path, not in Yaci or in pipelining.
+- **One pipelined connection matches or beats 8 connections** on every path measured.
+- **Pipelining helps even near the relay.** From 8.5 ms away, depth 1 gave only 3.8 EBs/s: the relay takes roughly
+  120 ms to answer a request (inferred from about 250 ms per EB at two requests per EB).
+- **The 5 MB byte cap costs nothing,** and protects memory.
 
 ### Full sync with `BlockRangeSync` (listener callback trace checked)
 
@@ -263,22 +293,52 @@ The POC is a local branch, `poc/leios-one-connection-pipelined`, on top of PR #2
 | Local, 9-connection pool | genesis → 20,000 | 46–49 s |
 | Local, slow listener (2 ms/block): today / one connection | genesis → 20,000 | 88 s / 67 s |
 | Local, one connection, 512 MB heap: normal / slow listener | genesis → 20,000 | 55 s / 68 s |
-| Public, today's path | genesis → 11,000 | 14:05, 10:29 |
-| Public, one connection | genesis → 11,000 | 14:30, 9:33; 4:31 without header prefetch |
-| Public, 9-connection pool | genesis → 11,000 | 2:38 |
+| Remote VM via tunnel, today's path | genesis → 11,000 | 4:06, 4:52 |
+| Remote VM via tunnel, one connection | genesis → 11,000 | 0:48, 1:13; 1:01, 1:16 without header prefetch |
+| Remote VM via tunnel, 9-connection pool | genesis → 11,000 | 0:53, 0:53 |
+| Public, 2026-11-25 07:12 UTC: today's path / one connection / pool | genesis → 11,000 | 4:34 / 0:50 / 0:42 |
+| Public, 2026-11-24 16:57–17:55 UTC (slow period): today's path | genesis → 11,000 | 14:05, 10:29 |
+| Public, same slow period: one connection / pool | genesis → 11,000 | 14:30, 9:33, 4:31 / 2:38 |
 
 - **Correctness:**
-  - All 25 runs passed: no parsing errors, gaps, retries or missing EBs.
+  - All 37 runs passed: no parsing errors, gaps, retries or missing EBs.
   - Every run's listener callback trace up to the stop block is byte-identical to today's path: 19 local runs at
-    20,000 (`7c018e3c…`), 6 public runs at 11,000 (`3f1e0608…`).
+    20,000 (`7c018e3c…`), 18 public and remote-VM runs at 11,000 (`3f1e0608…`).
+- **Throughput, public relay outside the slow period:** one connection delivered about 220 blocks/s, 15,400
+  transactions/s (EB transactions included) and 11 EBs/s, about 5.5× today's path, with one connection instead of
+  ten.
 - **Local:** Yaci on one connection keeps up with what the local node serves, about 400 blocks/s and 22 MB/s on
   Musashi, while that node is itself still syncing. A profile shows the remaining CPU goes to building the
   transaction model, not to the network: EB transactions on the CPU pool, ranking blocks on the event loop. Pool size
   (4/8/12 threads) made no difference.
-- **Public:** the relay's delivery on one connection swung between 0.1 and 4 MB/s within single runs.
-  - In fast periods one pipelined connection matches the pool: 3.07 vs 3.55 MB/s, measured back to back.
-  - In slow periods the pool wins, because each TCP connection gets its own share of a congested or lossy path. We
-    could not confirm loss directly: the host blocks ICMP, and macOS hides the TCP counters.
+- **The slow period** slowed every mode, today's path included (2–3× slower than the next day), so it lay on the
+  relay or the path, not in the design. In it, the pool degraded least, because each TCP connection gets its own
+  share of a congested path (inferred; loss could not be measured: the relay blocks ICMP).
+- **A full sync keeps fewer EB requests in flight than the fetch-only benchmark:** it only fetches EBs for blocks
+  within the delivery budget and header prefetch. Raising the depth a sync sustains is a tuning target (Plan, #261).
+
+## Downstream contract
+
+What a downstream relies on was checked against yaci-store, the main downstream (commit `1ff6f5ed`; it pins Yaci
+0.4.x today and uses no Leios callback). Each item is kept by this design, as listed. No downstream code changes;
+the only new setting is the D7 opt-in.
+
+| # | yaci-store relies on | Kept by |
+|---|---|---|
+| C1 | Callbacks for one listener are serialized, with happens-before between them. Its state (`syncMode`, epoch and era, the parallel-mode batch buffer) is not thread-safe. | D1: one serialized dispatcher; callbacks on the connection's event loop (I1) |
+| C2 | `fetch(from, to)` delivers every block of `[from, to]`, `from` included, exactly once, in chain order. It has no gap detection: a skipped block would be lost silently. | D2 exactly once; D4 logical range; I2, I-Resume |
+| C3 | `batchDone` arrives after the last block of the range. From inside it, yaci-store stops the `BlockRangeSync` that is delivering, and starts `BlockSync` from its cursor. | D2 (`batchDone` is a marker); D4 (one `batchDone` per range); I-Stop |
+| C4 | `onRollback` comes after every block received before it, and no block of the abandoned fork follows it. Its cleanup deletes by slot from the persisted cursor, and every `startSync` begins with a rollback to the intersection. | D2 markers; D10 pacing; I-Rollback |
+| C5 | `stop()`, `restart()` and `startSync()` are called from callbacks and from other threads. They must not wait for delivery, and once they return the old session delivers nothing. | D1 generations; I-Stop |
+| C6 | Blocking in `onBlock` is its only backpressure (synchronous DB writes; a 5-minute join every 100 blocks in parallel mode). | Callbacks stay on the event loop, so a blocked listener still stops reads and drains; windows (D4) and prefetch (D6) are admitted only under the D5 byte budget. Nothing buffers a whole range. |
+| C7 | A callback gap over 120 s triggers yaci-store's auto-restart. | The 45 s front budget, retry and skip/halt rules are unchanged (D2) |
+| C8 | A listener exception is reported as `onParsingError` in its place, and delivery continues if yaci-store chooses to. | D2 |
+| C9 | `intersactFound` and `intersactNotFound` arrive even when no block follows (`BlockFinder` shares the `BlockSync` instance). | D10 markers; the fast path delivers at once |
+| C10 | New callbacks have no-op defaults. | No callback is added |
+
+The cursor needs no change. A block is either delivered, and then yaci-store persists it before `onBlock`
+returns, or it is not yet delivered, and yaci-store's cursor is still behind it. Blocks queued but not delivered when
+the process stops are fetched again on restart, from yaci-store's own cursor, as blocks in flight are today.
 
 ## Invariants
 
@@ -289,6 +349,12 @@ The POC is a local branch, `poc/leios-one-connection-pipelined`, on top of PR #2
 - **I-Budget.** What D5 counts stays under its budget, except the front block's own fetch.
 - **I-Certified.** Only EBs announced by the parent of a block with `leiosCertInBody == true` are requested.
 - **I-Generation.** No reply of one connection generation completes a request of another.
+- **I-Rollback.** A rollback is delivered after every block received before it, and no block of the abandoned fork
+  is delivered after it (C4).
+- **I-Stop.** `stop()` never waits for delivery, also when called from a callback. After it returns, no callback of
+  that session is delivered: queued entries are discarded by generation (C3, C5).
+- **I-Resume.** After a reconnect, a range resumes from the last *delivered* block, never from what was only
+  received, so nothing is skipped (C2).
 
 ## Tests
 
@@ -304,12 +370,22 @@ The POC is a local branch, `poc/leios-one-connection-pipelined`, on top of PR #2
 - retained EB bytes with a slow front; `NoBlocks` mid-range;
 - ordering, halt and skip, listener exceptions and `fetch()` in `batchDone`: the ADR 0017 D4 list.
 
+**Downstream contract (C1–C10), with a listener shaped like yaci-store's `BlockFetchService`:**
+- `stop()` of the delivering `BlockRangeSync` and `BlockSync.startSync()` from inside `batchDone`;
+- `stop()` from another thread while the front waits for an EB, then a restart: no stale callback afterwards;
+- a rollback received while a certifying block waits (`BlockSync`), and across a queued certifying block;
+- `intersactFound` with no following block;
+- a listener blocking for seconds: reads and window requests stop, memory stays under the budget;
+- a listener exception in `onBlock` with `continueOnParseError` on and off.
+
 **Live:**
 - the Musashi trace digest against today's path, locally and on the public relay;
 - a full run to the tip;
 - `yaci-sync-check` on preview, preprod and mainnet with the feature on (the Byron path and no regression);
 - a slow-listener run with a fixed heap;
-- Yano/Haskell sync QA for D9.
+- Yano/Haskell sync QA for D9;
+- yaci-store on Musashi with the feature on, against a run with it off: same cursor, same row counts per table,
+  including a restart mid-range and the switch to `BlockSync` at the tip.
 
 ## Plan
 
@@ -319,14 +395,15 @@ The POC is a local branch, `poc/leios-one-connection-pipelined`, on top of PR #2
 | 1 | `PipelinedLeiosFetchAgent` with generations and the handshake gate (D3); unit tests | Agent tests; local and public LeiosFetch benchmark |
 | 2 | Logical range with header-driven windows (D4), including the edge cases above; Byron; reconnect | Range tests; `yaci-sync-check` preview, preprod and mainnet unchanged |
 | 3 | Serialized dispatcher and non-blocking delivery queue with the commit rule (D1, D2); one byte budget (D5) | Delivery tests; slow-listener and 512 MB heap runs |
-| 4 | Header-triggered prefetch (D6); `LeiosConfig` opt-in (D7); parent lookup on ChainSync | Musashi trace digest; local and public timings |
+| 4 | Header-triggered prefetch (D6); `LeiosConfig` opt-in (D7); parent lookup on ChainSync; `BlockSync` on one connection (D10) | Musashi trace digest; local and public timings; downstream contract tests (C1–C10); yaci-store run on and off |
 | 5 | Default on after one release; remove the side connections (D8); update ADR 0016 and 0017 status | Full Musashi run to the tip; mainnet sync check |
 | ‖ | #253 fair egress (D9) | #253's tests; Yano QA |
 | Later | Parse ranking blocks off the event loop, in parallel, with the same ordered delivery (a general Yaci speed-up for local and LAN sync, mainnet included); its own ADR | Mainnet sync from a local node: blocks/s and CPU |
 
 ## Consequences
 
-- **Downstream:** no API change. yaci-store sets one `LeiosConfig` option during the opt-in release, then nothing.
+- **Downstream:** no API change, and the contract yaci-store relies on is kept item by item (Downstream contract).
+  yaci-store sets one `LeiosConfig` option during the opt-in release, then nothing.
 - **Network:** one connection per peer during Leios sync, instead of one main connection plus one side connection
   (or nine with the ADR 0017 pool). Fewer TCP handshakes and less relay load.
 - **Code:** `BlockRangeSync` gains a header-driven windowed path, and `CompleteBlockAssembler` a non-blocking queue.
@@ -334,7 +411,8 @@ The POC is a local branch, `poc/leios-one-connection-pipelined`, on top of PR #2
 - **Performance:**
   - On a local node, about 15–25% faster in the POC, and about 30% with a slow listener. The node and Yaci's
     transaction model building are the limits after that.
-  - On a public relay, it is at the mercy of one TCP flow (see Risks).
+  - On a public relay, about 5.5× today's path outside slow periods, and equal to the pool, with one connection
+    instead of ten (Evidence). In a slow period it is at the mercy of one TCP flow (see Risks).
 
 ## Risks and open questions
 
@@ -342,12 +420,12 @@ The POC is a local branch, `poc/leios-one-connection-pipelined`, on top of PR #2
   - certified-only requests;
   - byte-based stall detection;
   - the delivered-block resume point.
-- **Public relays.** A single connection is at the mercy of one TCP flow on a long path. Measured: in slow periods it
-  is several times slower than a pool.
-  - Haskell answers this with several *peers*, each one connection.
-  - A Yaci option to spread EB fetches over several relay addresses, one connection per peer, could recover it, since
-    Musashi's name resolves to 8 relays.
-  - This needs a decision; it is not part of this ADR.
+- **Public relays.** A single connection is at the mercy of one TCP flow on a long path.
+  - Measured: on a steady path it matches the pool (remote VM, and the public relay on 2026-11-25). In the slow
+    period of 2026-11-24 it was several times slower than the pool, and today's path was slow too.
+  - Haskell answers this with several *peers*, each one connection. A Yaci option to spread EB fetches over several
+    relay addresses, one connection per peer, could recover it, since Musashi's name resolves to 8 relays.
+  - Low priority; not part of this ADR.
 - **Listener time on the event loop** still bounds a slow downstream. That is unchanged and intended (I1).
 - **Open:**
   - window and budget defaults on mainnet;
@@ -359,3 +437,8 @@ The POC is a local branch, `poc/leios-one-connection-pipelined`, on top of PR #2
 
 - **r1** (2026-11-25): initial proposal, with the POC evidence and the findings of two independent reviews of the
   POC folded into D1–D8 and Tests.
+- **r2** (2026-11-25): D3 defaults stated as Haskell's 150 requests / 5 MB, with the measurement, and the depth
+  reached is logged; new D10 (tip following in `BlockSync` on one connection, paced by delivery); new Downstream
+  contract section (C1–C10, checked against yaci-store) with I-Rollback, I-Stop, I-Resume and their tests; Evidence
+  adds the remote-VM runs, a second public series and the 150/5 MB benchmark (37 runs, traces identical); Risks and
+  Consequences updated: on a steady path one connection matches the pool.
