@@ -407,7 +407,7 @@ server side, and it is not a prerequisite for this ADR.
 
 ### D10. Tip following (`BlockSync`) on the same connection, paced by delivery
 
-D8 removes the side connection that `BlockSync` uses today. So with the feature on, `BlockSync`'s
+With the feature on, `BlockSync` does not use today's side connection (D8). Its
 `N2NChainSyncFetcher` connection also registers the `PipelinedLeiosFetchAgent` (D3), and its callbacks go through the
 delivery queue (D2).
 
