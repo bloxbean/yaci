@@ -380,6 +380,9 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
          Yaci, not by a close;
       3. open the fresh main connection and complete its handshake;
       4. send D4c's request.
+
+      If the front halts in step 2, steps 3 and 4 are skipped. If the front was `to`, `batchDone` completes the
+      range instead.
     - The next range's step 1 therefore also starts on idle protocols.
     - The main connection carries no LeiosFetch while D4c runs.
     - A seam duplicate, the repeated first block of the D4c request, is dropped before `CompleteBlockAssembler` and
@@ -1064,3 +1067,5 @@ stubs:**
     or `intersactNotFound`. Skip expiry during it is covered, and the "re-received copy" text is removed.
   - **R3-F9.** D4c entry order is fixed: retire, complete the front, connect and handshake, request.
   - **Minor.** A parse error in step 2 sends the range to D4c.
+- **r8.1** (2026-11-25): reviewer3 round 3 on `cc0b87ef`: APPROVED. Its implementation note is applied to D4c entry
+  (a halt skips steps 3–4; a front at `to` ends the range).
