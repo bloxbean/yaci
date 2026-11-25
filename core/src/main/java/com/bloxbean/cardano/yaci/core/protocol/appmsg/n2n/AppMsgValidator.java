@@ -2,6 +2,9 @@ package com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n;
 
 import com.bloxbean.cardano.yaci.core.protocol.appmsg.model.AppMessage;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Validation hook invoked by {@link AppMsgSubmissionServerAgent} for every inbound
  * message body, after the structural checks (message-id recompute, size, TTL, chain)
@@ -15,6 +18,25 @@ public interface AppMsgValidator {
     AppMsgValidator ACCEPT_ALL = message -> Result.accept();
 
     Result validate(AppMessage message);
+
+    /**
+     * Validates the structurally valid messages of one reply, in one call (ADR 0019 D5). An implementation may
+     * validate them in parallel; the result list must have the same length and order as {@code messages}, otherwise
+     * the server rejects every message of the reply.
+     */
+    default List<Result> validateAll(List<AppMessage> messages) {
+        List<Result> results = new ArrayList<>(messages.size());
+        for (AppMessage message : messages) {
+            Result result;
+            try {
+                result = validate(message);
+            } catch (RuntimeException e) {
+                result = Result.reject("validator failed: " + e);
+            }
+            results.add(result);
+        }
+        return results;
+    }
 
     final class Result {
         private static final Result ACCEPTED = new Result(true, null);
