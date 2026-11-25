@@ -370,7 +370,7 @@ class AppMsgSubmissionServerAgentTest {
     }
 
     @Test
-    void testOutOfOrderReplyMessagesAreNotAcknowledged() {
+    void testOmittedBodyIsAcknowledgedAndSkipped() {
         initToIdle();
         sendPendingMessageIdRequest();
 
@@ -390,18 +390,20 @@ class AppMsgSubmissionServerAgentTest {
         partialReply.addMessage(msg2);
         agent.receiveResponse(partialReply);
 
+        // ADR 0019: every id taken from the client's reply is acknowledged, so the client's FIFO acks stay
+        // aligned; the omitted body is skipped, the answered one is processed.
         assertThat(agent.getCurrentState()).isEqualTo(AppMsgSubmissionState.Idle);
         assertThat(agent.getOutstandingMessageCount()).isEqualTo(0);
         assertThat(agent.hasReceivedMessageId(msg1.getMessageIdHex())).isFalse();
-        assertThat(agent.hasReceivedMessageId(msg2.getMessageIdHex())).isFalse();
+        assertThat(agent.hasReceivedMessageId(msg2.getMessageIdHex())).isTrue();
 
         Message nextMsg = agent.buildNextMessage();
         assertThat(nextMsg).isInstanceOf(MsgRequestMessageIds.class);
-        assertThat(((MsgRequestMessageIds) nextMsg).getAckCount()).isEqualTo((short) 0);
+        assertThat(((MsgRequestMessageIds) nextMsg).getAckCount()).isEqualTo((short) 2);
     }
 
     @Test
-    void testPrefixPartialReplyMessagesAckOnlyAcceptedPrefix() {
+    void testPartialReplyAcknowledgesEveryRequestedId() {
         initToIdle();
         sendPendingMessageIdRequest();
 
@@ -425,7 +427,7 @@ class AppMsgSubmissionServerAgentTest {
 
         Message nextMsg = agent.buildNextMessage();
         assertThat(nextMsg).isInstanceOf(MsgRequestMessageIds.class);
-        assertThat(((MsgRequestMessageIds) nextMsg).getAckCount()).isEqualTo((short) 1);
+        assertThat(((MsgRequestMessageIds) nextMsg).getAckCount()).isEqualTo((short) 2);
     }
 
     @Test

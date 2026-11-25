@@ -1,18 +1,53 @@
 package com.bloxbean.cardano.yaci.core.protocol.appmsg.n2n;
 
+import com.bloxbean.cardano.yaci.core.protocol.appmsg.model.AppMessage;
 import lombok.Builder;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Set;
+import java.util.function.Predicate;
 
 @Data
-@Builder
+@Builder(toBuilder = true)
 @Slf4j
 public class AppMsgSubmissionConfig {
 
     @Builder.Default
     private final int batchSize = 10;
+
+    /**
+     * Upper bound for the message ids the server requests per round (ADR 0019 D1). The wire field is a uint16 and a
+     * client never replies with more ids than requested, so any value interoperates with older peers.
+     */
+    @Builder.Default
+    private final int maxUnacknowledged = 10;
+
+    /**
+     * Byte budget for one body request: the server asks for the longest prefix of outstanding ids whose announced
+     * sizes fit, always at least one id (ADR 0019 D1).
+     */
+    @Builder.Default
+    private final int maxBodiesBytesPerRequest = 1024 * 1024;
+
+    /** Client capacity for ordinary messages awaiting delivery to one peer. */
+    @Builder.Default
+    private final int maxPendingMessages = 1000;
+
+    /** Client capacity for priority messages awaiting delivery to one peer (ADR 0019 D3). */
+    @Builder.Default
+    private final int maxPendingPriorityMessages = 1000;
+
+    /** Byte budget (sum of body sizes) for pending priority messages; a message that would exceed it is rejected. */
+    @Builder.Default
+    private final long maxPendingPriorityBytes = Long.MAX_VALUE;
+
+    /**
+     * Selects messages that are offered before ordinary messages and have their own capacity (ADR 0019 D3). Null
+     * means no priority lane.
+     */
+    @Builder.Default
+    private final Predicate<AppMessage> priority = null;
 
     @Builder.Default
     private final boolean useBlockingMode = true;
@@ -54,8 +89,15 @@ public class AppMsgSubmissionConfig {
     public void validate() {
         if (batchSize <= 0)
             log.warn("AppMsgSubmissionConfig: batchSize must be positive, got: {}", batchSize);
-        if (batchSize > 10)
-            log.warn("AppMsgSubmissionConfig: batchSize ({}) exceeds recommended limit of 10", batchSize);
+        if (maxUnacknowledged <= 0 || maxUnacknowledged > Short.MAX_VALUE)
+            log.warn("AppMsgSubmissionConfig: maxUnacknowledged must be in 1..{}, got: {}", Short.MAX_VALUE,
+                    maxUnacknowledged);
+        if (maxBodiesBytesPerRequest <= 0)
+            log.warn("AppMsgSubmissionConfig: maxBodiesBytesPerRequest must be positive, got: {}",
+                    maxBodiesBytesPerRequest);
+        if (maxPendingMessages <= 0 || maxPendingPriorityMessages <= 0)
+            log.warn("AppMsgSubmissionConfig: pending capacities must be positive, got: {} / {}",
+                    maxPendingMessages, maxPendingPriorityMessages);
         if (processedMessageIdCacheSize <= 0)
             log.warn("AppMsgSubmissionConfig: processedMessageIdCacheSize must be positive, got: {}",
                     processedMessageIdCacheSize);
@@ -65,8 +107,11 @@ public class AppMsgSubmissionConfig {
 
     @Override
     public String toString() {
-        return String.format("AppMsgSubmissionConfig{batchSize=%d, blockingMode=%s, maxMessageSize=%d, "
-                        + "processedMessageIdCacheSize=%d, chains=%s, maxTtlSeconds=%d}",
-                batchSize, useBlockingMode, maxMessageSize, processedMessageIdCacheSize, chainIds, maxTtlSeconds);
+        return String.format("AppMsgSubmissionConfig{batchSize=%d, maxUnacknowledged=%d, maxBodiesBytesPerRequest=%d, "
+                        + "maxPendingMessages=%d, maxPendingPriorityMessages=%d, priority=%s, blockingMode=%s, "
+                        + "maxMessageSize=%d, processedMessageIdCacheSize=%d, chains=%s, maxTtlSeconds=%d}",
+                batchSize, maxUnacknowledged, maxBodiesBytesPerRequest, maxPendingMessages,
+                maxPendingPriorityMessages, priority != null, useBlockingMode, maxMessageSize,
+                processedMessageIdCacheSize, chainIds, maxTtlSeconds);
     }
 }
