@@ -77,8 +77,9 @@ the next chunk, or, when nothing is outstanding, the next IDs.
   taken from the client's reply keeps the FIFO accounting aligned.
 - **A missing body is skipped, not marked as received**, so a later offer of it is pulled
   again.
-- **A body whose size differs from its announced size is rejected as a protocol fault.** The
-  check detects a lying peer after its reply has arrived. The byte budget therefore bounds
+- **A body whose size differs from its announced size is rejected as a protocol fault**, and
+  like a missing body it is not marked as received. The check detects a lying peer after its
+  reply has arrived. The byte budget therefore bounds
   replies from honest peers. A hostile peer's reply is bounded only by `window ×
   maxMessageSize` and the decoder.
 
@@ -177,7 +178,8 @@ Netty event-loop group as its executor.
 - An embedder can raise the window, give control traffic the priority lane, and validate in
   parallel. One link's ceiling then rises from about 20 msg/s to roughly `window / (2 × RTT)`
   (window ÷ two round-trip times), until validation CPU becomes the limit.
-- A server holds at most `maxUnacknowledged` outstanding IDs per connection.
+- A server holds at most `maxUnacknowledged` outstanding IDs per connection. It takes IDs
+  from one reply per request, so an unsolicited repeat reply adds none.
 - **Mixed versions.** Between an old server and a new client, an omitted body still
   misaligns the acknowledgements. The new client never omits an offered body, so this cannot
   happen on that pairing.

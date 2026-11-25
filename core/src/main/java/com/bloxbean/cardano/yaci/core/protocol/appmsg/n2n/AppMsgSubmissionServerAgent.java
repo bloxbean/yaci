@@ -167,6 +167,8 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
             }
             processedReplyIds++;
         }
+        // One reply per request: an unsolicited repeat adds no ids, so outstanding ids stay within the window.
+        requestedMessageIdCount = 0;
 
         getAgentListeners().forEach(l -> l.handleReplyMessageIds(reply));
 
@@ -209,11 +211,14 @@ public class AppMsgSubmissionServerAgent extends Agent<AppMsgSubmissionListener>
                 missing++;
                 continue;
             }
-            processedMessageIds.add(messageId);
             Integer announced = requestedBodySizes.get(messageId);
-            String rejection = announced != null && announced != msg.getSize()
-                    ? "body size " + msg.getSize() + " differs from the announced " + announced
-                    : checkMessage(msg);
+            if (announced != null && announced != msg.getSize()) {
+                // Not marked received: a later offer of this id with the right size is pulled again.
+                rejectMessage(messageId, "body size " + msg.getSize() + " differs from the announced " + announced);
+                continue;
+            }
+            processedMessageIds.add(messageId);
+            String rejection = checkMessage(msg);
             if (rejection == null) {
                 structurallyValid.add(msg);
             } else {

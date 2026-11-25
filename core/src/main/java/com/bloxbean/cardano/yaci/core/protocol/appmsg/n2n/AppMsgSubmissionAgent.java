@@ -247,12 +247,6 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
             log.debug("Rejecting expired message {}", message.getMessageIdHex());
             return false;
         }
-        Set<String> negotiated = negotiatedChainIds;
-        if (negotiated != null && !negotiated.contains(message.getChainId())) {
-            log.debug("Not enqueuing message {} — chain {} not shared with peer",
-                    message.getMessageIdHex(), message.getChainId());
-            return false;
-        }
         if (!config.getChainIds().isEmpty() && !config.getChainIds().contains(message.getChainId())) {
             log.warn("Rejecting message {} for unknown chain {}", message.getMessageIdHex(), message.getChainId());
             return false;
@@ -262,6 +256,13 @@ public class AppMsgSubmissionAgent extends Agent<AppMsgSubmissionListener> {
         MessageKey key = new MessageKey(message.getMessageId());
         boolean shouldWake;
         synchronized (this) {
+            // Checked under the monitor, so a message cannot slip in after MsgInitAck pruned its chain.
+            Set<String> negotiated = negotiatedChainIds;
+            if (negotiated != null && !negotiated.contains(message.getChainId())) {
+                log.debug("Not enqueuing message {} — chain {} not shared with peer",
+                        message.getMessageIdHex(), message.getChainId());
+                return false;
+            }
             if (pendingPriority.containsKey(key) || pendingOrdinary.containsKey(key)) {
                 return false; // duplicate
             }

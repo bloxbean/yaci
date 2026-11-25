@@ -94,6 +94,24 @@ class AppMsgSubmissionThroughputTest {
     }
 
     @Test
+    void bodyWithAMismatchedSizeIsAcknowledgedButNotMarkedReceived() {
+        AppMsgSubmissionServerAgent server = server(AppMsgSubmissionConfig.builder().batchSize(10).build());
+        send(server, server.buildNextMessage());
+        AppMessage m = AppMsgTestFixtures.message(CHAIN, "t", 1, new byte[]{1, 2, 3});
+        MsgReplyMessageIds ids = new MsgReplyMessageIds();
+        ids.addMessageId(new AppMessageId(m.getMessageId(), m.getSize() + 1));
+        server.receiveResponse(ids);
+        send(server, server.buildNextMessage());
+        MsgReplyMessages bodies = new MsgReplyMessages();
+        bodies.addMessage(m);
+        server.receiveResponse(bodies);
+
+        assertThat(server.hasReceivedMessageId(m.getMessageIdHex())).isFalse();
+        MsgRequestMessageIds next = (MsgRequestMessageIds) server.buildNextMessage();
+        assertThat(next.getAckCount()).isEqualTo((short) 1);
+    }
+
+    @Test
     void validateAllRunsOncePerReplyAndKeepsOrder() {
         List<Integer> batchSizes = new CopyOnWriteArrayList<>();
         AppMsgValidator rejectEven = new AppMsgValidator() {
