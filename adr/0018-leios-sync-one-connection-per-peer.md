@@ -161,19 +161,26 @@ waits on its side connection's own I/O loop (D4).
   - So a peer that drops the connection on every request for a pruned EB still ends in today's skip or halt within
     the 45 s budget.
   - **The retained front stays at the head of the queue** (review r4: Fable F22). The `onDisconnect` markers of a
-    genuine loss queue behind it, so the listener sees the block's outcome and then `onDisconnect`, as today. A
-    re-received copy of the block attaches to the retained state; it is never enqueued twice.
-  - **Resolve the front before re-intersecting** (review r5: reviewer3 R3-F1, R3-F5; replaces r6's rule for expiry
-    during a replacement).
-    - After any reconnect, genuine or private, the new connection first finishes the retained front's EB over
-      LeiosFetch. Its block bytes are already held. Only then does ChainSync (or the range's step 1) run, from the
-      resume position as it stands once the front has resolved.
-    - **The front commits** (success or skip): the resume position is that block. A genuine loss then shows exactly
-      today's trace: `onBlock(B)`, `onDisconnect`, `intersactFound(B)`, `onRollback(B)`, then `B`'s successors. A
-      private replacement shows only `onBlock(B)`.
-    - **The front halts:** nothing more is sent, as today.
-    - So a re-intersection can never be made at the front's parent and then roll back a block already delivered. A
-      reconnect in `BlockRangeSync` can never resume behind a block that was skipped meanwhile.
+    genuine loss queue behind its outcome, as today; when the front is dropped as orphaned, they come first (table
+    below).
+  - **After a reconnect with a retained front** (review r5: reviewer3 R3-F1, R3-F5; r6: R3-F8).
+    - **`BlockRangeSync`:** the new connection first finishes the front's EB over LeiosFetch; its block bytes are
+      already held. Only then does step 1 run, from the resume position as it stands. A range's front is on the
+      verified path and has no sibling, so this never stalls on an orphan.
+    - **`BlockSync`:** the front `B` (parent `A`) may have been rolled back during the outage. So the reconnect first
+      sends an internal `FindIntersect([B, A])` (I-Suppress), and the reply is held:
+
+      | Reply | Then | Genuine loss shows | Private replacement shows |
+      |---|---|---|---|
+      | found at `B` | resolve `B`'s EB (front isolation; `[A, A]` first if `A`'s announcement is missing) | `onBlock(B)`, `onDisconnect`, `intersactFound(B)`, `onRollback(B)`, successors: today's trace | `onBlock(B)`, successors |
+      | found at `B`, `B` halts | stop | `SYNC_HALTED`, as today | `SYNC_HALTED` |
+      | found at `A` | `B` was orphaned; drop it atomically, with no retry loop and no false halt | `onDisconnect`, `intersactFound(A)`, `onRollback(A)`, the sibling | `onRollback(A)`, the sibling |
+      | not found | drop `B` atomically | `onDisconnect`, `intersactNotFound` | `intersactNotFound` |
+
+    - **Skip expiry while that `FindIntersect` is in flight** delivers `onBlock(B)` at once. If the reply is then
+      found at `A`, the rollback to `A` is delivered, after `onDisconnect` and `intersactFound(A)` for a genuine loss,
+      before the sibling. So the listener never sees two competing children without a rollback between them.
+    - A front is never fetched again by ChainSync from its parent, so it is never re-received.
   - **A rollback or a different successor supersedes it atomically** (review r4: Codex F19). The retained block,
     its timer, its outcome and its budget are dropped in one step, before the rollback is delivered. A deadline that
     fires after that is ignored. So an abandoned-fork block is never delivered after its rollback, and a stale timer
@@ -300,6 +307,8 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
   - `from`'s header gives `from.blockNo`, `leiosCertInBody` and `prevHash`, so the remaining header count is known
     exactly, and D4b can run before anything is published.
   - `NoBlocks` for either means the peer dropped it since step 1: the whole range goes to D4c.
+  - A parse error in either also sends the whole range to D4c, so today's `batchStarted` and `onParsingError`
+    happen unchanged (review r6: reviewer3).
   - `from`'s block is kept as the range's first block. `to`'s is dropped and fetched again in its window.
 - **Step 3: publish `from`.** If `from` is certifying, its parent's announcement is looked up first (D4b). If `from`
   is in the mutable zone (`from.blockNo > F`), it waits for that zone's verification like any block there.
@@ -364,6 +373,13 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
     - D4c always starts on a fresh main connection: a private replacement. So ChainSync, BlockFetch and LeiosFetch all
       start idle. No pipelined `RequestNext`, parked `MsgAwaitReply`, BlockFetch window or LeiosFetch request carries
       over, and nothing needs draining.
+    - **The order is fixed** (review r6: reviewer3 R3-F9):
+      1. retire the old main connection;
+      2. complete the retained front, if any, synchronously over the side connection. No main connection exists
+         then, so nothing waits on the start's loop, and no promotion clock runs: this replacement was started by
+         Yaci, not by a close;
+      3. open the fresh main connection and complete its handshake;
+      4. send D4c's request.
     - The next range's step 1 therefore also starts on idle protocols.
     - The main connection carries no LeiosFetch while D4c runs.
     - A seam duplicate, the repeated first block of the D4c request, is dropped before `CompleteBlockAssembler` and
@@ -522,14 +538,12 @@ delivery queue (D2).
   - Yaci remembers which of the pending block's callbacks have already been delivered.
   - After a private replacement:
     - **The same block:** the replay does not repeat `rollforward` or `batchStarted`, and the block is delivered once.
-    - **A sibling:** a public rollback to the parent is delivered first, then the sibling's callbacks. That is a
-      normal ChainSync trace, and the same one today gives when a reconnect finds a different successor.
-- **Reconnect while a block waits for its EB** follows D2's single rule.
-  - The front is retained, with its deadline. A re-received copy attaches to it.
-  - The front is resolved before the re-intersection (D2). On a genuine loss the trace is `onBlock(B)` (or its skip),
-    `onDisconnect`, `intersactFound(B)`, `onRollback(B)`, then the successors: today's order, since today `onBlock`
-    blocks through the outage and confirms `B` before the reconnect.
-  - On a private replacement, the re-intersection at the resume position is not shown.
+    - **A sibling:** when `FindIntersect([B, A])` lands at `A`, a public rollback to `A` is delivered first, then the
+      sibling's callbacks. That is a normal ChainSync trace, and the same one today gives when a reconnect finds a
+      different successor.
+- **Reconnect while a block waits for its EB** follows D2's table for `BlockSync`. The internal
+  `FindIntersect([B, A])` decides between today's trace (`B` found), a rollback to `A` and then the sibling (`B`
+  orphaned), and `intersactNotFound`.
   - The resume position after "deliver `B`, roll back to a non-origin `A`, disconnect" is `A`. After a rollback to
     origin it stays `B`, as today's ChainSync records it (review r4: Codex F4).
 - **Parent lookup.** The parent of the first block after an intersection or a rollback is always a known point: the
@@ -748,6 +762,10 @@ stubs:**
   - a failed internal fetch followed by a valid public fetch (ownership on `NoBlocks`).
 - **reviewer3 round 1:**
   - a genuine reconnect while a certifying front waits: today's exact trace, with no rollback of a delivered block;
+  - `BlockSync` reconnect with the front orphaned (found at `A`), pruned with a close, and not found; skip expiry
+    while the `FindIntersect([B, A])` is in flight;
+  - D4c entry with a retained front: front completes before the fresh connection opens;
+  - a parse error in step 2's internal fetch: whole range on D4c;
   - skip expiry during a `BlockRangeSync` reconnect: no duplicate;
   - a pruned EB behind a healthy front: front isolation, and the front completes;
   - D4c entry while windows and pipelined headers are in flight: fresh connection, then the next range;
@@ -1040,3 +1058,9 @@ stubs:**
   - **Byron.** `difficulty`, with epoch-boundary blocks in the mutable zone and a k + 2 reservation; otherwise D4c
     (R3-F6).
   - **Promotion** after 15 s is final; `LeiosConfig` validation; prefetch in chain order (R3-F7).
+- **r8** (2026-11-25, responds to reviewer3's round 2 on `c4c85ec8`):
+  - **R3-F8.** Front-first resolution is kept for `BlockRangeSync`. For `BlockSync` a reconnect starts with an
+    internal `FindIntersect([B, A])`, and its reply table decides today's trace, a rollback to `A` then the sibling,
+    or `intersactNotFound`. Skip expiry during it is covered, and the "re-received copy" text is removed.
+  - **R3-F9.** D4c entry order is fixed: retire, complete the front, connect and handshake, request.
+  - **Minor.** A parse error in step 2 sends the range to D4c.
