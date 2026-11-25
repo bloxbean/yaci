@@ -636,7 +636,7 @@ yaci-store:
     connection, which no downstream sees, and the private rule keeps it that way.
   - A genuine network loss at that moment is hidden too, but only while the reconnect succeeds within 15 s. After
     that, `onDisconnect` is delivered.
-- **V7 (proposed; needs the owner's approval). A peer missing a body on its own selected chain.**
+- **V7 (approved by the owner, 2026-11-25). A peer missing a body on its own selected chain.**
   - Example: a Yaci or Yano server with `blockFetchCheckRangeExists` on and a body missing in a later window.
   - Today's whole-range request is checked up front and gets `NoBlocks` with no other callback.
   - With windows, earlier windows are already delivered. The missing body is a verification fault, and D4c then
@@ -690,7 +690,8 @@ as blocks in flight are today.
   intersection point. Received-but-undelivered entries are discarded. In `BlockSync`, ChainSync's resume point moves
   only when a delivery concludes, as D10 lists per outcome.
 - **I-Private.** A private replacement (D3) changes nothing the listener sees. The exceptions are a genuine rollback
-  to an earlier point and `intersactNotFound`.
+  to an earlier point, the public rollback delivered before a sibling of a pending block (D10), and
+  `intersactNotFound`.
 
 ## Tests
 
@@ -965,8 +966,8 @@ stubs:**
   - **D4c specified:** threads and side I/O loops, the I-NoWait exception, entry drain, the retained front handed
     over with its deadline, the watchdog off, resources and `noBlockFound` arguments (Codex F21; Fable F27).
   - **Header reservation.** k + 1 headers are always reserved (Codex F22; Fable F30).
-  - **Classification.** The equal-slot rule is unambiguous (Codex F1). V7 is proposed for a peer missing a body of
-    its own selected chain, pending the owner's approval.
+  - **Classification.** The equal-slot rule is unambiguous (Codex F1). V7 is added for a peer missing a body of its
+    own selected chain; the owner approved it on 2026-11-25.
   - **Closes.** Each is classified per channel. V6 applies to the shared channel only, and turns genuine after 15 s
     without a reconnect (Codex F24; Fable F28).
   - **Tip callbacks keep today's timing,** with replay suppression and a public rollback before a sibling. Expiry
@@ -977,3 +978,5 @@ stubs:**
     - The cursor summary uses D2's resume position (Codex F4).
     - D2 no longer cites the baseline runs (Codex F9).
     - The Supersedes line is corrected, and the D4c performance cliff is added to Risks (Fable F30).
+- **r6.1** (2026-11-25): V7 marked as approved by the owner. I-Private lists the public rollback before a sibling.
+  Fable's final check of r6 (`8cb6fb07`): APPROVED.
