@@ -81,36 +81,52 @@ This ADR follows that model, with Yaci's delivery queue in the role of chain sel
 
 ### D1. Threads: one pinned event loop per start; nothing on it waits for the network
 
-New invariant **I-NoWait**: no code running on a start's event loop blocks on I/O of any connection.
+New invariant **I-NoWait**: no Yaci code running on a start's event loop blocks on I/O of any connection. Listener
+code may block, as today; it then holds only its own start.
 
-- **One event loop per start.** A *start* is one `fetch`/`startSync` session of a helper. Its loop is chosen once.
+- **One event loop per start.** A *start* is one `fetch`/`startSync` session of a helper.
+  - Each start owns a new single-thread event loop: never the caller's, and never one shared with another start. It is
+    shut down after the start retires (review r3: Fable F16).
   - Every connection of the start registers on it: the first one, reconnects and internal replacements (D3).
-  - All of the start's timers and its delivery dispatcher run on it too (review r2: Fable F5).
+  - All of the start's timers and its delivery dispatcher run on it too.
 - **Listener callbacks run on that loop, serialized** (I1, C1).
   - Today they run on the current connection's loop, which may differ after a reconnect. yaci-store makes no
     thread-identity assumption; it needs serialization and happens-before (C1).
-  - One exception is kept from today, with its count and thread: `Session.start` calls `disconnected()` on each agent
-    synchronously on the caller's thread, before the channel is attached. The queue is empty at that moment, so
-    those notifications pass straight through (review r2: Codex F5).
+  - **One exception is kept from today, with its count and thread.** `Session.start` calls `disconnected()` on each
+    agent, synchronously on the caller's thread, before the channel is attached.
+    - For the *initial* start the queue is empty, so those notifications pass straight through.
+    - On a reconnect, which runs off the loop, the same notifications are posted to the loop, in order and with
+      today's count. They never run beside a callback.
+- **Across starts that share a listener** (review r3: Codex F3):
+  - A new start's first callback is not entered while a callback of an earlier start on the same listener is still
+    running. It waits on the new start's loop, without blocking.
+  - Today the two can overlap, for example the new `BlockSync`'s intersection callbacks during the old range's
+    `batchDone`. That overlap is removed; nothing is reordered.
 - **A slow or blocked listener blocks that loop,** so reads stop, as today (C6). It can no longer deadlock the sync,
   because nothing on the loop waits for a reply.
 - **Reconnect waits** (connect, retry sleep, handshake polling) never run on the start's loop. Deadlines and the stall
   watchdog keep running during an outage.
 - **EB checking and mapping** (Blake2b, `withEndorserBlockTxs`, `TransactionListBuilder`) run on a small CPU pool and
   post the result back to the loop.
-- **Stop.** `stop()` retires the start at once: it marks the start's generation terminal, so no new callback starts.
-  - It closes the channel asynchronously, and never waits for the loop or for delivery (I-Stop).
-  - A callback already running may finish, as today.
-  - Start keeps today's caller-thread behaviour, but never runs on the old start's loop.
+- **Stop.** `stop()` retires the start at once:
+  - `isRunning()` is false when it returns;
+  - the start's generation is terminal, so no new callback starts;
+  - it closes the channel asynchronously, and never waits for the loop or for delivery (I-Stop).
+
+  A callback already running may finish, as today.
+- **Start keeps today's behaviour on the caller's thread.** yaci-store calls `BlockSync.startSync()` from inside
+  `batchDone`, on the old start's loop, and it waits there for the connect and handshake.
+  - That is listener code blocking its own, retiring start, which I-NoWait allows.
+  - The new start's connection is on its own new loop, so the wait cannot block it (review r3: Codex F3).
 
 ### D2. In-order delivery queue (ADR 0017 D4 semantics, without threads, a pool or blocking)
 
 - **Queue.** Entries enter in receive order. An ordinary block is *ready*; a certifying block *waits* for its EB.
-  `batchDone`, rollback, intersection, disconnect and every other callback of the start are queued **markers**, so
-  their position relative to blocks is the receive order, as today.
+  `batchDone`, rollback, intersection, disconnect and every other public callback of the start are queued
+  **markers**, so their position relative to blocks is the receive order, as today.
 - **One drain** delivers from the front only. It runs when an entry arrives, when a fetch completes, and on timers.
-- **Fast path.** With nothing waiting, an entry is delivered at once, as today. On a network without Leios the queue
-  stays empty.
+- **Fast path.** With nothing waiting, an entry is delivered at once, as today. On a network without Leios, and in
+  Byron, the queue stays empty.
 - **Rules from ADR 0017 D4, kept as reviewed:**
   - announcements are indexed on read;
   - the 45 s budget starts at the front;
@@ -118,27 +134,43 @@ New invariant **I-NoWait**: no code running on a start's event loop blocks on I/
   - `fetch()` is admitted after the queue drains, or from inside `batchDone`.
 - **Listener exception.** A listener exception becomes that block's `onParsingError`, in its place.
   - It carries the original block bytes, which are retained through deferred delivery and charged to D5.
-  - So the payload does not depend on `returnBlockCbor` or on whether the block was queued (review r2: Codex F8,
-    Fable F9).
+  - So the payload does not depend on `returnBlockCbor` or on whether the block was queued.
 - **Commit rule.** Success, retry, skip and halt are decided by one atomic commit against the block's deadline and the
   start's cancellation, as the synchronous path does today.
   - A result that completes after the deadline loses to the timer.
   - A stop that clears the queue wins over a drain that already looked at the front.
-- **Connection loss and internal replacement (review r2: Fable F1, F2; Codex F4).**
-  1. Entries received but not yet started are discarded, with their fetches and their budget.
-  2. The `onDisconnect` markers are delivered next, right after the last delivered entry.
-  3. The start resumes from the last *delivered* block (I-Resume).
+- **The front block's deadline and outcome belong to the logical block, not the connection** (review r3: Fable F14,
+  Codex F11).
+  - They are keyed by block hash for the start, with the raw block bytes needed for a skip-mode delivery.
+  - The deadline timer runs on the start's loop, also while disconnected.
+  - A fetch lost to a connection loss counts as a failed attempt and emits `RETRYING` under today's rules.
+  - At expiry, skip or halt is committed at once, connected or not, using the retained bytes.
+  - So a peer that drops the connection on every request for a pruned EB still ends in today's skip or halt within
+    the 45 s budget.
+- **Connection loss and internal replacement.**
+  1. Entries received but not yet started are discarded, with their fetches and their budget, except the front's
+     retained state above.
+  2. On a genuine connection loss, the `onDisconnect` markers are delivered next, right after the last delivered
+     entry. An internal replacement is private (D3).
+  3. The start resumes from its *resume position* (I-Resume).
 
   The listener therefore sees a sequence that exists today: the one in which the connection dropped before those
   blocks were received.
+- **Resume position** (review r3: Codex F4). It is the last of these that was delivered, never one only received:
+  - a block whose delivery concluded with success or skip;
+  - a rollback point;
+  - an intersection point.
+
+  A block whose delivery ended in `onParsingError` does not move it, as today.
 - **Exactly once.**
   - Each entry leaves the queue once.
-  - A resumed range repeats its last delivered block (the range start is inclusive). That block is dropped by its
-    exact hash, once.
-  - The duplicate check is armed only by a resume of *the same range*, never across separate `fetch` calls.
+  - A resumed range repeats its resume block (the range start is inclusive). That block is dropped by its exact hash,
+    once.
+  - The duplicate check is armed only by a resume of *the same range* after at least one delivered block, never
+    across separate `fetch` calls.
   - **Deliberate change.** Today a reconnect inside a range delivers that block and `batchStarted` a second time
-    (`BlockfetchAgent`). Under D2 neither is repeated, per the owner's exactly-once requirement. It is listed as
-    deviation V1 in the Downstream contract.
+    (`BlockfetchAgent`, and the three baseline runs in Evidence that resumed). Under D2 neither is repeated, per the
+    owner's exactly-once requirement. It is listed as deviation V1 in the Downstream contract.
 
 ### D3. LeiosFetch on the main connection, pipelined like the Haskell client
 
@@ -163,77 +195,120 @@ New invariant **I-NoWait**: no code running on a start's event loop blocks on I/
   - Abort marks the generation terminal *before* failing its futures, and only that generation's connection writes.
   - A request written cannot be cancelled. Its reply is drained and discarded, or the connection is replaced. Its
     budget credit is held until then (D5).
-- **Stalls (review r2: Codex F10; Fable F13).** The connection is replaced when any request is in flight on it
-  (ChainSync headers, a BlockFetch window, LeiosFetch) and no byte has been read for 15 s.
-  - The stall clock is `now − max(last byte read, end of the last listener callback)`, checked on the start's loop.
-    A listener that blocks the loop therefore never counts as a stalled peer.
-  - The replacement follows the D2 rule for a connection loss.
-- **What a replacement looks like.** To the listener it is exactly today's reconnect: `onDisconnect`, then in
-  `BlockSync` the re-intersection callbacks.
-  - It is a new *trigger* of existing callbacks, listed as deviation V2.
-  - `isRunning()` and the keep-alive getters behave as during today's reconnect.
+- **Stalls: one clock per mini-protocol** (review r3: Codex F12, Fable F15).
+  - A protocol's clock starts when it writes a request that expects a finite reply: a BlockFetch request, a LeiosFetch
+    request, or a range's ChainSync header request.
+  - The clock is reset only by bytes received *for that protocol*. So keep-alive replies cannot hide a stalled window
+    or EB.
+  - A ChainSync request answered by `MsgAwaitReply` is parked, not stalled, and has no clock. So an idle `BlockSync`
+    at the tip is never replaced, with or without keep-alive traffic.
+  - Time spent inside a listener callback is excluded: a clock reads
+    `now − max(last byte for the protocol, end of the last callback)`. A listener that blocks the loop is never taken
+    for a stalled peer.
+  - At 15 s, the connection is replaced under the D2 rule.
+- **A replacement is private** (review r3: Codex F5).
+  - The listener sees no `onDisconnect` for it.
+  - In `BlockSync`, the re-intersection at the resume position is private too: its `intersactFound` and its
+    `onRollback` *to that same point* are not delivered.
+  - Only a rollback to an *earlier* point, meaning the peer's chain changed during the outage, is delivered, as a
+    genuine rollback.
+  - So a replacement changes no downstream state. yaci-store would otherwise write a `rollback` row for a same-point
+    rollback.
+  - `isRunning()` stays true, and the keep-alive getters keep their values. A genuine connection loss behaves as today.
 
 ### D4. `BlockRangeSync` flow control by request: header-driven BlockFetch windows
 
 This replaces blocking the event loop and `autoRead` off, both of which deadlock on a shared socket. `fetch(from, to)`
 keeps its signature and its meaning: the blocks of the chain from `from` to `to`, as the peer serves them by hash.
 
-- **Start order.** No listener callback happens before step 3 delivers.
-  1. **Validate `to`:** ChainSync `FindIntersect([to])` on the main connection.
-     - **Found:** `to` is on the peer's selected chain. Learn `to`'s block number with BlockFetch `[to, to]`; that
-       block is not delivered. The whole range is windowed.
-     - **Not found:** `to` is on a fork the peer may still retain, and today's request would be served by hash
-       (review r2: Codex F1, Fable F3).
-       - Any such fork branches off within k blocks of the peer's tip (k is the security parameter: 2,160 on
-         mainnet, 108 on Musashi).
-       - So the range is windowed only up to the *immutable horizon* `H` = tip − k on the selected chain. The rest is
-         one `RequestRange(H, to)` by hash, as today's request would be served.
-       - Its repeated first block is dropped by exact hash. If that request gets `NoBlocks`, see deviation V3.
-  2. **Validate `from`:** `FindIntersect([from])`. If it is not found, the range gives `noBlockFound(from, to)` and
-     nothing else, as today's `NoBlocks` for a range that is not a chain.
-  3. **Fetch `from`'s body** with BlockFetch `[from, from]`, as the range's first block.
-     - If it is certifying, its parent's announcement is looked up first on this connection's ChainSync (D4b), which
-       then re-intersects at `from`.
-     - Header pipelining starts after this.
+Windows are an optimisation for a range on the peer's *selected* chain. That case is safe to window, because an
+honest peer stores every body of its selected chain. Any other range takes a path that settles the outcome before
+the first public callback (review r3: Codex F1).
+
+- **Step 1: classify the range.** The main connection's ChainSync sends `FindIntersect([to])` and
+  `FindIntersect([from])` (internal, I-Suppress). The intersection's tip gives the *immutable horizon* `H` = tip − k.
+  - k is the security parameter (2,160 on mainnet, 108 on Musashi), a `LeiosConfig` setting with default 2,160.
+    Over-estimating it is safe; under-estimating it is not.
+  - Any fork the peer still retains branches off above `H`.
+
+  | `from` | `to` | Path |
+  |---|---|---|
+  | on the selected chain | on the selected chain | windows over the whole range |
+  | not found, at or below `H`'s slot | any | `noBlockFound(from, to)` alone, as today's `NoBlocks`: no retained fork reaches that low |
+  | not found, above `H` | on the selected chain | `noBlockFound(from, to)` alone: every ancestor of `to` is on the selected chain, so `from` is not one |
+  | any | not found, at or below `H`'s slot | `noBlockFound(from, to)` alone, as today's `NoBlocks` |
+  | above `H` (found or not) | not found, above `H` | today's single `RequestRange(from, to)`: at most about k blocks, exact today's semantics |
+  | on the selected chain, below `H` | not found, above `H` | **probe** BlockFetch `[to, to]`, then decide (below) |
+
+  - **The probe.** One block, discarded, and internal.
+    - `NoBlocks`: `noBlockFound(from, to)` alone, exactly today's outcome.
+    - Served: the peer retains `to`. It therefore retains `to`'s ancestors down to the fork point, because a Haskell
+      node prunes volatile blocks by slot, below its immutable tip. So today's request would be served.
+      - The range is windowed along the selected chain up to `H`, whose point is read from its header.
+      - The rest is one `RequestRange(H, to)` by hash.
+  - **The only residual difference is a race (deviation V3).** The peer prunes that fork after the probe and before
+    the second request. That needs the peer's immutable tip to pass the fork point, that is about k more blocks.
+    - Today's single request reads the fork's tail at the end of its stream too, so it is exposed to the same
+      pruning.
+    - What today's server then sends is not pinned here; it is an open item for the phase 2 tests.
+- **Step 2: the first public operation.** For a windowed range, `[from, from]`; otherwise the single request.
+  - If `from` is certifying, its parent's announcement is looked up first (D4b), before `from` is delivered.
+  - Then header pipelining starts after `from`.
 - **Windows.**
-  - Pipelined ChainSync headers after `from` give each block's point and its exact `blockBodySize`. The number of
-    header requests in flight never exceeds the blocks left before `to` (known from its block number), so no request
-    passes `to` or parks at the tip.
+  - Pipelined ChainSync headers after `from` give each block's point and its exact `blockBodySize`.
+  - Header requests in flight never exceed the blocks left before the windowed part's end, so no request passes it or
+    parks at the tip.
+    - The end is `to`, or `H` after a served probe.
+    - Its block number comes from an internal `[to, to]` fetch, or from the tip, and the count is recomputed from the
+      last header received.
+  - Termination is by point: the range ends on `to`'s hash. At equal block number (a Byron epoch-boundary block after
+    a regular block), one more header is requested while `to` has not been reached (review r3: Codex F13).
   - BlockFetch asks for windows of at most W blocks and B bytes (defaults 100 and 2 MB). Byron headers give points but
-    no size, so Byron windows are bounded by count only (review r2: Fable F4).
+    no size, so Byron windows are bounded by count. Byron has no certifying blocks, so its queue never waits and holds
+    nothing (D5).
   - A window is requested only while the budget (D5) has room. An empty queue always admits one, so the front can
     always make progress.
-  - **Every window is verified (I-Range):** its blocks must be exactly the expected points, in order (review r2:
-    Codex F2).
-- **Anomaly fallback.** These conditions all mean the peer is no longer serving the chain that was read:
-  - a mismatch, an early `BatchDone` or `NoBlocks` for a window;
-  - a ChainSync `RollBackward` other than the first reply after an intersection.
-
-  Then header intake stops, and windows continue over the headers already buffered. The rest of the range is one
-  `RequestRange(last received, to)`, by hash, as today's request would have been served; its repeated first block is
-  dropped by exact hash.
-  - A fork switch can only reach the part of the chain within k blocks of the tip, so this request covers at most
-    about k blocks.
-  - Its outcome passes through as today: blocks then `batchDone`, or `noBlockFound(from, to)`.
-  - Residual difference (deviation V3). The peer may drop the fork's bodies before Yaci's by-hash request, in this
-    fallback or in step 1's `RequestRange(H, to)`.
-    - Then the blocks already delivered stay delivered, followed by `noBlockFound(from, to)` and no `batchDone`.
-      Those blocks are valid blocks of the requested chain, immutable in step 1's case.
-    - Today the same race gives `noBlockFound` with no block delivered.
+  - **Every window is verified (I-Range):** its blocks must be exactly the expected points, in order.
+- **Faults** (review r3: Codex F2, F7; Fable F17).
+  - **At the first discrepancy, freeze.** A mismatch, an early `BatchDone`, `NoBlocks` for a window, or a ChainSync
+    `RollBackward` other than the first reply after an intersection all trigger it.
+    - No later window is issued.
+    - Nothing past the last *contiguous, verified* block is delivered.
+    - Window, body and EB work beyond that block is retired by generation. A late body of an old window is discarded.
+  - **Recovery** is a connection fault under the D2 rule: reconnect, and restart from step 1 at the resume position.
+    - The range's `to` and its `batchStarted` state carry over.
+    - No by-hash suffix request is ever sent, so nothing unreserved and unbounded reaches the shared socket.
+    - After a fork switch, step 1 classifies the rest of the range again, so the probe or the single request
+      preserves today's by-hash outcome.
+  - **Repeated faults.** Three consecutive faults at the same resume position, with no progress, end the range with
+    `noBlockFound(from, to)` (deviation V4: a faulty peer only).
+    - An honest node never short-serves its selected chain.
+    - Today such a peer's short batch is followed by `batchDone`: a silent gap.
 - **Callbacks.**
-  - One `batchStarted` when the first block is received, and one `batchDone` after the last block of the range.
-  - `noBlockFound(from, to)` names the requested points, never internal window points.
-  - **I-Suppress:** the range's internal traffic never reaches the listener: its ChainSync (roll-forwards,
-    intersections, rollbacks), the `[to, to]` probe and the parent lookup. `BlockRangeSync` never emitted `onRollback`
-    and still does not (review r2: Fable F3).
+  - **`batchStarted`** is tied to the wire `StartBatch` of the range's first public operation (review r3: Codex
+    F15). It is exposed once per range, even if the connection drops before the first body. A later operation of the
+    same range never exposes it again (V1).
+  - **`batchDone`** comes once, after the last block of the range.
+  - **`noBlockFound(from, to)`** names the requested points, never internal window points.
+  - **I-Suppress:** the range's internal traffic never reaches the listener, nor the internal listeners of
+    `N2NChainSyncFetcher` and `BlockfetchAgent`. That covers its ChainSync (roll-forwards, intersections,
+    rollbacks), the probe and the parent lookup. `BlockRangeSync` never emitted `onRollback` and still does not.
   - A halt stops window and header requests at once.
+- **BlockFetch ownership** (review r3: Codex F14).
+  - BlockFetch runs one *operation* at a time, each tagged with its purpose (public range, window, probe, parent
+    lookup, tip body) and its generation.
+  - An operation starts only when the previous one has ended: after its `BatchDone` or `NoBlocks`, and after
+    `BlockfetchAgent` has reset its cursor (`readyForNextBatch`).
+  - Every marker and error is routed to the operation that owns it, never inferred from the request's shape. So an
+    internal `[P, P]` and a public `fetch(P, P)` cannot be confused.
 - **Round trips.** Header pipelining keeps BlockFetch fed.
   - A second window may be queued before the first completes, so a window boundary costs no idle round trip. Measure
     before enabling.
   - The extra header bytes and round trips, and how the Haskell node drives BlockFetch from ChainSync, are measured
     and tuned in #261.
-- **D4b. Parent lookup.** Needed for a certifying block at the start of a range. ADR 0016 D4b's `FindIntersect`
-  search runs on the main connection's ChainSync in step 3, before header pipelining starts, under I-Suppress.
+- **D4b. Parent lookup.** Needed for a certifying block at the start of a range.
+  - ADR 0016 D4b's `FindIntersect` search runs on the main connection's ChainSync in step 2, before header pipelining
+    starts, under I-Suppress. ChainSync then re-intersects at `from`.
   - Its deadline and cancellation are the start's.
   - `ParentBlockLookup`'s own connection is removed (D8).
 
@@ -246,8 +321,8 @@ data is gone (review r2: Codex F7, Fable F8).
 | Stage | Charge |
 |---|---|
 | Buffered headers | their bytes; at most 2,000 buffered and 100 in flight |
-| BlockFetch window | the sum of its headers' `blockBodySize`, from request until each block is delivered or discarded |
-| EB request | 660 kB (the `MsgLeiosBlock` limit) until the EB arrives |
+| BlockFetch window | the sum of its headers' `blockBodySize`, from request until each block is delivered or discarded; Byron windows are charged on receipt, and their blocks are delivered at once (no certifying block waits) |
+| EB request | the size announced in the parent's header (`EbAnnouncement.size`), capped at 660 kB (the `MsgLeiosBlock` limit), until the EB arrives |
 | EB transactions | the exact bytes the EB references, from request through raw reply, CPU mapping and queued block until delivery |
 | Written but abandoned request | held until its reply is drained or the connection closes |
 | Original block bytes kept for `onParsingError` | their size, until delivery |
@@ -258,10 +333,17 @@ data is gone (review r2: Codex F7, Fable F8).
   - The front block's own fetch is always admitted. It has priority, so a full budget can never hold back the block
     that would free it.
 - **Worst case:** the budget, plus one window (2 MB), plus the front block's EB.
-- **Not covered:** the by-hash `RequestRange` of D4 (step 1's tail when `to` is off the selected chain, and the
-  anomaly fallback) cannot be reserved in advance.
-  - It covers at most about k blocks: up to 2,160 on mainnet, 108 on Musashi.
-  - It occurs only when `to` is off the peer's selected chain or a fork switch happens inside the range.
+- **Pipeline depth at the defaults** (review r3: Fable F18):
+  - D3's 5 MB cap on expected reply bytes binds first. That is about 17 Musashi-average transaction replies (about
+    0.3 MB each) plus many small EB requests; the fetch-only benchmark reached 141 in flight.
+  - The prefetch half of the budget (16 MB) admits about 50 EBs of that size.
+  - #261 tunes from this base.
+- **Not covered.** D4's single requests cannot be reserved in advance: the range above `H`, and the tail after the
+  probe (review r3: Codex F7).
+  - Both cover at most about k blocks: up to 2,160 on mainnet, 108 on Musashi.
+  - Both occur only when an endpoint is not on the peer's selected chain.
+  - No fault recovery sends one.
+- **Singleton probes** (`[from, from]`, `[P, P]`) reserve one block's maximum body size.
 - **The budget counts wire bytes.** Deserialized blocks and transactions take several times more heap. Phase 3
   measures heap per budget byte and documents the recommended heap.
 - **Measured in the POC:** Musashi from genesis to block 20,000 completes with a 512 MB heap, also with a listener
@@ -308,20 +390,19 @@ D8 removes the side connection that `BlockSync` uses today. So with the feature 
 `N2NChainSyncFetcher` connection also registers the `PipelinedLeiosFetchAgent` (D3), and its callbacks go through the
 delivery queue (D2).
 
-- **Today's ordering, corrected (review r2: Fable F6; Codex F4).** `N2NChainSyncFetcher`'s internal listener runs
-  first, because listeners run last-added first. It confirms the block, setting ChainSync's resume point, and sends
-  `RequestNext` *before* `BlockSync`'s listener runs.
-  - Ordering holds today only because the blocked loop cannot read the next reply.
-  - D10 therefore changes `N2NChainSyncFetcher`, a public class, and only behind the D7 predicate.
-- **One transition: the block's delivery concluded.** It covers every way delivery can end:
-  - `onBlock` returned;
-  - `onBlock` threw, and its `onParsingError` was delivered;
-  - a parse error was delivered and the sync continues;
-  - a Byron callback was delivered;
-  - a skip was delivered.
-
-  Only then is the block confirmed as the resume point, and only then is `RequestNext` sent. A halt or a stop sends
-  neither. `NoBlocks` for a tip block behaves as today.
+- **Today's ordering.** `Agent.addListener` inserts at index 0, so `N2NChainSyncFetcher`'s internal listener, added
+  first, runs *last*. Today `BlockSync`'s `onBlock` therefore returns before the block is confirmed (ChainSync's resume
+  point) and before `RequestNext` is sent.
+  - Once `onBlock` only enqueues a waiting certifying block, that order would break.
+  - D10 keeps it by moving confirm and `RequestNext` to the end of the block's delivery. This changes
+    `N2NChainSyncFetcher`, a public class, only behind the D7 predicate (review r3: Fable F6).
+- **One transition: the block's delivery concluded.** Its outcome decides what follows, as today:
+  - **`onBlock` returned, a Byron callback was delivered, or a skip was delivered:** confirm the block, then
+    `RequestNext`.
+  - **`onBlock` threw, or the block failed to parse:** after its `onParsingError` is delivered, `RequestNext` without
+    confirming, as today's `onParsingError` path does.
+  - **Halt or stop:** neither.
+  - **`NoBlocks` for a tip block:** as today.
 - **Every `BlockSync` callback is queued in receive order:**
   - `rollforward` and `rollforwardByronEra`, `intersactFound`/`intersactNotFound`, `onRollback`;
   - `batchStarted`, the block callbacks, `batchDone`, `noBlockFound`, `onDisconnect`;
@@ -329,10 +410,14 @@ delivery queue (D2).
 
   With one block in flight, a rollback can be received only after the previous block's delivery concluded. So on an
   uninterrupted connection its position is today's.
-- **Reconnect while a block waits for its EB.** The block is discarded (D2), and its resume point was never
-  confirmed. ChainSync therefore re-intersects at the last delivered block, and the listener sees `onDisconnect`,
-  `intersactFound`, `onRollback` to that block, then the block again. That is today's sequence for a reconnect just
-  before that block arrived (I-Resume).
+- **Reconnect while a block waits for its EB.** The block is discarded (D2), and its resume position was never
+  confirmed. ChainSync re-intersects at the resume position: the last delivered block, or the last delivered rollback
+  or intersection point.
+  - **Genuine connection loss:** the listener sees `onDisconnect`, `intersactFound`, `onRollback` to that position,
+    then the block again. That is today's sequence for a reconnect just before that block arrived.
+  - **Internal replacement (D3):** private. The listener sees the block delivered once, and nothing else.
+  - The resume position after "deliver `B`, roll back to `A`, disconnect" is `A`, as today's ChainSync records it
+    (review r3: Codex F4).
 - **Parent lookup.** The parent of the first block after an intersection or a rollback is always a known point: the
   intersection point, the rollback point, or the previous block.
   - It is fetched with BlockFetch `[P, P]` on the main connection, never delivered (I-Suppress), with no search.
@@ -408,7 +493,11 @@ Peers, all Musashi `rc-2026w45` Haskell nodes:
   - Every run's trace up to the stop block is byte-identical to today's path: 19 local runs at 20,000 (`7c018e3c…`),
     18 public and remote-VM runs at 11,000 (`3f1e0608…`).
     - The trace records each `onBlock` (number, hash, transaction count and digest) and each EB event.
-    - Duplicates are counted separately: 0 in every run.
+    - Duplicates are counted separately, before the trace (review r3: Codex F9).
+      - Every feature-on run and every pool run counted 0.
+      - Three runs of today's path that resumed after a reconnect counted 1–2 (`vm-base-a`, `vm-base-b`,
+        `pub-base-b`): today's repeat of the resumed block, which D2 removes (V1).
+    - The digest covers the accepted block entries.
     - It does not record `batchStarted`, `batchDone`, threads, rollbacks or disconnects, so it supports I2 for these
       runs, but not all of I1. Phase 4's full-callback recording is I1's gate (review r2: Codex F9, Fable F10).
 - **Throughput, public relay outside the slow period:** one connection delivered about 220 blocks/s, 15,400
@@ -442,23 +531,28 @@ No downstream code change is needed in either case; the D7 opt-in can be a syste
 | C4 | `onRollback` comes after every block received before it, and no block of the abandoned fork follows it. Its cleanup deletes by slot from the persisted cursor. Every `startSync` begins with a rollback to the intersection. | D2 markers in receive order; D10 pacing and resume point; I-Rollback |
 | C5 | `stop()`, `restart()` and `startSync()` are called from callbacks and from other threads, inside yaci-store's own `synchronized` methods. | D1 stop: retire at once, close asynchronously, never wait for the loop or delivery; I-Stop |
 | C6 | Blocking in `onBlock` is its only backpressure: synchronous DB writes, and in parallel mode a join of up to 5 minutes every 100 blocks. | Callbacks stay on the start's loop, so a blocked listener still stops reads; windows and prefetch are admitted only under D5 |
-| C7 | Health is the time since the last *block* callback (`blockReceiveDelaySeconds`, default 120 s); optional auto-recovery restarts the sync. | Unchanged 45 s front budget and skip/halt rules (D2); the 15 s stall rule now covers headers and windows too (D3) |
+| C7 | Health is the time since the last *block* callback (`blockReceiveDelaySeconds`, default 120 s); optional auto-recovery restarts the sync. | The 45 s front budget, with its deadline kept across replacements, and the skip/halt rules (D2); per-protocol stall clocks (D3) |
 | C8 | A listener exception: yaci-store calls `stopSyncOnError()` and rethrows, and with `continueOnParseError` it publishes `onParsingError`'s bytes in `ErrorEvent`. | D2: `onParsingError` in place, with the original bytes; I-Stop's exception for it |
 | C9 | `intersactFound`/`intersactNotFound` arrive even when no block follows. `BlockFinder` shares the `BlockSync` instance, waits up to 40 s for them, then stops it. | D10 markers; the fast path delivers at once |
 | C10 | New callbacks would need no-op defaults. | No callback is added |
-| C11 | `isRunning()` and the keep-alive getters are polled every 10 s. | Unchanged; an internal replacement behaves as today's reconnect (D3) |
+| C11 | `isRunning()` and the keep-alive getters are polled every 10 s, and shutdown checks `isRunning()` before `stop()`. | `isRunning()` is false as soon as `stop()` returns, even before the channel closes; during a genuine reconnect it behaves as today; during an internal replacement it stays true, and the keep-alive getters keep their values (D1, D3) |
 
 **Deviations with the feature on.** Each is visible only in the case described, and each was reviewed against
 yaci-store:
 - **V1. No repeat after a reconnect inside a range.** Today such a reconnect delivers the last block and
   `batchStarted` a second time; now neither repeats (D2, exactly once). yaci-store tolerates either.
-- **V2. A new trigger for an existing reconnect.** A 15 s stall of any request on the main connection replaces it.
-  The listener sees today's reconnect callbacks: `onDisconnect`, and in `BlockSync` the re-intersection, whose
-  `onRollback` is to the last delivered block, a no-op for yaci-store's cleanup.
-- **V3. A fork's bodies dropped before Yaci's by-hash request** (D4). Already delivered blocks stay delivered, then
-  `noBlockFound(from, to)`. Today it is `noBlockFound` alone.
-  - yaci-store implements neither callback, so both cases end in its health restart from its cursor.
-  - The delivered blocks are valid blocks of the requested chain.
+- **V2 (withdrawn in r4).** An internal replacement is now private (D3), so it triggers no callback.
+- **V3. A retained fork pruned mid-range** (D4). The peer prunes the fork holding `to` after the `[to, to]` probe
+  and before the by-hash request for the tail. That needs about k more blocks on the peer's chain.
+  - Then blocks up to `H`, all immutable, stay delivered, followed by `noBlockFound(from, to)` and no `batchDone`.
+  - Today's single request reads that tail at the end of its stream too, so it is exposed to the same pruning; its
+    exact outcome is an open item.
+  - yaci-store implements neither callback. Whether it restarts depends on its optional auto-recovery. Without
+    recovery it stays idle, as it does after today's `noBlockFound`, but with a cursor that has advanced over valid
+    blocks (review r3: Codex F10).
+- **V4. A faulty peer that keeps short-serving its selected chain** (D4). After three faults with no progress, the
+  range ends with `noBlockFound(from, to)`. Today such a short batch is followed by `batchDone`, which is a silent
+  gap. An honest Haskell node never does this.
 
 **Cursors.** Three cursors are involved, and none changes meaning:
 - **Yaci's delivered cursor:** the last block whose delivery concluded. It is the only resume point (I-Resume).
@@ -476,39 +570,65 @@ as blocks in flight are today.
 ## Invariants
 
 - **I1.** Listeners see the same callbacks, arguments and order as today, serialized on the start's event loop.
-  The exceptions are deviations V1–V3, and D1's start-up `onDisconnect` on the caller's thread.
+  The exceptions are deviations V1, V3 and V4, and D1's start-up `onDisconnect` on the caller's thread.
 - **I2.** Every block of a range is delivered exactly once, also across reconnects.
-- **I-NoWait.** No code on a start's event loop waits for network I/O.
-- **I-Budget.** What D5 counts stays under its budget, except the front block's own fetch, one window, and D4's
-  by-hash request.
+- **I-NoWait.** No Yaci code on a start's event loop waits for network I/O. Listener code may block, as today.
+- **I-Budget.** What D5 counts stays under its budget, except the front block's own fetch, one window, a singleton
+  probe, and D4's single requests for an endpoint off the selected chain (at most about k blocks).
 - **I-Certified.** Only EBs announced by the parent of a block with `leiosCertInBody == true` are requested.
 - **I-Generation.** No reply of one connection generation completes a request of another.
-- **I-Range.** Every BlockFetch window delivers exactly its expected points, in order, or triggers D4's fallback; a
-  range never advances past a block that was not received.
-- **I-Suppress.** Internal protocol traffic never reaches the listener: the range's ChainSync, the `[to, to]` probe,
-  parent lookups, and `[P, P]` fetches.
+- **I-Range.** Every BlockFetch window delivers exactly its expected points, in order, or freezes the range at the
+  last contiguous, verified block (D4). A range never delivers past a block that was not received and verified.
+- **I-Suppress.** Internal protocol traffic never reaches the downstream listener, nor the internal listeners of
+  `N2NChainSyncFetcher` and `BlockfetchAgent`: the range's ChainSync, the `[to, to]` probe, parent lookups, and the
+  `[P, P]` fetches. A probe never confirms a point or sends `RequestNext`.
 - **I-Rollback.** A rollback is delivered after every entry received before it, and no block of the abandoned fork is
   delivered after it.
 - **I-Stop.** `stop()` never waits for the loop or for delivery, also when called from a callback.
-  - After it returns, no new callback of that start begins. A callback already running may finish, as today.
-  - Exception: the `onParsingError` that reports an exception thrown by that running callback is still delivered,
-    as today.
-- **I-Resume.** A start resumes only from its last *delivered* block: received-but-undelivered entries are
-  discarded. In `BlockSync`, ChainSync's resume point is confirmed only when a block's delivery concludes.
+  - After it returns, `isRunning()` is false and no new callback of that start begins. A callback already running may
+    finish, as today.
+  - Two exceptions are kept from today:
+    - the `onParsingError` reporting an exception thrown by that running callback;
+    - the retired start's `onDisconnect` when its channel closes, which today's assembler forwards for a replaced,
+      non-halted start (review r3: Codex F5).
+  - Callbacks of different starts that share a listener never overlap (D1).
+- **I-Resume.** A start resumes only from its resume position (D2): the last delivered block, rollback point or
+  intersection point. Received-but-undelivered entries are discarded. In `BlockSync`, ChainSync's resume point moves
+  only when a delivery concludes, as D10 lists per outcome.
+- **I-Private.** An internal replacement changes nothing the listener sees, except a genuine rollback to an earlier
+  point.
 
 ## Tests
 
 **Unit, through real `BlockfetchAgent`, `ChainsyncAgent`, `Session` and `MiniProtoClientInboundHandler` state, not
 stubs:**
-- **Range start and end:** `fetch(P, P)`; `to` off the selected chain, retained and pruned (V3); `from` not found.
-- **Range anomalies:**
-  - a missing body in the second window;
+- **Range classification (D4 step 1), every row of the table:**
+  - both endpoints on a retained fork (served as today);
+  - `from` above `H`;
+  - an unknown old `to` (`noBlockFound` alone);
+  - `to` retained or pruned at the probe;
+  - pruned between the probe and the tail (V3);
+  - `fetch(P, P)`;
+  - a public `fetch(P, P)` right after an internal `[P, P]`.
+- **Range faults:**
+  - a missing body in the second window, with later headers already buffered (no later block delivered);
   - an early `BatchDone` in a non-final window;
   - a window with a wrong point;
-  - a rollback while a window is in flight, with its late bodies and EB completions arriving after the rollback;
-  - Byron headers, and a range crossing Byron → Shelley.
+  - a fault near the start of a long historical range with a waiting front (retained bytes stay bounded);
+  - three faults at one position (V4);
+  - a rollback while a window is in flight, with its late bodies and EB completions arriving after the freeze.
+- **Byron:** headers; a range crossing Byron → Shelley; the two-block range of a regular block and its epoch-boundary
+  successor.
+- **Markers:** a disconnect, and a stop from inside a callback, between `StartBatch` and the first body
+  (`batchStarted` once).
+- **BlockFetch ownership:** a cold parent lookup with the child's `BatchDone` delayed.
 - **Reconnects:**
-  - before the first block;
+  - before the first block (`from` delivered once, `batchStarted` once);
+  - a peer that disconnects on every EB request: today's skip or halt within the budget, in strict and skip modes;
+  - repeated replacements, and expiry while disconnected;
+  - an idle tip for more than 15 s with no keep-alive: no replacement;
+  - a stalled window with healthy keep-alives: replaced (per-protocol clock);
+  - an internal replacement in `BlockSync`: no `onDisconnect`, no same-point rollback, no `rollback` row;
   - with a non-empty queue behind a waiting certifying front;
   - after the last block before `BatchDone`;
   - while idle, then an overlapping range.
@@ -531,9 +651,15 @@ stubs:**
 **Downstream contract (C1–C11), with a listener shaped like yaci-store's `BlockFetchService`:**
 - a `synchronized` service monitor;
 - `stop()` of the delivering `BlockRangeSync` and `BlockSync.startSync()` from inside `batchDone`;
+- a replacement start while the old start's callback is still inside the listener, including an exception thrown
+  after the replacement;
+- `isRunning()` polled, and `stop()` called, between logical retirement and the physical close;
+- `BlockSync` resume schedules through the real listener registration order: a parse-continue then a disconnect; a
+  delivered `B`, a rollback to `A`, then a disconnect;
 - an external `stop()` racing that `batchDone` on the service monitor, run under barriers (no deadlock);
 - an external `stop()` while the front waits for an EB, then a restart: no stale callback afterwards;
-- the real shared `BlockSync` used by a `BlockFinder`-shaped intersection check;
+- the real shared `BlockSync` used by a `BlockFinder`-shaped intersection check, with both intersection outcomes and no
+  following block;
 - a listener exception in `onBlock` with `continueOnParseError` on and off and `returnBlockCbor=false`: the payload,
   and the callbacks after the stop;
 - a listener blocking for seconds: reads and window requests stop, memory stays under the budget;
@@ -549,7 +675,8 @@ stubs:**
 - `yaci-sync-check` on preview, preprod and mainnet with the feature on (the Byron path and no regression);
 - a slow-listener run with a fixed heap;
 - yaci-store (Yaci 0.5.x build) on Musashi, feature on against feature off, with parallel processing on:
-  - the same callback sequence and the same *commit* sequence (cursor writes, per-table rows);
+  - the same callback sequence and the same *commit* sequence (cursor writes, per-table rows, `rollback` rows and
+    events);
   - a run that ends one block past a parallel batch boundary;
   - a restart with a partial batch;
   - a recovery restart during a stalled header window;
@@ -561,9 +688,9 @@ stubs:**
 |---|---|---|
 | 0 | Merge PR #256 D1 (timings) and D2 (keep-alive). Keep the D4 pool off by default, as a baseline. | Done in #256 |
 | 1 | `PipelinedLeiosFetchAgent` with generations, the handshake gate and credit for abandoned requests (D3); unit tests | Agent tests; local and public LeiosFetch benchmark at 150 / 5 MB |
-| 2 | Logical range (D4): start order and validation, verified windows, fallback, I-Suppress, Byron by count | Range tests; `yaci-sync-check` preview, preprod and mainnet unchanged |
+| 2 | Logical range (D4): classification and probe, verified windows, freeze and recovery, BlockFetch ownership, I-Suppress, Byron by count | Range tests; `yaci-sync-check` preview, preprod and mainnet unchanged |
 | 3 | Pinned loop per start, stop, and the dispatcher (D1); delivery queue with the commit rule and the reconnect rule (D2); staged budget (D5); stall watchdog (D3) | Delivery and reconnect tests; slow-listener and fixed-heap runs; heap per budget byte |
-| 4 | Header-triggered prefetch (D6); `LeiosConfig` opt-in with a system-property default (D7); parent lookups (D4b, D10); `BlockSync` on one connection (D10) | Downstream contract tests (C1–C11); full-callback recording identical except V1–V3; yaci-store run on and off |
+| 4 | Header-triggered prefetch (D6); `LeiosConfig` opt-in with a system-property default (D7); parent lookups (D4b, D10); `BlockSync` on one connection (D10) | Downstream contract tests (C1–C11); full-callback recording identical except V1, V3 and V4; yaci-store run on and off |
 | 5 | Default on after one release; remove the side connections (D8); update ADR 0016 and 0017 status | Full Musashi run to the tip; mainnet sync check; mainnet blocks/s from a local node within 5% of today's path |
 | ‖ | #253 fair egress (D9) | #253's tests; Yano QA |
 | Later | Parse ranking blocks off the event loop, in parallel, with the same ordered delivery (a general Yaci speed-up for local and LAN sync, mainnet included); its own ADR | Mainnet sync from a local node: blocks/s and CPU |
@@ -572,7 +699,7 @@ stubs:**
 
 - **Downstream:**
   - No API change. With the feature off nothing changes. With it on, the contract yaci-store relies on is kept item by
-    item, with deviations V1–V3 (Downstream contract).
+    item, with deviations V1, V3 and V4 (Downstream contract).
   - Enabling it during the opt-in release needs a system property, or one `LeiosConfig` option, and a Yaci 0.5.x
     build of yaci-store. After phase 5, nothing.
 - **Network:** one connection per peer during Leios sync, instead of one main connection plus one side connection
@@ -602,7 +729,7 @@ stubs:**
   - Low priority; not part of this ADR.
 - **Listener time on the event loop** still bounds a slow downstream. That is unchanged and intended (I1).
 - **Design-only parts.** The POC covered `BlockRangeSync` in the Shelley-based eras, with no reconnect and no
-  rollback. D10, the switch at the tip (C3), C4, C5, C9, the reconnect rule, Byron windows and the fallback paths have
+  rollback. D10, the switch at the tip (C3), C4, C5, C9, the reconnect rule, Byron windows, the classification paths and fault recovery have
   no live evidence yet. Phase 4's full-callback recording and the yaci-store run are their acceptance gates.
 
 ## Related findings (out of scope)
@@ -617,7 +744,9 @@ stubs:**
 - **Open:**
   - window and budget defaults on mainnet;
   - whether to queue a second BlockFetch window;
-  - CIP-0164's multi-EB request, once relays support it.
+  - CIP-0164's multi-EB request, once relays support it;
+  - what today's single request sends when the peer prunes a fork's tail mid-stream, which is the baseline for V3
+    (phase 2 tests).
 
 ## Revision history
 
@@ -649,3 +778,23 @@ stubs:**
   - **Evidence.** The trace's claim is narrowed, design-only parts are listed, and phase 4 is gated on a
     full-callback recording (Codex F9; Fable F10).
   - **Plan.** A mainnet throughput gate before default on; Related findings added; stale D-ranges fixed (Fable F13).
+- **r4** (2026-11-25, responds to the reviews of `67619efa`: Fable round 2, F6 and F14–F20; Codex round 2, F1–F5,
+  F7, F9, F10 reopened, and F11–F16):
+  - **Range classification.** D4 step 1 classifies every endpoint case before the first public callback: a retained
+    fork is served as today; an unknown `to` gives `noBlockFound` alone; a `[to, to]` probe settles a long range
+    whose `to` is off the selected chain. V3 is narrowed to a pruning race (Codex F1).
+  - **Faults.** Windows freeze at the first discrepancy and recover by reconnecting from the resume position. No
+    by-hash suffix is sent. Three faults with no progress give V4 (Codex F2, F7; Fable F17).
+  - **Handoff.** Callbacks of different starts never overlap; start-up behaviour on the caller's thread is
+    explained; `isRunning()` is false at retirement (Codex F3, F16; Fable F16).
+  - **Resume position** covers rollback and intersection points. D10's ordering is corrected, and a parse error does
+    not confirm a block, as today (Codex F4; Fable F6).
+  - **Internal replacement is private.** V2 is withdrawn, I-Private added, and the retired start's `onDisconnect`
+    is kept as today (Codex F5).
+  - **The front's deadline** survives replacement, and expiry can happen while disconnected (Codex F11; Fable F14).
+  - **Per-protocol stall clocks**, with parked ChainSync exempt (Codex F12; Fable F15).
+  - **Byron.** Epoch-boundary termination by point (Codex F13; Fable F19).
+  - **BlockFetch ownership** by operation, and `batchStarted` tied to the wire `StartBatch` (Codex F14, F15).
+  - **Budget.** EB request charge uses the announced size; pipeline depth at the defaults is stated (Fable F18).
+  - **Smaller fixes.** Duplicate counts corrected in Evidence (Codex F9); V3's store outcome without auto-recovery
+    (Codex F10); the duplicate check is armed only after a delivery (Fable F20).
