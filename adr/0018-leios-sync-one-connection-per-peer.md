@@ -91,10 +91,13 @@ waits on its side connection's own I/O loop (D4).
   - Each start owns a new single-thread event loop: never the caller's, and never one shared with another start. It is
     shut down after the start retires (review r3: Fable F16).
   - Every connection of the start registers on it: the first one, reconnects and internal replacements (D3).
-  - All of the start's timers and its delivery dispatcher run on it too.
-- **Listener callbacks run on that loop, serialized** (I1, C1).
-  - Today they run on the current connection's loop, which may differ after a reconnect. yaci-store makes no
-    thread-identity assumption; it needs serialization and happens-before (C1).
+  - All of the start's timers and lifecycle transitions run on it too.
+- **Listener callbacks run serialized per start, on a delivery thread** (I1, C1; implementation, r10).
+  - Protocol threads only enqueue (D2). One drain at a time per start delivers from the front of its queue on a
+    pooled delivery thread, never on a protocol loop. So keep-alive, handshakes, timers, closes and retirement always
+    proceed, also while a listener is slow.
+  - Today callbacks run on the current connection's loop, which may differ after a reconnect. yaci-store makes no
+    thread-identity assumption; it needs serialization and happens-before (C1), which the single drain gives.
   - **One exception is kept from today, with its count and thread.** `Session.start` calls `disconnected()` on each
     agent, synchronously on the caller's thread, before the channel is attached.
     - For the *initial* start the queue is empty, so those notifications pass straight through.
@@ -104,8 +107,9 @@ waits on its side connection's own I/O loop (D4).
   - **Nested start-up, as today.** The new start's `Session.start` notifications run synchronously on the caller's
     thread, re-entrantly inside the old callback, as today. For yaci-store that is `onDisconnect`, inside
     `batchDone`. They are not gated, so nothing waits.
-  - **The gate.** Callbacks the new start delivers from its own loop are not entered while a callback of an earlier
-    start on the same listener is still running. They wait on the new start's loop, without blocking.
+  - **The gate.** A start's drain does not enter the listener while a callback of another start on the same listener
+    (by identity) is running. Its entries stay queued, and its drain is rescheduled when that callback returns. No
+    thread ever waits on the gate.
   - **Exceptions.**
     - An exception from a *block* callback becomes that block's `onParsingError`, which is part of the running
       callback, as today.
@@ -114,8 +118,12 @@ waits on its side connection's own I/O loop (D4).
       lets it (review r4: Codex F3).
   - Today the two starts' loop callbacks can overlap, for example the new `BlockSync`'s intersection callbacks during
     the old range's `batchDone`. That overlap is removed; nothing is reordered (deviation V5).
-- **A slow or blocked listener blocks that loop,** so reads stop, as today (C6). It can no longer deadlock the sync,
-  because nothing on the loop waits for a reply.
+- **A slow or blocked listener holds its start's drain** (C6).
+  - Queued block bytes count against the budget (D5), so new windows stop at the budget and resume when the queue
+    drains.
+  - A producer that cannot ask for room waits on its own thread above twice the budget, as today's synchronous
+    delivery does. Those producers are D4c, and `BlockSync` until D10.
+  - It can no longer deadlock the sync, because no protocol loop waits for a listener or for a reply.
 - **Reconnect waits** (connect, retry sleep, handshake polling) never run on the start's loop. Deadlines and the stall
   watchdog keep running during an outage.
 - **EB checking and mapping** (Blake2b, `withEndorserBlockTxs`, `TransactionListBuilder`) run on a small CPU pool and
@@ -185,16 +193,16 @@ waits on its side connection's own I/O loop (D4).
     its timer, its outcome and its budget are dropped in one step, before the rollback is delivered. A deadline that
     fires after that is ignored. So an abandoned-fork block is never delivered after its rollback, and a stale timer
     never halts the new fork.
-- **Connection loss and internal replacement.**
-  1. Entries received but not yet started are discarded, with their fetches and their budget, except the front's
-     retained state above.
-  2. On a genuine connection loss, the `onDisconnect` markers are delivered after the retained front's outcome, or
-     right after the last delivered entry if there is none. An internal replacement is private (D3).
-  3. The start resumes from its *resume position* (I-Resume).
-
-  The listener therefore sees a sequence that exists today: the one in which the connection dropped before those
-  blocks were received.
-- **Resume position** (review r3: Codex F4). It is the last of these that was delivered, never one only received:
+- **Connection loss and internal replacement** (r10: the queue survives, as review r1's option (b), Fable F1).
+  1. Entries already queued stay queued and are delivered, in order. They are verified blocks of the requested path
+     (D4), so the connection they came from does not matter.
+  2. On a genuine connection loss, the `onDisconnect` markers queue behind them. An internal replacement is private
+     (D3).
+  3. A range resumes from its last *queued* block. The repeated block is dropped by its exact hash, so there is no
+     duplicate and no gap.
+  4. `BlockSync` keeps D10's rules.
+- **Resume position** (review r3: Codex F4). For a range, it is the last queued block (above). For `BlockSync`, it is
+  the last of these that was delivered, never one only received:
   - a block whose delivery concluded with success or skip;
   - a rollback point;
   - an intersection point.
@@ -209,8 +217,9 @@ waits on its side connection's own I/O loop (D4).
   - The duplicate check is armed only by a resume of *the same range* after at least one delivered block, never
     across separate `fetch` calls.
   - **Deliberate change.** Today a reconnect inside a range delivers that block and `batchStarted` a second time
-    (`BlockfetchAgent`). Under D2 neither is repeated, per the
-    owner's exactly-once requirement. It is listed as deviation V1 in the Downstream contract.
+    (`BlockfetchAgent`). Under D2 neither is repeated, per the owner's exactly-once requirement. A block whose
+    listener threw is not delivered again after a reconnect either; it got its `onParsingError`. It is listed as
+    deviation V1 in the Downstream contract.
 
 ### D3. LeiosFetch on the main connection, pipelined like the Haskell client
 
@@ -677,7 +686,7 @@ No downstream code change is needed in either case; the D7 opt-in can be a syste
 | C3 | `batchDone` arrives after the last block of the range. From inside it, yaci-store stops the delivering `BlockRangeSync` and starts `BlockSync` from its cursor. | D2 (`batchDone` is a marker); D4 (one per range); D1 stop; I-Stop |
 | C4 | `onRollback` comes after every block received before it, and no block of the abandoned fork follows it. Its cleanup deletes by slot from the persisted cursor. Every `startSync` begins with a rollback to the intersection. | D2 markers in receive order; D10 pacing and resume point; I-Rollback |
 | C5 | `stop()`, `restart()` and `startSync()` are called from callbacks and from other threads, inside yaci-store's own `synchronized` methods. | D1 stop: retire at once, close asynchronously, never wait for the loop or delivery; I-Stop |
-| C6 | Blocking in `onBlock` is its only backpressure: synchronous DB writes, and in parallel mode a join of up to 5 minutes every 100 blocks. | Callbacks stay on the start's loop, so a blocked listener still stops reads; windows and prefetch are admitted only under D5 |
+| C6 | Blocking in `onBlock` is its only backpressure: synchronous DB writes, and in parallel mode a join of up to 5 minutes every 100 blocks. | A blocked listener holds its start's drain; queued bytes count against D5, so windows and prefetch stop at the budget; D4c and pre-D10 `BlockSync` wait on their own thread above twice the budget, as today |
 | C7 | Health is the time since the last *block* callback (`blockReceiveDelaySeconds`, default 120 s); optional auto-recovery restarts the sync. | The 45 s front budget, with its deadline kept across replacements, and the skip/halt rules (D2); per-protocol stall clocks (D3) |
 | C8 | A listener exception: yaci-store calls `stopSyncOnError()` and rethrows, and with `continueOnParseError` it publishes `onParsingError`'s bytes in `ErrorEvent`. | D2: `onParsingError` in place, with the original bytes; I-Stop's exception for it |
 | C9 | `intersactFound`/`intersactNotFound` arrive even when no block follows. `BlockFinder` shares the `BlockSync` instance, waits up to 40 s for them, then stops it. | D10 markers; the fast path delivers at once |
@@ -725,7 +734,7 @@ as blocks in flight are today.
 
 ## Invariants
 
-- **I1.** Listeners see the same callbacks, arguments and order as today, serialized on the start's event loop.
+- **I1.** Listeners see the same callbacks, arguments and order as today, serialized per start (one drain at a time).
   The exceptions are deviations V1, V5, V6 and V7, and D1's start-up notifications on the caller's thread, as today.
 - **I2.** Every block of a range is delivered exactly once, also across reconnects.
 - **I-NoWait.** No Yaci code on a start's event loop waits for network I/O, except D4c's synchronous completion over
@@ -751,9 +760,9 @@ as blocks in flight are today.
       non-halted start (review r3: Codex F5).
   - Callbacks that different starts deliver from their loops never overlap on a shared listener (D1). The nested
     start-up notifications on the caller's thread are the exception, as today.
-- **I-Resume.** A start resumes only from its resume position (D2): the last delivered block, rollback point or
-  intersection point. Received-but-undelivered entries are discarded. In `BlockSync`, ChainSync's resume point moves
-  only when a delivery concludes, as D10 lists per outcome.
+- **I-Resume.** A range resumes from its last queued block, with queued entries kept (D2). `BlockSync` resumes only
+  from its resume position: the last delivered block, rollback point or intersection point. Its ChainSync resume
+  point moves only when a delivery concludes, as D10 lists per outcome.
 - **I-Private.** A private replacement (D3) changes nothing the listener sees. The exceptions are a genuine rollback
   to an earlier point, the public rollback delivered before a sibling of a pending block (D10), and
   `intersactNotFound`.
@@ -1084,3 +1093,9 @@ stubs:**
     headers in flight.
   - D5: header and worst-case rows updated.
   - The measured Byron gap on public relays is added to Open, and the second-window question is closed.
+- **r10** (2026-11-26): aligned with the implementation, after phase 2 review round 4.
+  - **Delivery thread.** Callbacks run serialized per start on a delivery thread, not on the protocol loop. The gate
+    reschedules a drain instead of waiting. Backpressure is the D5 budget; D4c and pre-D10 `BlockSync` wait on their
+    own thread above twice the budget (D1, C6, I1).
+  - **Queue across reconnects.** A range keeps its queued entries across a reconnect and resumes from the last queued
+    block. This is review r1's option (b), and V1 now also covers a block whose listener threw (D2, I-Resume).
