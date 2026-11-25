@@ -163,13 +163,17 @@ waits on its side connection's own I/O loop (D4).
   - **The retained front stays at the head of the queue** (review r4: Fable F22). The `onDisconnect` markers of a
     genuine loss queue behind it, so the listener sees the block's outcome and then `onDisconnect`, as today. A
     re-received copy of the block attaches to the retained state; it is never enqueued twice.
-  - **Expiry while a replacement is in flight** (review r4: Codex F19).
-    - Suppose the retained front `B` is committed by skip while a private replacement's follower is positioned at its
-      parent `A`. Then before any further header is accepted, the follower is re-intersected, privately, at `B`.
-    - If `B` is found, the replay continues after `B`.
-    - If it is not, the intersection lands earlier, and a public rollback to that point is delivered before any
-      sibling of `B`.
-    - So the listener never sees two competing children without a rollback between them.
+  - **Resolve the front before re-intersecting** (review r5: reviewer3 R3-F1, R3-F5; replaces r6's rule for expiry
+    during a replacement).
+    - After any reconnect, genuine or private, the new connection first finishes the retained front's EB over
+      LeiosFetch. Its block bytes are already held. Only then does ChainSync (or the range's step 1) run, from the
+      resume position as it stands once the front has resolved.
+    - **The front commits** (success or skip): the resume position is that block. A genuine loss then shows exactly
+      today's trace: `onBlock(B)`, `onDisconnect`, `intersactFound(B)`, `onRollback(B)`, then `B`'s successors. A
+      private replacement shows only `onBlock(B)`.
+    - **The front halts:** nothing more is sent, as today.
+    - So a re-intersection can never be made at the front's parent and then roll back a block already delivered. A
+      reconnect in `BlockRangeSync` can never resume behind a block that was skipped meanwhile.
   - **A rollback or a different successor supersedes it atomically** (review r4: Codex F19). The retained block,
     its timer, its outcome and its budget are dropped in one step, before the rollback is delivered. A deadline that
     fires after that is ignored. So an abandoned-fork block is never delivered after its rollback, and a stale timer
@@ -251,6 +255,14 @@ waits on its side connection's own I/O loop (D4).
   - **A private close becomes genuine** if the reconnect and handshake do not succeed within 15 s. Its `onDisconnect`
     is then delivered under the D2 rule, and `isRunning()` behaves as during today's reconnect. A long outage is
     never hidden (review r4: Fable F28).
+    - Once promoted, the close is genuine for good. When the reconnect later succeeds, its re-intersection callbacks
+      are delivered as for any genuine reconnect (review r5: reviewer3 R3-F7).
+- **Front isolation after a LeiosFetch close** (review r5: reviewer3 R3-F3).
+  - When the shared channel closes with LeiosFetch requests outstanding, or the front block is on its second attempt
+    or later, only the front block's EB is fetched, one request at a time. Prefetch and every other LeiosFetch request
+    wait until the front completes.
+  - So an EB that the peer pruned, further back in the pipeline, cannot close the connection again and again under a
+    healthy front, until the front is skipped or halted.
 - **What a private replacement shows the listener:**
   - no `onDisconnect`;
   - in `BlockSync`, nothing from the re-intersection at the resume position: neither its `intersactFound` nor its
@@ -281,12 +293,21 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
     successor's slot).
     - Today's single request then gives today's answer: a retained fork served by hash, or `NoBlocks` with no other
       callback.
-- **Step 2: anchor on `to`** (review r4: Codex F18, F23). An internal BlockFetch `[to, to]` fetches `to`'s block and
-  checks its hash. Its header gives `to`'s block number. The block is not delivered.
-  - `NoBlocks` here means the peer dropped `to` since step 1: the whole range goes to D4c.
-- **Step 3: the first public operation** is `[from, from]`. If `from` is certifying, its parent's announcement is
-  looked up first (D4b). If `from` is in the mutable zone, it waits for that zone's verification like any block
-  there.
+- **Step 2: anchor on both endpoints** (review r4: Codex F18, F23; r5: reviewer3 R3-F4). Internal BlockFetch
+  `[to, to]` and `[from, from]` (one fetch when `from == to`) fetch both blocks and check their hashes, under
+  I-Suppress.
+  - `to`'s header gives `to.blockNo`.
+  - `from`'s header gives `from.blockNo`, `leiosCertInBody` and `prevHash`, so the remaining header count is known
+    exactly, and D4b can run before anything is published.
+  - `NoBlocks` for either means the peer dropped it since step 1: the whole range goes to D4c.
+  - `from`'s block is kept as the range's first block. `to`'s is dropped and fetched again in its window.
+- **Step 3: publish `from`.** If `from` is certifying, its parent's announcement is looked up first (D4b). If `from`
+  is in the mutable zone (`from.blockNo > F`), it waits for that zone's verification like any block there.
+- **On a windowed resume** (review r5: reviewer3 R3-F5). After a connection fault, the range resumes at the resume
+  position `R`, which was already delivered.
+  - Step 2 fetches only `[to, to]`, then ChainSync streams the successors of `R`. `R` is not fetched or
+    resolved again.
+  - If `R == to`, the range is complete, and `batchDone` follows.
 - **Windows, published in two zones.** Let `F = to.blockNo − k`.
   - k is the security parameter (2,160 on mainnet, 108 on Musashi), a `LeiosConfig` setting with default 2,160.
     Over-estimating it is safe.
@@ -296,10 +317,15 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
       `F`.
     - So a block at or below `F` on the path read is an ancestor of `to`. This depends only on `to`'s own block
       number, not on a tip read at another moment.
-  - **The mutable zone: blocks above `F`.** It holds exactly k blocks before `to`, or fewer when `from` is above `F`.
+  - **Block numbers.** For Byron, the block number is the `difficulty`. An epoch-boundary block shares its
+    predecessor's, so the mutable zone can hold k blocks plus any epoch-boundary blocks in it (review r5: reviewer3
+    R3-F6).
+  - **The mutable zone: blocks above `F`.** It holds k blocks before `to` (plus any epoch-boundary blocks), or fewer
+    when `from` is above `F`.
     - Its headers are read and must end exactly at `to`'s hash before any block of this zone is published.
-    - The header buffer always holds k + 1 headers for this, by count and by bytes, reserved in D5 (review r4: Codex
-      F22).
+    - The header buffer always holds k + 2 headers for this, by count and by bytes, reserved in D5 (review r4: Codex
+      F22). That covers one epoch-boundary block, the most a mainnet window of k blocks can hold. If a zone needs
+      more, the rest of the range goes to D4c.
     - Its bodies are then fetched by hash along that verified path, as today's iterator walks it.
   - **Header requests in flight** never exceed the blocks left before `to`, known from `to`'s block number. So no
     request passes `to`.
@@ -334,9 +360,14 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
       I/O loop, never the start's.
     - Blocking the start's loop on that side I/O is the one exception to I-NoWait, because it is today's synchronous
       path.
-  - **Entry.**
-    - LeiosFetch requests still outstanding on the main connection are drained and discarded first, so the main
-      connection carries no LeiosFetch while D4c runs.
+  - **Entry** (review r5: reviewer3 R3-F2).
+    - D4c always starts on a fresh main connection: a private replacement. So ChainSync, BlockFetch and LeiosFetch all
+      start idle. No pipelined `RequestNext`, parked `MsgAwaitReply`, BlockFetch window or LeiosFetch request carries
+      over, and nothing needs draining.
+    - The next range's step 1 therefore also starts on idle protocols.
+    - The main connection carries no LeiosFetch while D4c runs.
+    - A seam duplicate, the repeated first block of the D4c request, is dropped before `CompleteBlockAssembler` and
+      EB resolution. Its announcement stays in `EbAnnouncementCache` for its successor.
     - The queue counts as drained when it is empty, or holds only the retained front.
     - That front is handed to D4c as its first block: it completes over the side connection, with its deadline and
       attempt count carried over, not restarted.
@@ -351,9 +382,12 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
     where a range uses a second connection, and it runs at today's speed.
     - It is logged once per range and counted in a metric, so a sync that falls back often is visible.
 - **Callbacks.**
-  - **`batchStarted`** is tied to the wire `StartBatch` of the range's first public operation. It is exposed once per
-    range, even if the connection drops before the first body. A later operation of the same range, D4c included,
-    never exposes it again (V1).
+  - **`batchStarted`** comes immediately before the range's first published block (review r5: reviewer3 R3-F4).
+    - On the windowed path, `from` is fetched internally, so `batchStarted` never precedes a `noBlockFound`.
+    - On D4c for the whole range, it is tied to the wire `StartBatch`, as today.
+    - It is exposed once per range; a later operation of the same range never exposes it again (V1).
+    - A disconnect after an internal `StartBatch` and before any published block therefore shows no `batchStarted`
+      before `onDisconnect`. Today it shows one, and repeats it after the reconnect (part of V1).
   - **`batchDone`** comes once, after the last block of the range.
   - **`noBlockFound(from, to)`** names the requested points, never internal window points.
   - **I-Suppress:** the range's internal traffic never reaches the listener, nor the internal listeners of
@@ -372,8 +406,8 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
   - The extra header bytes and round trips, and how the Haskell node drives BlockFetch from ChainSync, are measured
     and tuned in #261.
 - **D4b. Parent lookup.** Needed for a certifying block at the start of a windowed range.
-  - ADR 0016 D4b's `FindIntersect` search runs on the main connection's ChainSync in step 2, before header pipelining
-    starts, under I-Suppress. ChainSync then re-intersects at `from`.
+  - ADR 0016 D4b's `FindIntersect` search runs on the main connection's ChainSync after step 2 has fetched `from`,
+    and before header pipelining starts, under I-Suppress. ChainSync then re-intersects at `from`.
   - Its deadline and cancellation are the start's.
   - D4c keeps today's `ParentBlockLookup`.
 
@@ -385,7 +419,7 @@ data is gone (review r2: Codex F7, Fable F8).
 
 | Stage | Charge |
 |---|---|
-| Buffered headers | their bytes; at most max(2,000, k + 1) buffered and 100 in flight; the k + 1 needed to verify the mutable zone are always reserved |
+| Buffered headers | their bytes; at most max(2,000, k + 2) buffered and 100 in flight; the k + 2 needed to verify the mutable zone are always reserved |
 | BlockFetch window | the sum of its headers' `blockBodySize`, from request until each block is delivered or discarded; Byron windows are charged on receipt, and their blocks are delivered at once (no certifying block waits) |
 | EB request | the size announced in the parent's header (`EbAnnouncement.size`), capped at 660 kB (the `MsgLeiosBlock` limit), until the EB arrives |
 | EB transactions | the exact bytes the EB references, from request through raw reply, CPU mapping and queued block until delivery |
@@ -405,8 +439,12 @@ data is gone (review r2: Codex F7, Fable F8).
   - #261 tunes from this base.
 - **D4c is outside the budget.** It is today's path, with today's synchronous delivery and TCP backpressure, and
   its EBs come over the side connection. It retains what today's path retains.
-- **Header buffer:** k + 1 headers are always reserved, about 3 MB at k = 2,160, so verifying the mutable zone can
+- **Header buffer:** k + 2 headers are always reserved, about 3 MB at k = 2,160, so verifying the mutable zone can
   always complete. Windows draw on the rest of the budget.
+- **Validation** (review r5: reviewer3 R3-F7). `LeiosConfig` fails fast if the budget is smaller than that header
+  reservation plus one window.
+- **Prefetch order.** Prefetched transaction requests are admitted in chain order, not in the order EB checks
+  finish on the CPU pool. So a later block's large EB cannot take the prefetch half from the block after the front.
 - **Singleton fetches** (`[from, from]`, `[P, P]`) reserve one block's maximum body size.
 - **The budget counts wire bytes.** Deserialized blocks and transactions take several times more heap. Phase 3
   measures heap per budget byte and documents the recommended heap.
@@ -488,8 +526,9 @@ delivery queue (D2).
       normal ChainSync trace, and the same one today gives when a reconnect finds a different successor.
 - **Reconnect while a block waits for its EB** follows D2's single rule.
   - The front is retained, with its deadline. A re-received copy attaches to it.
-  - On a genuine loss, the block's outcome comes first, then `onDisconnect`, then the re-intersection callbacks. That
-    is today's order, since today `onBlock` blocks through the outage.
+  - The front is resolved before the re-intersection (D2). On a genuine loss the trace is `onBlock(B)` (or its skip),
+    `onDisconnect`, `intersactFound(B)`, `onRollback(B)`, then the successors: today's order, since today `onBlock`
+    blocks through the outage and confirms `B` before the reconnect.
   - On a private replacement, the re-intersection at the resume position is not shown.
   - The resume position after "deliver `B`, roll back to a non-origin `A`, disconnect" is `A`. After a rollback to
     origin it stays `B`, as today's ChainSync records it (review r4: Codex F4).
@@ -707,6 +746,16 @@ stubs:**
   - `fetch(P, P)`;
   - a public `fetch(P, P)` right after an internal `[P, P]`;
   - a failed internal fetch followed by a valid public fetch (ownership on `NoBlocks`).
+- **reviewer3 round 1:**
+  - a genuine reconnect while a certifying front waits: today's exact trace, with no rollback of a delivered block;
+  - skip expiry during a `BlockRangeSync` reconnect: no duplicate;
+  - a pruned EB behind a healthy front: front isolation, and the front completes;
+  - D4c entry while windows and pipelined headers are in flight: fresh connection, then the next range;
+  - a reorg between the two intersections: no `batchStarted` before `noBlockFound`;
+  - a resume at a delivered certifying block: no re-fetch or EB lookup;
+  - a Byron mutable zone with an epoch-boundary block;
+  - a 15 s promotion, then a successful reconnect: public re-intersection;
+  - `LeiosConfig` validation.
 - **Anchoring and zones:**
   - a chain switch inside the server's handling of the first `FindIntersect` (`k = 2`): no block that is not an
     ancestor of `to` is published (review r4: Codex F18);
@@ -980,3 +1029,14 @@ stubs:**
     - The Supersedes line is corrected, and the D4c performance cliff is added to Risks (Fable F30).
 - **r6.1** (2026-11-25): V7 marked as approved by the owner. I-Private lists the public rollback before a sibling.
   Fable's final check of r6 (`8cb6fb07`): APPROVED.
+- **r7** (2026-11-25, responds to reviewer3's round 1 on `8cb6fb07`, R3-F1 to R3-F7):
+  - **Reconnects.** After any reconnect, the retained front is resolved before any re-intersection, giving today's
+    exact trace. This replaces r6's rule for expiry during a replacement (R3-F1, R3-F5).
+  - **D4c.** It always starts on a fresh main connection, so nothing is mid-exchange; the seam duplicate is dropped
+    before EB resolution (R3-F2, R3-F5).
+  - **Front isolation** after a LeiosFetch close or a retry (R3-F3).
+  - **Step 2** fetches `from` and `to` internally, so D4b runs and `batchStarted` comes only before the first
+    published block; a windowed resume skips `[R, R]` (R3-F4, R3-F5).
+  - **Byron.** `difficulty`, with epoch-boundary blocks in the mutable zone and a k + 2 reservation; otherwise D4c
+    (R3-F6).
+  - **Promotion** after 15 s is final; `LeiosConfig` validation; prefetch in chain order (R3-F7).
