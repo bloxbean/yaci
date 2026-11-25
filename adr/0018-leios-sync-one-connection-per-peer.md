@@ -343,9 +343,10 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
       `to` has not been reached.
   - **Before `to`.** If the header stream parks (`MsgAwaitReply`), or passes `to.slot` without `to`, the peer has
     left `to`'s chain. The rest of the range goes to D4c.
-  - **Window size.** BlockFetch asks for windows of at most W blocks and B bytes (defaults 100 and 2 MB). Byron
-    headers give points but no size, so Byron windows are bounded by count. Byron has no certifying blocks, so its
-    queue never waits.
+  - **Window size.** BlockFetch asks for windows of at most B bytes (default 2 MB) and W blocks (default 2,000).
+    - A Byron header gives no body size. A Byron block therefore counts as the average size of the Byron blocks the
+      range has already received; D5 charges its real size on receipt.
+    - Byron has no certifying blocks, so its queue never waits.
   - **Admission.** A window is requested only while the budget (D5) has room. An empty queue always admits one.
   - **Every window is verified (I-Range):** its blocks must be exactly the expected points, in order.
 - **Faults** (review r4: Fable F26). The range always freezes first, at the last contiguous, verified, delivered
@@ -414,16 +415,24 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
     never emitted `onRollback` and still does not.
   - A halt stops window and header requests at once.
 - **BlockFetch ownership** (review r4: Codex F14).
-  - BlockFetch runs one *operation* at a time, each tagged with its purpose (public range, window, parent lookup,
-    tip body, D4c) and its generation.
+  - BlockFetch operations are kept in request order, each tagged with its purpose (public range, window, parent
+    lookup, tip body, D4c) and its generation. Only windows are pipelined; every other operation runs alone, and an
+    abandoned request stays counted until its reply has been drained.
   - An operation ends on `BatchDone` *or* `NoBlocks`. On both, Yaci resets `BlockfetchAgent`'s cursor and hands over
     to the next operation itself.
   - Every marker and error is routed to the operation that owns it.
-- **Round trips.** Header pipelining keeps BlockFetch fed.
-  - A second window may be queued before the first completes, so a window boundary costs no idle round trip. Measure
-    before enabling.
-  - The extra header bytes and round trips, and how the Haskell node drives BlockFetch from ChainSync, are measured
-    and tuned in #261.
+- **Round trips** (measured and tuned in phase 2, #261).
+  - Up to 2,000 header requests are in flight (`headersInFlight`), and never past `to`.
+  - Up to two windows are requested at once (BlockFetch pipelining; replies match requests in order). Behind a
+    window in flight, the next one is requested only when it is full (W, B, or up to the mutable zone or `to`), so
+    the peer always has a full window queued and a window boundary costs no idle round trip.
+  - Measured on a public relay at about 200 ms, mainnet, feature on against off, interleaved:
+    - Conway segments: within 5% of today's path.
+    - Byron: about 2× slower. A Byron header (about 700 B) is nearly as large as its block (750–1,050 B), so the
+      windowed path moves about 1.75× today's bytes, and the relay answers headers slowly while it streams blocks.
+      This adds about 3 minutes to a full mainnet sync from a public relay.
+  - Local node (Musashi): equal to today's path.
+  - How the Haskell node drives BlockFetch from ChainSync remains for #261.
 - **D4b. Parent lookup.** Needed for a certifying block at the start of a windowed range.
   - ADR 0016 D4b's `FindIntersect` search runs on the main connection's ChainSync after step 2 has fetched `from`,
     and before header pipelining starts, under I-Suppress. ChainSync then re-intersects at `from`.
@@ -438,7 +447,7 @@ data is gone (review r2: Codex F7, Fable F8).
 
 | Stage | Charge |
 |---|---|
-| Buffered headers | their bytes; at most max(2,000, k + 2) buffered and 100 in flight; the k + 2 needed to verify the mutable zone are always reserved |
+| Buffered headers | their bytes; at most `headersInFlight` (default 2,000) in flight, about 2.2 MB at the 1,100 B maximum header size; `headersInFlight` + W held, and never fewer than k + 2, which are always reserved for the mutable zone |
 | BlockFetch window | the sum of its headers' `blockBodySize`, from request until each block is delivered or discarded; Byron windows are charged on receipt, and their blocks are delivered at once (no certifying block waits) |
 | EB request | the size announced in the parent's header (`EbAnnouncement.size`), capped at 660 kB (the `MsgLeiosBlock` limit), until the EB arrives |
 | EB transactions | the exact bytes the EB references, from request through raw reply, CPU mapping and queued block until delivery |
@@ -450,7 +459,7 @@ data is gone (review r2: Codex F7, Fable F8).
     of it.
   - The front block's own fetch is always admitted. It has priority, so a full budget can never hold back the block
     that would free it.
-- **Worst case:** the budget, plus one window (2 MB), plus the front block's EB.
+- **Worst case:** the budget, plus two windows (4 MB), plus the front block's EB.
 - **Pipeline depth at the defaults** (review r3: Fable F18):
   - D3's 5 MB cap on expected reply bytes binds first. That is about 17 Musashi-average transaction replies (about
     0.3 MB each) plus many small EB requests; the fetch-only benchmark reached 141 in flight.
@@ -940,7 +949,7 @@ stubs:**
   and counted in a metric.
 - **Open:**
   - window and budget defaults on mainnet;
-  - whether to queue a second BlockFetch window;
+  - the Byron gap on public relays (about 2×, see D4 Round trips);
   - CIP-0164's multi-EB request, once relays support it.
 
 ## Related findings (out of scope)
@@ -1069,3 +1078,9 @@ stubs:**
   - **Minor.** A parse error in step 2 sends the range to D4c.
 - **r8.1** (2026-11-25): reviewer3 round 3 on `cc0b87ef`: APPROVED. Its implementation note is applied to D4c entry
   (a halt skips steps 3–4; a front at `to` ends the range).
+
+- **r9** (2026-11-26): phase 2 throughput tuning recorded (#261).
+  - D4 windows: 2 MB / 2,000 blocks, two in flight, the full-window rule, Byron sizing by observed bytes, 2,000
+    headers in flight.
+  - D5: header and worst-case rows updated.
+  - The measured Byron gap on public relays is added to Open, and the second-window question is closed.
