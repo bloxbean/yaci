@@ -130,7 +130,8 @@ exception is D4c, today's synchronous path, which waits on its side connection's
     - Registering as a waiter and giving up the drain are one atomic step, so no wake-up is lost.
     - A drain with a waiter behind it hands over after one entry, so neither start starves the other.
     - A start whose kept turn finds nothing to deliver, because its backlog was pruned, passes the turn to the next
-      waiter (r12).
+      waiter (r12). It does so only after rechecking, under the gate's lock, that no backlog arrived meanwhile; if
+      one did, the turn stays with it (r13).
     - Not gated: D4c's direct delivery, the start-up notifications, and a `BlockSync` start until D10.
   - **Exceptions.**
     - An exception from a *block* callback becomes that block's `onParsingError`, which is part of the running
@@ -410,7 +411,8 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
       range has already received; D5 charges its real size on receipt.
     - Byron has no certifying blocks, so its queue never waits.
   - **Admission.** A window reserves its bytes (D5) before it is requested, and is requested only if the
-    reservation is granted. An empty queue always grants one. A refused window waits for credit; no thread does.
+    reservation is granted. A window larger than the budget is granted only on an empty queue with nothing reserved
+    (D5). A refused window waits for credit; no thread does.
   - **Every window is verified (I-Range):** its blocks must be exactly the expected points, in order.
 - **Faults** (review r4: Fable F26). The range always freezes first, at the last contiguous, verified, queued block.
   Window, body and EB work beyond that block is retired by generation.
@@ -454,6 +456,8 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
       drain is invalidated, and the range stays at D4c entry. The next accepted connection repeats steps 3–6.
     - Steps 5 and 6 are one transition on the start's loop. It is taken only after checking the range, its
       generation, that its connection is still the current accepted one, and that the queue has drained.
+    - The direct-mode grant also requires the queue to be open, not only drained (r13). A start stopped after the
+      range's checks is refused the grant and sends nothing.
     - **Delivery mode per range** (r12). The one transition that first starts a range, whether reported by the
       handshake or by the admitting `fetch()`, sets queued delivery for it. So a direct D4c never carries over.
     - The next range's step 1 therefore also starts on idle protocols.
@@ -522,12 +526,15 @@ data is gone (review r2: Codex F7, Fable F8).
 - One credit counter per start, in its delivery queue.
 - Each queued entry is charged the wire bytes it retains: a block's bytes, a header marker's bytes, a parse error's
   bytes, and the EB transaction bytes as received by the resolver, carried with the completed block to its entry
-  (r12).
+  (r12). The resolver returns those bytes together with the completed block, and no EB source retains the block
+  (r13).
 - A window reserves its bytes before it is requested: the sum of its headers' `blockBodySize`, or the Byron average
   (D4). Its reservation is released per block once that block is queued; the entry then carries the charge. An
   abandoned window releases what it still holds.
-- A reservation is granted while queued and reserved bytes stay within the budget. An empty queue, with nothing
-  reserved, always grants one window. Nothing waits for credit.
+- A reservation is granted while queued and reserved bytes stay within the budget. A request larger than the budget
+  is granted only when nothing is queued (markers included) and nothing is reserved (r13). Nothing waits for credit.
+- A reservation on a stopped, replaced or halted start is refused for good, and no wait is registered. A stop or
+  halt drops a held request's wake-up instead of running it (r13).
 - A refused reservation registers its wake-up in the same step, with its byte count. It is woken only by a credit
   change that admits that count, so a partial release causes no busy loop (r12).
 - Validation: `LeiosConfig` fails fast unless the budget is > 0 and ≥ (k + 2) × 1,100 + `windowBytes`, computed
@@ -549,7 +556,8 @@ data is gone (review r2: Codex F7, Fable F8).
     of it.
   - The front block's own fetch is always admitted. It has priority, so a full budget can never hold back the block
     that would free it.
-- **Worst case:** the budget, plus the one window an empty queue grants, plus the front block's EB.
+- **Worst case:** the budget, or one oversized request granted on an empty queue with nothing reserved, plus the
+  front block's EB.
 - **Pipeline depth at the defaults** (review r3: Fable F18):
   - D3's 5 MB cap on expected reply bytes binds first. That is about 17 Musashi-average transaction replies (about
     0.3 MB each) plus many small EB requests; the fetch-only benchmark reached 141 in flight.
@@ -791,6 +799,8 @@ yaci-store:
   blocks inside a callback, waiting for another start's callback on the same listener, would notice. yaci-store does
   not: `BlockFinder` uses its own listener, and the restart runs on a virtual thread.
   - The `BlockRangeSync` → `BlockSync` handoff is not gated, so it overlaps as today until D10.
+  - D4c's direct delivery is not gated either, as on today's path. So V5 does not hold while a range is on D4c
+    (r13: Fable round 7 note).
 - **V6. A remote close of the shared channel with a LeiosFetch request outstanding is private** (D3, owner decision).
   - A Haskell peer closes the connection on a request for an EB it has pruned. Today that loses only the side
     connection, which no downstream sees, and the private rule keeps it that way.
@@ -829,7 +839,8 @@ as blocks in flight are today.
   delivery. The one exception is D4c's synchronous completion over its side connection. Listener code may block, as
   today.
 - **I-Budget.** What D5 counts stays under its budget, except for these stated overshoots:
-  - the one window that an empty queue always grants;
+  - a request larger than the budget, granted only when nothing is queued (markers included) and nothing is
+    reserved (D5);
   - charges that were not reserved ahead, which are a Byron window's real sizes against its average estimate and
     parse-error entries;
   - in the staged form (phase 3), the front block's own fetch and a singleton fetch.
@@ -848,6 +859,8 @@ as blocks in flight are today.
 - **I-Stop.** `stop()` never waits for the loop or for delivery, also when called from a callback.
   - After it returns, `isRunning()` is false, no callback of that start is admitted, and the retired start's backlog
     is pruned at once. A callback already running may finish, as today.
+  - After it returns, the start writes no further request: its reservations and its D4c direct grant are refused for
+    good (D5, D4c).
   - Two exceptions are kept from today:
     - an admitted block's `onParsingError`, reporting an exception thrown by that running callback;
     - the retired start's `onDisconnect` when its channel closes, which today's assembler forwards for a replaced,
@@ -915,6 +928,11 @@ stubs:**
   - gate turns: first come, first served, and a pruned waiter passes its turn on;
   - the drain quantum: a busy start gives up its pool thread every 64 entries or 50 ms;
   - an enqueue after closure is rejected.
+- **Closed queues and EB bytes (phase 2 review round 7, r13):**
+  - a stop between D4c's last checks and the direct grant: the grant is refused, and no request is written;
+  - a stale idle notification against a fresh grant: the turn stays with the start that has a backlog;
+  - a queue holding only markers, with a request larger than the budget: refused until the last marker is removed;
+  - the EB sources retain no completed block.
 - **Anchoring and zones:**
   - a chain switch inside the server's handling of the first `FindIntersect` (`k = 2`): no block that is not an
     ancestor of `to` is published (review r4: Codex F18);
@@ -1261,3 +1279,14 @@ stubs:**
   - **Budget.** EB transaction bytes are charged as received by the resolver; a refused reservation registers its
     wake-up with its byte count in the same step (D5).
   - **Tests.** Round-6 cases added.
+- **r13** (2026-11-26): aligned with the implementation after phase 2 review round 7 (`0b043bc3`).
+  - **Closed queues grant nothing.** A reservation on a stopped, replaced or halted start is refused for good, with no
+    wait registered, and a stop or halt drops a held request's wake-up. D4c's direct grant needs an open queue as
+    well as a drained one, so a start stopped after the range's checks sends nothing (D5, D4c).
+  - **Oversized requests.** A request larger than the budget is granted only when nothing is queued, markers
+    included, and nothing is reserved (D5, D4 admission, worst case, I-Budget).
+  - **EB bytes** are returned together with the completed block; no EB source retains it (D5).
+  - **Gate.** A start passes on an empty kept turn only after rechecking, under the gate's lock, that no backlog
+    arrived (D1).
+  - **V5** does not hold while a range is on D4c, whose direct delivery is not gated (Fable round 7 note).
+  - **Tests.** Round-7 cases added.
