@@ -108,6 +108,10 @@ exception is D4c, today's synchronous path, which waits on its side connection's
     synchronously on the start's loop, so a slow listener holds that loop as today, with the watchdog off (D4).
   - The pool is shared and bounded (64 threads). Scheduling a drain never blocks the submitter; a drain beyond 64
     waits in the pool's queue.
+    - A drain run delivers one quantum (64 entries or 50 ms), then resubmits itself to the back of the pool's queue,
+      so a busy start does not keep a worker (r12).
+    - 64 callbacks blocked at once on distinct listeners occupy every pool thread. Other starts' drains then wait in
+      the pool's queue until one returns.
   - Today callbacks run on the current connection's loop, which may differ after a reconnect. yaci-store makes no
     thread-identity assumption; it needs serialization and happens-before (C1), which the single drain gives.
   - **One exception is kept from today, with its count and thread.** `Session.start` calls `disconnected()` on each
@@ -120,11 +124,13 @@ exception is D4c, today's synchronous path, which waits on its side connection's
     thread, re-entrantly inside the old callback, as today. For yaci-store that is `onDisconnect`, inside
     `batchDone`. They are not gated, so nothing waits.
   - **The gate.** A windowed start's drain does not enter the listener while a callback of another windowed start on
-    the same listener (by identity) is running. Its entries stay queued, and its drain is rescheduled when that
-    callback returns. No thread ever waits on the gate.
+    the same listener (by identity) is running. Its entries stay queued. When that callback returns, the turn is kept
+    for the first waiting start (first come, first served), and that start is rescheduled. No thread ever waits on
+    the gate.
     - Registering as a waiter and giving up the drain are one atomic step, so no wake-up is lost.
     - A drain with a waiter behind it hands over after one entry, so neither start starves the other.
-    - A drain that is woken with nothing to deliver wakes the other waiters again.
+    - A start whose kept turn finds nothing to deliver, because its backlog was pruned, passes the turn to the next
+      waiter (r12).
     - Not gated: D4c's direct delivery, the start-up notifications, and a `BlockSync` start until D10.
   - **Exceptions.**
     - An exception from a *block* callback becomes that block's `onParsingError`, which is part of the running
@@ -157,6 +163,13 @@ exception is D4c, today's synchronous path, which waits on its side connection's
   `onParsingError`, and the close's `onDisconnect` (I-Stop).
 - **Halt.** A halt closes delivery at the position of its `SYNC_HALTED` report instead: every entry queued up to and
   including that report is delivered, and later entries are discarded (r11).
+- **Closure is one state per queue** (r12): open, halted or closed, changed under the queue's lock. It decides both
+  what enters the queue and what is delivered.
+  - An explicit `stop()` or a replacement closes the queue, and wins over a halt: it clears the halt's position, and
+    a halt reported later does not reinstate it.
+  - Once halted or closed, no ordinary entry enters. A producer that passed its own retirement check before the
+    closure is rejected at enqueue.
+  - The two exceptions above still pass.
 - **Start keeps today's behaviour on the caller's thread.** yaci-store calls `BlockSync.startSync()` from inside
   `batchDone`, and it waits there for the connect and handshake. For a windowed range that thread is the old start's
   delivery thread, or its loop during D4c.
@@ -187,6 +200,9 @@ Scope: windowed starts (D1). `BlockSync`'s callbacks go through the queue with D
   inside `batchDone` is admitted only when that callback ends the current range, checked by that identity.
 - **Halt and stop** (r11). A halt closes delivery at the position of its `SYNC_HALTED` report: every entry queued up
   to and including it is delivered, then later entries are discarded. `stop()` prunes the backlog at once (D1).
+  - One closure state per queue (open, halted, closed), under its lock, decides what enters and what is delivered
+    (r12). A `stop()` or replacement wins over a halt, also over one reported later. After closure no ordinary entry
+    enters, even from a producer that passed its own retirement check (D1).
 - **Listener throwables** (r11). Whatever a callback throws, the drain continues with the next entry.
   - A block callback's `Exception` becomes that block's `onParsingError`, in its place.
     - It carries the original block bytes, which are retained through deferred delivery and charged to D5.
@@ -433,7 +449,13 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
       6. send D4c's request.
 
       If the front halts in step 2, steps 3–6 are skipped. If the front was `to`, `batchDone` completes the range
-      instead. Direct delivery ends when the next range is admitted, which delivers through the queue again.
+      instead.
+    - **Steps 3–6 under a loss** (r12). If the fresh connection is lost before the request is sent, the wait for the
+      drain is invalidated, and the range stays at D4c entry. The next accepted connection repeats steps 3–6.
+    - Steps 5 and 6 are one transition on the start's loop. It is taken only after checking the range, its
+      generation, that its connection is still the current accepted one, and that the queue has drained.
+    - **Delivery mode per range** (r12). The one transition that first starts a range, whether reported by the
+      handshake or by the admitting `fetch()`, sets queued delivery for it. So a direct D4c never carries over.
     - The next range's step 1 therefore also starts on idle protocols.
     - The main connection carries no LeiosFetch while D4c runs.
     - A seam duplicate, the repeated first block of the D4c request, is dropped before `CompleteBlockAssembler` and
@@ -499,12 +521,15 @@ data is gone (review r2: Codex F7, Fable F8).
 **Phase 2: the simple form** (r11). The staged form below comes with phase 3.
 - One credit counter per start, in its delivery queue.
 - Each queued entry is charged the wire bytes it retains: a block's bytes, a header marker's bytes, a parse error's
-  bytes, and the EB transactions of a completed certifying block.
+  bytes, and the EB transaction bytes as received by the resolver, carried with the completed block to its entry
+  (r12).
 - A window reserves its bytes before it is requested: the sum of its headers' `blockBodySize`, or the Byron average
   (D4). Its reservation is released per block once that block is queued; the entry then carries the charge. An
   abandoned window releases what it still holds.
 - A reservation is granted while queued and reserved bytes stay within the budget. An empty queue, with nothing
   reserved, always grants one window. Nothing waits for credit.
+- A refused reservation registers its wake-up in the same step, with its byte count. It is woken only by a credit
+  change that admits that count, so a partial release causes no busy loop (r12).
 - Validation: `LeiosConfig` fails fast unless the budget is > 0 and ≥ (k + 2) × 1,100 + `windowBytes`, computed
   overflow-safe.
 
@@ -829,6 +854,9 @@ as blocks in flight are today.
       non-halted start (review r3: Codex F5).
   - A halt is not a stop: delivery closes at the position of its `SYNC_HALTED` report, so everything queued up to and
     including it is delivered, and later entries are discarded (D2).
+  - Closure is one state per queue: open, halted or closed (D1, r12). A `stop()` or replacement wins over a halt,
+    also over a halt reported later. After closure no ordinary entry enters, even from a producer that already
+    passed its own retirement check. Only the two exceptions above pass.
   - Callbacks of different windowed starts never overlap on a shared listener (D1, the gate). Outside the gate, as
     today: the nested start-up notifications on the caller's thread, D4c's direct delivery, and `BlockSync` until
     D10.
@@ -877,6 +905,16 @@ stubs:**
     after;
   - D4c starts only after the queue has drained, then delivers synchronously;
   - `BlockSync` with the feature on equals the feature off, callback for callback and thread for thread.
+- **Delivery queue and D4c entry (phase 2 review round 6, r12):**
+  - the fresh D4c connection lost while the queue drains (handshake held until after the drain): the range stays at
+    D4c entry, and the next connection repeats it;
+  - a refused reservation after a partial credit release: no busy loop, woken once the count fits;
+  - `stop()` after a halt boundary, and a halt reported after `stop()`: the stop wins;
+  - EB transaction bytes charged with the CBOR flags off;
+  - delivery mode per range: the range after a direct D4c delivers through the queue;
+  - gate turns: first come, first served, and a pruned waiter passes its turn on;
+  - the drain quantum: a busy start gives up its pool thread every 64 entries or 50 ms;
+  - an enqueue after closure is rejected.
 - **Anchoring and zones:**
   - a chain switch inside the server's handling of the first `FindIntersect` (`k = 2`): no block that is not an
     ancestor of `to` is published (review r4: Codex F18);
@@ -1210,3 +1248,16 @@ stubs:**
     phase 3; reconnect notifications enter the queue; the pinned loop, queue and simple budget moved to phase 2 in
     the Plan, and `BlockSync` through the queue is phase 4; round-5 tests added and the slow-listener test made
     reservation-based.
+- **r12** (2026-11-26): aligned with the implementation after phase 2 review round 6 (`8877ece3`).
+  - **Drain quantum.** A drain run delivers 64 entries or 50 ms, then resubmits itself to the back of the pool's
+    queue; 64 callbacks blocked on distinct listeners occupy the whole pool (D1).
+  - **Gate turns.** A freed turn is kept for the first waiting start (first come, first served); a start whose kept
+    turn finds nothing to deliver passes it on (D1).
+  - **Closure.** One state per queue (open, halted, closed) decides what enters and what is delivered. A `stop()` or
+    replacement wins over a halt, also a later one; nothing ordinary enters after closure (D1, D2, I-Stop).
+  - **D4c entry.** A loss before the request invalidates the drain wait and keeps the range at D4c entry. Direct
+    delivery and the request are one checked transition on the loop, and the transition that first starts a range
+    sets queued delivery for it (D4c).
+  - **Budget.** EB transaction bytes are charged as received by the resolver; a refused reservation registers its
+    wake-up with its byte count in the same step (D5).
+  - **Tests.** Round-6 cases added.
