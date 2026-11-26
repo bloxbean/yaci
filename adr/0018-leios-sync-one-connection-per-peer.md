@@ -554,10 +554,12 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
     - The main connection carries no LeiosFetch while D4c runs.
     - A seam duplicate, the repeated first block of the D4c request, is dropped before `CompleteBlockAssembler` and
       EB resolution. Its announcement stays in `EbAnnouncementCache` for its successor.
-    - From phase 3, the queue counts as drained when it is empty, or holds only the retained front. Phase 2 has no
-      retained front, so it waits for an empty queue.
-    - That front is handed to D4c as its first block: it completes over the side connection, with its deadline and
-      attempt count carried over, not restarted.
+    - The queue counts as drained only when it is empty (r16; review r11–r16: reviewer3 R3-F10). Every certifying
+      block still waiting in it is completed over the side connection as it reaches the front, in queue order:
+      - the retained front keeps its deadline and attempt count;
+      - a waiting block behind it whose main-connection fetch was aborted by the close is fetched again over the side
+        connection when it becomes the front, and its 45 s budget starts only there.
+      Fetches ahead stay off while D4c entry runs, so no block behind the front starts early.
   - **The stall watchdog is off for the main connection** during D4c, as on today's path. Its synchronous completion
     counts as callback time.
   - **Resources.** The start closes D4c's side connection and lookup on completion, `NoBlocks`, halt and stop.
