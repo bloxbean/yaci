@@ -865,13 +865,13 @@ as blocks in flight are today.
   - A request already being handed to Netty when `stop()` runs may still be written before the asynchronous close.
     Its reply is discarded and no callback follows, so downstream sees nothing. Guaranteeing "no byte on the wire
     after `stop()` returns" would need `stop()` to wait for the channel, which is the deadlock D1 removes (r15).
-  - A halt delivers up to its `SYNC_HALTED` report, then nothing more, and cancels any pending window or drain wait.
   - Two exceptions are kept from today:
     - an admitted block's `onParsingError`, reporting an exception thrown by that running callback;
     - the retired start's `onDisconnect` when its channel closes, which today's assembler forwards for a replaced,
       non-halted start (review r3: Codex F5).
   - A halt is not a stop: delivery closes at the position of its `SYNC_HALTED` report, so everything queued up to and
-    including it is delivered, and later entries are discarded (D2).
+    including it is delivered, and later entries are discarded (D2). A halt also cancels any pending window or drain
+    wait.
   - Closure is one state per queue: open, halted or closed (D1, r12). A `stop()` or replacement wins over a halt,
     also over a halt reported later. After closure no ordinary entry enters, even from a producer that already
     passed its own retirement check. Only the two exceptions above pass.
