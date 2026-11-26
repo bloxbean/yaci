@@ -861,6 +861,9 @@ as blocks in flight are today.
     is pruned at once. A callback already running may finish, as today.
   - After it returns, the start writes no further request: its reservations and its D4c direct grant are refused for
     good (D5, D4c).
+    - A start's request submission and its retirement are serialized by a per-start lock. The lock is held only
+      around Netty's non-blocking write, never around network I/O or listener delivery.
+    - A halt also drops a pending drain wait.
   - Two exceptions are kept from today:
     - an admitted block's `onParsingError`, reporting an exception thrown by that running callback;
     - the retired start's `onDisconnect` when its channel closes, which today's assembler forwards for a replaced,
@@ -1290,3 +1293,6 @@ stubs:**
     arrived (D1).
   - **V5** does not hold while a range is on D4c, whose direct delivery is not gated (Fable round 7 note).
   - **Tests.** Round-7 cases added.
+- **r14** (2026-11-26): implementation commit c9b6f9bf. Request submission and retirement are serialized by a
+  per-start lock around the non-blocking write, so no request is submitted after `stop()` returns. A halt drops a
+  pending drain wait.
