@@ -152,8 +152,9 @@ exception is D4c, today's synchronous path, which waits on its side connection's
   - It can no longer deadlock the sync, because no protocol loop waits for a listener or for a reply.
 - **Reconnect waits** (connect, retry sleep, handshake polling) never run on the start's loop. Deadlines and the stall
   watchdog keep running during an outage.
-- **EB checking and mapping** (Blake2b, `withEndorserBlockTxs`, `TransactionListBuilder`) run on a small CPU pool and
-  post the result back to the loop.
+- **EB checking and mapping** (Blake2b, `withEndorserBlockTxs`, `TransactionListBuilder`) run on a small CPU pool,
+  max(2, cores / 2) threads, and post the result back to the loop (r16). Side-connection attempts, which block, run
+  on their own pool, never the loop.
 - **Stop.** `stop()` retires the start at once:
   - `isRunning()` is false when it returns;
   - no callback of the start is admitted after it returns, and the retired start's backlog is pruned at once;
@@ -189,9 +190,76 @@ Scope: windowed starts (D1). `BlockSync`'s callbacks go through the queue with D
   entry arrives, when a fetch completes, and on timers.
 - **Fast path.** With nothing waiting, the drain delivers an entry at once, as today. On a network without Leios,
   and in Byron, no entry waits.
-- **Phase 2 form** (r11). A certifying block is still completed before it is queued (`CompleteBlockAssembler`, as
-  today), so entries wait only for the gate (D1). The commit rule and the front deadline below are not in the queue
-  yet; they come with phase 3, with LeiosFetch on the main connection.
+- **Phase 3 form** (r16). A windowed range's certifying block is queued at once, as an entry that waits for its EB;
+  `CompleteBlockAssembler` completes blocks only on D4c's direct path.
+  - **Fetched ahead.** Its EB is fetched over LeiosFetch on the main connection as soon as it is queued, while the
+    prefetch part of the budget admits it (D5, r17). LeiosFetch's own caps (D3) bound the rest; there is no count
+    limit. An EB larger than the whole part is fetched when its block reaches the front.
+    A failure ahead of the front is internal: no callback, and the block is fetched again later, in queue order.
+  - **One fetch state per waiting block** (r17). Each waiting block has exactly one fetch state, changed only on the
+    start's loop, in one place, and each change checks the state it leaves:
+
+    | from | event | to |
+    |---|---|---|
+    | (read) | queued in the delivery queue | `QUEUED` |
+    | `QUEUED` | an attempt starts: ahead (within the prefetch part, D5) or at the front | `FETCHING(attempt)` |
+    | `FETCHING` | a fetch ahead failed (internal, no callback); D4c gave its main-connection attempt up | `QUEUED` |
+    | `FETCHING` | the front's attempt failed with time left: `RETRYING` reported | `RETRY_PAUSE(timer)` |
+    | `RETRY_PAUSE` | the pause is over; or D4c starts the side attempt at once | `FETCHING` |
+    | `QUEUED`, `RETRY_PAUSE` | at the front with no connection: waits for an accepted one | `QUEUED` |
+    | any | its outcome is decided (`READY`, `SKIPPED`, `HALTED`, `CANCELLED`), or the start retires | `DONE` |
+
+    An attempt starts only from `QUEUED` or `RETRY_PAUSE`. Leaving a state ends what it held: `FETCHING`'s attempt
+    is given up, `RETRY_PAUSE`'s timer is cancelled (so a retry scheduled before D4c can never start a second side
+    attempt). The outcome itself stays the queue's, decided once under its lock by the commit rule below.
+    - r18: a given-up attempt's own cancellation signal ends its side worker, which then opens no parent lookup or side
+      connection (each checks cancellation and the deadline before opening one). r19: that check, registering the
+      connection and starting its connecting thread run under one start-admission lock, which `stop()` and the
+      give-up take to cancel: no dial is admitted after `stop()` returns or after its attempt was given up. A side
+      connection admitted before is registered for the source's close that follows; a parent-lookup connection is
+      not registered: its own worker closes it as the cancellation ends the lookup (r20 wording). r20: the side
+      connection (and its event loop) is created only once admitted, so a refused dial leaks nothing; the direct D4c
+      path (`CompleteBlockAssembler`) uses the start's own lock too, the one its stop takes. A dial holds that lock
+      while it creates the side connection's client (bounded, no I/O), so a give-up or a stop may wait for it briefly
+      (r21). r21: both connecting threads check the admitting attempt's cancellation, not only their connection's own
+      closure, right before connecting (and the parent lookup's again after); a cancelled startup retires only its
+      own connection. They are created without inheritable thread-locals. At the D4c hand-off a pending retry
+      becomes the next numbered attempt; an attempt in flight keeps its number. A fetch ahead whose result was not
+      committed goes back to `QUEUED`. A block that can never be fetched ahead (its EB larger than the prefetch part,
+      or a parent this start never read) is marked so once and not looked at again ahead; at a share of 0 nothing
+      ahead is scanned at all.
+  - **Attempts.** Each fetch is an attempt with its owner and origin (ahead or at the front, main or side). Before
+    each of its requests is submitted, and again by the connection right before the request is written (r17), it
+    checks that it is still wanted, the start was not stopped, and no other block is isolated (D3). A request that
+    is no longer wanted is never written: it is settled as unwritten and its credit released once. A given-up
+    attempt's late result only releases its credit.
+  - **At the front.** A `RETRYING` report goes immediately before the waiting block, behind earlier reports. A skip
+    puts its report before the block, which is then delivered as received. A halt keeps the reports already before
+    the block, and drops the block and everything behind it.
+  - **A result that loses to the deadline** before the deadline's timer runs ends the front at once with its skip or
+    halt; the front is never left waiting.
+  - **A connection policy that gives up** (r17): no connection will come, so every waiting block expires as it
+    reaches the front (skip or halt, in queue order), the front at once. The start's loop stays until the queue holds
+    no waiting block, or a halt discarded the rest; then the start ends. Its `onDisconnect` is queued behind those
+    outcomes, once. r18: every undecided block's attempt is given up at that moment (a late result only releases its
+    credit), and the reports say "the connection policy gave up".
+  - **A range delivered up to `to`** when its connection is lost (only the wire `BatchDone` missing) ends with its
+    `batchDone` at once, queued before the loss's `onDisconnect`, whether a connection comes again or not (r18; the
+    reconnect path already did this). So does a fault that would send it to D4c (r19: no D4c bookkeeping). When no
+    connection will come (autoReconnect off, or the policy gave up), that is published before the `batchDone` is
+    exposed: a `fetch()` from inside it fails fast, as on a stopped start; with a reconnect pending, chaining from it
+    works as before (r19). r21: `fetch()` admits a range, and the loop publishes "ending for good", under one small
+    admission lock: a range is either admitted before it, and is then the start's range like any range in progress
+    at a permanent loss, or refused after it. There is no rollback: a `fetch()` that returned normally never reports a
+    refusal later (r20's check–install–check could, after its range had delivered blocks).
+  - **A block already due when its front notification arrives** expires before any attempt starts or is promoted,
+    and a block whose result lost to its front deadline is not fetched ahead while that notification is pending: no
+    EB request is written after the deadline (r19). r20: expiry is decided on the nanosecond deadline the commit rule
+    uses (timers round up and recheck), and the `wanted` check refuses a request once its block's front deadline has
+    passed, so the writer never writes one after it.
+  - **Retirement** (r17) has one path for every exit (stop, replacement, halt, the policy giving up, an interrupt):
+    stop() itself cancels the side attempts before it posts anything (they open no connection from then on), and the
+    waiting blocks retire on the loop exactly once.
 - **Rules from ADR 0017 D4, kept as reviewed:**
   - announcements are indexed on read;
   - the 45 s budget starts at the front;
@@ -289,8 +357,8 @@ Scope: windowed starts (D1). `BlockSync`'s callbacks go through the queue with D
       flight), against 1.6 EBs/s one at a time.
     - Removing the byte cap was no faster, and slower against a local node (Evidence).
   - One request is always allowed, so an oversized reply still makes progress.
-  - The maximum depth reached is logged at the end of each range and exposed for tests, so a sync that cannot keep the
-    pipeline full is visible.
+  - The maximum depth reached is logged at the end of each range (at debug level, r16) and exposed for tests, so a
+    sync that cannot keep the pipeline full is visible.
 - **Per EB.**
   1. The EB request.
   2. When the EB arrives, *all* its transaction batches are requested at once.
@@ -311,13 +379,20 @@ Scope: windowed starts (D1). `BlockSync`'s callbacks go through the queue with D
   - Time spent inside a listener callback is excluded: a clock reads
     `now − max(last byte for the protocol, end of the last callback)`. A listener that blocks the loop is never taken
     for a stalled peer.
+  - **As built (r16).** The watchdog checks once a second, and not while a listener callback runs. Every non-empty
+    segment a responder sends counts as progress for its protocol, so a large body or reply still arriving is not a
+    stall; messages still disarm the clocks. The watchdog is off on D4c, today's path.
+    - r17: bytes of a responder's segment still arriving count too, once its mux header named the protocol, so one
+      slow segment (up to 64 KiB) is no stall either. r18: including the first fragment, read with the header.
   - At 15 s, the connection is replaced under the D2 rule.
 - **Classifying a close** (review r4: Codex F24, Fable F28). Each close is classified once, against the channel
   that closed and the LeiosFetch requests written on it and not yet answered, before abort clears them. The later
   choice to continue windowed or enter D4c is separate.
   - **Private:**
     - the watchdog's own replacement;
-    - by owner decision, a remote close of the *shared* channel while a LeiosFetch request is outstanding on it. A
+    - by owner decision, a remote close of the *shared* channel while a LeiosFetch request is outstanding on it (a
+      close this side made itself, such as an abort of an undecodable LeiosFetch reply, is not one: it is genuine,
+      r16). A
       Haskell peer closes the connection on a request for an EB it has pruned, and today that only loses the side
       connection (review r4: Codex F20).
   - **Genuine:** any other close, including a close of the main channel during D4c, which carries no LeiosFetch.
@@ -333,6 +408,16 @@ Scope: windowed starts (D1). `BlockSync`'s callbacks go through the queue with D
     wait until the front completes.
   - So an EB that the peer pruned, further back in the pipeline, cannot close the connection again and again under a
     healthy front, until the front is skipped or halted.
+  - Fetches ahead already in flight submit nothing more while the front is isolated (D2 attempts, r16), and their
+    requests not yet written are not written (r17: checked by the connection right before each write).
+  - **Which facts** (r17). Isolation follows the requests outstanding when the channel closed, whoever closed it. A
+    close's visibility follows its cause: an agent that closes the channel itself (a LeiosFetch abort, any agent's
+    failed write, r18: the decoder's own close on a malformed Leios stream) records why on the channel, so such a
+    close is genuine however soon the next connection comes.
+  - **The `wanted` check** (r18) is internal: it must return at once and never call back into the agent. The writer
+    is not reentrant, looks at the head again after the check (the check may have changed anything), and treats a
+    throw of any kind as "not wanted", so the FIFO cannot wedge. It is asked before the caps (r19), so an unwanted
+    head never holds back a smaller request behind it.
 - **What a private replacement shows the listener:**
   - no `onDisconnect`;
   - in `BlockSync`, nothing from the re-intersection at the resume position: neither its `intersactFound` nor its
@@ -440,15 +525,20 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
     - D4c always starts on a fresh main connection: a private replacement. So ChainSync, BlockFetch and LeiosFetch all
       start idle. No pipelined `RequestNext`, parked `MsgAwaitReply`, BlockFetch window or LeiosFetch request carries
       over, and nothing needs draining.
-    - **The order is fixed** (review r6: reviewer3 R3-F9):
+    - **The order, as built** (review r6: reviewer3 R3-F9; r16):
       1. retire the old main connection;
-      2. complete the retained front, if any, synchronously over the side connection. No main connection exists
-         then, so nothing waits on the start's loop, and no promotion clock runs: this replacement was started by
-         Yaci, not by a close;
-      3. open the fresh main connection and complete its handshake;
-      4. wait until the delivery queue has drained (r11);
+      2. complete the retained front, if any, over the side connection, off the start's loop. Its attempt on the old
+         main connection is given up silently, so D4c's own replacement causes no `RETRYING`; the side attempt starts
+         at once, with the front's deadline and attempt count carried on;
+      3. open the fresh main connection and complete its handshake. This may happen while step 2 runs: until step 6
+         the fresh connection carries only the handshake and keep-alive, as today's path keeps its main connection
+         open while the side connection completes a block;
+      4. wait until the delivery queue has drained (r11), which includes the front's outcome;
       5. switch delivery to direct: synchronous, on the start's loop;
       6. send D4c's request.
+
+      A halt during step 2 retires the start: the fresh connection is closed, and nothing is sent on it. A promotion
+      of that reconnect (D3) queues its `onDisconnect` in order, behind the front.
 
       If the front halts in step 2, steps 3–6 are skipped. If the front was `to`, `batchDone` completes the range
       instead.
@@ -515,12 +605,93 @@ same peer behaviour (review r4: Codex F1, F7, F17, F18; Fable F21, F23).
     and before header pipelining starts, under I-Suppress. ChainSync then re-intersects at `from`.
   - Its deadline and cancellation are the start's.
   - D4c keeps today's `ParentBlockLookup`.
+  - **Until phase 4** (r16): a certifying block whose parent this start never read, such as a range's first block, is
+    completed over the side connection, whose resolver runs today's `ParentBlockLookup`.
 
 ### D5. One memory budget, counted in bytes
 
-What Yaci holds for not-yet-delivered blocks is charged to one budget (default 32 MB, configurable). Credit is
-reserved before a request is sent, moves with the data from stage to stage, and is released only when the retained
+What Yaci holds for not-yet-delivered blocks is charged to one budget (default 128 MB, configurable). Credit
+is reserved before a request is sent, moves with the data from stage to stage, and is released only when the retained
 data is gone (review r2: Codex F7, Fable F8).
+
+**Phase 3: as built** (r16, r17). The budget bounds heap, not only wire bytes.
+- **The charge.** Each queued entry holds its wire bytes plus K bytes for each of its transactions. K is a
+  documented constant, 3,000 (`DeliveryQueue.HEAP_BYTES_PER_TRANSACTION`; r17: no longer configurable). Byron main
+  blocks count their transactions too; epoch-boundary blocks have none. Both are known when the entry is queued,
+  and an EB's transaction count is known before its transactions are requested, so the reservation is made first.
+  - Why: decoded and mapped, a transaction takes about 2.8 kB of heap (the body, witnesses, auxiliary data and the
+    listener's transaction view), against about 280 wire bytes on Musashi. A wire-only budget let a slow listener
+    hold about 12 bytes of heap per budget byte (phase 3 first measurement).
+  - The as-received transaction list of a completed certifying block is dropped at commit; only a skip needs it.
+- **Stages.**
+  - *Header buffer:* a streaming range reserves every header it can hold × 1,100 bytes as a fixed reservation: the
+    buffer (`headersInFlight` + W, at least k + 2; buffered and in-flight headers together stay within it) and the
+    headers taken into windows, at most `windowsInFlight` windows of W (those in flight, and one refused while fewer
+    are). So no retained header is uncounted (r17). It is always granted, and it never holds back the range's own
+    one oversized window.
+  - *Anchors:* each singleton fetch reserves one body (90,112 bytes, mainnet's `maxBlockBodySize`) until the body is
+    published or dropped.
+  - *Windows:* as in phase 2.
+  - *EB request:* the announced size, capped at 660 kB, held while the EB's references are kept: to the attempt's end.
+  - *EB transactions:* the referenced bytes plus K per transaction, reserved before the requests are submitted, and
+    moved into the block's entry at commit. Requests are counted as they are submitted, so a stage that fails after
+    its first batch releases its credit once that batch settles.
+  - *Written but abandoned requests:* held until their reply is drained or their connection closes (a core settle
+    hook on each LeiosFetch request).
+- **Admission: two fixed parts** (r17, replacing r16's "windows yield to EB stages"). The budget is split at start:
+  - the *prefetch part*, `prefetchBudgetPercent` of it: EB requests and EB transaction stages, ahead of the front
+    and at it, and a completed block's EB transactions until the block is delivered;
+  - the *window part*, the rest: windows, the header stage, anchors, and the blocks they queued.
+
+  Neither part can take the other's room, and each wakes only its own waits. The front's own EB stages are always
+  admitted (from the prefetch part), as are anchors and the header stage (from the window part): they may overshoot
+  their part. A fetch ahead larger than the whole prefetch part registers no wait: that block is fetched when it
+  reaches the front. At 0 % nothing goes ahead, and windows are unaffected. Transaction stages are granted strictly in
+  queue order within the prefetch part, on a later turn of the loop than the request, so each stage has attached its
+  requests and they go out in queue order too. A transaction stage that cannot fit the part beside its own EB
+  request (held until the attempt ends) registers no wait: it is granted at the front, and holds no later stage back
+  (r18). A block whose fetch ahead failed is fetched again in queue order by the next pass ahead, and may then hold
+  later pending stages until its own EB check finishes; stages already granted are not taken back (r19: the narrower
+  guarantee, documented). Each owner (a
+  range's windows, the fetches ahead, the transaction stages) has at most one wait for room. The prefetch part is
+  `budget × share / 100`, rounded down once (r18).
+- **Overshoot, bounded** (r17). The budget may be exceeded by K × the transactions of the windows in flight (their
+  count is known only when the bodies arrive), and by the front block itself: its EB stages are always admitted, and
+  a front completed over the side connection (a parent this start never read, D4c) is charged at commit, as any
+  front, with no reservation of its own before.
+  - K = 3,000 and these terms do not hold the live heap within budget + baseline at larger budgets: at 256 MB it was
+    346 to 422 MB (r18). The heap guidance (a 512 MB heap suffices) is for the default 128 MB budget only (r19).
+- **Defaults** (r17): a 128 MB budget and a 50 % prefetch part. The interleaved A/B on the public relay (r17, five
+  rotations to block 11,000, every digest the baseline) measured the median wall time against feature off in the same
+  rotation: 8258c7a8 (32 MB, a 50 % share) 0.12; 2b3cf7f9 (128 MB, 100 %, windows yielding to EB stages) 0.30;
+  2b3cf7f9 at 256 MB 0.17; feature off steady at 297 to 311 s. The time followed how long fronts waited: letting
+  prefetch take the whole budget put the front's own data behind a deeper pipeline. The even split is the share of
+  the fastest build; the fixed parts make it hold under load. With the parts (583ff141, public relay, two rotations
+  interleaved with off at 199 to 200 s): 25 % 21 and 23 s, 50 % 29 and 22 s, 75 % 19 and 19 s; every certifying block
+  fetched ahead, none failed, fronts waited 5 to 15 s in total. The shares are within relay noise of each other; the
+  default stays at 50 %, which leaves the window part the most room for a slow listener.
+- **Measured** (r17, 583ff141): the slow listener at 2 ms a block to block 20,000 passes with `-Xmx512m` (peak 449 MB
+  sampled, digest `7c018e3c`); local Musashi to 20,000 on 41 s, off 43 s, both `7c018e3c`. Sampled peak heap with
+  `-Xmx4g` at 2 ms a block to 12,000: 32 MB 1,207 MB, 128 MB 1,410 MB, 256 MB 1,796 MB (sampled used heap, not live
+  heap after a full GC).
+- **Measured** (r18, f0ab3931, with the parts): live heap after a forced full GC, slow listener at 2 ms a block, three
+  samples 22 s into the run (the Leios section, the queue full), as in r16:
+
+  | budget | live heap after a full GC | r16 (no parts) |
+  |---|---|---|
+  | 32 MB | 58 to 104 MB | — |
+  | 128 MB (default) | 117 to 157 MB | 138 to 306 MB |
+  | 256 MB | 346 to 422 MB | 160 to 363 MB |
+
+  Feature off was 16 to 65 MB (r16). The slow-listener run to block 20,000 passes with `-Xmx512m` (peak 442 MB
+  sampled, `7c018e3c`).
+- **Validation.** The window part must hold every header a range holds (above) and one window, computed
+  overflow-safe; so a 100 % share is refused.
+- **Measured** (slow listener at 2 ms a block, live heap after a full GC in the Leios section):
+  feature off 16 to 65 MB; budget 64 MB: 99 to 165 MB; 128 MB (the default): 138 to 306 MB; 256 MB: 160 to 363 MB
+  (three samples each, r16). With the default, the slow-listener run to block 20,000 passes with `-Xmx512m` (peak
+  452 MB sampled), and the live heap stays near the budget plus the baseline, against about 12 bytes of heap per
+  budget byte with the wire-only charge.
 
 **Phase 2: the simple form** (r11). The staged form below comes with phase 3.
 - One credit counter per start, in its delivery queue.
@@ -540,7 +711,7 @@ data is gone (review r2: Codex F7, Fable F8).
 - Validation: `LeiosConfig` fails fast unless the budget is > 0 and ≥ (k + 2) × 1,100 + `windowBytes`, computed
   overflow-safe.
 
-**The staged form** (phase 3):
+**The staged form** (phase 3, as planned; "Phase 3: as built" above records what changed in r16):
 
 | Stage | Charge |
 |---|---|
@@ -583,7 +754,8 @@ data is gone (review r2: Codex F7, Fable F8).
 
 - **When.** A certifying header (`leiosCertInBody`, ChainSync) whose parent's announcement is known starts the EB
   fetch before BlockFetch delivers the body. This is certified-only, as Haskell's roll-forward offer is.
-- **Limit.** Bounded by D5, and by a maximum number of prefetched EBs (default 64).
+- **Limit.** Bounded by D5's prefetch part (r17) and by D3's LeiosFetch caps (r16: no count limit; a count limit with D5's
+  heap-aware charge was redundant).
 - **Configurable,** default on for remote peers. Against a local node it measured no gain, because round trips there
   are under a millisecond.
 
@@ -858,7 +1030,10 @@ as blocks in flight are today.
   delivered after it.
 - **I-Stop.** `stop()` never waits for the loop or for delivery, also when called from a callback.
   - After it returns, `isRunning()` is false, no callback of that start is admitted, and the retired start's backlog
-    is pruned at once. A callback already running may finish, as today.
+    is pruned at once. A callback already running may finish, as today. The boundary is admission, not method entry
+    (owner, r15; r17 wording): a callback admitted before `stop()` returned may still be entered after it, because
+    holding the queue's lock across listener code would bring back the deadlock D1 removes. The acceptance test
+    checks exactly this: no callback is admitted after `stop()` returns, except the two below.
   - After it returns, a `fetch()` on that start writes nothing, and its range starts no further work: every request
     first checks retirement, without a lock, and its reservations and D4c direct grant are refused for good (D5,
     D4c).
@@ -866,12 +1041,29 @@ as blocks in flight are today.
     Its reply is discarded and no callback follows, so downstream sees nothing. Guaranteeing "no byte on the wire
     after `stop()` returns" would need `stop()` to wait for the channel, which is the deadlock D1 removes (r15).
   - Two exceptions are kept from today:
-    - an admitted block's `onParsingError`, reporting an exception thrown by that running callback;
+    - an admitted block's `onParsingError`, reporting an exception thrown by that running callback (r17: also on D4c's
+      direct path, where the range's cursor advances when the block is admitted, so a block whose listener threw is
+      never delivered again after a reconnect). Only the listener's own exception inside the admitted delivery takes
+      this exception (r18); a block whose preparation failed (mapping its transactions, queueing it to wait) had no
+      callback admitted, so its `onParsingError` is ordered and admitted like any callback;
     - the retired start's `onDisconnect` when its channel closes, which today's assembler forwards for a replaced,
       non-halted start (review r3: Codex F5).
   - A halt is not a stop: delivery closes at the position of its `SYNC_HALTED` report, so everything queued up to and
     including it is delivered, and later entries are discarded (D2). A halt also cancels any pending window or drain
-    wait.
+    wait. A halted start delivers nothing after its `SYNC_HALTED` report, not even the `onDisconnect` of the close its
+    retirement makes, also after a later `stop()` (r17). On D4c's direct path the halt is recorded in the same step
+    that admits the report, before the listener runs, so a `stop()` from inside `SYNC_HALTED` changes nothing (r18).
+    A halt report racing a concurrent `stop()` from another thread may be dropped: a stop that wins admits nothing
+    more, and the report is not admitted after it (r19, owner decision; pinned by a unit test). A `stop()` from inside
+    the report is covered above. If the stop lands after the halt was recorded but before the report is delivered,
+    both the report and the close are dropped (r20, pinned by a two-thread test).
+  - A side or parent-lookup connect already admitted may still begin after `stop()` returns (r20, owner decision, as
+    r15 accepts for a request already handed to Netty): its connecting thread checks the attempt's cancellation right
+    before the connect and connects nothing if it is set (r21: the attempt's, not only the connection's own closure);
+    a connect that began anyway is closed at once. Nothing is requested on it, no callback follows, and nothing
+    leaks.
+  - Every `stop()` caller runs the synchronous cancellation itself (it is idempotent), so a second concurrent
+    `stop()` never returns before it; only the posted cleanup is done once (r20).
   - Closure is one state per queue: open, halted or closed (D1, r12). A `stop()` or replacement wins over a halt,
     also over a halt reported later. After closure no ordinary entry enters, even from a producer that already
     passed its own retirement check. Only the two exceptions above pass.
@@ -949,6 +1141,21 @@ stubs:**
     of the new branch is delivered;
   - headers passing `to.slot` without `to`: D4c takes the rest;
   - the seam into D4c, uninterrupted and with a disconnect on either side: no duplicate.
+- **Waiting blocks, as built (r17):**
+  - one fetch state per block: a retry pending at the D4c hand-off is cancelled and one side attempt runs;
+  - the deadline and attempts of two waiting blocks survive a reconnect (isolated from the front's second attempt);
+  - the connection policy gives up with two waiting blocks behind a slow listener: both expire in order, then the
+    start ends once; end to end, the raw calls end with the second block, `batchDone` and one `onDisconnect`;
+  - a halt, then the halt's close: the raw calls end at `SYNC_HALTED`; a halt during side completion after D4c: the
+    fresh connection asks for nothing;
+  - a side attempt after cancellation opens nothing, also while the loop is busy;
+  - the fixed parts: neither takes the other's room; at 0 % nothing goes ahead, no wait is left, and a certifying
+    block followed by further windows completes end to end; an EB larger than the prefetch part is fetched at the
+    front;
+  - transaction stages submit in queue order; a request no longer wanted is never written and settles once; a settle
+    hook throwing an `Error` stops neither the reply nor the next write;
+  - a ChainSync stall and a LeiosFetch stall are replaced privately; one slow segment longer than the stall time is
+    no stall.
 - **Range faults:**
   - a missing body in the second window, with later headers already buffered (no later block delivered);
   - an early `BatchDone` in a non-final window;
@@ -1009,6 +1216,9 @@ stubs:**
   after the replacement;
 - `isRunning()` polled, `fetch()` called and `stop()` called between logical retirement and the physical close: no
   request written;
+- the I-Stop acceptance test checks admission (r17 wording): no callback is admitted after `stop()` returns, except an
+  admitted block's `onParsingError` and the retired start's close `onDisconnect` (never after a halt); a callback
+  admitted before may still be entered;
 - nested start-up: the new start's `onDisconnect` re-entrant inside `batchDone`, as today; a `batchDone` that throws
   after `startSync` (not translated into `onParsingError`);
 - `BlockSync` resume schedules through the real listener registration order: a parse-continue then a disconnect; a
@@ -1303,3 +1513,102 @@ stubs:**
     inline. A request is checked for retirement without a lock.
   - I-Stop states the downstream guarantee (no callback after `stop()` returns, and `fetch()` writes nothing) and
     allows a request already being written to reach the wire before the asynchronous close.
+- **r16** (2026-11-26): phase 3 implementation and its first review round (Fable, Codex; commits 39da85ae to
+  2b3cf7f9).
+  - **D2, phase 3 form.** Certifying blocks wait in the queue as entries and are fetched ahead over LeiosFetch on the
+    main connection; each fetch is an attempt with an owner and origin, which checks before each request that it is
+    still wanted. `RETRYING` goes immediately before the waiting block; a halt keeps the reports before it. A result
+    that loses to the deadline before its timer runs ends the front at once. A connection policy that gives up keeps
+    the loop until a pending front's outcome is queued.
+  - **D3.** The watchdog checks once a second, not during a listener callback; responder segments count as progress
+    for BlockFetch and ChainSync. A close of this side's own making (a LeiosFetch abort) is genuine, not V6.
+    Isolation stops fetches ahead from submitting more.
+  - **D4c entry, as built.** The front's main attempt is given up silently and its side attempt starts at once; the
+    fresh main connection may open meanwhile, carrying only the handshake and keep-alive; a halt then closes it with
+    nothing sent, and a promotion queues its `onDisconnect` in order.
+  - **D4b until phase 4.** A certifying block whose parent this start never read is completed over the side
+    connection.
+  - **D5.** The budget bounds heap: an entry holds its wire bytes plus K = 3,000 bytes per transaction, reserved
+    before an EB's transactions are requested. Header buffer as a fixed reservation that never holds back a range's
+    own window; anchors reserve one body; the EB request's credit is held while its references are; transaction
+    requests are counted as submitted; written-but-abandoned requests hold their credit until settled. Windows wait
+    while an EB stage waits. Defaults 128 MB and a 100 % prefetch share, from measurement.
+  - **D6.** No count limit on EBs fetched ahead: the prefetch share and LeiosFetch's caps bound them.
+  - **D1.** The EB CPU pool has max(2, cores / 2) threads; side attempts run on their own pool. The thread-local
+    "hidden parameters" are replaced by explicit arguments to the delivery queue.
+- **r17** (2026-11-26): phase 3 review round 2 (Fable F14–F20, Codex C18–C31; commits babc9e0f, 583ff141). Owner
+  direction: simplify, don't patch.
+  - **D2.** One fetch state per waiting block (`QUEUED`, `FETCHING`, `RETRY_PAUSE`, `DONE`), changed in one place on
+    the loop; leaving a state gives its attempt up and cancels its pause timer (table in D2). Once the connection
+    policy gave up, every waiting block expires as it reaches the front, in order, and the start ends when none is
+    left. Retirement has one path for every exit; stop() cancels side attempts itself before posting anything. On
+    D4c's direct path the cursor advances when a block is admitted, and its listener exception's `onParsingError` is
+    part of that block.
+  - **D3.** Each LeiosFetch request is checked by the connection right before it is written: an unwanted one is never
+    written and settles once. Bytes of a responder's segment still arriving are progress. Isolation follows the
+    outstanding requests; a close's visibility follows its cause, recorded on the channel (including a failed write).
+  - **D5.** Two fixed parts instead of windows yielding to EB stages: prefetch (`prefetchBudgetPercent`, default 50 %,
+    from the public-relay A/B) and windows. K is a constant, 3,000; Byron main blocks count their transactions. The
+    header stage reserves every header a range holds. The overshoot (windows' K × transactions, the front) is stated.
+  - **I-Stop.** The boundary is admission, worded so in the invariant and its acceptance test; a halted start
+    delivers nothing after `SYNC_HALTED`, not even its close.
+  - **Evidence.** `:core:test` 1,410 and `:helper:test` 308 tests pass (rerun); Musashi digests unchanged
+    (`7c018e3c` to 20,000, `3f1e0608` to 11,000) in every live run.
+- **r18** (2026-11-26): phase 3 review round 3 (Fable F21–F24, Codex F32–F44; commits ab43a9e4, f0ab3931). Both
+  reviewers kept S1/S2's shape; the fixes are local.
+  - **D2.** A block whose preparation failed gets an ordered, admitted `onParsingError`; only the listener's own
+    exception inside the admitted direct delivery passes a stop. A range delivered up to `to` when its connection is
+    lost ends with `batchDone` before the loss's `onDisconnect`. At policy exhaustion every undecided attempt is
+    given up. Side attempts carry their own cancellation and check it, and the deadline, before opening a connection.
+    A pending retry handed to D4c is the next numbered attempt.
+  - **D3.** The `wanted` check is internal; the writer is not reentrant, looks again after it, and treats any throw
+    as unwanted. Progress includes the first fragment; the decoder's own close is local.
+  - **D5.** A transaction stage that cannot fit beside its own EB request is granted at the front and holds no one
+    back; zero share scans nothing; the part rounds once. The live-heap table is back, measured with the parts.
+  - **I-Stop.** A `SYNC_HALTED` delivered directly records the halt as it is admitted.
+  - **Evidence.** `:core:test` 1,413 and `:helper:test` 315 pass (rerun); local on 41 s and off 42 s to 20,000
+    (`7c018e3c`); public on 20 s against off 194 s to 11,000 (`3f1e0608`).
+- **r19** (2026-11-26): phase 3 review round 4 (Fable approved with P3 notes F25–F28; Codex F45–F49). Small, local
+  fixes; S1/S2's shape kept.
+  - **I-Stop.** A halt report racing a concurrent `stop()` may be dropped (owner decision; unit test).
+  - **D2.** A permanent loss refuses new ranges before exposing the completed range's `batchDone`; a fault after `to`
+    was queued finishes the range without D4c; a block already due at its front notification expires before any
+    attempt, and is not fetched ahead meanwhile. The grant-order guarantee is narrowed (a retrying predecessor may
+    hold later pending stages until its check finishes). Side dials are admitted under one lock with cancellation.
+  - **D3.** `wanted` is asked before the caps.
+  - **D5.** The heap guidance is for the default budget only; K and the overshoot terms do not bound larger ones.
+  - Accepted with comments: the remaining scan over `frontOnly` blocks (Codex F42); partial batch acceptance, which
+    the stock agent cannot do (Codex F49).
+  - **Evidence.** Commits 166b29dd, abd414aa. `:core:test` 1,414 and `:helper:test` 322 pass (rerun); local on to
+    20,000 in 42 s (`7c018e3c`); public on to 11,000 in 28 s (`3f1e0608`, every block fetched ahead, none failed).
+- **r20** (2026-11-26): phase 3 review round 5, final (Fable approved with F29–F30; Codex F50–F58).
+  - **I-Stop.** An admitted side or parent-lookup connect may begin after `stop()` returns; it is closed at once and
+    nothing is sent on it. Every `stop()` caller cancels synchronously. A stop between a direct halt's record and its
+    delivery drops both the report and the close.
+  - **D2.** A refused dial creates no side connection (Fable F29: it leaked an event loop group). The direct D4c path
+    shares the start's admission lock. A concurrent `fetch()` racing a permanent loss is refused. Deadlines are
+    decided to the nanosecond, and `wanted` includes the front's deadline.
+  - **Tests.** Fable's leak probe as a test; a stop between admission and connect leaks nothing; the dial-lock test
+    waits for the cancellation explicitly; a two-thread halt/stop test; the D4c attempt-number test asserts the side
+    attempt's own report; a latched external `fetch()` across a permanent loss.
+  - Not changed: Fable F30 (unreadable ChainSync in `d4c()`), left as is.
+  - **Evidence.** Commit 8eb67138. `:core:test` 1,414 and `:helper:test` 326 pass (rerun); local on to 20,000 in 42 s
+    (`7c018e3c`); public on to 11,000 in 31 s (`3f1e0608`, every block fetched ahead, none failed).
+- **r21** (2026-11-26): phase 3 review round 6 (Fable approved with F31–F32; Codex F59–F65).
+  - **D2.** One admission lock for `fetch()` and "ending for good" replaces r20's check–install–check: no rollback,
+    no refusal after a normal return (Codex F59); the test hook is gone (Fable F31). Connecting threads check the
+    attempt's cancellation (F60) and carry no inheritable thread-locals (F65). The dial lock's wait is stated (F32).
+  - **Tests.** A fetch admitted behind a held terminal runs and returns normally across a later permanent loss, each
+    block once; a fetch after the loss is refused. The connector is latched after admission: it ends, connects
+    nothing, and its client's event loop group shuts down (portable; descriptors only where the platform reports
+    them). The D4c attempt-number test holds the retry until after the hand-off (F61–F64).
+  - **Evidence.** Commit 080554e6. `:core:test` 1,414 and `:helper:test` 326 pass (rerun); local on to 20,000 in 42 s
+    (`7c018e3c`); public on to 11,000 in 28 s (`3f1e0608`, every block fetched ahead, none failed).
+- **r22** (2026-11-26): phase 3 review round 7, the last code round (Fable approved, F33; Codex F66–F70; commit
+  1a7cbeab). Once its range is installed, `fetch()` never throws, also when the loop is already gone (the stop ends
+  that range); a displaced fetch is logged after the admission lock is released; the test-only `lastOpened` field is
+  gone; the F59, dial and D4c tests now force their orders. `:core:test` 1,414 and `:helper:test` 328 pass (rerun);
+  local on to 20,000 in 43 s (`7c018e3c`, 11k `3f1e0608`). Codex's final check (F71–F74; commit 7be4b1ad): an admitted
+  fetch returns normally only when the start's loop is shut down, and a live loop's refusal is surfaced; the F67,
+  dial and D4c tests force their orders. `:core:test` 1,414 and `:helper:test` 328 pass (rerun); local on to 20,000
+  in 43 s (`7c018e3c`, 11k `3f1e0608`).
