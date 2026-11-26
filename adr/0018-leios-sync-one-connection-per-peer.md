@@ -1,6 +1,6 @@
 # ADR 0018: Leios sync on one connection per peer: pipelined LeiosFetch, request-level flow control, in-order delivery
 
-- Status: **Proposed** (design and plan, backed by a measured proof of concept). Implementation: phases 1–2 are on the
+- Status: **Proposed** (design and plan, backed by a measured proof of concept). Implementation: phases 1–3 are on the
   branch `feat/leios-one-connection`, opt-in (`LeiosConfig.oneConnection`, `-Dyaci.leios.oneConnection`); not yet
   on `next`.
 - Date: 2026-11-25
