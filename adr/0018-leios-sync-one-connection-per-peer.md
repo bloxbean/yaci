@@ -859,11 +859,13 @@ as blocks in flight are today.
 - **I-Stop.** `stop()` never waits for the loop or for delivery, also when called from a callback.
   - After it returns, `isRunning()` is false, no callback of that start is admitted, and the retired start's backlog
     is pruned at once. A callback already running may finish, as today.
-  - After it returns, the start writes no further request: its reservations and its D4c direct grant are refused for
-    good (D5, D4c).
-    - A start's request submission and its retirement are serialized by a per-start lock. The lock is held only
-      around Netty's non-blocking write, never around network I/O or listener delivery.
-    - A halt also drops a pending drain wait.
+  - After it returns, a `fetch()` on that start writes nothing, and its range starts no further work: every request
+    first checks retirement, without a lock, and its reservations and D4c direct grant are refused for good (D5,
+    D4c).
+  - A request already being handed to Netty when `stop()` runs may still be written before the asynchronous close.
+    Its reply is discarded and no callback follows, so downstream sees nothing. Guaranteeing "no byte on the wire
+    after `stop()` returns" would need `stop()` to wait for the channel, which is the deadlock D1 removes (r15).
+  - A halt delivers up to its `SYNC_HALTED` report, then nothing more, and cancels any pending window or drain wait.
   - Two exceptions are kept from today:
     - an admitted block's `onParsingError`, reporting an exception thrown by that running callback;
     - the retired start's `onDisconnect` when its channel closes, which today's assembler forwards for a replaced,
@@ -1296,3 +1298,8 @@ stubs:**
 - **r14** (2026-11-26): implementation commit c9b6f9bf. Request submission and retirement are serialized by a
   per-start lock around the non-blocking write, so no request is submitted after `stop()` returns. A halt drops a
   pending drain wait.
+- **r15** (2026-11-26): implementation commit 629f0c0e.
+  - The per-start submission lock of r14 is withdrawn: it could deadlock when a failed write closed the channel
+    inline. A request is checked for retirement without a lock.
+  - I-Stop states the downstream guarantee (no callback after `stop()` returns, and `fetch()` writes nothing) and
+    allows a request already being written to reach the wire before the asynchronous close.
